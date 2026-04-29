@@ -265,6 +265,7 @@ pub(crate) async fn process_ask_task(
         turn_analysis: prepared_flow.turn_analysis.clone(),
         context_bundle_summary: Some(prepared_flow.context_bundle_summary.clone()),
         auto_locator_path: prepared_flow.auto_locator_path.clone(),
+        fuzzy_locator_suggestions: prepared_flow.fuzzy_locator_suggestions.clone(),
         // Execution-time context should prefer the resolved prompt that already incorporates
         // alias bindings / clarify completions / locator stabilization. Otherwise planner and
         // observed synthesis can fall back to stale raw phrasing and let memory override the
@@ -286,6 +287,7 @@ pub(crate) async fn process_ask_task(
         prepared_flow.agent_mode,
         &prepared_flow.clarify_reason,
         prepared_flow.clarify_reason_kind,
+        prepared_flow.clarify_fallback_source,
         &prepared_flow.fuzzy_locator_suggestions,
         &prepared_flow.ask_mode,
         prepared_flow.should_route_schedule_direct,
@@ -305,6 +307,7 @@ pub(crate) async fn process_ask_task(
         &prepared_flow.resolved_prompt_for_execution,
         &prepared_flow.route_result,
         prepared_flow.turn_analysis.as_ref(),
+        &prepared_flow.fuzzy_locator_suggestions,
         result,
     )
     .await

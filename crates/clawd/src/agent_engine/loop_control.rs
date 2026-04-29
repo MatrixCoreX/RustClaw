@@ -191,7 +191,6 @@ fn should_stop_for_observed_finalize(
         if super::observed_output::scalar_route_prefers_structured_observed_answer(
             route_result,
             loop_state,
-            agent_run_context,
         ) && super::observed_output::extract_direct_answer_from_generic_output(
             loop_state,
             agent_run_context,

@@ -50,7 +50,6 @@ pub(crate) struct FollowupFrame {
     pub(crate) ordered_entries: Vec<String>,
     pub(crate) selected_entry_index: Option<usize>,
     pub(crate) slice_spec: Option<FollowupSliceSpec>,
-    pub(crate) count_limit: Option<usize>,
     pub(crate) output_shape: Option<String>,
     pub(crate) unresolved_slot: Option<FollowupUnresolvedSlot>,
     pub(crate) source_task_id: String,
@@ -204,40 +203,6 @@ pub(crate) fn synthesize_locator_reply_resolved_intent(
     })
 }
 
-fn followup_slice_spec_from_requested_range(
-    requested: crate::read_range_request::RequestedReadRange,
-) -> FollowupSliceSpec {
-    match requested {
-        crate::read_range_request::RequestedReadRange::Head { n } => FollowupSliceSpec {
-            kind: FollowupSliceKind::Head,
-            n: Some(n as usize),
-            start_line: None,
-            end_line: None,
-        },
-        crate::read_range_request::RequestedReadRange::Tail { n } => FollowupSliceSpec {
-            kind: FollowupSliceKind::Tail,
-            n: Some(n as usize),
-            start_line: None,
-            end_line: None,
-        },
-        crate::read_range_request::RequestedReadRange::Range {
-            start_line,
-            end_line,
-        } => FollowupSliceSpec {
-            kind: FollowupSliceKind::Range,
-            n: None,
-            start_line: Some(start_line as usize),
-            end_line: Some(end_line as usize),
-        },
-    }
-}
-
-pub(crate) fn followup_slice_spec_from_requested_range_for_tests(
-    requested: crate::read_range_request::RequestedReadRange,
-) -> FollowupSliceSpec {
-    followup_slice_spec_from_requested_range(requested)
-}
-
 fn sanitize_ordered_entry_text(entry: &str) -> String {
     let mut current = entry.trim();
     if let Some(stripped) = current.strip_prefix("- ") {
@@ -355,7 +320,7 @@ fn absolute_path_has_suffix(absolute: &Path, suffix: &Path) -> bool {
 fn op_kind_from_route(
     route_result: &crate::RouteResult,
     unresolved_locator: bool,
-    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    journal: &crate::task_journal::TaskJournal,
 ) -> FollowupOpKind {
     if unresolved_locator {
         return FollowupOpKind::ClarifyPending;
@@ -363,10 +328,9 @@ fn op_kind_from_route(
     if route_result.wants_file_delivery || route_result.output_contract.delivery_required {
         return FollowupOpKind::Delivery;
     }
-    if surface.requested_read_range.is_some() {
-        return FollowupOpKind::Read;
-    }
-    if surface.requested_listing_limit.is_some() {
+    if route_contract_prefers_listing_followup(route_result)
+        || journal_has_listing_observation(journal)
+    {
         return FollowupOpKind::List;
     }
     if route_result.output_contract.requires_content_evidence
@@ -386,6 +350,43 @@ fn op_kind_from_route(
         return FollowupOpKind::Read;
     }
     FollowupOpKind::Generic
+}
+
+fn route_contract_prefers_listing_followup(route_result: &crate::RouteResult) -> bool {
+    matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::SqliteTableListing
+            | crate::OutputSemanticKind::SqliteTableNamesOnly
+    ) || matches!(
+        route_result.output_contract.delivery_intent,
+        crate::OutputDeliveryIntent::DirectoryLookup
+            | crate::OutputDeliveryIntent::DirectoryBatchFiles
+    )
+}
+
+fn journal_has_listing_observation(journal: &crate::task_journal::TaskJournal) -> bool {
+    journal.step_results.iter().rev().any(|step| {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            return false;
+        }
+        if step.skill == "list_dir" {
+            return true;
+        }
+        if step.skill != "system_basic" {
+            return false;
+        }
+        step.output_excerpt
+            .as_deref()
+            .and_then(parse_journal_step_output)
+            .and_then(|value| {
+                value
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .map(|action| matches!(action, "inventory_dir" | "list_dir"))
+            })
+            .unwrap_or(false)
+    })
 }
 
 pub(crate) fn extract_ordered_entries_from_text(text: &str) -> Vec<String> {
@@ -648,7 +649,6 @@ fn merge_frame_with_prior(
             .is_some()
     {
         frame.ordered_entries = prior.ordered_entries.clone();
-        frame.count_limit = frame.count_limit.or(prior.count_limit);
     }
     if frame.selected_entry_index.is_none() {
         if let Some(bound_target) = frame.bound_target.as_deref() {
@@ -669,18 +669,12 @@ fn derive_frame_for_ask_outcome(
     journal: &crate::task_journal::TaskJournal,
 ) -> FollowupFrame {
     let now_ts = crate::now_ts_u64();
-    let request_surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
-    let observed_facts = crate::observed_facts::derive_observed_facts_from_ask_outcome_with_surface(
+    let observed_facts = crate::observed_facts::derive_observed_facts_from_ask_outcome(
         answer_text,
         answer_messages,
         journal,
         route_result,
-        &request_surface,
     );
-    let answer_requests_locator = answer_messages
-        .iter()
-        .any(|message| message_requests_locator_clarify(message))
-        || message_requests_locator_clarify(answer_text);
     let unresolved_locator = semantic_clarify
         && matches!(
             route_result.output_contract.locator_kind,
@@ -690,10 +684,9 @@ fn derive_frame_for_ask_outcome(
                 | crate::OutputLocatorKind::CurrentWorkspace
                 | crate::OutputLocatorKind::None
         )
-        && (route_result.output_contract.locator_hint.trim().is_empty() || answer_requests_locator);
-    let resolved_surface =
-        crate::intent::surface_signals::analyze_prompt_surface(&route_result.resolved_intent);
-    let op_kind = op_kind_from_route(route_result, unresolved_locator, &resolved_surface);
+        && (route_result.needs_clarify
+            || route_result.output_contract.locator_hint.trim().is_empty());
+    let op_kind = op_kind_from_route(route_result, unresolved_locator, journal);
     let should_extract_answer_entries = matches!(op_kind, FollowupOpKind::List)
         || (matches!(op_kind, FollowupOpKind::Delivery)
             && answer_contains_multiple_delivery_targets(answer_text, answer_messages));
@@ -717,7 +710,6 @@ fn derive_frame_for_ask_outcome(
         ordered_entries,
         selected_entry_index: None,
         slice_spec: observed_facts.slice_spec.clone(),
-        count_limit: resolved_surface.requested_listing_limit,
         output_shape: Some(
             route_result
                 .output_contract
@@ -731,18 +723,6 @@ fn derive_frame_for_ask_outcome(
         expires_at_ts: now_ts + FOLLOWUP_FRAME_TTL_SECS,
     };
     merge_frame_with_prior(frame, prior_frame)
-}
-
-pub(crate) fn message_requests_locator_clarify(text: &str) -> bool {
-    let trimmed = text.trim();
-    matches!(
-        trimmed,
-        "Please provide the specific file name or path."
-            | "Please provide the specific file name or path to read."
-            | "请提供具体的文件名或路径。"
-            | "请提供具体要读取的文件名或路径。"
-            | "请提供具体文件路径。"
-    )
 }
 
 #[cfg(test)]
@@ -1024,7 +1004,7 @@ mod tests {
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::CurrentWorkspace,
                 delivery_intent: crate::OutputDeliveryIntent::None,
-                semantic_kind: crate::OutputSemanticKind::None,
+                semantic_kind: crate::OutputSemanticKind::FileNames,
                 locator_hint: "logs".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
@@ -1160,7 +1140,6 @@ mod tests {
                 "clawd.run.log".to_string(),
                 "feishud.log".to_string(),
             ],
-            count_limit: Some(4),
             source_task_id: "older-task".to_string(),
             updated_at_ts: 1,
             expires_at_ts: crate::now_ts_u64() + 300,
@@ -1257,7 +1236,6 @@ mod tests {
                 "clawd.run.log".to_string(),
                 "feishud.log".to_string(),
             ],
-            count_limit: Some(4),
             source_task_id: "older-task".to_string(),
             updated_at_ts: 1,
             expires_at_ts: crate::now_ts_u64() + 300,
@@ -1334,7 +1312,6 @@ mod tests {
                 "clawd.run.log".to_string(),
                 "feishud.log".to_string(),
             ],
-            count_limit: Some(4),
             source_task_id: "older-task".to_string(),
             updated_at_ts: 1,
             expires_at_ts: crate::now_ts_u64() + 300,

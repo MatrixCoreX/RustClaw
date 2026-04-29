@@ -546,6 +546,7 @@ pub(crate) fn update_active_session_from_ask_outcome(
     answer_text: &str,
     answer_messages: &[String],
     semantic_clarify: bool,
+    fuzzy_locator_suggestions: &[String],
     journal: &crate::task_journal::TaskJournal,
 ) {
     let prior_session_snapshot = load_active_session_snapshot(state, task);
@@ -619,6 +620,7 @@ pub(crate) fn update_active_session_from_ask_outcome(
                         answer_text,
                         answer_messages,
                         semantic_clarify,
+                        fuzzy_locator_suggestions,
                         Some(&prior_session_snapshot),
                     )?;
                 let active_observed_facts_task_id =

@@ -155,13 +155,13 @@ pub(crate) fn load_active_clarify_state(
 fn clarify_question_from_answer(answer_text: &str, answer_messages: &[String]) -> Option<String> {
     answer_messages
         .iter()
-        .find(|message| crate::followup_frame::message_requests_locator_clarify(message))
-        .cloned()
+        .map(|message| message.trim())
+        .find(|message| !message.is_empty())
+        .map(ToString::to_string)
         .or_else(|| {
-            crate::followup_frame::message_requests_locator_clarify(answer_text)
-                .then(|| answer_text.trim().to_string())
+            let answer = answer_text.trim();
+            (!answer.is_empty()).then(|| answer.to_string())
         })
-        .filter(|value| !value.trim().is_empty())
 }
 
 fn derive_clarify_state_for_ask_outcome(
@@ -171,6 +171,7 @@ fn derive_clarify_state_for_ask_outcome(
     answer_text: &str,
     answer_messages: &[String],
     semantic_clarify: bool,
+    fuzzy_locator_suggestions: &[String],
     prior_session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
 ) -> Option<ClarifyState> {
     if !semantic_clarify {
@@ -181,7 +182,8 @@ fn derive_clarify_state_for_ask_outcome(
             let route_question = route_result.clarify_question.trim();
             (!route_question.is_empty()).then(|| route_question.to_string())
         })?;
-    let candidate_targets = derive_clarify_candidate_targets(route_result, prior_session_snapshot);
+    let candidate_targets =
+        derive_clarify_candidate_targets(fuzzy_locator_suggestions, prior_session_snapshot);
     let now_ts = crate::now_ts_u64();
     Some(ClarifyState {
         missing_slot: ClarifyMissingSlot::Locator,
@@ -222,14 +224,8 @@ fn derive_clarify_state_for_ask_outcome(
     })
 }
 
-fn derive_fuzzy_locator_candidate_targets(route_result: &crate::RouteResult) -> Vec<String> {
-    crate::post_route_policy::fuzzy_locator_candidates_from_route_reason(
-        route_result.route_reason.as_str(),
-    )
-}
-
 fn derive_clarify_candidate_targets(
-    route_result: &crate::RouteResult,
+    fuzzy_locator_suggestions: &[String],
     prior_session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
 ) -> Vec<String> {
     let mut candidates = prior_session_snapshot
@@ -251,8 +247,7 @@ fn derive_clarify_candidate_targets(
                 .filter(|entries| !entries.is_empty())
         })
         .or_else(|| {
-            let candidates = derive_fuzzy_locator_candidate_targets(route_result);
-            (!candidates.is_empty()).then_some(candidates)
+            (!fuzzy_locator_suggestions.is_empty()).then(|| fuzzy_locator_suggestions.to_vec())
         })
         .unwrap_or_default();
     if candidates.is_empty() {
@@ -285,6 +280,7 @@ pub(crate) fn replace_active_clarify_state_from_ask_outcome(
     answer_text: &str,
     answer_messages: &[String],
     semantic_clarify: bool,
+    fuzzy_locator_suggestions: &[String],
     prior_session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
 ) -> Option<String> {
     let Some(clarify_state) = derive_clarify_state_for_ask_outcome(
@@ -294,6 +290,7 @@ pub(crate) fn replace_active_clarify_state_from_ask_outcome(
         answer_text,
         answer_messages,
         semantic_clarify,
+        fuzzy_locator_suggestions,
         prior_session_snapshot,
     ) else {
         if let Err(err) = clear_active_clarify_state(state, task) {
@@ -324,6 +321,7 @@ pub(crate) fn sync_active_clarify_state_from_ask_outcome_tx(
     answer_text: &str,
     answer_messages: &[String],
     semantic_clarify: bool,
+    fuzzy_locator_suggestions: &[String],
     prior_session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
 ) -> Result<Option<String>> {
     let Some(clarify_state) = derive_clarify_state_for_ask_outcome(
@@ -333,6 +331,7 @@ pub(crate) fn sync_active_clarify_state_from_ask_outcome_tx(
         answer_text,
         answer_messages,
         semantic_clarify,
+        fuzzy_locator_suggestions,
         prior_session_snapshot,
     ) else {
         clear_active_clarify_state_tx(tx, task)?;
@@ -348,29 +347,6 @@ mod tests {
         clarify_question_from_answer, derive_clarify_candidate_targets,
         derive_clarify_state_for_ask_outcome, ClarifyMissingSlot,
     };
-
-    fn route_result_stub() -> crate::RouteResult {
-        crate::RouteResult {
-            routed_mode: crate::RoutedMode::AskClarify,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
-            resolved_intent: String::new(),
-            needs_clarify: true,
-            route_reason: String::new(),
-            route_confidence: Some(0.9),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Low,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            clarify_question: String::new(),
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract::default(),
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        }
-    }
 
     #[test]
     fn locator_question_prefers_matching_answer_text() {
@@ -412,6 +388,7 @@ mod tests {
             "请提供具体要读取的文件名或路径。",
             &[],
             true,
+            &[],
             None,
         )
         .expect("clarify state should be derived");
@@ -456,6 +433,7 @@ mod tests {
             "请提供具体要读取的文件名或路径。",
             &[],
             true,
+            &[],
             None,
         )
         .expect("clarify state should be derived");
@@ -481,7 +459,7 @@ mod tests {
                 ..crate::observed_facts::ObservedFacts::default()
             }),
         };
-        let candidates = derive_clarify_candidate_targets(&route_result_stub(), Some(&snapshot));
+        let candidates = derive_clarify_candidate_targets(&[], Some(&snapshot));
         assert_eq!(
             candidates,
             vec!["README.md".to_string(), "deploy.md".to_string()]
@@ -503,7 +481,7 @@ mod tests {
                 ..crate::observed_facts::ObservedFacts::default()
             }),
         };
-        let candidates = derive_clarify_candidate_targets(&route_result_stub(), Some(&snapshot));
+        let candidates = derive_clarify_candidate_targets(&[], Some(&snapshot));
         assert_eq!(
             candidates,
             vec!["deploy.md".to_string(), "README.md".to_string()]
@@ -511,14 +489,14 @@ mod tests {
     }
 
     #[test]
-    fn clarify_candidate_targets_fall_back_to_fuzzy_locator_route_candidates() {
-        let route = crate::RouteResult {
-            route_reason:
-                "route_contract:generic_filename_scalar_extract; fuzzy_locator_candidates=/tmp/a/Cargo.toml | /tmp/b/Cargo.toml"
-                    .to_string(),
-            ..route_result_stub()
-        };
-        let candidates = derive_clarify_candidate_targets(&route, None);
+    fn clarify_candidate_targets_fall_back_to_structured_fuzzy_locator_candidates() {
+        let candidates = derive_clarify_candidate_targets(
+            &[
+                "/tmp/a/Cargo.toml".to_string(),
+                "/tmp/b/Cargo.toml".to_string(),
+            ],
+            None,
+        );
         assert_eq!(
             candidates,
             vec![
@@ -571,6 +549,7 @@ mod tests {
             "请提供具体的文件名或路径。",
             &[],
             true,
+            &[],
             Some(&snapshot),
         )
         .expect("clarify state should be derived");

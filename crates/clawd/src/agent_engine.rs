@@ -349,6 +349,7 @@ pub(crate) struct AgentRunContext {
     pub(crate) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
     pub(crate) context_bundle_summary: Option<String>,
     pub(crate) auto_locator_path: Option<String>,
+    pub(crate) fuzzy_locator_suggestions: Vec<String>,
     pub(crate) user_request: Option<String>,
     /// Cross-turn recent execution context (rendered by routing_context::build_recent_execution_context).
     /// Used by runtime synthesis/planning so the LLM can see prior turns' outputs (file content,
@@ -606,31 +607,12 @@ fn user_safe_step_error(err: &str) -> String {
     if trimmed.is_empty() {
         return "执行失败，但没有返回明确原因".to_string();
     }
-    let lower = trimmed.to_ascii_lowercase();
-    if lower.contains("rate limit") || lower.contains("限流") {
-        return "模型请求触发限流，请稍后重试".to_string();
-    }
-    if lower.contains("synthesize_answer")
-        || lower.contains("publishable")
-        || lower.contains("repair plan")
-        || lower.contains("non-actionable")
-        || lower.contains("non_actionable")
-    {
-        return "已经拿到部分结果，但没有形成可直接交付的答案".to_string();
-    }
-    if lower.contains("paths is required")
-        || lower.contains("unknown action")
-        || lower.contains("missing field")
-        || lower.contains("expected")
-        || lower.contains("required")
-    {
-        return "工具调用参数不完整或与能力契约不匹配".to_string();
-    }
     crate::truncate_for_agent_trace(trimmed)
 }
 
-fn build_resume_context_error(
+async fn build_resume_context_error(
     state: &AppState,
+    task: &ClaimedTask,
     actions: &[AgentAction],
     plan_steps: &[String],
     user_request: &str,
@@ -689,6 +671,11 @@ fn build_resume_context_error(
         "remaining_actions": remaining_actions,
         "hint": "LLM should infer continuation from resume context and user follow-up."
     });
+    let has_remaining_actions = resume_context
+        .get("remaining_actions")
+        .and_then(|v| v.as_array())
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
     let prefer_english = state
         .policy
         .command_intent
@@ -697,12 +684,7 @@ fn build_resume_context_error(
         .starts_with("en");
     let failed_index_text = failed_index.to_string();
     let safe_err = user_safe_step_error(err);
-    let user_error = if resume_context
-        .get("remaining_actions")
-        .and_then(|v| v.as_array())
-        .map(|v| !v.is_empty())
-        .unwrap_or(false)
-    {
+    let fallback_user_error = if has_remaining_actions {
         crate::bilingual_t_with_default_vars(
             state,
             "clawd.msg.resume_step_failed_with_remaining",
@@ -729,6 +711,56 @@ fn build_resume_context_error(
             ],
         )
     };
+    let language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_request);
+    let mut observed_facts = vec![
+        format!("failed_step_index: {failed_index}"),
+        format!("failed_action: {failed_action}"),
+        format!("error_summary: {safe_err}"),
+        format!("remaining_steps_count: {}", remaining_steps.len()),
+    ];
+    if !completed_steps.is_empty() {
+        observed_facts.push(format!("completed_steps_count: {}", completed_steps.len()));
+    }
+    let mut policy_boundary = vec![
+        "Do not expose raw resume_context JSON, internal action schema, stack traces, or prompt names."
+            .to_string(),
+        "Do not claim the failed step succeeded.".to_string(),
+        "Keep the reply focused on the failed step and the immediate recovery path.".to_string(),
+    ];
+    if has_remaining_actions {
+        policy_boundary.push(
+            "Mention that remaining steps are paused and the user can reply continue to resume them."
+                .to_string(),
+        );
+    } else {
+        policy_boundary.push("Do not invent remaining work or a continuation option.".to_string());
+    }
+    let contract = crate::fallback::UserResponseContract::tool_failure(
+        if has_remaining_actions {
+            "resume_step_failed_with_remaining"
+        } else {
+            "resume_step_failed_no_remaining"
+        },
+        user_request,
+        goal,
+        observed_facts,
+        policy_boundary,
+        if has_remaining_actions {
+            "brief_failure_with_continue_option"
+        } else {
+            "brief_failure"
+        },
+        &language_hint,
+    );
+    let user_error = crate::fallback::compose_user_response_from_contract_with_default(
+        state,
+        task,
+        &contract,
+        crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
+        &fallback_user_error,
+    )
+    .await;
     let payload = json!({
         "user_error": user_error,
         "resume_context": resume_context
@@ -748,8 +780,9 @@ fn confirmation_remaining_step_labels(steps: &[crate::PlanStep]) -> Vec<String> 
         .collect()
 }
 
-pub(crate) fn build_confirmation_required_resume_context(
+pub(crate) async fn build_confirmation_required_resume_context(
     state: &AppState,
+    task: &ClaimedTask,
     steps: &[crate::PlanStep],
     user_request: &str,
     goal: &str,
@@ -763,6 +796,7 @@ pub(crate) fn build_confirmation_required_resume_context(
         delivery_messages.to_vec()
     };
     let remaining_steps = confirmation_remaining_step_labels(steps);
+    let remaining_steps_count = remaining_steps.len();
     let remaining_actions = steps
         .iter()
         .filter_map(crate::PlanStep::to_agent_action)
@@ -783,18 +817,41 @@ pub(crate) fn build_confirmation_required_resume_context(
         "remaining_actions": remaining_actions,
         "hint": "User must explicitly confirm before executing the remaining actions."
     });
-    let user_error = crate::bilingual_t_with_default_vars(
+    let language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_request);
+    let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
+    let fallback_user_error = crate::bilingual_t_with_default_vars(
         state,
         "clawd.msg.resume_confirmation_required",
         "这一步需要你先明确确认，我还不会直接执行。你可以回复“继续”来执行剩余步骤。\n原因：{detail}",
         "This step needs your explicit confirmation before I execute it. Reply \"continue\" to run the remaining steps.\nReason: {detail}",
-        state
-            .policy.command_intent
-            .default_locale
-            .to_ascii_lowercase()
-            .starts_with("en"),
+        prefer_english,
         &[("detail", detail)],
     );
+    let contract = crate::fallback::UserResponseContract::verifier_gate(
+        "resume_confirmation_required",
+        user_request,
+        goal,
+        vec!["explicit_user_confirmation".to_string()],
+        vec![
+            format!(
+                "verification_detail: {}",
+                crate::truncate_for_agent_trace(detail)
+            ),
+            format!("remaining_steps_count: {remaining_steps_count}"),
+            "needs_confirmation: true".to_string(),
+        ],
+        "brief_failure_with_continue_option",
+        &language_hint,
+    );
+    let user_error = crate::fallback::compose_user_response_from_contract_with_default(
+        state,
+        task,
+        &contract,
+        crate::fallback::ClarifyFallbackSource::VerifyRejected,
+        &fallback_user_error,
+    )
+    .await;
     (user_error, resume_context)
 }
 
@@ -1183,16 +1240,16 @@ mod tests {
     }
 
     #[test]
-    fn test_user_safe_step_error_hides_internal_engine_details() {
+    fn test_user_safe_step_error_preserves_sanitized_error_excerpt() {
         assert_eq!(
             user_safe_step_error(
                 "synthesize_answer could not produce a grounded publishable answer"
             ),
-            "已经拿到部分结果，但没有形成可直接交付的答案"
+            "synthesize_answer could not produce a grounded publishable answer"
         );
         assert_eq!(
             user_safe_step_error("unknown action: read; allowed: info|inventory_dir"),
-            "工具调用参数不完整或与能力契约不匹配"
+            "unknown action: read; allowed: info|inventory_dir"
         );
     }
 

@@ -20,17 +20,6 @@ fn ask_result_payload(
     }
 }
 
-/// §7.2 后保留：仍被该模块某些调用方 / 单测引用以拿到老 super-fallback 的字面字符串。
-/// 真正的"是不是 fallback 占位符"判定走 [`crate::fallback::is_known_clarify_fallback_text`]。
-#[allow(dead_code)]
-fn provider_unavailable_answer_text(state: &AppState) -> String {
-    crate::i18n_t_with_default(
-        state,
-        crate::fallback::LEGACY_SUPER_FALLBACK_KEY,
-        crate::fallback::LEGACY_SUPER_FALLBACK_DEFAULT_EN,
-    )
-}
-
 fn should_skip_ask_memory_pair(
     state: &AppState,
     answer_text: &str,
@@ -93,28 +82,44 @@ fn has_any_delivery_file_token(text: &str, messages: &[String]) -> bool {
             .any(|message| !crate::extract_delivery_file_tokens(message).is_empty())
 }
 
-fn missing_file_delivery_reply_text(
-    state: &AppState,
+fn should_use_missing_file_delivery_reply(
     route_result: &crate::RouteResult,
     answer: &crate::AskReply,
-) -> Option<String> {
+) -> bool {
     let file_delivery_contract = route_result.wants_file_delivery
         || route_result.output_contract.delivery_required
         || matches!(
             route_result.output_contract.response_shape,
             crate::OutputResponseShape::FileToken
         );
-    (file_delivery_contract
+    file_delivery_contract
         && !answer.should_fail_task
         && !has_any_delivery_file_token(&answer.text, &answer.messages)
-        && journal_has_missing_file_search_evidence(answer.task_journal.as_ref()))
-    .then(|| {
-        crate::i18n_t_with_default(
+        && journal_has_missing_file_search_evidence(answer.task_journal.as_ref())
+}
+
+async fn missing_file_delivery_reply_text(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    answer: &crate::AskReply,
+) -> Option<String> {
+    if !should_use_missing_file_delivery_reply(route_result, answer) {
+        return None;
+    }
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, prompt);
+    Some(
+        crate::fallback::compose_missing_file_delivery_response(
             state,
-            "clawd.msg.delivery.rule3_file_not_found",
-            "File not found.",
+            task,
+            prompt,
+            &route_result.resolved_intent,
+            Some(route_result.output_contract.locator_hint.as_str()),
+            &language_hint,
         )
-    })
+        .await,
+    )
 }
 
 fn insert_ask_memory_pair(
@@ -292,6 +297,51 @@ async fn finalize_ask_failure(
     Ok(())
 }
 
+async fn compose_ask_failure_user_message(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    user_request: &str,
+    err_text: &str,
+) -> String {
+    let language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_request);
+    let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
+    let fallback_text = if prefer_english {
+        "The task could not be completed, and no reliable user-facing result was produced. Please adjust the request or retry later."
+    } else {
+        "这次任务没有完成，也没有形成可靠的可交付结果。请调整请求或稍后重试。"
+    };
+    let mut observed_facts = Vec::new();
+    let err = err_text.trim();
+    if !err.is_empty() {
+        observed_facts.push(format!(
+            "error_summary: {}",
+            crate::truncate_for_agent_trace(err)
+        ));
+    }
+    let contract = crate::fallback::UserResponseContract::tool_failure(
+        "ask_runtime_failure",
+        user_request,
+        user_request,
+        observed_facts,
+        vec![
+            "Do not expose raw provider errors, prompt names, schema names, stack traces, or internal planner action names.".to_string(),
+            "Do not claim the task succeeded or that any unobserved action was completed.".to_string(),
+            "Give one concise recovery path the user can act on.".to_string(),
+        ],
+        "brief_failure_with_next_step",
+        &language_hint,
+    );
+    crate::fallback::compose_user_response_from_contract_with_default(
+        state,
+        task,
+        &contract,
+        crate::fallback::ClarifyFallbackSource::ExecutionFailedPartial,
+        fallback_text,
+    )
+    .await
+}
+
 pub(crate) async fn finalize_ask_direct_success(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -349,8 +399,13 @@ pub(crate) async fn run_direct_classifier_reply(
     resolved_prompt_for_execution: &str,
 ) -> Result<crate::AskReply, String> {
     const DIRECT_CLASSIFIER_PROMPT_LABEL: &str = "inline:direct_classifier";
+    let request_language_hint = crate::language_policy::task_response_language_hint(
+        state,
+        task,
+        resolved_prompt_for_execution,
+    );
     let prompt = format!(
-        "You are producing the final user-facing reply directly.\n\nLanguage policy (strict): use {} as the highest-priority default for user-visible text. Override to English only when the current user request is fully English with no meaningful non-English content. Do not switch languages just because names, paths, commands, code, or other normalized values are in English.\n\nReturn only the user-facing reply.\n\n{}",
+        "You are producing the final user-facing reply directly.\n\nRequest language hint: {request_language_hint}\nConfigured fallback language: {}\n\nLanguage policy (strict): follow the Request language hint when it is clear (`zh-CN`, `en`, or `mixed`). Use the configured fallback language only when the hint is `config_default` or otherwise unclear. Do not switch languages just because names, paths, commands, code, or other normalized values are in English.\n\nReturn only the user-facing reply.\n\n{}",
         state.policy.command_intent.default_locale,
         resolved_prompt_for_execution
     );
@@ -414,6 +469,7 @@ pub(crate) async fn finalize_ask_result(
     resolved_prompt_for_execution: &str,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    fuzzy_locator_suggestions: &[String],
     result: Result<crate::AskReply, String>,
 ) -> Result<()> {
     // §3.1: ask 状态机 — 进入 finalize。
@@ -465,7 +521,7 @@ pub(crate) async fn finalize_ask_result(
                     });
             let failure_reply = answer.should_fail_task;
             let missing_file_delivery_reply =
-                missing_file_delivery_reply_text(state, route_result, &answer);
+                missing_file_delivery_reply_text(state, task, prompt, route_result, &answer).await;
             let (answer_text, answer_messages) =
                 if failure_reply || route_result.ask_mode.is_clarify_only() {
                     (
@@ -557,6 +613,7 @@ pub(crate) async fn finalize_ask_result(
                     &answer_text,
                     &answer_messages,
                     semantic_clarify,
+                    fuzzy_locator_suggestions,
                     &journal,
                 );
                 if semantic_clarify {
@@ -634,14 +691,16 @@ pub(crate) async fn finalize_ask_result(
                 state.clear_task_llm_call_count(&task.task_id);
                 return Ok(());
             }
+            let user_error = compose_ask_failure_user_message(state, task, prompt, &err_text).await;
             journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
             journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
             journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
-            journal.record_final_answer(&err_text);
-            crate::finalize::ensure_task_metrics(&mut journal, &err_text, &[]);
+            journal.record_final_answer(&user_error);
+            crate::finalize::ensure_task_metrics(&mut journal, &user_error, &[]);
             journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
-            finalize_ask_failure(state, task, payload, &err_text, &[], &err_text, &journal).await?;
-            insert_unfinished_goal_memory(state, task, prompt, &err_text);
+            finalize_ask_failure(state, task, payload, &user_error, &[], &err_text, &journal)
+                .await?;
+            insert_unfinished_goal_memory(state, task, prompt, &user_error);
             // §3.1: Finalizing → Failed（dispatch 抛 Err 进入此分支）。
             crate::log_ask_transition(
                 state,
@@ -666,62 +725,8 @@ pub(crate) async fn finalize_ask_result(
 #[cfg(test)]
 mod tests {
     use super::{assistant_memory_source_text, journal_has_missing_file_search_evidence};
-    use std::collections::{HashMap, HashSet};
-    use std::sync::{Arc, RwLock};
 
     use serde_json::json;
-
-    use crate::{
-        runtime::{AgentRuntimeConfig, SkillViewsSnapshot},
-        AppState, CommandIntentRuntime, ScheduleRuntime, ToolsPolicy,
-    };
-    use claw_core::config::{AgentConfig, ToolsConfig};
-
-    fn test_state() -> AppState {
-        let agents_by_id = HashMap::from([(
-            crate::DEFAULT_AGENT_ID.to_string(),
-            AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
-        )]);
-        AppState {
-            core: crate::CoreServices {
-                agents_by_id: Arc::new(agents_by_id),
-                skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
-                    registry: None,
-                    skills_list: Arc::new(HashSet::new()),
-                }))),
-                ..crate::CoreServices::test_default()
-            },
-            skill_rt: crate::SkillRuntime {
-                locator_scan_max_depth: 3,
-                locator_scan_max_files: 200,
-                tools_policy: Arc::new(
-                    ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
-                ),
-                ..crate::SkillRuntime::test_default()
-            },
-            policy: crate::PolicyConfig {
-                command_intent: CommandIntentRuntime {
-                    all_result_suffixes: Vec::new(),
-                    default_locale: "en".to_string(),
-                    verify_enforce_enabled: false,
-                },
-                schedule: ScheduleRuntime {
-                    timezone: "Asia/Shanghai".to_string(),
-                    intent_prompt_template: Arc::new(RwLock::new(String::new())),
-                    intent_prompt_source: String::new(),
-                    intent_rules_template: Arc::new(RwLock::new(String::new())),
-                    locale: "en".to_string(),
-                    i18n_dict: HashMap::new(),
-                },
-                ..crate::PolicyConfig::test_default()
-            },
-            worker: crate::WorkerConfig::test_default(),
-            metrics: crate::TaskMetricsRegistry::default(),
-            channels: crate::ChannelConfig::default(),
-            reload_ctx: crate::ReloadContext::default(),
-            ask_states: crate::AskStateRegistry::default(),
-        }
-    }
 
     // ensure_journal_task_metrics_* tests 已搬移到 finalize/journal.rs（Stage 3.1）。
 
@@ -852,8 +857,8 @@ mod tests {
         route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
         route.output_contract.delivery_required = true;
 
-        let state = test_state();
-        let reply = super::missing_file_delivery_reply_text(&state, &route, &answer);
-        assert_eq!(reply.as_deref(), Some("File not found."));
+        assert!(super::should_use_missing_file_delivery_reply(
+            &route, &answer
+        ));
     }
 }

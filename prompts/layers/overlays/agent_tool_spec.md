@@ -22,7 +22,7 @@ All capabilities are skills. Use `{"type":"call_skill","skill":"<name>","args":{
 - `run_cmd`: `args.command` required; optional `args.cwd`. Run one shell command.
 - `read_file`: `args.path` required. Read file content.
 - `write_file`: `args.path`, `args.content` required. Write file.
-- `list_dir`: `args.path` optional (default "."). List directory entries.
+- `list_dir`: `args.path` optional (default "."), `args.limit` or `args.max_entries` optional (1..200), `args.names_only` optional. List directory entries. Use `limit/max_entries` when the user asks for the first/top/recent N entries instead of listing everything and truncating later.
 - `make_dir`: `args.path` required. Create directory (and parents).
 - `remove_file`: `args.path` required. Remove a single file (not directories).
 
@@ -437,7 +437,7 @@ Skill behavior notes (file/path):
 - Prefer `system_basic.find_path` for exact/full-path lookup tasks.
 - When the user gives an unclear, partial, or approximate directory name, first use `system_basic.find_path` with `target_kind="dir"` and a broad `contains` match before asking for clarification.
 - Use `fs_search.find_name` with `target_kind="dir"` when the task is explicitly a name search over files/directories rather than a direct path-resolution request.
-- Prefer `system_basic.inventory_dir` for immediate directory listing / hidden-file / names-only inventory tasks.
+- Prefer `system_basic.inventory_dir` for immediate directory listing / hidden-file / names-only inventory tasks, especially recent/last-modified listings where `sort_by="mtime_desc"` and `max_entries` are required.
 - When the user specifies a folder/directory and asks to find files inside it, treat search as recursive under `root` (traverse all subdirectories).
 - Path matching rule for file search: case-insensitive exact basename match can be used directly; if only fuzzy/approximate matches exist, ask one concise clarification with 1-3 candidate full absolute paths before execution.
 

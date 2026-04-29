@@ -10,8 +10,6 @@ pub(crate) enum ClarifyFollowupResolution {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FreshDeicticClarifyDecision {
     pub(crate) reason: &'static str,
-    pub(crate) question_i18n_key: &'static str,
-    pub(crate) default_question: &'static str,
 }
 
 pub(crate) fn immediate_prior_turn_was_clarify(last_turn_full: &str) -> bool {
@@ -212,8 +210,6 @@ pub(crate) fn resolve_fresh_deictic_clarify_guard_with_surface(
     if route_result.wants_file_delivery {
         return Some(FreshDeicticClarifyDecision {
             reason: "fresh_delivery_deictic_requires_locator",
-            question_i18n_key: "clawd.msg.clarify_missing_file_locator",
-            default_question: "Please provide the specific file name or path.",
         });
     }
     if semantic_kind_allows_locator_free_fresh_turn(route_result.output_contract.semantic_kind) {
@@ -235,16 +231,12 @@ pub(crate) fn resolve_fresh_deictic_clarify_guard_with_surface(
     match route_result.output_contract.response_shape {
         crate::OutputResponseShape::Scalar => Some(FreshDeicticClarifyDecision {
             reason: "fresh_scalar_deictic_requires_locator",
-            question_i18n_key: "clawd.msg.clarify_missing_read_target",
-            default_question: "Please provide the specific file name or path to read.",
         }),
-        crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence => {
-            Some(FreshDeicticClarifyDecision {
-                reason: "fresh_content_deictic_requires_locator",
-                question_i18n_key: "clawd.msg.clarify_missing_read_target",
-                default_question: "Please provide the specific file name or path to read.",
-            })
-        }
+        crate::OutputResponseShape::Free
+        | crate::OutputResponseShape::OneSentence
+        | crate::OutputResponseShape::Strict => Some(FreshDeicticClarifyDecision {
+            reason: "fresh_content_deictic_requires_locator",
+        }),
         crate::OutputResponseShape::FileToken => None,
     }
 }
@@ -328,9 +320,10 @@ fn route_has_current_turn_generated_anchor(
         && (matches!(
             route_result.output_contract.semantic_kind,
             crate::OutputSemanticKind::RawCommandOutput
-        ) || route_result
-            .route_reason
-            .contains(crate::post_route_policy::SAME_TURN_GENERATED_ANCHOR_REASON_TAG))
+        ) || matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::CurrentWorkspace
+        ))
 }
 
 fn route_has_current_turn_filename_anchor(
@@ -619,7 +612,6 @@ mod tests {
         let frame = crate::followup_frame::FollowupFrame {
             source_request: "先列出 document 目录下前 5 个文件名".to_string(),
             op_kind: crate::followup_frame::FollowupOpKind::List,
-            count_limit: Some(5),
             ordered_entries: vec!["README.md".to_string(), "deploy.md".to_string()],
             ..crate::followup_frame::FollowupFrame::default()
         };
@@ -650,7 +642,6 @@ mod tests {
         let frame = crate::followup_frame::FollowupFrame {
             source_request: "先列出 document 目录下前 5 个文件名".to_string(),
             op_kind: crate::followup_frame::FollowupOpKind::List,
-            count_limit: Some(5),
             ordered_entries: vec!["README.md".to_string(), "deploy.md".to_string()],
             ..crate::followup_frame::FollowupFrame::default()
         };
@@ -1095,8 +1086,7 @@ mod tests {
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
             resolved_intent: "执行 pwd，然后用一句话解释这个路径大概是什么".to_string(),
             needs_clarify: false,
-            route_reason: crate::post_route_policy::SAME_TURN_GENERATED_ANCHOR_REASON_TAG
-                .to_string(),
+            route_reason: String::new(),
             route_confidence: Some(0.9),
             visible_skill_candidates: Vec::new(),
             risk_ceiling: crate::RiskCeiling::Unknown,
@@ -1111,7 +1101,7 @@ mod tests {
                 response_shape: crate::OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
-                locator_kind: crate::OutputLocatorKind::Path,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
                 delivery_intent: crate::OutputDeliveryIntent::None,
                 semantic_kind: crate::OutputSemanticKind::None,
                 locator_hint: String::new(),

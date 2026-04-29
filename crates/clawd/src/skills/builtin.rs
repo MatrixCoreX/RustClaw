@@ -63,7 +63,17 @@ pub(crate) async fn execute_builtin_skill_with_task(
         .tools_policy
         .is_allowed(&policy_token, state.core.active_provider_type.as_deref())
     {
-        return Err(format!("blocked by policy: {policy_token}"));
+        return Err(crate::skills::policy_block_error(
+            "skill_policy_denied",
+            vec![
+                format!("skill: {skill_name}"),
+                format!("policy_token: {policy_token}"),
+            ],
+            vec![
+                "Do not execute the blocked skill.".to_string(),
+                "Explain that the current tools policy blocks this capability.".to_string(),
+            ],
+        ));
     }
 
     let map = ensure_args_object(args)?;
@@ -121,8 +131,12 @@ pub(crate) async fn execute_builtin_skill_with_task(
             ))
         }
         "list_dir" => {
-            ensure_only_keys(map, &["path", "names_only"])?;
+            ensure_only_keys(map, &["path", "names_only", "limit", "max_entries"])?;
             let path = optional_string(map, "path").unwrap_or(".");
+            let max_entries = optional_usize(map, "limit")
+                .or_else(|| optional_usize(map, "max_entries"))
+                .map(|value| value.clamp(1, 200))
+                .unwrap_or(200);
             let requested_path = resolve_workspace_path(
                 &state.skill_rt.workspace_root,
                 path,
@@ -145,23 +159,18 @@ pub(crate) async fn execute_builtin_skill_with_task(
                             candidates,
                         ),
                     ) => {
-                        let mut lines = vec![crate::i18n_t_with_default(
-                            state,
-                            "clawd.msg.directory.multiple_candidates",
-                            "Found multiple possible directories. Please confirm which one:",
-                        )];
-                        lines.extend(
-                            candidates
-                                .into_iter()
-                                .map(|candidate| candidate.display().to_string()),
-                        );
-                        return Ok(lines.join("\n"));
+                        let candidates = candidates
+                            .into_iter()
+                            .map(|candidate| candidate.display().to_string())
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        return Err(format!(
+                            "directory locator matched multiple candidates: {candidates}"
+                        ));
                     }
                     Some(crate::delivery_utils::DirectoryLocatorExecutionResolution::NotFound) => {
-                        return Ok(crate::i18n_t_with_default(
-                            state,
-                            "clawd.msg.directory.not_found_dual_root",
-                            "Directory not found under system root and project root.",
+                        return Err(format!(
+                            "directory not found under system root and project root: {path}"
                         ));
                     }
                     None => requested_path,
@@ -183,6 +192,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 }
             }
             items.sort();
+            items.truncate(max_entries);
             Ok(items.join("\n"))
         }
         "run_cmd" => {
@@ -323,6 +333,16 @@ fn optional_string<'a>(map: &'a serde_json::Map<String, Value>, key: &str) -> Op
     map.get(key).and_then(|v| v.as_str())
 }
 
+fn optional_usize(map: &serde_json::Map<String, Value>, key: &str) -> Option<usize> {
+    match map.get(key)? {
+        Value::Number(number) => number
+            .as_u64()
+            .and_then(|value| usize::try_from(value).ok()),
+        Value::String(value) => value.trim().parse::<usize>().ok(),
+        _ => None,
+    }
+}
+
 fn looks_detached_background_command(command: &str) -> bool {
     let bytes = command.as_bytes();
     let mut saw_terminal_background = false;
@@ -392,12 +412,29 @@ fn resolve_workspace_path(
     }
 
     if base.components().any(|c| matches!(c, Component::ParentDir)) {
-        return Err("path with '..' is not allowed".to_string());
+        return Err(crate::skills::policy_block_error(
+            "path_parent_traversal",
+            vec![format!("requested_path: {input}")],
+            vec![
+                "Do not access paths containing parent traversal.".to_string(),
+                "Ask for a concrete path inside the workspace.".to_string(),
+            ],
+        ));
     }
 
     let normalized_base = base.canonicalize().unwrap_or_else(|_| base.clone());
     if !normalized_base.starts_with(&normalized_root) {
-        return Err("path is outside workspace".to_string());
+        return Err(crate::skills::policy_block_error(
+            "path_outside_workspace",
+            vec![
+                format!("denied_path: {}", normalized_base.display()),
+                format!("workspace_root: {}", normalized_root.display()),
+            ],
+            vec![
+                "Do not access paths outside the workspace for non-admin tasks.".to_string(),
+                "Explain the workspace boundary and one safe next step.".to_string(),
+            ],
+        ));
     }
 
     Ok(base)
@@ -419,7 +456,14 @@ pub(crate) async fn run_safe_command(
     }
 
     if !allow_sudo && command.split_whitespace().any(|p| p == "sudo") {
-        return Err("sudo is not allowed by tools config".to_string());
+        return Err(crate::skills::policy_block_error(
+            "sudo_not_allowed",
+            vec!["command_requested_sudo: true".to_string()],
+            vec![
+                "Do not run sudo when allow_sudo is false for this task.".to_string(),
+                "Explain that elevated access requires an admin-authorized run and sudo-enabled policy.".to_string(),
+            ],
+        ));
     }
 
     let mut cmd = Command::new("bash");
@@ -738,6 +782,37 @@ mod tests {
         .expect("list_dir should succeed");
 
         assert_eq!(output, "a.txt\nb.txt");
+    }
+
+    #[tokio::test]
+    async fn list_dir_accepts_structured_limit_arg() {
+        let root = TempDirGuard::new("list_dir_limit");
+        fs::write(root.path.join("c.txt"), "c").expect("write c");
+        fs::write(root.path.join("a.txt"), "a").expect("write a");
+        fs::write(root.path.join("b.txt"), "b").expect("write b");
+
+        let state = test_state(root.path.clone());
+        let output = execute_builtin_skill(&state, "list_dir", &json!({"path": ".", "limit": 2}))
+            .await
+            .expect("list_dir should succeed");
+
+        assert_eq!(output, "a.txt\nb.txt");
+    }
+
+    #[tokio::test]
+    async fn list_dir_missing_locator_is_error_not_success_observation() {
+        let root = TempDirGuard::new("list_dir_missing_locator");
+        let state = test_state(root.path.clone());
+        let err = execute_builtin_skill(
+            &state,
+            "list_dir",
+            &json!({"path": "definitely_missing_directory"}),
+        )
+        .await
+        .expect_err("missing directory should fail");
+
+        assert!(err.contains("directory not found under system root and project root"));
+        assert!(err.contains("definitely_missing_directory"));
     }
 
     #[tokio::test]

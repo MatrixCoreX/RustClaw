@@ -18,6 +18,7 @@ WAIT_SECONDS_VALUE="${MAX_WAIT_SECONDS:-240}"
 POLL_SECONDS_VALUE="${POLL_INTERVAL_SECONDS:-1}"
 LOG_ROOT="${ROOT_DIR}/scripts/nl_suite_logs/client_like_continuous"
 PROMPT_REPLY_ONLY=0
+QUALITY_GUARD=0
 CASE_FILE_VALUE=""
 CASE_LIMIT_VALUE=""
 CASE_START_VALUE="${CASE_START:-1}"
@@ -54,6 +55,7 @@ Options:
                              --external-chat-id/--external-user-id to resume after provider failure.
   --skip-smoke               run only the case file prompts, without the built-in 5-turn memory smoke
   --prompt-reply-only        print only prompt and reply snippets
+  --quality-guard            fail on common soft failures, not only terminal task status
   -h, --help                 show this help
 EOF
 }
@@ -133,6 +135,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --prompt-reply-only)
       PROMPT_REPLY_ONLY=1
+      shift
+      ;;
+    --quality-guard)
+      QUALITY_GUARD=1
       shift
       ;;
     -h|--help)
@@ -285,12 +291,171 @@ soft_markers = [
     "模型暂时不可用",
     "当前大模型服务暂时不可用",
     "我没看出这条消息要做什么",
+    "没有足够的上下文",
+    "没有足够上下文",
+    "无法确定这个连续会话测试",
 ]
 if any(marker in joined for marker in hard_markers):
     raise SystemExit(0)
 for marker in soft_markers:
     if marker in joined and marker not in prompt:
         raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+quality_violation_reason() {
+  local file="$1"
+  local prompt="${2:-}"
+  python3 - "$file" "$prompt" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+prompt = sys.argv[2]
+prompt_l = prompt.lower()
+data = obj.get("data") or {}
+result = data.get("result_json") or {}
+texts = [str(data.get("error_text") or ""), str(result.get("text") or "")]
+for item in result.get("messages") or []:
+    if isinstance(item, str):
+        texts.append(item)
+    elif isinstance(item, dict):
+        texts.append(str(item.get("text") or ""))
+text = "\n".join(part for part in texts if part).strip()
+text_l = text.lower()
+
+strict_prompt_markers = [
+    "只输出",
+    "只回答",
+    "不要解释",
+    "不要总结",
+    "不要贴正文",
+    "不要贴内容",
+    "只告诉我",
+    "恰好",
+    "不要多也不要少",
+    "output only",
+    "answer only",
+    "return only",
+    "exactly",
+    "no more no less",
+    "no explanation",
+    "do not paste",
+    "do not summarize",
+    "with no summary",
+]
+execution_trace_markers = [
+    "**执行过程**",
+    "调用技能 `",
+    "调用命令 `",
+    "called skill",
+    "called command",
+]
+if any(marker in prompt_l or marker in prompt for marker in strict_prompt_markers):
+    if any(marker.lower() in text_l for marker in execution_trace_markers):
+        print("strict_output_contains_execution_trace")
+        raise SystemExit(0)
+
+delivery_markers = [
+    "发给我",
+    "发送给我",
+    "把文件发",
+    "直接发",
+    "send me",
+    "deliver",
+]
+delivery_requested = any(marker in prompt_l or marker in prompt for marker in delivery_markers)
+missing_or_clarify = any(
+    marker in text_l
+    for marker in [
+        "not found",
+        "不存在",
+        "未找到",
+        "文件未找到",
+        "请提供完整路径",
+        "provide the full path",
+    ]
+)
+if delivery_requested and not missing_or_clarify and "file:" not in text_l and "image_file:" not in text_l:
+    print("delivery_request_without_file_token")
+    raise SystemExit(0)
+
+filesystem_refusal_markers = [
+    "chat-only 模式无法直接访问文件系统",
+    "无法直接访问文件系统",
+    "没有执行文件系统命令的能力",
+    "无法检查当前目录",
+    "cannot directly access the file system",
+    "do not have the ability to execute filesystem commands",
+]
+filesystem_prompt_markers = [
+    "目录",
+    "文件",
+    "当前目录",
+    "仓库",
+    "logs",
+    "document",
+    "read",
+    "list",
+    "check",
+    "file",
+    "directory",
+    "pwd",
+]
+if any(marker in text_l or marker in text for marker in filesystem_refusal_markers):
+    if any(marker in prompt_l or marker in prompt for marker in filesystem_prompt_markers):
+        print("filesystem_request_answered_as_chat_only_refusal")
+        raise SystemExit(0)
+
+path_clarify_markers = [
+    "请提供完整的仓库路径",
+    "请提供完整路径",
+    "请提供文件所在目录",
+    "provide the full repository path",
+    "provide the full path",
+    "provide the directory",
+]
+current_scope_markers = [
+    "当前",
+    "仓库",
+    "当前目录",
+    "当前仓库",
+    "current",
+    "repo",
+    "repository",
+    "workspace",
+]
+observable_markers = [
+    "有没有",
+    "是否存在",
+    "列出",
+    "读取",
+    "读一下",
+    "看一下",
+    "exists",
+    "exist",
+    "list",
+    "read",
+    "check",
+]
+if any(marker in text_l or marker in text for marker in path_clarify_markers):
+    if any(marker in prompt_l or marker in prompt for marker in current_scope_markers) and any(
+        marker in prompt_l or marker in prompt for marker in observable_markers
+    ):
+        print("current_workspace_request_asked_for_path")
+        raise SystemExit(0)
+
+if "{{last_output" in text_l or re.search(r"\{\{[^}]+\}\}", text):
+    print("unresolved_template_visible_or_executed")
+    raise SystemExit(0)
+
+if "调用技能 `schedule`（action=compile" in text and re.search(r"已成功(创建|设置)", text):
+    print("schedule_compile_overclaimed_created")
+    raise SystemExit(0)
+
 raise SystemExit(1)
 PY
 }
@@ -342,7 +507,16 @@ for item in result.get("messages") or []:
     elif isinstance(item, dict) and str(item.get("text") or "").strip():
         texts.append(str(item.get("text") or "").strip())
 text = (texts[-1] if texts else str(data.get("error_text") or "")).strip()
-bad_markers = ["缺少的验证信息", "下一步建议", "请问", "?", "？"]
+bad_markers = [
+    "缺少的验证信息",
+    "下一步建议",
+    "请问",
+    "?",
+    "？",
+    "没有足够的上下文",
+    "没有足够上下文",
+    "无法确定",
+]
 if any(marker in text for marker in bad_markers):
     raise SystemExit(f"summary reply looks like clarification or advice: {text!r}")
 if "\n" in text or len(text) > 180:
@@ -434,6 +608,16 @@ submit_turn() {
     echo "Turn ${turn} returned bad fallback/unavailable text." >&2
     print_log_hints "$task_id" >&2
     return 1
+  fi
+  if [[ "$QUALITY_GUARD" -eq 1 ]]; then
+    local quality_reason
+    quality_reason="$(quality_violation_reason "$out_file" "$prompt" || true)"
+    if [[ -n "$quality_reason" ]]; then
+      echo "Turn ${turn} failed quality guard: ${quality_reason}" >&2
+      echo "  reply=${text:-${error:-<empty>}}" >&2
+      print_log_hints "$task_id" >&2
+      return 1
+    fi
   fi
   if [[ -n "$expected_marker" ]] && ! result_text_contains "$out_file" "$expected_marker"; then
     echo "Turn ${turn} did not include expected marker: ${expected_marker}" >&2
@@ -620,6 +804,7 @@ echo "log_dir=${RUN_DIR}"
 echo "case_file=${CASE_FILE_VALUE:-<none>}"
 echo "case_limit=${CASE_LIMIT_VALUE:-<none>}"
 echo "case_start=${CASE_START_VALUE:-1}"
+echo "quality_guard=${QUALITY_GUARD}"
 
 read -r -d '' HEAVY_CONTEXT_PROMPT <<'EOF' || true
 请记住下面这段较长的上下文，后续我会基于它继续问问题。不要执行外部工具，只需要用中文确认已收到。
@@ -663,7 +848,11 @@ if [[ -n "${CASE_FILE_VALUE:-}" ]]; then
     turn=$((turn + 1))
     echo "[CASE ${case_index}] name=${case_name}"
     if ! submit_turn "$turn" "$case_prompt" "${RUN_DIR}/turn_${turn}_case_${case_index}.json" "${case_expect:-}"; then
-      echo "RESUME_HINT bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file ${CASE_FILE_VALUE} --case-start ${case_index} --skip-smoke --external-user-id ${EXTERNAL_USER_ID_VALUE} --external-chat-id ${EXTERNAL_CHAT_ID_VALUE} --prompt-reply-only" >&2
+      quality_guard_arg=""
+      if [[ "$QUALITY_GUARD" -eq 1 ]]; then
+        quality_guard_arg=" --quality-guard"
+      fi
+      echo "RESUME_HINT bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file ${CASE_FILE_VALUE} --case-start ${case_index} --skip-smoke --external-user-id ${EXTERNAL_USER_ID_VALUE} --external-chat-id ${EXTERNAL_CHAT_ID_VALUE} --prompt-reply-only${quality_guard_arg}" >&2
       exit 1
     fi
   done < <(load_case_rows "$CASE_FILE_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE")

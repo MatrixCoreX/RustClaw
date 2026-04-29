@@ -83,39 +83,6 @@ fn rewrite_response_with_written_aliases(text: &str, loop_state: &LoopState) -> 
     out
 }
 
-fn rewrite_bounded_list_dir_last_output_placeholder(
-    content: &str,
-    loop_state: &LoopState,
-) -> String {
-    if !content.contains("{{last_output}}") {
-        return content.to_string();
-    }
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(content);
-    let Some(limit) = surface.requested_listing_limit else {
-        return content.to_string();
-    };
-    let Some(last_ok_step) = loop_state
-        .executed_step_results
-        .iter()
-        .rev()
-        .find(|step| step.is_ok())
-    else {
-        return content.to_string();
-    };
-    if last_ok_step.skill != "list_dir" {
-        return content.to_string();
-    }
-    let Some(listing) = loop_state.last_output.as_deref() else {
-        return content.to_string();
-    };
-    let Some(trimmed_listing) =
-        crate::agent_engine::observed_output::normalized_observed_listing(listing, Some(limit))
-    else {
-        return content.to_string();
-    };
-    content.replace("{{last_output}}", &trimmed_listing)
-}
-
 fn has_remaining_action_after(
     actions: &[AgentAction],
     current_idx: usize,
@@ -184,15 +151,152 @@ pub(super) fn classify_skill_failure_recovery(
     None
 }
 
+fn route_resolved_intent(agent_run_context: Option<&AgentRunContext>) -> String {
+    agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .map(|route| route.resolved_intent.trim())
+        .filter(|intent| !intent.is_empty())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn synthesize_failure_observed_facts(loop_state: &LoopState, refs_summary: &str) -> Vec<String> {
+    let mut facts = vec![
+        format!("synthesize_refs: {}", refs_summary.trim()),
+        format!(
+            "observed_steps_count: {}",
+            loop_state.executed_step_results.len()
+        ),
+    ];
+    let mut recent_steps = loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "think" | "synthesize_answer"
+            )
+        })
+        .take(4)
+        .collect::<Vec<_>>();
+    recent_steps.reverse();
+    for step in recent_steps {
+        let mut parts = vec![
+            format!("skill={}", step.skill.trim()),
+            format!("status={}", step.status.as_str()),
+        ];
+        if let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push(format!(
+                "output_excerpt={}",
+                crate::truncate_for_agent_trace(output)
+            ));
+        }
+        if let Some(error) = step
+            .error
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push(format!(
+                "error_summary={}",
+                crate::truncate_for_agent_trace(error)
+            ));
+        }
+        facts.push(format!("observed_step: {}", parts.join(", ")));
+    }
+    facts
+}
+
+fn synthesize_failure_default_text(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+) -> String {
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
+    let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
+    crate::bilingual_t_with_default_vars(
+        state,
+        crate::fallback::ClarifyFallbackSource::SynthesisEmpty.i18n_key(),
+        "我还没能根据现有证据生成可靠最终答案。请补充缺少的目标，或让我重新整理一次。",
+        crate::fallback::ClarifyFallbackSource::SynthesisEmpty.default_en(),
+        prefer_english,
+        &[],
+    )
+}
+
+async fn synthesize_failure_user_message(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    refs_summary: &str,
+) -> String {
+    let default_text = synthesize_failure_default_text(state, task, user_text);
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
+    let has_observed_result = loop_state.executed_step_results.iter().any(|step| {
+        step.is_ok()
+            && step
+                .output
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty())
+    });
+    let mut policy_boundary = vec![
+        "Do not say the task succeeded.".to_string(),
+        "Do not expose prompt names, schema names, stack traces, or raw provider errors."
+            .to_string(),
+        "Explain the synthesis failure from observed facts only; do not invent missing results."
+            .to_string(),
+    ];
+    if has_observed_result {
+        policy_boundary.push(
+            "Mention that execution results exist and the user can ask to view raw results or retry synthesis."
+                .to_string(),
+        );
+    } else {
+        policy_boundary.push("Mention that no usable execution result was available.".to_string());
+    }
+    let contract = crate::fallback::UserResponseContract::tool_failure(
+        if has_observed_result {
+            "synthesize_answer_no_publishable_answer"
+        } else {
+            "synthesize_answer_no_evidence"
+        },
+        user_text,
+        &route_resolved_intent(agent_run_context),
+        synthesize_failure_observed_facts(loop_state, refs_summary),
+        policy_boundary,
+        if has_observed_result {
+            "brief_failure_with_next_step"
+        } else {
+            "brief_failure"
+        },
+        &language_hint,
+    );
+    crate::fallback::compose_user_response_from_contract_with_default(
+        state,
+        task,
+        &contract,
+        crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
+        &default_text,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
     use std::path::Path;
     use std::sync::{Arc, RwLock};
 
-    use super::{
-        classify_skill_failure_recovery, rewrite_bounded_list_dir_last_output_placeholder,
-    };
+    use super::{classify_skill_failure_recovery, synthesize_failure_observed_facts};
     use crate::agent_engine::LoopState;
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
@@ -275,34 +379,19 @@ mod tests {
     }
 
     #[test]
-    fn bounded_list_dir_placeholder_rewrite_truncates_to_requested_limit() {
+    fn synthesize_failure_observed_facts_include_recent_execution_outputs() {
         let mut loop_state = LoopState::new(2);
         loop_state
             .executed_step_results
-            .push(ok_step("step_1", "list_dir", "a\nb\nc\nd\n"));
-        loop_state.last_output = Some("a\nb\nc\nd\n".to_string());
+            .push(ok_step("step_1", "list_dir", "alpha.md\nbeta.md\n"));
 
-        let rewritten = rewrite_bounded_list_dir_last_output_placeholder(
-            "logs 目录下前 2 个文件名：\n{{last_output}}",
-            &loop_state,
-        );
+        let facts = synthesize_failure_observed_facts(&loop_state, "last_output");
+        let joined = facts.join("\n");
 
-        assert_eq!(rewritten, "logs 目录下前 2 个文件名：\na\nb");
-    }
-
-    #[test]
-    fn bounded_list_dir_placeholder_rewrite_ignores_non_listing_outputs() {
-        let mut loop_state = LoopState::new(2);
-        loop_state
-            .executed_step_results
-            .push(ok_step("step_1", "read_file", "alpha\nbeta\n"));
-        loop_state.last_output = Some("alpha\nbeta\n".to_string());
-
-        let content = "前 2 行：\n{{last_output}}";
-        assert_eq!(
-            rewrite_bounded_list_dir_last_output_placeholder(content, &loop_state),
-            content
-        );
+        assert!(joined.contains("synthesize_refs: last_output"));
+        assert!(joined.contains("observed_steps_count: 1"));
+        assert!(joined.contains("skill=list_dir"));
+        assert!(joined.contains("alpha.md"));
     }
 }
 
@@ -363,11 +452,8 @@ pub(super) fn handle_respond_action(
     fingerprint: &str,
     content: &str,
 ) -> RespondActionOutcome {
-    let rewritten_content = rewrite_bounded_list_dir_last_output_placeholder(content, loop_state);
     let text = rewrite_response_with_written_aliases(
-        &resolve_arg_string(&rewritten_content, loop_state)
-            .trim()
-            .to_string(),
+        &resolve_arg_string(content, loop_state).trim().to_string(),
         loop_state,
     )
     .trim()
@@ -699,23 +785,29 @@ pub(super) async fn handle_synthesize_answer_action(
     );
     let step_execution =
         crate::executor::execute_step(&format!("step_{global_step}"), action, || async {
-            crate::agent_engine::observed_output::synthesize_answer_from_observed_output(
+            let synthesized =
+                crate::agent_engine::observed_output::synthesize_answer_from_observed_output(
+                    state,
+                    task,
+                    user_text,
+                    loop_state,
+                    agent_run_context,
+                )
+                .await
+                .map(|(answer, _summary)| answer)
+                .filter(|answer| !answer.trim().is_empty());
+            if let Some(answer) = synthesized {
+                return Ok(answer);
+            }
+            Err(synthesize_failure_user_message(
                 state,
                 task,
                 user_text,
                 loop_state,
                 agent_run_context,
+                &refs_summary,
             )
-            .await
-            .map(|(answer, _summary)| answer)
-            .filter(|answer| !answer.trim().is_empty())
-            .ok_or_else(|| {
-                if loop_state.executed_step_results.is_empty() {
-                    "没有可用于生成答案的执行结果".to_string()
-                } else {
-                    "已经拿到执行结果，但没有整理出可直接交付的答案".to_string()
-                }
-            })
+            .await)
         })
         .await;
     match step_execution

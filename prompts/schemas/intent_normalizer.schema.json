@@ -10,7 +10,8 @@
     "mode",
     "needs_clarify",
     "reason",
-    "confidence"
+    "confidence",
+    "output_contract"
   ],
   "properties": {
     "resolved_user_intent": {
@@ -68,11 +69,11 @@
     },
     "output_contract": {
       "type": ["object", "null"],
-      "description": "Optional output contract hints used by finalize layers.",
+      "description": "Output contract used by finalize layers. The prompt must emit this object; parser recovery still accepts null/missing values and normalizes them to defaults.",
       "properties": {
         "response_shape": {
           "type": "string",
-          "enum": ["free", "one_sentence", "scalar", "file_token", ""]
+          "enum": ["free", "one_sentence", "strict", "scalar", "file_token", ""]
         },
         "requires_content_evidence": {"type": "boolean"},
         "delivery_required": {"type": "boolean"},
@@ -104,6 +105,10 @@
             "command_output",
             "service_status",
             "hidden_entries_check",
+            "file_names",
+            "names_only",
+            "entry_names",
+            "directory_entry_names",
             "directory_purpose_summary",
             "listing_purpose_summary",
             "directory_listing_summary",
@@ -207,18 +212,6 @@
         }
       },
       "additionalProperties": false
-    },
-    "direct_reply_candidate": {
-      "type": "string",
-      "description": "Deprecated planner-first compatibility field. The runtime ignores it; omit it or leave it empty.",
-      "default": ""
-    },
-    "direct_reply_confidence": {
-      "type": "number",
-      "description": "Deprecated planner-first compatibility field. The runtime ignores it; omit it or leave it at 0.0.",
-      "minimum": 0.0,
-      "maximum": 1.0,
-      "default": 0.0
     },
     "turn_type": {
       "type": "string",

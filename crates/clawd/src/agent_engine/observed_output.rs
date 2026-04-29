@@ -190,7 +190,7 @@ fn latest_successful_list_dir_answer_candidate(
     ) {
         return None;
     }
-    let idx = latest_successful_step_index(loop_state, |_| true)?;
+    let idx = latest_successful_step_index(loop_state, |step| step.skill == "list_dir")?;
     let step = &loop_state.executed_step_results[idx];
     if !step.is_ok() || step.skill != "list_dir" {
         return None;
@@ -297,11 +297,6 @@ fn looks_like_shell_long_listing_line(line: &str) -> bool {
         && trimmed.split_whitespace().count() >= 9
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn requested_listing_limit_from_intent(intent: &str) -> Option<usize> {
-    crate::listing_limit_request::requested_listing_limit_from_prompt(intent)
-}
-
 fn current_turn_request_text<'a>(
     route: Option<&'a crate::RouteResult>,
     agent_run_context: Option<&'a AgentRunContext>,
@@ -316,33 +311,9 @@ fn current_turn_request_text<'a>(
         })
 }
 
-fn requested_listing_limit(route: Option<&crate::RouteResult>) -> Option<usize> {
-    crate::intent::surface_signals::requested_listing_limit_from_prompt_pair(
-        route.map(|value| value.resolved_intent.as_str()),
-        "",
-    )
-}
-
-fn current_turn_requested_listing_limit(
-    route: Option<&crate::RouteResult>,
-    agent_run_context: Option<&AgentRunContext>,
-) -> Option<usize> {
-    current_turn_request_text(route, agent_run_context)
-        .and_then(requested_listing_limit_from_intent)
-        .or_else(|| requested_listing_limit(route))
-}
-
 fn route_requests_scalar_count(route: &crate::RouteResult) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Scalar
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
-}
-
-fn route_requests_limited_listing_names(
-    route: &crate::RouteResult,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    route_requests_scalar_count(route)
-        && current_turn_requested_listing_limit(Some(route), agent_run_context).is_some()
 }
 
 fn route_requests_hidden_entries_check(route: &crate::RouteResult) -> bool {
@@ -362,33 +333,11 @@ pub(crate) fn route_prefers_direct_observed_answer_for_scalar(route: &crate::Rou
 pub(crate) fn scalar_route_prefers_structured_observed_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
 ) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Scalar
         && (route_prefers_direct_observed_answer_for_scalar(route)
-            || route_requests_limited_listing_names(route, agent_run_context)
             || extract_latest_generic_successful_output(loop_state)
                 .is_some_and(|observed| observed.skill == "health_check"))
-}
-
-fn route_requests_directory_purpose_summary(route: &crate::RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryPurposeSummary
-}
-
-fn route_requests_recent_artifacts_judgment(route: &crate::RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::RecentArtifactsJudgment
-}
-
-fn route_requests_excerpt_kind_judgment(route: &crate::RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::ExcerptKindJudgment
-        && matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Free
-        )
-}
-
-fn route_requests_workspace_project_summary(route: &crate::RouteResult) -> bool {
-    route.output_contract.semantic_kind == crate::OutputSemanticKind::WorkspaceProjectSummary
 }
 
 fn route_requests_quantity_comparison(route: &crate::RouteResult) -> bool {
@@ -401,46 +350,27 @@ fn route_requests_scalar_path_only(route: &crate::RouteResult) -> bool {
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
 }
 
-fn contains_any(text: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| text.contains(needle))
+fn health_check_contract_prefers_summary(route: Option<&crate::RouteResult>) -> bool {
+    route.is_some_and(|route| {
+        !route.ask_mode.is_plain_act()
+            || matches!(
+                route.output_contract.response_shape,
+                crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar
+            )
+    })
 }
 
-fn health_check_request_prefers_summary(
-    route: Option<&crate::RouteResult>,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    let request_text = current_turn_request_text(route, agent_run_context)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    contains_any(
-        &request_text,
-        &[
-            "summarize",
-            "summary",
-            "key fields",
-            "important findings",
-            "host operating system",
-            "只总结",
-            "关键字段",
-            "最重要",
-            "操作系统",
-            "不展开总结",
-        ],
-    )
-}
-
-fn route_allows_raw_listing_direct_answer(
-    route: Option<&crate::RouteResult>,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
+fn route_allows_raw_listing_direct_answer(route: Option<&crate::RouteResult>) -> bool {
     route.is_none_or(|route| {
-        !route.output_contract.requires_content_evidence
-            || route_requests_limited_listing_names(route, agent_run_context)
+        if !route.output_contract.requires_content_evidence {
+            return true;
+        }
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::FileNames
     })
 }
 
 fn latest_list_dir_listing(loop_state: &LoopState) -> Option<String> {
-    let idx = latest_successful_step_index(loop_state, |_| true)?;
+    let idx = latest_successful_step_index(loop_state, |step| step.skill == "list_dir")?;
     let step = &loop_state.executed_step_results[idx];
     if !step.is_ok() || step.skill != "list_dir" {
         return None;
@@ -578,485 +508,6 @@ fn directory_listing_entries_from_step(
     .filter(|entries| !entries.is_empty())
 }
 
-fn latest_workspace_project_listing_entries(
-    loop_state: &LoopState,
-    auto_locator_path: Option<&str>,
-) -> Option<Vec<String>> {
-    loop_state
-        .executed_step_results
-        .iter()
-        .rev()
-        .filter_map(|step| directory_listing_entries_from_step(step, auto_locator_path, None))
-        .next()
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DirectoryPurposeKind {
-    Documentation,
-    ScriptsAutomation,
-    Configs,
-    Logs,
-    DataArtifacts,
-    ServiceOps,
-    Generic,
-}
-
-#[derive(Default)]
-struct DirectoryPurposeScores {
-    docs: i32,
-    scripts: i32,
-    configs: i32,
-    logs: i32,
-    data: i32,
-    service_ops: i32,
-}
-
-fn directory_scope_hint(
-    locator_hint: Option<&str>,
-    auto_locator_path: Option<&str>,
-) -> Option<String> {
-    locator_hint
-        .map(str::trim)
-        .filter(|hint| !hint.is_empty())
-        .map(|hint| {
-            hint.trim_end_matches('/')
-                .trim_end_matches('\\')
-                .to_string()
-        })
-        .filter(|hint| !hint.is_empty())
-        .or_else(|| {
-            auto_locator_path
-                .map(str::trim)
-                .filter(|path| !path.is_empty())
-                .and_then(|path| Path::new(path).file_name().and_then(|value| value.to_str()))
-                .map(str::trim)
-                .filter(|name| !name.is_empty())
-                .map(ToString::to_string)
-        })
-}
-
-fn add_directory_scope_bias(scores: &mut DirectoryPurposeScores, scope_hint: Option<&str>) {
-    let Some(scope_hint) = scope_hint.map(str::trim).filter(|hint| !hint.is_empty()) else {
-        return;
-    };
-    let lower = scope_hint.to_ascii_lowercase();
-    if lower.contains("doc") || lower.contains("readme") {
-        scores.docs += 4;
-    }
-    if lower.contains("script") || lower == "bin" || lower == "tools" {
-        scores.scripts += 4;
-    }
-    if lower.contains("config") || lower == "conf" {
-        scores.configs += 4;
-    }
-    if lower.contains("log") {
-        scores.logs += 4;
-    }
-    if lower.contains("data") || lower.contains("db") || lower.contains("cache") {
-        scores.data += 4;
-    }
-    if lower.contains("service")
-        || lower.contains("deploy")
-        || lower.contains("systemd")
-        || lower.contains("docker")
-    {
-        scores.service_ops += 4;
-    }
-}
-
-fn add_directory_entry_scores(scores: &mut DirectoryPurposeScores, entry: &str) {
-    let trimmed = entry.trim();
-    if trimmed.is_empty() {
-        return;
-    }
-    let lower = trimmed.trim_end_matches('/').to_ascii_lowercase();
-    let ext = lower
-        .rsplit_once('.')
-        .map(|(_, ext)| ext)
-        .unwrap_or_default();
-
-    match ext {
-        "md" | "rst" | "txt" | "pdf" | "doc" | "docx" => scores.docs += 3,
-        "sh" | "py" | "rb" | "ps1" | "fish" => scores.scripts += 4,
-        "toml" | "yaml" | "yml" | "json" | "ini" | "conf" | "cfg" | "env" => scores.configs += 3,
-        "log" | "trace" | "out" | "err" => scores.logs += 4,
-        "sqlite" | "db" | "csv" | "tsv" | "parquet" | "jsonl" => scores.data += 4,
-        "service" => scores.service_ops += 4,
-        _ => {}
-    }
-
-    for marker in [
-        "readme",
-        "guide",
-        "manual",
-        "checklist",
-        "summary",
-        "report",
-        "spec",
-        "design",
-        "plan",
-        "contract",
-        "notes",
-        "release",
-        "faq",
-        "tutorial",
-    ] {
-        if lower.contains(marker) {
-            scores.docs += 2;
-        }
-    }
-    for marker in [
-        "run",
-        "start",
-        "build",
-        "deploy",
-        "test",
-        "sync",
-        "setup",
-        "migrate",
-        "seed",
-        "bootstrap",
-        "lint",
-        "check",
-    ] {
-        if lower.contains(marker) {
-            scores.scripts += 2;
-        }
-    }
-    for marker in [
-        "config", "settings", "profile", "env", "template", "example",
-    ] {
-        if lower.contains(marker) {
-            scores.configs += 2;
-        }
-    }
-    for marker in [
-        "log", "trace", "stderr", "stdout", "journal", "panic", "error",
-    ] {
-        if lower.contains(marker) {
-            scores.logs += 2;
-        }
-    }
-    for marker in [
-        "data", "cache", "snapshot", "export", "backup", "dump", "fixture", "seed",
-    ] {
-        if lower.contains(marker) {
-            scores.data += 2;
-        }
-    }
-    for marker in [
-        "service",
-        "systemd",
-        "docker",
-        "compose",
-        "k8s",
-        "helm",
-        "supervisor",
-        "nginx",
-        "caddy",
-    ] {
-        if lower.contains(marker) {
-            scores.service_ops += 2;
-        }
-    }
-}
-
-fn classify_directory_purpose(
-    entries: &[String],
-    scope_hint: Option<&str>,
-) -> DirectoryPurposeKind {
-    let mut scores = DirectoryPurposeScores::default();
-    add_directory_scope_bias(&mut scores, scope_hint);
-    for entry in entries {
-        add_directory_entry_scores(&mut scores, entry);
-    }
-    let mut ranked = vec![
-        (DirectoryPurposeKind::Documentation, scores.docs),
-        (DirectoryPurposeKind::ScriptsAutomation, scores.scripts),
-        (DirectoryPurposeKind::Configs, scores.configs),
-        (DirectoryPurposeKind::Logs, scores.logs),
-        (DirectoryPurposeKind::DataArtifacts, scores.data),
-        (DirectoryPurposeKind::ServiceOps, scores.service_ops),
-    ];
-    ranked.sort_by(|a, b| b.1.cmp(&a.1));
-    let (winner, winner_score) = ranked[0];
-    let second_score = ranked.get(1).map(|(_, score)| *score).unwrap_or_default();
-    if winner_score < 4 || winner_score < second_score + 2 {
-        DirectoryPurposeKind::Generic
-    } else {
-        winner
-    }
-}
-
-fn directory_purpose_summary_text(
-    state: Option<&AppState>,
-    kind: DirectoryPurposeKind,
-    prefer_english: bool,
-) -> String {
-    match kind {
-        DirectoryPurposeKind::Documentation => observed_t(
-            state,
-            "clawd.msg.directory_purpose_docs",
-            "这个目录主要放说明文档、操作指引和检查清单。",
-            "This directory mainly holds docs, guides, and checklists.",
-            prefer_english,
-        ),
-        DirectoryPurposeKind::ScriptsAutomation => observed_t(
-            state,
-            "clawd.msg.directory_purpose_scripts",
-            "这个目录主要放运行、测试和维护用的脚本。",
-            "This directory mainly holds scripts for running, testing, and maintenance.",
-            prefer_english,
-        ),
-        DirectoryPurposeKind::Configs => observed_t(
-            state,
-            "clawd.msg.directory_purpose_configs",
-            "这个目录主要放配置文件和环境参数。",
-            "This directory mainly holds config files and environment settings.",
-            prefer_english,
-        ),
-        DirectoryPurposeKind::Logs => observed_t(
-            state,
-            "clawd.msg.directory_purpose_logs",
-            "这个目录主要放运行日志和排查记录。",
-            "This directory mainly holds runtime logs and troubleshooting records.",
-            prefer_english,
-        ),
-        DirectoryPurposeKind::DataArtifacts => observed_t(
-            state,
-            "clawd.msg.directory_purpose_data",
-            "这个目录主要放运行期数据、数据库或导出结果。",
-            "This directory mainly holds runtime data, databases, or exported artifacts.",
-            prefer_english,
-        ),
-        DirectoryPurposeKind::ServiceOps => observed_t(
-            state,
-            "clawd.msg.directory_purpose_service_ops",
-            "这个目录主要放服务启动、部署和运维相关文件。",
-            "This directory mainly holds service startup, deployment, and ops-related files.",
-            prefer_english,
-        ),
-        DirectoryPurposeKind::Generic => observed_t(
-            state,
-            "clawd.msg.directory_purpose_generic",
-            "这个目录里的条目更像围绕同一任务的一组工作文件和辅助材料。",
-            "These entries look like a grouped set of working files and support materials for one area.",
-            prefer_english,
-        ),
-    }
-}
-
-fn directory_purpose_summary_direct_answer(
-    state: Option<&AppState>,
-    route: &crate::RouteResult,
-    loop_state: &LoopState,
-    auto_locator_path: Option<&str>,
-    requested_listing_limit: Option<usize>,
-    prefer_english: bool,
-) -> Option<String> {
-    if !route_requests_directory_purpose_summary(route) {
-        return None;
-    }
-    let entries =
-        latest_directory_listing_entries(loop_state, auto_locator_path, requested_listing_limit)?;
-    let scope_hint = directory_scope_hint(
-        Some(route.output_contract.locator_hint.as_str()),
-        auto_locator_path,
-    );
-    let summary = directory_purpose_summary_text(
-        state,
-        classify_directory_purpose(&entries, scope_hint.as_deref()),
-        prefer_english,
-    );
-    Some(format!("{}\n\n{summary}", entries.join("\n")))
-}
-
-fn workspace_project_summary_from_entries(
-    state: Option<&AppState>,
-    entries: &[String],
-    prefer_english: bool,
-) -> Option<String> {
-    fn normalize_workspace_entry(value: &str) -> &str {
-        value.trim().trim_end_matches('/')
-    }
-
-    if entries.is_empty() {
-        return None;
-    }
-    let contains_exact = |target: &str| {
-        let target = normalize_workspace_entry(target);
-        entries
-            .iter()
-            .any(|entry| normalize_workspace_entry(entry).eq_ignore_ascii_case(target))
-    };
-    let contains_substring = |needle: &str| {
-        entries.iter().any(|entry| {
-            normalize_workspace_entry(entry)
-                .to_ascii_lowercase()
-                .contains(&needle.to_ascii_lowercase())
-        })
-    };
-    let count_matching = |needle: &str| {
-        entries
-            .iter()
-            .filter(|entry| {
-                normalize_workspace_entry(entry)
-                    .to_ascii_lowercase()
-                    .contains(&needle.to_ascii_lowercase())
-            })
-            .count()
-    };
-
-    let has_rust_workspace = contains_exact("Cargo.toml") && contains_exact("crates");
-    let has_ui = contains_exact("UI") || contains_exact("ui");
-    let has_configs = contains_exact("configs");
-    let has_docs = contains_exact("README.md")
-        || contains_exact("README.zh-CN.md")
-        || contains_exact("docs")
-        || contains_exact("document");
-    let has_service_ops = contains_exact("docker-compose.yml")
-        || contains_exact("services")
-        || contains_exact("systemd")
-        || contains_exact("rustclaw.service")
-        || entries.iter().any(|entry| {
-            let entry = normalize_workspace_entry(entry);
-            entry.starts_with("start-") && entry.ends_with(".sh")
-        });
-    let channel_markers = ["telegram", "wechat", "whatsapp", "feishu", "lark"];
-    let channel_hits = channel_markers
-        .iter()
-        .map(|marker| count_matching(marker))
-        .sum::<usize>();
-    let has_skills_or_runtime = contains_exact("prompts")
-        || contains_exact("external_skills")
-        || contains_exact("skill_develop")
-        || contains_exact("skills_output")
-        || contains_exact("rustclaw")
-        || contains_substring("clawd");
-
-    if has_rust_workspace && has_ui && has_service_ops && has_skills_or_runtime && channel_hits >= 2
-    {
-        return Some(observed_t(
-            state,
-            "clawd.msg.workspace_project_summary_assistant_platform",
-            "这是一个可本地部署的智能助手平台仓库，带网页界面、多聊天渠道接入和后台服务，用来通过聊天或浏览器处理任务、记忆、调度和自动化。",
-            "This looks like a locally deployable assistant platform with a web UI, multiple chat-channel adapters, and backend services for tasks, memory, scheduling, and automation.",
-            prefer_english,
-        ));
-    }
-
-    if has_rust_workspace && has_ui && has_configs && has_docs {
-        return Some(observed_t(
-            state,
-            "clawd.msg.workspace_project_summary_fullstack_control_console",
-            "这是一个带网页界面和配置脚本的软件项目仓库，前后端都在这里，主要用来构建、部署并管理一套本地服务。",
-            "This looks like a software project repository with both backend code and a web console, mainly for building, deploying, and managing a local service stack.",
-            prefer_english,
-        ));
-    }
-
-    if has_rust_workspace && has_docs {
-        return Some(observed_t(
-            state,
-            "clawd.msg.workspace_project_summary_rust_service",
-            "这是一个以 Rust 为主的软件项目仓库，里面有代码、文档和运行脚本，主要用来构建并运行一套服务。",
-            "This looks like a Rust-based software repository with code, docs, and run scripts for building and operating a service.",
-            prefer_english,
-        ));
-    }
-
-    Some(observed_t(
-        state,
-        "clawd.msg.workspace_project_summary_generic",
-        "这是一个软件项目仓库，里面放着代码、文档、配置和启动脚本，主要用来构建并运行一套程序。",
-        "This looks like a software project repository with code, docs, configs, and startup scripts for building and running an application.",
-        prefer_english,
-    ))
-}
-
-fn workspace_project_summary_from_scoped_entries(
-    state: Option<&AppState>,
-    entries: &[String],
-    scope_hint: Option<&str>,
-    prefer_english: bool,
-) -> Option<String> {
-    let scope_hint = scope_hint
-        .map(str::trim)
-        .filter(|hint| !hint.is_empty())
-        .unwrap_or_default();
-    let scope_lower = scope_hint.to_ascii_lowercase();
-    let contains_exact = |target: &str| {
-        let target = target.trim().trim_end_matches('/');
-        entries.iter().any(|entry| {
-            entry
-                .trim()
-                .trim_end_matches('/')
-                .eq_ignore_ascii_case(target)
-        })
-    };
-    let contains_substring = |needle: &str| {
-        let needle = needle.to_ascii_lowercase();
-        entries.iter().any(|entry| {
-            entry
-                .trim()
-                .trim_end_matches('/')
-                .to_ascii_lowercase()
-                .contains(&needle)
-        })
-    };
-
-    if !scope_lower.is_empty()
-        && (scope_lower == "ui" || scope_lower.ends_with("/ui"))
-        && (contains_exact("package.json")
-            || contains_exact("index.html")
-            || contains_exact("src")
-            || contains_exact("vite.config.ts"))
-    {
-        return Some(observed_t(
-            state,
-            "clawd.msg.workspace_project_summary_scoped_web_ui",
-            "UI 部分是 RustClaw 的浏览器前端，用来给普通用户提供本地可视化控制台和聊天式操作入口。",
-            "The UI part is RustClaw's browser front end, providing a local visual console and chat-style operating entry point for users.",
-            prefer_english,
-        ));
-    }
-
-    if (scope_lower.contains("pi_app") || scope_lower.contains("small"))
-        && (contains_substring("small_screen")
-            || contains_exact("SMALL-SCREEN.md")
-            || contains_exact("run-small-screen.sh"))
-    {
-        return Some(observed_t(
-            state,
-            "clawd.msg.workspace_project_summary_scoped_small_screen",
-            "这个部分是 RustClaw 的小屏幕桌面应用，面向树莓派或触屏设备，提供独立的可视化操作面板。",
-            "This part is RustClaw's small-screen desktop app for Raspberry Pi or touch devices, providing a standalone visual control panel.",
-            prefer_english,
-        ));
-    }
-
-    workspace_project_summary_from_entries(state, entries, prefer_english)
-}
-
-fn workspace_project_summary_direct_answer(
-    state: Option<&AppState>,
-    route: &crate::RouteResult,
-    loop_state: &LoopState,
-    auto_locator_path: Option<&str>,
-    prefer_english: bool,
-) -> Option<String> {
-    if !route_requests_workspace_project_summary(route) {
-        return None;
-    }
-    let entries = latest_workspace_project_listing_entries(loop_state, auto_locator_path)?;
-    workspace_project_summary_from_scoped_entries(
-        state,
-        &entries,
-        Some(route.output_contract.locator_hint.as_str()),
-        prefer_english,
-    )
-}
-
 fn comparison_winner_from_route(
     route: &crate::RouteResult,
     loop_state: &LoopState,
@@ -1147,50 +598,6 @@ fn numeric_scalar_value(value: &serde_json::Value, display_text: &str) -> Option
         .or_else(|| display_text.parse::<f64>().ok())
 }
 
-fn structured_scalar_observation_from_parts(
-    display_text: String,
-    numeric_value: Option<f64>,
-) -> Option<StructuredScalarObservation> {
-    let display_text = display_text.trim().to_string();
-    if display_text.is_empty() {
-        return None;
-    }
-    Some(StructuredScalarObservation {
-        normalized_key: normalized_scalar_equality_key(&display_text),
-        numeric_value,
-        display_text,
-    })
-}
-
-fn structured_scalar_observation_from_json_scalar(
-    value: &serde_json::Value,
-) -> Option<StructuredScalarObservation> {
-    let display_text = value_scalar_text(value)?;
-    structured_scalar_observation_from_parts(
-        display_text.clone(),
-        numeric_scalar_value(value, &display_text),
-    )
-}
-
-fn toml_scalar_text_and_numeric(value: &toml::Value) -> Option<(String, Option<f64>)> {
-    match value {
-        toml::Value::String(v) => Some((v.trim().to_string(), None)),
-        toml::Value::Integer(v) => Some((v.to_string(), Some(*v as f64))),
-        toml::Value::Float(v) => Some((v.to_string(), Some(*v))),
-        toml::Value::Boolean(v) => Some((v.to_string(), None)),
-        toml::Value::Datetime(v) => Some((v.to_string(), None)),
-        _ => None,
-    }
-    .filter(|(text, _)| !text.trim().is_empty())
-}
-
-fn structured_scalar_observation_from_toml_scalar(
-    value: &toml::Value,
-) -> Option<StructuredScalarObservation> {
-    let (display_text, numeric_value) = toml_scalar_text_and_numeric(value)?;
-    structured_scalar_observation_from_parts(display_text, numeric_value)
-}
-
 fn structured_scalar_observation_from_extract_item(
     value: &serde_json::Value,
 ) -> Option<StructuredScalarObservation> {
@@ -1214,42 +621,6 @@ fn structured_scalar_observation_from_extract_item(
         numeric_value: numeric_scalar_value(raw_value, &display_text),
         display_text,
     })
-}
-
-fn route_mentions_name_field(route: &crate::RouteResult) -> bool {
-    let text = route.resolved_intent.to_ascii_lowercase();
-    text.contains("name") || route.resolved_intent.contains("名称")
-}
-
-fn route_mentions_package_name_field(route: &crate::RouteResult) -> bool {
-    let text = route.resolved_intent.to_ascii_lowercase();
-    text.contains("package.name") || text.contains("package name")
-}
-
-fn structured_scalar_observation_from_read_file_body(
-    route: &crate::RouteResult,
-    body: &str,
-) -> Option<StructuredScalarObservation> {
-    if !route_mentions_name_field(route) {
-        return None;
-    }
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
-        return value
-            .get("name")
-            .and_then(structured_scalar_observation_from_json_scalar);
-    }
-    let value = toml::from_str::<toml::Value>(body).ok()?;
-    if route_mentions_package_name_field(route) {
-        return value
-            .get("package")
-            .and_then(|package| package.get("name"))
-            .and_then(structured_scalar_observation_from_toml_scalar);
-    }
-    value
-        .get("package")
-        .and_then(|package| package.get("name"))
-        .or_else(|| value.get("name"))
-        .and_then(structured_scalar_observation_from_toml_scalar)
 }
 
 fn structured_scalar_observation_from_step(
@@ -1291,36 +662,12 @@ fn recent_structured_scalar_observations(
     recent
 }
 
-fn recent_read_file_scalar_observations(
-    route: &crate::RouteResult,
-    loop_state: &LoopState,
-    limit: usize,
-) -> Vec<StructuredScalarObservation> {
-    let mut recent = loop_state
-        .executed_step_results
-        .iter()
-        .rev()
-        .filter(|step| step.is_ok() && step.skill == "read_file")
-        .filter_map(|step| {
-            step.output
-                .as_deref()
-                .and_then(|body| structured_scalar_observation_from_read_file_body(route, body))
-        })
-        .take(limit.max(1))
-        .collect::<Vec<_>>();
-    recent.reverse();
-    recent
-}
-
 fn structured_scalar_pair_direct_answer(
     route: &crate::RouteResult,
     loop_state: &LoopState,
     prefer_english: bool,
 ) -> Option<String> {
-    let mut observations = recent_structured_scalar_observations(loop_state, 2);
-    if observations.len() < 2 {
-        observations = recent_read_file_scalar_observations(route, loop_state, 2);
-    }
+    let observations = recent_structured_scalar_observations(loop_state, 2);
     if observations.len() < 2 {
         return None;
     }
@@ -1452,24 +799,6 @@ fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> 
     let response_shape = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .map(|route| route.output_contract.response_shape);
-    let request_text = agent_run_context
-        .and_then(|ctx| ctx.user_request.as_deref())
-        .or_else(|| {
-            agent_run_context
-                .and_then(|ctx| ctx.route_result.as_ref())
-                .map(|route| route.resolved_intent.as_str())
-        })
-        .unwrap_or_default();
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(request_text);
-    if matches!(
-        surface.output_compression_shape,
-        Some(crate::intent::surface_signals::OutputCompressionShape::Brief)
-    ) && matches!(
-        response_shape,
-        Some(crate::OutputResponseShape::Free) | Some(crate::OutputResponseShape::OneSentence)
-    ) {
-        return "Return a compact final answer. For short/brief notes or one-paragraph requests, prefer one short paragraph with no headings and no fenced code blocks unless the user explicitly asked for a full step-by-step guide.".to_string();
-    }
     match response_shape {
         Some(crate::OutputResponseShape::Scalar) => {
             "Return only the final scalar value with no label, prefix, suffix, or explanation."
@@ -1479,6 +808,9 @@ fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> 
         }
         Some(crate::OutputResponseShape::OneSentence) => {
             "Return exactly one sentence unless the current user request explicitly asks for another exact sentence count."
+        }
+        Some(crate::OutputResponseShape::Strict) => {
+            "Return exactly the format requested by the user. Do not add execution traces, headings, prefixes, suffixes, or extra explanation."
         }
         Some(crate::OutputResponseShape::Free) => {
             "Return a short direct answer, usually one short paragraph or compact listing plus one concise conclusion."
@@ -1523,49 +855,10 @@ fn db_basic_table_names(value: &serde_json::Value) -> Option<Vec<String>> {
     )
 }
 
-fn db_tables_looks_like_test_db(locator_hint: Option<&str>, table_names: &[String]) -> bool {
-    if table_names.is_empty() {
-        return true;
-    }
-    let lower_path = locator_hint.unwrap_or_default().to_ascii_lowercase();
-    if ["test", "fixture", "mock", "sample", "contract"]
-        .iter()
-        .any(|needle| lower_path.contains(needle))
-    {
-        return true;
-    }
-    let lower_names = table_names
-        .iter()
-        .map(|name| name.to_ascii_lowercase())
-        .collect::<Vec<_>>();
-    if lower_names.iter().any(|name| {
-        ["test", "fixture", "mock", "sample", "contract"]
-            .iter()
-            .any(|needle| name.contains(needle))
-    }) {
-        return true;
-    }
-    !lower_names.iter().any(|name| {
-        [
-            "auth_keys",
-            "user_preferences",
-            "tasks",
-            "scheduled_jobs",
-            "audit_logs",
-            "long_term_memories",
-            "memories",
-            "users",
-        ]
-        .iter()
-        .any(|needle| name == needle)
-    })
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SqliteTableObservedOutputKind {
     Listing,
     NamesOnly,
-    DatabaseKindJudgment,
 }
 
 fn sqlite_table_observed_output_kind(
@@ -1586,9 +879,6 @@ fn sqlite_table_observed_output_kind(
         crate::OutputSemanticKind::SqliteTableNamesOnly => {
             Some(SqliteTableObservedOutputKind::NamesOnly)
         }
-        crate::OutputSemanticKind::SqliteDatabaseKindJudgment => {
-            Some(SqliteTableObservedOutputKind::DatabaseKindJudgment)
-        }
         _ => None,
     }
 }
@@ -1601,19 +891,9 @@ fn db_basic_tables_summary_candidate(
     let observed_kind = sqlite_table_observed_output_kind(route)?;
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     let table_names = db_basic_table_names(&value)?;
-    let looks_like_test = db_tables_looks_like_test_db(
-        Some(route.output_contract.locator_hint.as_str()),
-        &table_names,
-    );
     if table_names.is_empty() {
         return Some(
-            if observed_kind == SqliteTableObservedOutputKind::DatabaseKindJudgment {
-                if prefer_english {
-                    "This SQLite file currently has no tables, so it looks more like an empty or test DB.".to_string()
-                } else {
-                    "这个 sqlite 文件里目前没有任何表，所以更像一个空白或测试库。".to_string()
-                }
-            } else if observed_kind == SqliteTableObservedOutputKind::NamesOnly {
+            if observed_kind == SqliteTableObservedOutputKind::NamesOnly {
                 if prefer_english {
                     "This SQLite file currently has no tables.".to_string()
                 } else {
@@ -1635,25 +915,11 @@ fn db_basic_tables_summary_candidate(
         .cloned()
         .collect::<Vec<_>>()
         .join(if prefer_english { ", " } else { "、" });
-    Some(
-        if observed_kind == SqliteTableObservedOutputKind::DatabaseKindJudgment {
-            if prefer_english {
-                let kind = if looks_like_test { "test DB" } else { "app DB" };
-                format!("The tables include {preview}; overall this looks more like a {kind}.")
-            } else {
-                let kind = if looks_like_test {
-                    "测试库"
-                } else {
-                    "业务库"
-                };
-                format!("表包括 {preview}；整体更像{kind}。")
-            }
-        } else if prefer_english {
-            format!("The tables include {preview}.")
-        } else {
-            format!("表包括 {preview}。")
-        },
-    )
+    Some(if prefer_english {
+        format!("The tables include {preview}.")
+    } else {
+        format!("表包括 {preview}。")
+    })
 }
 
 fn transform_skill_formatted_output_candidate(body: &str) -> Option<String> {
@@ -1775,6 +1041,16 @@ fn system_basic_info_summary_candidate(
             &[("hostname", hostname), ("os", os)],
         ),
     })
+}
+
+fn system_basic_info_scalar_path_candidate(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("cwd")
+        .or_else(|| value.get("workspace_root"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
 }
 
 fn system_basic_value_looks_like_info(value: &serde_json::Value) -> bool {
@@ -2087,134 +1363,6 @@ fn run_cmd_shell_listing_entry_names(
         names.truncate(limit);
     }
     Some(names)
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RecentArtifactStyle {
-    LogLike,
-    FormalDeliverable,
-    WorkingArtifact,
-}
-
-fn recent_artifact_style_for_name(name: &str) -> (i32, i32) {
-    let trimmed = name.trim();
-    if trimmed.is_empty() {
-        return (0, 0);
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    let ext = lower
-        .rsplit_once('.')
-        .map(|(_, ext)| ext)
-        .unwrap_or_default();
-
-    let mut log_like = 0;
-    let mut formal = 0;
-
-    match ext {
-        "log" | "trace" | "out" | "err" => log_like += 4,
-        "md" | "pdf" | "doc" | "docx" | "ppt" | "pptx" | "html" | "htm" => formal += 4,
-        "txt" => formal += 1,
-        _ => {}
-    }
-
-    for marker in ["log", "trace", "stderr", "stdout", "runtime", "journal"] {
-        if lower.contains(marker) {
-            log_like += 2;
-        }
-    }
-    for marker in [
-        "readme",
-        "guide",
-        "manual",
-        "checklist",
-        "proposal",
-        "summary",
-        "report",
-        "spec",
-        "design",
-        "plan",
-    ] {
-        if lower.contains(marker) {
-            formal += 2;
-        }
-    }
-
-    (log_like, formal)
-}
-
-fn classify_recent_artifact_style(names: &[String]) -> RecentArtifactStyle {
-    let (log_like, formal) = names.iter().fold((0, 0), |(log_acc, formal_acc), name| {
-        let (log_score, formal_score) = recent_artifact_style_for_name(name);
-        (log_acc + log_score, formal_acc + formal_score)
-    });
-    if log_like >= formal + 2 {
-        RecentArtifactStyle::LogLike
-    } else if formal >= log_like + 2 {
-        RecentArtifactStyle::FormalDeliverable
-    } else {
-        RecentArtifactStyle::WorkingArtifact
-    }
-}
-
-fn recent_artifacts_judgment_direct_answer(
-    state: Option<&AppState>,
-    route: &crate::RouteResult,
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    prefer_english: bool,
-) -> Option<String> {
-    if !route_requests_recent_artifacts_judgment(route) {
-        return None;
-    }
-    let listing_limit = current_turn_requested_listing_limit(Some(route), agent_run_context);
-    let names = extract_latest_generic_successful_output(loop_state)
-        .and_then(|observed| {
-            (observed.skill == "run_cmd")
-                .then(|| run_cmd_shell_listing_entry_names(&observed.body, listing_limit))
-                .flatten()
-        })
-        .or_else(|| {
-            latest_directory_listing_entries(
-                loop_state,
-                Some(route.output_contract.locator_hint.as_str()),
-                listing_limit,
-            )
-        })?;
-    if names.is_empty() {
-        return None;
-    }
-    let names_text = if prefer_english {
-        names.join(", ")
-    } else {
-        names.join("、")
-    };
-    let answer = match classify_recent_artifact_style(&names) {
-        RecentArtifactStyle::LogLike => observed_t_with_vars(
-            state,
-            "clawd.msg.recent_artifacts_judgment_log_like",
-            "最近修改的文件是：{names}；这些更像运行或测试过程中产生的日志，不像正式交付产物。",
-            "The most recently modified files are {names}; these look more like runtime or test logs than formal deliverables.",
-            prefer_english,
-            &[("names", names_text.as_str())],
-        ),
-        RecentArtifactStyle::FormalDeliverable => observed_t_with_vars(
-            state,
-            "clawd.msg.recent_artifacts_judgment_formal",
-            "最近修改的文件是：{names}；这些更像整理好的正式文档或交付产物，不太像日志。",
-            "The most recently modified files are {names}; these look more like prepared documents or formal deliverables than logs.",
-            prefer_english,
-            &[("names", names_text.as_str())],
-        ),
-        RecentArtifactStyle::WorkingArtifact => observed_t_with_vars(
-            state,
-            "clawd.msg.recent_artifacts_judgment_working",
-            "最近修改的文件是：{names}；这些更像工作过程中的中间产物或运行痕迹，暂时不像正式交付产物。",
-            "The most recently modified files are {names}; these look more like working/runtime artifacts than formal deliverables.",
-            prefer_english,
-            &[("names", names_text.as_str())],
-        ),
-    };
-    Some(answer)
 }
 
 fn route_prefers_archive_success_answer(route: &crate::RouteResult) -> bool {
@@ -2758,6 +1906,7 @@ fn fs_search_direct_answer_candidate(
     value: &serde_json::Value,
     locator_hint: Option<&str>,
     prefer_english: bool,
+    allow_multi_result_list: bool,
 ) -> Option<String> {
     if let Some((results, count, ext)) = fs_search_find_ext_results(value) {
         if count == 0 || results.is_empty() {
@@ -2804,34 +1953,11 @@ fn fs_search_direct_answer_candidate(
         }
         let ranked = rank_fs_search_candidates(&results, &pattern);
         if !ranked.is_empty() {
-            let count_text = ranked.len().to_string();
-            let separator = if prefer_english { "; " } else { "；" };
-            let candidates = ranked.join(separator);
-            return Some(observed_t_with_vars(
-                state,
-                "clawd.msg.fs_search_candidates",
-                "我找到 {count} 个最接近的候选，请确认要哪一个：{candidates}",
-                "I found {count} closest candidates. Please confirm which one you want: {candidates}",
-                prefer_english,
-                &[("count", &count_text), ("candidates", &candidates)],
-            ));
+            return allow_multi_result_list.then(|| ranked.join("\n"));
         }
     }
-    let count_text = results.len().min(count.max(results.len())).to_string();
-    let separator = if prefer_english { "; " } else { "；" };
-    let matches = results
-        .into_iter()
-        .take(3)
-        .collect::<Vec<_>>()
-        .join(separator);
-    Some(observed_t_with_vars(
-        state,
-        "clawd.msg.fs_search_multiple",
-        "找到 {count} 个匹配项：{matches}",
-        "Found {count} matches: {matches}",
-        prefer_english,
-        &[("count", &count_text), ("matches", &matches)],
-    ))
+    let matches = results.into_iter().take(3).collect::<Vec<_>>().join("\n");
+    allow_multi_result_list.then_some(matches)
 }
 
 fn log_analyze_direct_answer_candidate(
@@ -3256,10 +2382,9 @@ fn structured_scalar_candidate(
     match action {
         "inventory_dir" => {
             let hidden_count_route = route.is_some_and(|route| {
-                crate::route_reason_starts_with_route_contract(
-                    &route.route_reason,
-                    "current_workspace_hidden_entries_count",
-                )
+                route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+                    && route.output_contract.semantic_kind
+                        == crate::OutputSemanticKind::HiddenEntriesCheck
             });
             if hidden_count_route {
                 value
@@ -3605,634 +2730,6 @@ fn normalize_read_range_excerpt(excerpt: &str) -> Option<String> {
     }
 }
 
-#[derive(Debug, Clone)]
-struct ContentExcerptObserved {
-    path: Option<String>,
-    content: String,
-}
-
-fn route_requests_content_excerpt_summary(
-    route: &crate::RouteResult,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ContentExcerptSummary {
-        return false;
-    }
-    if matches!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::OneSentence
-    ) {
-        return true;
-    }
-    if !matches!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::Free
-    ) {
-        return false;
-    }
-    let Some(request_text) = current_turn_request_text(Some(route), agent_run_context) else {
-        return false;
-    };
-    let request_surface = crate::intent::surface_signals::analyze_prompt_surface(request_text);
-    request_surface.requested_sentence_count.is_some()
-        || matches!(
-            request_surface.output_compression_shape,
-            Some(crate::intent::surface_signals::OutputCompressionShape::Brief)
-        )
-}
-
-fn requested_summary_sentence_count(
-    route: &crate::RouteResult,
-    agent_run_context: Option<&AgentRunContext>,
-) -> Option<usize> {
-    if matches!(
-        route.output_contract.response_shape,
-        crate::OutputResponseShape::OneSentence
-    ) {
-        return Some(1);
-    }
-    current_turn_request_text(Some(route), agent_run_context).and_then(|request_text| {
-        crate::intent::surface_signals::analyze_prompt_surface(request_text)
-            .requested_sentence_count
-    })
-}
-
-fn route_allows_raw_read_range_direct_answer(
-    route: Option<&crate::RouteResult>,
-    agent_run_context: Option<&AgentRunContext>,
-) -> bool {
-    let Some(route) = route else {
-        return false;
-    };
-    route.output_contract.requires_content_evidence
-        && matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::Free
-        )
-        && crate::route_reason_starts_with_route_contract(&route.route_reason, "generic_")
-        && route.route_reason.ends_with("_read_range")
-        && !route_requests_content_excerpt_summary(route, agent_run_context)
-}
-
-fn latest_content_excerpt_observed(
-    loop_state: &LoopState,
-    auto_locator_path: Option<&str>,
-    locator_hint: Option<&str>,
-) -> Option<ContentExcerptObserved> {
-    let idx = latest_successful_step_index(loop_state, |step| {
-        matches!(step.skill.as_str(), "read_file" | "system_basic")
-    })?;
-    let step = &loop_state.executed_step_results[idx];
-    let body = step
-        .output
-        .as_deref()
-        .map(str::trim)
-        .filter(|text| !text.is_empty())?;
-    match step.skill.as_str() {
-        "read_file" => Some(ContentExcerptObserved {
-            path: auto_locator_path
-                .or(locator_hint)
-                .map(str::trim)
-                .filter(|path| !path.is_empty())
-                .map(ToString::to_string),
-            content: body.to_string(),
-        }),
-        "system_basic" => {
-            let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
-            let action = value.get("action").and_then(|v| v.as_str());
-            if action != Some("read_range") {
-                return None;
-            }
-            let content = value
-                .get("excerpt")
-                .and_then(|v| v.as_str())
-                .and_then(normalize_read_range_excerpt)?;
-            let path = value
-                .get("resolved_path")
-                .or_else(|| value.get("path"))
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|path| !path.is_empty())
-                .map(ToString::to_string)
-                .or_else(|| {
-                    auto_locator_path
-                        .or(locator_hint)
-                        .map(str::trim)
-                        .filter(|path| !path.is_empty())
-                        .map(ToString::to_string)
-                });
-            Some(ContentExcerptObserved { path, content })
-        }
-        _ => None,
-    }
-}
-
-fn excerpt_content_lines(content: &str) -> Vec<String> {
-    content
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .filter(|line| {
-            !line.starts_with('#')
-                && !line.starts_with("//")
-                && !line.starts_with(';')
-                && !line.starts_with("/*")
-                && !line.starts_with('*')
-        })
-        .map(ToString::to_string)
-        .collect()
-}
-
-fn excerpt_section_headers(content: &str) -> Vec<String> {
-    let mut sections = Vec::new();
-    for line in excerpt_content_lines(content) {
-        let trimmed = line.trim();
-        if !(trimmed.starts_with('[') && trimmed.ends_with(']')) {
-            continue;
-        }
-        let inner = trimmed.trim_start_matches('[').trim_end_matches(']').trim();
-        if inner.is_empty() {
-            continue;
-        }
-        if !sections.iter().any(|existing| existing == inner) {
-            sections.push(inner.to_string());
-        }
-    }
-    sections
-}
-
-fn excerpt_assignment_pairs(content: &str) -> Vec<(String, String)> {
-    let mut pairs = Vec::new();
-    for line in excerpt_content_lines(content) {
-        let Some((lhs, rhs)) = line.split_once('=') else {
-            continue;
-        };
-        let key = lhs.trim();
-        let value = rhs.trim().trim_end_matches(',');
-        if key.is_empty() || value.is_empty() {
-            continue;
-        }
-        if !key
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '-'))
-        {
-            continue;
-        }
-        pairs.push((key.to_string(), value.to_string()));
-    }
-    pairs
-}
-
-fn summary_value_token(value: &str) -> Option<String> {
-    let trimmed = value.trim().trim_matches('"').trim_matches('\'').trim();
-    if trimmed.is_empty() || trimmed.contains('\n') {
-        return None;
-    }
-    if trimmed.chars().count() > 32 {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
-
-fn join_summary_names(names: &[String], prefer_english: bool) -> String {
-    match names {
-        [] => String::new(),
-        [one] => one.clone(),
-        [first, second] => {
-            if prefer_english {
-                format!("{first} and {second}")
-            } else {
-                format!("{first}、{second}")
-            }
-        }
-        _ => {
-            let shown = names.iter().take(2).cloned().collect::<Vec<_>>();
-            if prefer_english {
-                format!("{} and more", shown.join(", "))
-            } else {
-                format!("{} 等", shown.join("、"))
-            }
-        }
-    }
-}
-
-fn path_looks_like_markdown(path: &str) -> bool {
-    let path = path.trim().to_ascii_lowercase();
-    path.ends_with(".md") || path.ends_with(".markdown") || path.ends_with(".mdx")
-}
-
-fn excerpt_comment_summary_line(content: &str) -> Option<String> {
-    content
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .filter_map(|line| {
-            let stripped = line
-                .strip_prefix('#')
-                .or_else(|| line.strip_prefix(';'))
-                .or_else(|| line.strip_prefix("//"))
-                .map(str::trim)?;
-            let stripped = stripped.trim_matches(|ch| matches!(ch, '[' | ']')).trim();
-            if stripped.is_empty()
-                || stripped.chars().all(|ch| !ch.is_alphanumeric())
-                    && !stripped.chars().any(
-                        |ch| matches!(ch as u32, 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF),
-                    )
-            {
-                return None;
-            }
-            Some(stripped.to_string())
-        })
-        .next()
-}
-
-fn excerpt_markdown_heading(observed: &ContentExcerptObserved) -> Option<String> {
-    let path_text = observed.path.as_deref().unwrap_or_default();
-    if !path_text.is_empty() && !path_looks_like_markdown(path_text) {
-        return None;
-    }
-    observed
-        .content
-        .lines()
-        .map(str::trim)
-        .filter_map(|line| {
-            let hashes = line.chars().take_while(|&ch| ch == '#').count();
-            if hashes == 0 {
-                return None;
-            }
-            let rest = line.get(hashes..)?.trim();
-            if rest.is_empty()
-                || rest.chars().all(|ch| !ch.is_alphanumeric())
-                    && !rest.chars().any(
-                        |ch| matches!(ch as u32, 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF),
-                    )
-            {
-                return None;
-            }
-            Some(rest.to_string())
-        })
-        .next()
-}
-
-fn config_excerpt_summary_candidate(
-    state: Option<&AppState>,
-    observed: &ContentExcerptObserved,
-    prefer_english: bool,
-) -> Option<String> {
-    let sections = excerpt_section_headers(&observed.content);
-    let assignments = excerpt_assignment_pairs(&observed.content);
-    let path_text = observed.path.as_deref().unwrap_or_default();
-    let path_lower = path_text.to_ascii_lowercase();
-    let looks_like_config_path = path_lower.ends_with(".toml")
-        || path_lower.ends_with(".yaml")
-        || path_lower.ends_with(".yml")
-        || path_lower.ends_with(".json")
-        || path_lower.ends_with(".ini")
-        || path_lower.ends_with(".conf")
-        || path_lower.ends_with(".cfg");
-    let looks_like_config_excerpt = !sections.is_empty() || !assignments.is_empty();
-    if !looks_like_config_path && !looks_like_config_excerpt {
-        return None;
-    }
-
-    if sections.len() >= 2 {
-        let named_sections = join_summary_names(&sections[..2].to_vec(), prefer_english);
-        return Some(observed_t_with_vars(
-            state,
-            "clawd.msg.content_excerpt_config_sections_summary",
-            "这个配置文件主要在配置 {sections} 等运行参数。",
-            "This config file mainly covers runtime settings such as {sections}.",
-            prefer_english,
-            &[("sections", named_sections.as_str())],
-        ));
-    }
-
-    if let Some((key, value)) = assignments.first() {
-        let value_text = summary_value_token(value);
-        if let Some(value_text) = value_text {
-            return Some(observed_t_with_vars(
-                state,
-                "clawd.msg.content_excerpt_config_assignment_summary",
-                "这段主要是在设置 `{key}` 为 {value}。",
-                "This excerpt mainly sets `{key}` to {value}.",
-                prefer_english,
-                &[("key", key.as_str()), ("value", value_text.as_str())],
-            ));
-        }
-        return Some(observed_t_with_vars(
-            state,
-            "clawd.msg.content_excerpt_config_assignment_key_only_summary",
-            "这段主要是在配置 `{key}` 这项参数。",
-            "This excerpt mainly configures the `{key}` setting.",
-            prefer_english,
-            &[("key", key.as_str())],
-        ));
-    }
-
-    if let Some(section) = sections.first() {
-        return Some(observed_t_with_vars(
-            state,
-            "clawd.msg.content_excerpt_config_single_section_summary",
-            "这段主要是在配置 `{section}` 这一组参数。",
-            "This excerpt mainly covers the `{section}` config section.",
-            prefer_english,
-            &[("section", section.as_str())],
-        ));
-    }
-
-    if let Some(comment_line) = excerpt_comment_summary_line(&observed.content) {
-        let note = comment_line
-            .trim_end_matches(['。', '.', '!', '！'])
-            .trim()
-            .to_string();
-        if !note.is_empty() {
-            return Some(observed_t_with_vars(
-                state,
-                "clawd.msg.content_excerpt_config_comment_summary",
-                "这个配置文件开头主要在说明：{note}。",
-                "This config excerpt mainly notes: {note}.",
-                prefer_english,
-                &[("note", note.as_str())],
-            ));
-        }
-    }
-
-    None
-}
-
-fn markdown_excerpt_summary_candidate(
-    state: Option<&AppState>,
-    observed: &ContentExcerptObserved,
-    prefer_english: bool,
-) -> Option<String> {
-    let heading = excerpt_markdown_heading(observed)?;
-    Some(observed_t_with_vars(
-        state,
-        "clawd.msg.content_excerpt_heading_summary",
-        "这段内容主要是在说明“{heading}”相关内容。",
-        "This excerpt mainly explains {heading}.",
-        prefer_english,
-        &[("heading", heading.as_str())],
-    ))
-}
-
-fn markdown_excerpt_multi_sentence_summary_candidate(
-    _state: Option<&AppState>,
-    observed: &ContentExcerptObserved,
-    prefer_english: bool,
-    sentence_count: usize,
-) -> Option<String> {
-    if sentence_count < 2 {
-        return None;
-    }
-    let heading = excerpt_markdown_heading(observed)?;
-    let prose_lines = observed
-        .content
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .filter(|line| !line.starts_with('#'))
-        .filter(|line| !line.starts_with('<'))
-        .filter(|line| !line.starts_with('`'))
-        .filter(|line| {
-            line.chars().any(|ch| ch.is_ascii_alphabetic())
-                || line.chars().any(
-                    |ch| matches!(ch as u32, 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF),
-                )
-        })
-        .collect::<Vec<_>>();
-    let first_line = prose_lines.first().copied().unwrap_or_default();
-    let second_line = prose_lines.get(1).copied().unwrap_or_default();
-    if first_line.is_empty() || second_line.is_empty() {
-        return None;
-    }
-    let project_shape = if heading.eq_ignore_ascii_case("readme")
-        || observed
-            .path
-            .as_deref()
-            .map(|path| path.to_ascii_lowercase().contains("readme"))
-            .unwrap_or(false)
-    {
-        if prefer_english {
-            "Overall, this reads like the opening of a project README."
-        } else {
-            "整体看，这更像是一个项目 README 的开头说明。"
-        }
-    } else if prefer_english {
-        "Overall, this excerpt is an overview section for the project."
-    } else {
-        "整体看，这段更像是在做项目总览说明。"
-    };
-    let mut sentences = Vec::new();
-    sentences.push(if prefer_english {
-        format!("This excerpt opens with {heading}.")
-    } else {
-        format!("这段内容开头主要在介绍“{heading}”。")
-    });
-    let first_line = first_line.trim_end_matches('.');
-    sentences.push(if prefer_english {
-        format!("It says {first_line}.")
-    } else {
-        format!("它提到：{first_line}。")
-    });
-    if sentence_count >= 3 {
-        if !second_line.is_empty() {
-            let second_line = second_line.trim_end_matches('.');
-            sentences.push(if prefer_english {
-                format!("It also mentions {second_line}.")
-            } else {
-                format!("同时还提到：{second_line}。")
-            });
-        } else {
-            sentences.push(project_shape.to_string());
-        }
-    }
-    while sentences.len() < sentence_count {
-        sentences.push(project_shape.to_string());
-    }
-    Some(
-        sentences
-            .into_iter()
-            .take(sentence_count)
-            .collect::<Vec<_>>()
-            .join(" "),
-    )
-}
-
-fn log_excerpt_summary_candidate(
-    state: Option<&AppState>,
-    observed: &ContentExcerptObserved,
-    prefer_english: bool,
-) -> Option<String> {
-    let path_text = observed.path.as_deref().unwrap_or_default();
-    let path_lower = path_text.to_ascii_lowercase();
-    let lines = excerpt_content_lines(&observed.content);
-    let looks_like_log_excerpt = path_lower.ends_with(".log")
-        || lines.iter().any(|line| {
-            let upper = line.to_ascii_uppercase();
-            upper.contains("ERROR") || upper.contains("WARN")
-        });
-    if !looks_like_log_excerpt || lines.is_empty() {
-        return None;
-    }
-    if let Some(line) = lines.iter().rev().find(|line| {
-        let upper = line.to_ascii_uppercase();
-        upper.contains("ERROR")
-    }) {
-        return Some(observed_t_with_vars(
-            state,
-            "clawd.msg.content_excerpt_log_error_summary",
-            "最后几行里有 ERROR，最值得注意的是：{line}",
-            "The last few lines include an ERROR; the most notable one is: {line}",
-            prefer_english,
-            &[("line", line.as_str())],
-        ));
-    }
-    if let Some(line) = lines.iter().rev().find(|line| {
-        let upper = line.to_ascii_uppercase();
-        upper.contains("WARN")
-    }) {
-        return Some(observed_t_with_vars(
-            state,
-            "clawd.msg.content_excerpt_log_warn_summary",
-            "最后几行里有 WARN，最值得注意的是：{line}",
-            "The last few lines include a WARN; the most notable one is: {line}",
-            prefer_english,
-            &[("line", line.as_str())],
-        ));
-    }
-    Some(observed_t(
-        state,
-        "clawd.msg.content_excerpt_log_clean_summary",
-        "最后几行里没有明显的 ERROR 或 WARN。",
-        "The last few lines do not show any obvious ERROR or WARN.",
-        prefer_english,
-    ))
-}
-
-fn checklist_excerpt_summary_candidate(
-    state: Option<&AppState>,
-    observed: &ContentExcerptObserved,
-    prefer_english: bool,
-) -> Option<String> {
-    let checklist_items = observed
-        .content
-        .lines()
-        .map(str::trim)
-        .filter(|line| {
-            let lower = line.to_ascii_lowercase();
-            lower.starts_with("- [ ]")
-                || lower.starts_with("- [x]")
-                || lower.starts_with("* [ ]")
-                || lower.starts_with("* [x]")
-        })
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    if checklist_items.len() < 2 {
-        return None;
-    }
-    Some(observed_t(
-        state,
-        "clawd.msg.content_excerpt_checklist_summary",
-        "这段主要是在列一组检查清单项。",
-        "This excerpt mainly lists a set of checklist items.",
-        prefer_english,
-    ))
-}
-
-fn excerpt_kind_judgment_direct_answer_candidate(
-    state: Option<&AppState>,
-    route: &crate::RouteResult,
-    loop_state: &LoopState,
-    auto_locator_path: Option<&str>,
-    prefer_english: bool,
-) -> Option<String> {
-    if !route_requests_excerpt_kind_judgment(route) {
-        return None;
-    }
-    let locator_hint = route.output_contract.locator_hint.as_str();
-    let observed = latest_content_excerpt_observed(
-        loop_state,
-        auto_locator_path,
-        (!locator_hint.trim().is_empty()).then_some(locator_hint),
-    )?;
-    let path_lower = observed
-        .path
-        .as_deref()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let lines = excerpt_content_lines(&observed.content);
-    let checklist_like = lines
-        .iter()
-        .filter(|line| {
-            let lower = line.to_ascii_lowercase();
-            lower.starts_with("- [ ]")
-                || lower.starts_with("- [x]")
-                || lower.starts_with("* [ ]")
-                || lower.starts_with("* [x]")
-        })
-        .count()
-        >= 2;
-    if checklist_like {
-        return Some(observed_t(
-            state,
-            "clawd.msg.content_excerpt_kind_checklist",
-            "这更像一段检查清单，不像运行日志。",
-            "This reads more like a checklist than a runtime log.",
-            prefer_english,
-        ));
-    }
-    let log_like = path_lower.ends_with(".log")
-        || lines.iter().any(|line| {
-            let upper = line.to_ascii_uppercase();
-            upper.contains("ERROR") || upper.contains("WARN") || upper.contains("INFO")
-        })
-        || observed.content.trim_start().starts_with('{')
-        || observed.content.trim_start().starts_with('[');
-    if log_like {
-        return Some(observed_t(
-            state,
-            "clawd.msg.content_excerpt_kind_log",
-            "这更像一段日志或运行记录，不像检查清单。",
-            "This reads more like a log or runtime record than a checklist.",
-            prefer_english,
-        ));
-    }
-    None
-}
-
-fn content_excerpt_summary_direct_answer_candidate(
-    state: Option<&AppState>,
-    route: &crate::RouteResult,
-    loop_state: &LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    auto_locator_path: Option<&str>,
-    prefer_english: bool,
-) -> Option<String> {
-    if !route_requests_content_excerpt_summary(route, agent_run_context) {
-        return None;
-    }
-    let sentence_count = requested_summary_sentence_count(route, agent_run_context).unwrap_or(1);
-    let locator_hint = route.output_contract.locator_hint.as_str();
-    let observed = latest_content_excerpt_observed(
-        loop_state,
-        auto_locator_path,
-        (!locator_hint.trim().is_empty()).then_some(locator_hint),
-    )?;
-    if sentence_count <= 1 {
-        return config_excerpt_summary_candidate(state, &observed, prefer_english)
-            .or_else(|| checklist_excerpt_summary_candidate(state, &observed, prefer_english))
-            .or_else(|| log_excerpt_summary_candidate(state, &observed, prefer_english))
-            .or_else(|| markdown_excerpt_summary_candidate(state, &observed, prefer_english));
-    }
-    markdown_excerpt_multi_sentence_summary_candidate(
-        state,
-        &observed,
-        prefer_english,
-        sentence_count,
-    )
-}
-
 fn compare_paths_direct_answer_candidate(body: &str, prefer_english: bool) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     if value.get("action").and_then(|v| v.as_str()) != Some("compare_paths") {
@@ -4393,7 +2890,7 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
         }
         "db_basic" => db_basic_observed_candidate(&value),
         "service_control" => service_control_summary_candidate(&value),
-        "fs_search" => fs_search_direct_answer_candidate(None, &value, None, false),
+        "fs_search" => fs_search_direct_answer_candidate(None, &value, None, false, true),
         "archive_basic" => archive_basic_observed_candidate(&value),
         "log_analyze" => compact_log_analyze_excerpt(&value),
         "package_manager" => package_manager_summary_candidate(
@@ -4612,9 +3109,7 @@ fn extract_direct_answer_from_generic_output_impl(
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     let response_shape = route.map(|route| route.output_contract.response_shape);
     let is_plain_act = route.is_some_and(|route| route.ask_mode.is_plain_act());
-    let allow_raw_listing_direct_answer =
-        route_allows_raw_listing_direct_answer(route, agent_run_context);
-    let requested_listing_limit = current_turn_requested_listing_limit(route, agent_run_context);
+    let allow_raw_listing_direct_answer = route_allows_raw_listing_direct_answer(route);
     let locator_hint = route
         .map(|route| route.output_contract.locator_hint.as_str())
         .filter(|hint| !hint.trim().is_empty());
@@ -4634,8 +3129,8 @@ fn extract_direct_answer_from_generic_output_impl(
             response_shape,
             Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar)
         )
-        && !health_check_request_prefers_summary(route, agent_run_context);
-    if health_check_request_prefers_summary(route, agent_run_context) {
+        && !health_check_contract_prefers_summary(route);
+    if health_check_contract_prefers_summary(route) {
         if let Some(observed_output) =
             extract_latest_successful_output_for_skill(loop_state, "health_check")
         {
@@ -4656,53 +3151,6 @@ fn extract_direct_answer_from_generic_output_impl(
         {
             return Some(answer);
         }
-        if let Some(answer) = directory_purpose_summary_direct_answer(
-            state,
-            route,
-            loop_state,
-            auto_locator_path,
-            requested_listing_limit,
-            prefers_english_free_text,
-        ) {
-            return Some(answer);
-        }
-        if let Some(answer) = workspace_project_summary_direct_answer(
-            state,
-            route,
-            loop_state,
-            auto_locator_path,
-            prefers_english_free_text,
-        ) {
-            return Some(answer);
-        }
-        if let Some(answer) = recent_artifacts_judgment_direct_answer(
-            state,
-            route,
-            loop_state,
-            agent_run_context,
-            prefers_english_free_text,
-        ) {
-            return Some(answer);
-        }
-        if let Some(answer) = excerpt_kind_judgment_direct_answer_candidate(
-            state,
-            route,
-            loop_state,
-            auto_locator_path,
-            prefers_english_free_text,
-        ) {
-            return Some(answer);
-        }
-        if let Some(answer) = content_excerpt_summary_direct_answer_candidate(
-            state,
-            route,
-            loop_state,
-            agent_run_context,
-            auto_locator_path,
-            prefers_english_free_text,
-        ) {
-            return Some(answer);
-        }
     }
 
     let answer = allow_raw_listing_direct_answer
@@ -4710,7 +3158,7 @@ fn extract_direct_answer_from_generic_output_impl(
             latest_successful_list_dir_answer_candidate(
                 loop_state,
                 response_shape,
-                requested_listing_limit,
+                None,
                 auto_locator_path,
                 prefer_full_path,
             )
@@ -4732,7 +3180,7 @@ fn extract_direct_answer_from_generic_output_impl(
                             run_cmd_listing_text_candidate(
                                 &observed_output.body,
                                 auto_locator_path,
-                                requested_listing_limit,
+                                None,
                             )
                         })
                         .flatten()
@@ -4780,6 +3228,7 @@ fn extract_direct_answer_from_generic_output_impl(
                             &value,
                             locator_hint,
                             prefers_english_free_text,
+                            allow_raw_listing_direct_answer,
                         )
                     }),
                 "git_basic" => git_basic_status_summary_candidate(
@@ -4826,12 +3275,11 @@ fn extract_direct_answer_from_generic_output_impl(
                         })?;
                     let action = value.get("action").and_then(|v| v.as_str());
                     if action == Some("read_range")
-                        && ((is_plain_act
+                        && (is_plain_act
                             && !matches!(
                                 response_shape,
                                 Some(crate::OutputResponseShape::OneSentence)
                             ))
-                            || route_allows_raw_read_range_direct_answer(route, agent_run_context))
                     {
                         value
                             .get("excerpt")
@@ -4842,7 +3290,7 @@ fn extract_direct_answer_from_generic_output_impl(
                         && is_plain_act
                         && allow_raw_listing_direct_answer
                     {
-                        inventory_dir_direct_answer_candidate(&value, requested_listing_limit)
+                        inventory_dir_direct_answer_candidate(&value, None)
                     } else if action == Some("extract_fields") {
                         extract_fields_direct_answer_candidate(
                             &value,
@@ -4859,12 +3307,16 @@ fn extract_direct_answer_from_generic_output_impl(
                     } else if action == Some("info")
                         || (action.is_none() && system_basic_value_looks_like_info(&value))
                     {
-                        system_basic_info_summary_candidate(
-                            state,
-                            &value,
-                            response_shape,
-                            prefers_english_free_text,
-                        )
+                        if route.is_some_and(route_requests_scalar_path_only) {
+                            system_basic_info_scalar_path_candidate(&value)
+                        } else {
+                            system_basic_info_summary_candidate(
+                                state,
+                                &value,
+                                response_shape,
+                                prefers_english_free_text,
+                            )
+                        }
                     } else if route.is_some_and(|route| {
                         route.output_contract.semantic_kind
                             == crate::OutputSemanticKind::ExistenceWithPath
@@ -5218,8 +3670,8 @@ mod tests {
         extract_direct_scalar_from_generic_output_i18n,
         extract_direct_scalar_from_generic_output_with_locator_hint, normalized_observed_listing,
         observed_contract_json, observed_output_entries, observed_request_language_hint,
-        observed_response_style_hint, requested_listing_limit_from_intent,
-        structured_observed_body, AgentRunContext, OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
+        observed_response_style_hint, structured_observed_body, AgentRunContext,
+        OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
     };
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
@@ -5413,7 +3865,7 @@ mod tests {
     }
 
     #[test]
-    fn structured_pair_answer_extracts_name_fields_from_read_file_outputs() {
+    fn structured_pair_answer_does_not_infer_fields_from_read_file_outputs() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -5469,7 +3921,7 @@ version.workspace = true
                 Some(&agent_run_context)
             )
             .as_deref(),
-            Some("不一样")
+            None
         );
     }
 
@@ -5558,22 +4010,24 @@ version.workspace = true
             "results": ["Cargo.toml", "configs/config.toml", "configs/git_basic.toml"]
         });
         assert_eq!(
-            super::fs_search_direct_answer_candidate(None, &value, None, false).as_deref(),
+            super::fs_search_direct_answer_candidate(None, &value, None, false, true).as_deref(),
             Some("Cargo.toml\nconfigs/config.toml\nconfigs/git_basic.toml")
         );
     }
 
     #[test]
-    fn fs_search_direct_answer_uses_top3_confirmation_for_ambiguous_matches() {
+    fn fs_search_direct_answer_does_not_confirm_ambiguous_matches_when_direct_list_disallowed() {
         let value = serde_json::from_str::<serde_json::Value>(
             r#"{"action":"find_name","pattern":"abcd","count":4,"results":["abcd_report.md","my_abcd.txt","x_abcd_log.txt","zz_abcd_backup.log"],"root":""}"#,
         )
         .expect("json");
         assert_eq!(
-            super::fs_search_direct_answer_candidate(None, &value, None, false).as_deref(),
-            Some(
-                "我找到 3 个最接近的候选，请确认要哪一个：abcd_report.md；my_abcd.txt；x_abcd_log.txt"
-            )
+            super::fs_search_direct_answer_candidate(None, &value, None, false, false).as_deref(),
+            None
+        );
+        assert_eq!(
+            super::fs_search_direct_answer_candidate(None, &value, None, false, true).as_deref(),
+            Some("abcd_report.md\nmy_abcd.txt\nx_abcd_log.txt")
         );
     }
 
@@ -5584,21 +4038,27 @@ version.workspace = true
         )
         .expect("json");
         assert_eq!(
-            super::fs_search_direct_answer_candidate(None, &value, None, false).as_deref(),
+            super::fs_search_direct_answer_candidate(None, &value, None, false, false).as_deref(),
             Some("有，路径：README.md")
         );
     }
 
     #[test]
-    fn fs_search_direct_answer_uses_locator_hint_when_output_omits_pattern() {
+    fn fs_search_direct_answer_uses_locator_hint_for_ambiguous_list_when_allowed() {
         let value = serde_json::from_str::<serde_json::Value>(
             r#"{"action":"find_name","count":4,"results":["scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md","scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/zz_abcd_backup.log","scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt","scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt"],"root":"scripts/nl_tests/fixtures/locator_smart/fuzzy_top3"}"#,
         )
         .expect("json");
         assert_eq!(
-            super::fs_search_direct_answer_candidate(None, &value, Some("abcd"), false).as_deref(),
+            super::fs_search_direct_answer_candidate(None, &value, Some("abcd"), false, false)
+                .as_deref(),
+            None
+        );
+        assert_eq!(
+            super::fs_search_direct_answer_candidate(None, &value, Some("abcd"), false, true)
+                .as_deref(),
             Some(
-                "我找到 3 个最接近的候选，请确认要哪一个：scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md；scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt；scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt"
+                "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt"
             )
         );
     }
@@ -5781,47 +4241,6 @@ version.workspace = true
     }
 
     #[test]
-    fn observed_response_style_hint_reflects_brief_surface_shape() {
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "Write a short RustClaw setup note".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::Free,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::CurrentWorkspace,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::None,
-                locator_hint: String::new(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            user_request: Some("Write a short RustClaw setup note".to_string()),
-            ..AgentRunContext::default()
-        };
-        let hint = observed_response_style_hint(Some(&agent_run_context));
-        assert!(hint.contains("one short paragraph"));
-        assert!(hint.contains("no headings"));
-    }
-
-    #[test]
     fn observed_fallback_prompt_renders_language_and_response_style_hints() {
         let prompt = crate::render_prompt_template(
             OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
@@ -5847,7 +4266,7 @@ version.workspace = true
     }
 
     #[test]
-    fn direct_answer_summarizes_config_read_range_excerpt_without_llm() {
+    fn content_excerpt_summary_is_not_hard_summarized_by_observed_output() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -5888,64 +4307,8 @@ version.workspace = true
             ..AgentRunContext::default()
         };
         assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("这段主要是在设置 `task_timeout_seconds` 为 3600。")
-        );
-    }
-
-    #[test]
-    fn direct_answer_summarizes_config_read_file_sections_without_llm() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "read_file",
-            r#"[command_intent]
-default_locale = "zh-CN"
-
-[database]
-sqlite_path = "data/rustclaw.db"
-"#,
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "看一下 /tmp/config.toml，然后用一句大白话说它主要配置了什么"
-                .to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::OneSentence,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::Path,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
-                locator_hint: "/tmp/config.toml".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            auto_locator_path: Some("/tmp/config.toml".to_string()),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("这个配置文件主要在配置 command_intent、database 等运行参数。")
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+            None
         );
     }
 
@@ -5998,218 +4361,17 @@ sqlite_path = "data/rustclaw.db"
     }
 
     #[test]
-    fn direct_answer_summarizes_markdown_excerpt_in_three_sentences_without_llm() {
+    fn direct_answer_passthroughs_contract_filename_read_range_excerpt_without_llm() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|RustClaw is a local Rust agent runtime centered on clawd.\n4|It combines multi-channel chat access, task execution, memory, scheduling, and a browser UI."}"#,
+            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|<img src=\"./RustClaw.png\" width=\"420\" />\n4|"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "看看 README.md 开头讲了什么，读前 20 行后用三句话总结".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "route_contract:generic_filename_read_range".to_string(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::Free,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::Filename,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
-                locator_hint: "README.md".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            auto_locator_path: Some("/tmp/README.md".to_string()),
-            ..AgentRunContext::default()
-        };
-        let answer =
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .expect("three-sentence summary");
-        assert!(answer.contains("RustClaw"));
-        assert_eq!(answer.matches('。').count(), 3);
-    }
-
-    #[test]
-    fn direct_answer_summarizes_brief_excerpt_request_without_local_phrase_table() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "read_file",
-            r#"[command_intent]
-default_locale = "zh-CN"
-
-[database]
-sqlite_path = "data/rustclaw.db"
-"#,
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "看一下 /tmp/config.toml，简短说下它主要配置了什么".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "normalizer:chat_act".to_string(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::Free,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::Path,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
-                locator_hint: "/tmp/config.toml".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            auto_locator_path: Some("/tmp/config.toml".to_string()),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("这个配置文件主要在配置 command_intent、database 等运行参数。")
-        );
-    }
-
-    #[test]
-    fn direct_answer_summarizes_tailed_log_excerpt_without_llm() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "system_basic",
-            r#"{"action":"read_range","path":"/tmp/clawd.run.log","resolved_path":"/tmp/clawd.run.log","excerpt":"18|INFO startup complete\n19|WARN provider is warming up\n20|INFO retrying request"}"#,
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "读取 /tmp/clawd.run.log 最后 3 行，然后用一句话总结".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "route_contract:generic_explicit_path_read_range".to_string(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::OneSentence,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::Path,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
-                locator_hint: "/tmp/clawd.run.log".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            auto_locator_path: Some("/tmp/clawd.run.log".to_string()),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("最后几行里有 WARN，最值得注意的是：WARN provider is warming up")
-        );
-    }
-
-    #[test]
-    fn direct_answer_summarizes_checklist_excerpt_without_llm() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "read_file",
-            "- [ ] verify backup\n- [x] restart clawd\n- [ ] confirm health endpoint\n",
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "看一下 /tmp/release_checklist.md，然后用一句话总结".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "route_contract:generic_explicit_path_single_read".to_string(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::OneSentence,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::Path,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
-                locator_hint: "/tmp/release_checklist.md".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            auto_locator_path: Some("/tmp/release_checklist.md".to_string()),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("这段主要是在列一组检查清单项。")
-        );
-    }
-
-    #[test]
-    fn direct_answer_judges_log_vs_checklist_from_log_excerpt_without_llm() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "system_basic",
-            r#"{"action":"read_range","path":"/tmp/install_ops.log","resolved_path":"/tmp/install_ops.log","excerpt":"{\"command\":\"apt-get install -y missing-pkg\",\"exit_code\":100,\"output\":\"permission denied\"}"}"#,
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "一句话说它更像日志还是清单".to_string(),
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "先读一下 README.md 前 4 行".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
             route_reason: String::new(),
@@ -6223,61 +4385,12 @@ sqlite_path = "data/rustclaw.db"
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::OneSentence,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::Path,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::ExcerptKindJudgment,
-                locator_hint: "/tmp/install_ops.log".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            auto_locator_path: Some("/tmp/install_ops.log".to_string()),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("这更像一段日志或运行记录，不像检查清单。")
-        );
-    }
-
-    #[test]
-    fn direct_answer_passthroughs_contract_filename_read_range_excerpt_without_llm() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "system_basic",
-            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|<img src=\"./RustClaw.png\" width=\"420\" />\n4|"}"#,
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "先读一下 README.md 前 4 行".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "route_contract:generic_filename_read_range".to_string(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::Filename,
                 delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                semantic_kind: OutputSemanticKind::None,
                 locator_hint: "README.md".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
@@ -6524,7 +4637,7 @@ sqlite_path = "data/rustclaw.db"
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::Path,
                 delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: Default::default(),
+                semantic_kind: OutputSemanticKind::FileNames,
                 locator_hint: "logs".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
@@ -6543,7 +4656,7 @@ sqlite_path = "data/rustclaw.db"
     }
 
     #[test]
-    fn direct_answer_truncates_inventory_dir_names_to_requested_limit() {
+    fn direct_answer_preserves_inventory_dir_names_without_request_text_limit() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -6586,12 +4699,12 @@ sqlite_path = "data/rustclaw.db"
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
-            Some("a\nb")
+            Some("a\nb\nc\nd")
         );
     }
 
     #[test]
-    fn direct_answer_prefers_current_turn_listing_limit_over_resolved_intent_drift() {
+    fn direct_answer_does_not_use_current_turn_request_text_to_truncate_inventory_dir() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -6635,12 +4748,12 @@ sqlite_path = "data/rustclaw.db"
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
-            Some("a\nb")
+            Some("a\nb\nc\nd")
         );
     }
 
     #[test]
-    fn scalar_listing_gate_prefers_current_turn_limit_over_resolved_intent_drift() {
+    fn scalar_listing_gate_does_not_repair_count_from_request_text_limit() {
         let mut loop_state = LoopState::new(2);
         loop_state
             .executed_step_results
@@ -6681,12 +4794,8 @@ sqlite_path = "data/rustclaw.db"
         };
         let route = agent_run_context.route_result.as_ref().unwrap();
         assert!(
-            super::scalar_route_prefers_structured_observed_answer(
-                route,
-                &loop_state,
-                Some(&agent_run_context),
-            ),
-            "scalar/listing gate should use current-turn request when resolved_intent lost the limit"
+            !super::scalar_route_prefers_structured_observed_answer(route, &loop_state,),
+            "scalar/listing gate must not infer bounded listing from current-turn request text"
         );
     }
 
@@ -6739,7 +4848,59 @@ sqlite_path = "data/rustclaw.db"
     }
 
     #[test]
-    fn direct_answer_truncates_list_dir_entries_to_requested_limit() {
+    fn direct_answer_uses_latest_list_dir_even_after_synthesis_step() {
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "list_dir", "alpha.md\nbeta.md\n"));
+        loop_state.executed_step_results.push(ok_step(
+            "step_2",
+            "synthesize_answer",
+            "document 目录下有 alpha.md 和 beta.md。",
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "列出 document 目录下有哪些文件，只输出文件名列表".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::FileNames,
+                locator_hint: "document".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            user_request: Some("列出 document 目录下有哪些文件，只输出文件名列表".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("alpha.md\nbeta.md")
+        );
+    }
+
+    #[test]
+    fn direct_answer_preserves_list_dir_entries_without_request_text_limit() {
         let mut loop_state = LoopState::new(2);
         loop_state
             .executed_step_results
@@ -6780,7 +4941,7 @@ sqlite_path = "data/rustclaw.db"
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
-            Some("a\nb")
+            Some("a\nb\nc\nd")
         );
     }
 
@@ -7375,7 +5536,7 @@ sqlite_path = "data/rustclaw.db"
     }
 
     #[test]
-    fn direct_answer_combines_inventory_dir_listing_with_docs_purpose_summary() {
+    fn directory_purpose_summary_is_not_hard_classified_by_observed_output() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -7417,187 +5578,13 @@ sqlite_path = "data/rustclaw.db"
             ..AgentRunContext::default()
         };
         assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some(
-                "release_checklist.md\noperator-guide.md\nrollout-summary.pdf\n\n这个目录主要放说明文档、操作指引和检查清单。"
-            )
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+            None
         );
     }
 
     #[test]
-    fn direct_answer_keeps_listing_for_directory_purpose_summary_even_when_shape_one_sentence() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "system_basic",
-            r#"{"action":"inventory_dir","path":"/tmp/docs","resolved_path":"/tmp/docs","names_only":true,"names":["release_checklist.md","operator-guide.md","rollout-summary.pdf"]}"#,
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
-                .to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::OneSentence,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::Path,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
-                locator_hint: "docs".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some(
-                "release_checklist.md\noperator-guide.md\nrollout-summary.pdf\n\n这个目录主要放说明文档、操作指引和检查清单。"
-            )
-        );
-    }
-
-    #[test]
-    fn direct_answer_combines_run_cmd_listing_with_scripts_purpose_summary() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "clawd-observed-output-directory-purpose-{}-{}",
-            std::process::id(),
-            crate::now_ts_u64()
-        ));
-        std::fs::create_dir_all(&temp_dir).unwrap();
-
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "run_cmd",
-            "run_suite.sh\nrun_manual_test.sh\nsync_skill_docs.py\n",
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "执行 ls scripts，然后用一句话告诉我这个目录大概放的是什么"
-                .to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::Free,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::Path,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
-                locator_hint: "scripts".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some(
-                "run_suite.sh\nrun_manual_test.sh\nsync_skill_docs.py\n\n这个目录主要放运行、测试和维护用的脚本。"
-            )
-        );
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn direct_answer_combines_run_cmd_shell_listing_with_scripts_purpose_summary() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "clawd-observed-output-directory-purpose-shell-{}-{}",
-            std::process::id(),
-            crate::now_ts_u64()
-        ));
-        std::fs::create_dir_all(&temp_dir).unwrap();
-
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "run_cmd",
-            "total 96\n-rwxr-xr-x   1 testuser  staff  10314 Apr  2 19:32 auth-key.sh\n-rwxr-xr-x   1 testuser  staff   3953 Apr  2 19:32 check-secrets.sh\n-rwxr-xr-x   1 testuser  staff  10941 Apr  2 19:32 codex_fix.sh\n",
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "执行 ls scripts，然后用一句话告诉我这个目录大概放的是什么"
-                .to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::Free,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::Path,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
-                locator_hint: "scripts".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some(
-                "auth-key.sh\ncheck-secrets.sh\ncodex_fix.sh\n\n这个目录主要放运行、测试和维护用的脚本。"
-            )
-        );
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn direct_answer_classifies_recent_log_artifacts_from_shell_listing() {
+    fn recent_artifacts_judgment_is_not_hard_classified_by_observed_output() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -7640,268 +5627,8 @@ sqlite_path = "data/rustclaw.db"
             ..AgentRunContext::default()
         };
         assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("最近修改的文件是：model_io.log、act_plan.log、service_ops.log；这些更像运行或测试过程中产生的日志，不像正式交付产物。")
-        );
-    }
-
-    #[test]
-    fn requested_listing_limit_parses_recent_numbered_file_count() {
-        assert_eq!(
-            requested_listing_limit_from_intent(
-                "列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物"
-            ),
-            Some(3)
-        );
-        assert_eq!(
-            requested_listing_limit_from_intent(
-                "list the recent 3 files in logs and tell me whether they look like logs"
-            ),
-            Some(3)
-        );
-        assert_eq!(
-            requested_listing_limit_from_intent(
-                "List the 3 most recently modified files in the logs directory, then tell me whether this looks more like runtime logs or formal deliverables."
-            ),
-            Some(3)
-        );
-        assert_eq!(
-            requested_listing_limit_from_intent(
-                "List the three most recently modified files in docs and say whether they look more like logs or formal deliverables."
-            ),
-            Some(3)
-        );
-        assert_eq!(
-            requested_listing_limit_from_intent(
-                "列出logs目录最近修改的3个文件，再告诉我这更像是测试日志还是正式产物"
-            ),
-            Some(3)
-        );
-    }
-
-    #[test]
-    fn requested_listing_limit_ignores_structured_field_queries() {
-        assert_eq!(
-            requested_listing_limit_from_intent(
-                "读取 /tmp/config.toml 里的 database.sqlite_path 和 tools.allow_sudo，告诉我两个字段的值"
-            ),
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
             None
-        );
-    }
-
-    #[test]
-    fn requested_listing_limit_ignores_one_sentence_summary_requests() {
-        assert_eq!(
-            requested_listing_limit_from_intent("把上一个结果再用一句话总结"),
-            None
-        );
-        assert_eq!(
-            requested_listing_limit_from_intent("Summarize the previous result in one sentence"),
-            None
-        );
-    }
-
-    #[test]
-    fn direct_answer_classifies_recent_formal_artifacts_from_shell_listing_in_english() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "run_cmd",
-            "total 48\n-rw-r--r--  1 testuser  staff  2048 Apr 12 16:30 release-checklist.md\n-rw-r--r--  1 testuser  staff  1024 Apr 12 16:20 operator-guide.md\n-rw-r--r--  1 testuser  staff   512 Apr 12 16:10 rollout-summary.pdf\n",
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent:
-                "List the three most recently modified files in docs and say whether they look more like logs or formal deliverables."
-                    .to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::Free,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::Path,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
-                locator_hint: "docs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("The most recently modified files are release-checklist.md, operator-guide.md, rollout-summary.pdf; these look more like prepared documents or formal deliverables than logs.")
-        );
-    }
-
-    #[test]
-    fn direct_answer_limits_recent_artifact_listing_for_english_recent_files_request() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "run_cmd",
-            "total 96\n-rw-r--r--  1 testuser  staff  2048 Apr 13 14:40 model_io.log\n-rw-r--r--  1 testuser  staff  1536 Apr 13 14:39 act_plan.log\n-rw-r--r--  1 testuser  staff  1024 Apr 13 14:38 service_ops.log\n-rw-r--r--  1 testuser  staff   900 Apr 13 14:37 wechatd.log\n-rw-r--r--  1 testuser  staff   880 Apr 13 14:36 webd.log\n-rw-r--r--  1 testuser  staff   860 Apr 13 14:35 feishud.log\n-rw-r--r--  1 testuser  staff   840 Apr 13 14:34 telegramd.log\n-rw-r--r--  1 testuser  staff   820 Apr 13 14:33 clawd.log\n-rw-r--r--  1 testuser  staff   800 Apr 13 14:32 logs_directory_listing.txt\n",
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent:
-                "List the 3 most recently modified files in the logs directory, then tell me whether this looks more like runtime logs or formal deliverables."
-                    .to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::Free,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::Path,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
-                locator_hint: "logs".to_string(),
-            self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("The most recently modified files are model_io.log, act_plan.log, service_ops.log; these look more like runtime or test logs than formal deliverables.")
-        );
-    }
-
-    #[test]
-    fn direct_answer_classifies_recent_artifacts_from_inventory_dir_listing() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "system_basic",
-            r#"{"action":"inventory_dir","path":"logs","resolved_path":"/tmp/logs","names_only":true,"sort_by":"mtime_desc","names":["model_io.log","act_plan.log","service_ops.log"]}"#,
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent:
-                "列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物"
-                    .to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::Free,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::CurrentWorkspace,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
-                locator_hint: "logs".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("最近修改的文件是：model_io.log、act_plan.log、service_ops.log；这些更像运行或测试过程中产生的日志，不像正式交付产物。")
-        );
-    }
-
-    #[test]
-    fn direct_answer_prefers_current_turn_recent_artifacts_limit_over_resolved_intent_drift() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "system_basic",
-            r#"{"action":"inventory_dir","path":"logs","resolved_path":"/tmp/logs","names_only":true,"sort_by":"mtime_desc","names":["model_io.log","act_plan.log","service_ops.log"]}"#,
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "列出 logs 目录最近修改的文件，再告诉我这更像是测试日志还是正式产物"
-                .to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::Free,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::CurrentWorkspace,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
-                locator_hint: "logs".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            user_request: Some(
-                "列出 logs 目录最近修改的 2 个文件，再告诉我这更像是测试日志还是正式产物"
-                    .to_string(),
-            ),
-            route_result: Some(route_result),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("最近修改的文件是：model_io.log、act_plan.log；这些更像运行或测试过程中产生的日志，不像正式交付产物。")
         );
     }
 
@@ -8156,173 +5883,65 @@ sqlite_path = "data/rustclaw.db"
     }
 
     #[test]
-    fn direct_answer_summarizes_workspace_project_from_top_level_listing() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "list_dir",
-            "Cargo.toml\ncrates/\nUI/\nconfigs/\nREADME.md\nREADME.zh-CN.md\nprompts/\nrustclaw.service\nstart-telegramd.sh\nstart-wechatd.sh\nstart-whatsappd.sh\n",
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "用非技术用户能听懂的话，简短解释这个仓库主要是干什么的".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::OneSentence,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::CurrentWorkspace,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
-                locator_hint: String::new(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("这是一个可本地部署的智能助手平台仓库，带网页界面、多聊天渠道接入和后台服务，用来通过聊天或浏览器处理任务、记忆、调度和自动化。")
-        );
-    }
-
-    #[test]
-    fn direct_answer_summarizes_workspace_project_from_inventory_dir_listing() {
+    fn direct_answer_extracts_cwd_from_system_basic_info_for_scalar_path_contract() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
             "system_basic",
-            r#"{"action":"inventory_dir","path":"/tmp/workspace","resolved_path":"/tmp/workspace","names_only":true,"names":["Cargo.toml","crates","UI","configs","README.md","prompts","rustclaw.service","start-telegramd.sh","start-wechatd.sh","start-whatsappd.sh"]}"#,
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "用非技术用户能听懂的话，简短解释这个仓库主要是干什么的".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::OneSentence,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::CurrentWorkspace,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
-                locator_hint: String::new(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("这是一个可本地部署的智能助手平台仓库，带网页界面、多聊天渠道接入和后台服务，用来通过聊天或浏览器处理任务、记忆、调度和自动化。")
-        );
-    }
-
-    #[test]
-    fn direct_answer_summarizes_workspace_project_from_shell_listing_in_english() {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "clawd-observed-output-workspace-summary-{}-{}",
-            std::process::id(),
-            crate::now_ts_u64()
-        ));
-        std::fs::create_dir_all(&temp_dir).unwrap();
-
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "run_cmd",
-            "Cargo.toml\ncrates\nUI\nconfigs\nREADME.md\nprompts\nrustclaw.service\nstart-telegramd.sh\nstart-wechatd.sh\nstart-whatsappd.sh\n",
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent:
-                "Inspect the current workspace and briefly explain in one sentence what this project is for."
-                    .to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::OneSentence,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::CurrentWorkspace,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
-                locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("This looks like a locally deployable assistant platform with a web UI, multiple chat-channel adapters, and backend services for tasks, memory, scheduling, and automation.")
-        );
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn direct_answer_summarizes_workspace_project_from_top_level_listing_in_english() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "list_dir",
-            "Cargo.toml\ncrates/\nUI/\nconfigs/\nREADME.md\nREADME.zh-CN.md\nprompts/\nrustclaw.service\nstart-telegramd.sh\nstart-wechatd.sh\nstart-whatsappd.sh\n",
+            r#"{"action":"info","hostname":"ThinkPad-X1","os":"linux","arch":"x86_64","cwd":"/home/guagua/rustclaw","workspace_root":"/home/guagua/rustclaw"}"#,
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
-            resolved_intent: "Inspect the current workspace to identify the project type and briefly summarize what it is in one sentence."
-                .to_string(),
+            resolved_intent: "获取当前工作目录的绝对路径".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "llm_contract:scalar_path_only".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::None,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ScalarPathOnly,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+            direct_reply_candidate: String::new(),
+            direct_reply_confidence: 0.0,
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("/home/guagua/rustclaw")
+        );
+    }
+
+    #[test]
+    fn workspace_project_summary_is_not_hard_summarized_by_observed_output() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "list_dir",
+            "Cargo.toml\ncrates/\nUI/\nconfigs/\nREADME.md\nREADME.zh-CN.md\nprompts/\nrustclaw.service\nstart-telegramd.sh\nstart-wechatd.sh\nstart-whatsappd.sh\n",
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "用非技术用户能听懂的话，简短解释这个仓库主要是干什么的".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
             route_reason: String::new(),
@@ -8343,59 +5962,6 @@ sqlite_path = "data/rustclaw.db"
                 delivery_intent: OutputDeliveryIntent::None,
                 semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
                 locator_hint: String::new(),
-            self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("This looks like a locally deployable assistant platform with a web UI, multiple chat-channel adapters, and backend services for tasks, memory, scheduling, and automation.")
-        );
-    }
-
-    #[test]
-    fn workspace_project_summary_ignores_later_field_extract_when_listing_exists() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "list_dir",
-            "Cargo.toml\ncrates/\nUI/\nconfigs/\nREADME.md\nprompts/\nrustclaw.service\nstart-telegramd.sh\nstart-wechatd.sh\nstart-whatsappd.sh\n",
-        ));
-        loop_state.executed_step_results.push(ok_step(
-            "step_2",
-            "system_basic",
-            r#"{"action":"extract_fields","path":"Cargo.toml","results":[{"exists":false,"field_path":"package.name","value":null}]}"#,
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "帮我总结这个仓库".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::Free,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::CurrentWorkspace,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
-                locator_hint: String::new(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
             direct_reply_candidate: String::new(),
@@ -8406,57 +5972,8 @@ sqlite_path = "data/rustclaw.db"
             ..AgentRunContext::default()
         };
         assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("这是一个可本地部署的智能助手平台仓库，带网页界面、多聊天渠道接入和后台服务，用来通过聊天或浏览器处理任务、记忆、调度和自动化。")
-        );
-    }
-
-    #[test]
-    fn workspace_project_summary_uses_scoped_ui_listing() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "list_dir",
-            ".env.example\nREADME.md\nindex.html\npackage.json\nsrc/\nvite.config.ts\n",
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent: "Summarize only the UI part of this repository".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::Free,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::CurrentWorkspace,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
-                locator_hint: "UI".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("The UI part is RustClaw's browser front end, providing a local visual console and chat-style operating entry point for users.")
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+            None
         );
     }
 
@@ -8739,7 +6256,7 @@ sqlite_path = "data/rustclaw.db"
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::CurrentWorkspace,
                 delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: crate::OutputSemanticKind::ScalarCount,
+                semantic_kind: crate::OutputSemanticKind::HiddenEntriesCheck,
                 locator_hint: ".".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
@@ -8807,7 +6324,7 @@ sqlite_path = "data/rustclaw.db"
     }
 
     #[test]
-    fn direct_answer_summarizes_empty_sqlite_tables_as_test_db_without_llm() {
+    fn sqlite_database_kind_judgment_is_not_hard_classified_by_observed_output() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -8850,59 +6367,8 @@ sqlite_path = "data/rustclaw.db"
             ..AgentRunContext::default()
         };
         assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("这个 sqlite 文件里目前没有任何表，所以更像一个空白或测试库。")
-        );
-    }
-
-    #[test]
-    fn direct_answer_summarizes_empty_sqlite_tables_with_all_tables_wording_without_llm() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "db_basic",
-            r#"{"columns":["name"],"rows":[]}"#,
-        ));
-        let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
-            resolved_intent:
-                "查看 data/db-basic-contract.sqlite 中的所有表，并判断它更像业务库还是测试库"
-                    .to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "normalizer:chat_act".to_string(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::OneSentence,
-                requires_content_evidence: true,
-                delivery_required: false,
-                locator_kind: OutputLocatorKind::Path,
-                delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
-                locator_hint: "data/db-basic-contract.sqlite".to_string(),
-                self_extension: crate::SelfExtensionContract::default(),
-            },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
-        };
-        let agent_run_context = AgentRunContext {
-            route_result: Some(route_result),
-            ..AgentRunContext::default()
-        };
-        assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("这个 sqlite 文件里目前没有任何表，所以更像一个空白或测试库。")
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+            None
         );
     }
 
@@ -9398,7 +6864,7 @@ sqlite_path = "data/rustclaw.db"
     }
 
     #[test]
-    fn direct_answer_truncates_run_cmd_directory_entry_names_to_requested_limit() {
+    fn direct_answer_preserves_run_cmd_directory_entry_names_without_request_text_limit() {
         let temp_dir = std::env::temp_dir().join(format!(
             "clawd_observed_output_test_{}_run_cmd_limit",
             std::process::id()
@@ -9445,7 +6911,7 @@ sqlite_path = "data/rustclaw.db"
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
-            Some("a\nb")
+            Some("a\nb\nc\nd")
         );
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -9606,13 +7072,12 @@ sqlite_path = "data/rustclaw.db"
     }
 
     #[test]
-    fn direct_answer_summarizes_health_check_for_act_free_summary_request() {
+    fn direct_answer_does_not_use_health_check_request_text_to_force_summary() {
         let mut loop_state = LoopState::new(2);
-        loop_state.executed_step_results.push(ok_step(
-            "step_1",
-            "health_check",
-            r#"{"clawd_process_count":7,"telegramd_process_count":0,"clawd_health_port_open":false,"clawd_log":{"exists":false},"telegramd_log":{"exists":false},"system_health":{"os_family":"macos","warnings":[]}}"#,
-        ));
+        let body = r#"{"clawd_process_count":7,"telegramd_process_count":0,"clawd_health_port_open":false,"clawd_log":{"exists":false},"telegramd_log":{"exists":false},"system_health":{"os_family":"macos","warnings":[]}}"#;
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "health_check", body));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::Act,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
@@ -9651,9 +7116,7 @@ sqlite_path = "data/rustclaw.db"
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
-            Some(
-                "macOS 宿主机当前没有明显的系统层告警。 clawd_process_count=7, telegramd_process_count=0, clawd_health_port_open=false"
-            )
+            Some(body)
         );
     }
 
@@ -9687,7 +7150,7 @@ sqlite_path = "data/rustclaw.db"
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
-                response_shape: OutputResponseShape::Free,
+                response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::None,

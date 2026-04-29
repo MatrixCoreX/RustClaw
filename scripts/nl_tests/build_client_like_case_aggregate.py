@@ -1,0 +1,386 @@
+#!/usr/bin/env python3
+"""Build a client-like continuous NL aggregate case file.
+
+The historical NL case directory contains several row shapes:
+- prompt
+- name|prompt
+- name|prompt|clarification_answer
+- suite|name|tags|prompt[|expect=...]
+- case_name|turn1|turn2|turn3[|turn4]
+- suite|case_name|turn1|turn2|turn3
+
+This script normalizes those shapes into the format consumed by
+run_client_like_continuous_suite.sh:
+  suite|name|tags|prompt|expect=optional substring
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+
+CANONICAL_SUITES = {
+    "act",
+    "chat",
+    "chat_act",
+    "compound",
+    "continuous",
+    "crypto",
+    "dynamic_guard",
+    "failure",
+    "file",
+    "manual",
+    "mixed",
+    "regression",
+}
+
+RISKY_FILE_NAMES = {
+    "nl_cases_sensitive_flows.txt",
+    "nl_cases_ops_http_repair.txt",
+}
+
+GENERATED_FILE_NAMES = {
+    "nl_cases_client_like_all_aggregate.txt",
+}
+
+RISKY_PROMPT_PATTERNS = [
+    r"\{\{[^}]+\}\}",  # unresolved harness placeholders
+    r"\bset\s+server\.listen\b",
+    r"\btools\.allow_sudo\b",
+    r"\bapply the config change directly\b",
+    r"直接帮我改掉这个配置",
+    r"后台启动一个本地静态 HTTP 服务",
+    r"\bstart a static http server\b",
+    r"\brepair .*index\.html\b",
+    r"\bremove_file\b",
+    r"\bdelete\b",
+    r"删除\s+",
+]
+
+COMMENT_PREFIXES = ("#",)
+
+
+@dataclass(frozen=True)
+class CaseRow:
+    suite: str
+    name: str
+    tags: str
+    prompt: str
+    expect: str = ""
+    source: str = ""
+
+    def line(self) -> str:
+        base = "|".join(
+            [
+                sanitize_field(self.suite),
+                sanitize_field(self.name),
+                sanitize_field(self.tags),
+                self.prompt.replace("\t", " ").strip(),
+            ]
+        )
+        if self.expect:
+            return f"{base}|expect={self.expect.strip()}"
+        return base
+
+
+def sanitize_field(value: str) -> str:
+    value = value.strip().replace("\t", " ")
+    value = re.sub(r"\s+", "_", value)
+    value = re.sub(r"[^A-Za-z0-9_.:-]+", "_", value)
+    return value.strip("_") or "case"
+
+
+def should_skip_prompt(prompt: str, include_risky: bool) -> bool:
+    if include_risky:
+        return False
+    lower = prompt.lower()
+    return any(re.search(pattern, lower, flags=re.IGNORECASE) for pattern in RISKY_PROMPT_PATTERNS)
+
+
+def is_comment_or_empty(line: str) -> bool:
+    stripped = line.strip()
+    return not stripped or stripped.startswith(COMMENT_PREFIXES)
+
+
+def split_columns(line: str) -> list[str]:
+    return [part.strip() for part in line.split("|")]
+
+
+def split_canonical(line: str) -> list[str]:
+    return [part.strip() for part in line.split("|", 4)]
+
+
+def row_from_prompt(
+    source: Path,
+    index: int,
+    prompt: str,
+    *,
+    suite: str = "aggregate",
+    name_prefix: str = "",
+    tags: str = "client_like,aggregate",
+) -> CaseRow:
+    stem = sanitize_field(source.stem)
+    name = sanitize_field(name_prefix or f"{stem}_{index:04d}")
+    return CaseRow(suite=suite, name=name, tags=tags, prompt=prompt, source=str(source))
+
+
+def expand_turns(source: Path, case_name: str, turns: list[str], tags: str) -> list[CaseRow]:
+    rows: list[CaseRow] = []
+    clean_turns = [turn.strip() for turn in turns if turn.strip()]
+    for idx, turn in enumerate(clean_turns, 1):
+        rows.append(
+            CaseRow(
+                suite="continuous",
+                name=sanitize_field(f"{case_name}_turn{idx}"),
+                tags=tags,
+                prompt=turn,
+                source=str(source),
+            )
+        )
+    return rows
+
+
+def parse_line(source: Path, line: str, index: int, preserve_expects: bool) -> list[CaseRow]:
+    cols = split_columns(line)
+    canonical = split_canonical(line)
+    source_stem = sanitize_field(source.stem)
+
+    if len(cols) == 1:
+        return [
+            row_from_prompt(
+                source,
+                index,
+                cols[0],
+                suite="single",
+                name_prefix=f"{source_stem}_{index:04d}",
+                tags="single,client_like,aggregate",
+            )
+        ]
+
+    if len(cols) == 2:
+        name, prompt = cols
+        return [
+            CaseRow(
+                suite="single",
+                name=sanitize_field(f"{source_stem}_{name}"),
+                tags="two_column,client_like,aggregate",
+                prompt=prompt,
+                source=str(source),
+            )
+        ]
+
+    if len(cols) == 3:
+        name, prompt, answer = cols
+        return expand_turns(
+            source,
+            f"{source_stem}_{name}",
+            [prompt, answer],
+            "clarify_chain,client_like,aggregate",
+        )
+
+    first = cols[0].strip()
+    first_norm = first.strip().lower()
+
+    if first_norm == "context_chain":
+        _, case_name, *turns = cols
+        return expand_turns(
+            source,
+            f"{source_stem}_{case_name}",
+            turns,
+            "context_chain,client_like,aggregate",
+        )
+
+    if first_norm == "clarify":
+        _, case_name, *turns = cols
+        return expand_turns(
+            source,
+            f"{source_stem}_{case_name}",
+            turns,
+            "clarify_chain,client_like,aggregate",
+        )
+
+    if first.startswith(("task_updates", "context_", "followup_", "clarify_")):
+        case_name, *turns = cols
+        return expand_turns(
+            source,
+            f"{source_stem}_{case_name}",
+            turns,
+            "turn_chain,client_like,aggregate",
+        )
+
+    if first_norm in CANONICAL_SUITES and len(canonical) >= 4:
+        suite, name, tags, prompt = canonical[:4]
+        expect = ""
+        if preserve_expects and len(canonical) >= 5 and canonical[4].strip().startswith("expect="):
+            expect = canonical[4].strip()[len("expect=") :]
+        return [
+            CaseRow(
+                suite=suite.strip(),
+                name=sanitize_field(f"{source_stem}_{name}"),
+                tags=",".join(
+                    part
+                    for part in [
+                        tags.strip(),
+                        "client_like",
+                        "aggregate",
+                    ]
+                    if part
+                ),
+                prompt=prompt,
+                expect=expect,
+                source=str(source),
+            )
+        ]
+
+    if len(cols) >= 4:
+        # Last-resort legacy shape. Treat the final field as the prompt and
+        # preserve earlier fields as tags/source metadata rather than dropping it.
+        name = cols[0]
+        prompt = cols[-1]
+        tags = ",".join(["legacy_shape", "client_like", "aggregate", sanitize_field(cols[1])])
+        return [
+            CaseRow(
+                suite="legacy",
+                name=sanitize_field(f"{source_stem}_{name}_{index:04d}"),
+                tags=tags,
+                prompt=prompt,
+                source=str(source),
+            )
+        ]
+
+    return []
+
+
+def build_rows(
+    cases_dir: Path,
+    include_risky: bool,
+    include_temp: bool,
+    preserve_expects: bool,
+) -> tuple[list[CaseRow], dict[str, int]]:
+    rows: list[CaseRow] = []
+    stats = {
+        "files_seen": 0,
+        "files_skipped_temp": 0,
+        "files_skipped_risky": 0,
+        "rows_seen": 0,
+        "rows_expect_dropped": 0,
+        "rows_skipped_risky": 0,
+        "rows_emitted": 0,
+    "rows_deduped": 0,
+    }
+    seen: set[tuple[str, str]] = set()
+    files = sorted(cases_dir.rglob("*.txt"))
+    for path in files:
+        if path.name in GENERATED_FILE_NAMES:
+            continue
+        if not include_temp and path.name.startswith("_tmp_"):
+            stats["files_skipped_temp"] += 1
+            continue
+        if not include_risky and path.name in RISKY_FILE_NAMES:
+            stats["files_skipped_risky"] += 1
+            continue
+        stats["files_seen"] += 1
+        line_index = 0
+        for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if is_comment_or_empty(raw):
+                continue
+            line_index += 1
+            stats["rows_seen"] += 1
+            if not preserve_expects and "|expect=" in raw:
+                stats["rows_expect_dropped"] += 1
+            for row in parse_line(path, raw.strip(), line_index, preserve_expects):
+                if should_skip_prompt(row.prompt, include_risky):
+                    stats["rows_skipped_risky"] += 1
+                    continue
+                key = (canonical_prompt_key(row.prompt), row.expect.strip())
+                if key in seen:
+                    stats["rows_deduped"] += 1
+                    continue
+                seen.add(key)
+                rows.append(row)
+    stats["rows_emitted"] = len(rows)
+    return rows, stats
+
+
+def canonical_prompt_key(prompt: str) -> str:
+    return re.sub(r"\s+", " ", prompt).strip()
+
+
+def write_aggregate(out_path: Path, rows: list[CaseRow], stats: dict[str, int], include_risky: bool) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Generated client-like continuous NL aggregate.",
+        "# Do not edit by hand; regenerate with scripts/nl_tests/build_client_like_case_aggregate.py.",
+        "# Deduplication: global prompt text, after whitespace normalization.",
+        "# Run:",
+        f"#   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file {out_path.as_posix()} --prompt-reply-only",
+        f"# include_risky={include_risky}",
+        "# stats="
+        + " ".join(f"{key}={value}" for key, value in sorted(stats.items())),
+        "# Format: suite|name|tags|prompt|expect=optional substring",
+        "",
+    ]
+    current_source = ""
+    for row in rows:
+        if row.source != current_source:
+            current_source = row.source
+            lines.append(f"# source: {current_source}")
+        lines.append(row.line())
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--cases-dir",
+        default="scripts/nl_tests/cases",
+        help="Case directory to scan.",
+    )
+    parser.add_argument(
+        "--out",
+        default="scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt",
+        help="Aggregate case file to write.",
+    )
+    parser.add_argument(
+        "--include-risky",
+        action="store_true",
+        help="Include mutating/config/placeholder cases. Default keeps the aggregate safe.",
+    )
+    parser.add_argument(
+        "--include-temp",
+        action="store_true",
+        help="Include _tmp_ case files.",
+    )
+    parser.add_argument(
+        "--preserve-expects",
+        action="store_true",
+        help=(
+            "Preserve legacy expect= substring checks. Default drops them because "
+            "the client-like aggregate relies on quality-guard and many old "
+            "single-shot expects conflict with exact-output contracts."
+        ),
+    )
+    args = parser.parse_args()
+
+    cases_dir = Path(args.cases_dir)
+    out_path = Path(args.out)
+    rows, stats = build_rows(
+        cases_dir,
+        include_risky=args.include_risky,
+        include_temp=args.include_temp,
+        preserve_expects=args.preserve_expects,
+    )
+    write_aggregate(out_path, rows, stats, include_risky=args.include_risky)
+    print(
+        "CLIENT_LIKE_AGGREGATE_BUILT "
+        f"out={out_path} "
+        + " ".join(f"{key}={value}" for key, value in sorted(stats.items()))
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

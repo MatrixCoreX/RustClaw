@@ -8,6 +8,7 @@ pub(crate) enum OutputResponseShape {
     #[default]
     Free,
     OneSentence,
+    Strict,
     Scalar,
     FileToken,
 }
@@ -17,6 +18,7 @@ impl OutputResponseShape {
         match self {
             Self::Free => "free",
             Self::OneSentence => "one_sentence",
+            Self::Strict => "strict",
             Self::Scalar => "scalar",
             Self::FileToken => "file_token",
         }
@@ -72,6 +74,7 @@ pub(crate) enum OutputSemanticKind {
     RawCommandOutput,
     ServiceStatus,
     HiddenEntriesCheck,
+    FileNames,
     DirectoryPurposeSummary,
     ContentExcerptSummary,
     ExcerptKindJudgment,
@@ -94,6 +97,7 @@ impl OutputSemanticKind {
             Self::RawCommandOutput => "raw_command_output",
             Self::ServiceStatus => "service_status",
             Self::HiddenEntriesCheck => "hidden_entries_check",
+            Self::FileNames => "file_names",
             Self::DirectoryPurposeSummary => "directory_purpose_summary",
             Self::ContentExcerptSummary => "content_excerpt_summary",
             Self::ExcerptKindJudgment => "excerpt_kind_judgment",
@@ -240,23 +244,6 @@ pub(crate) struct RouteResult {
     /// 它们当作 direct-reply 短路权威；普通回答继续进入 chat/planner 层。
     pub(crate) direct_reply_candidate: String,
     pub(crate) direct_reply_confidence: f64,
-}
-
-pub(crate) const ROUTE_CONTRACT_REASON_PREFIX: &str = "route_contract:";
-
-fn route_contract_tail(route_reason: &str) -> Option<&str> {
-    route_reason.strip_prefix(ROUTE_CONTRACT_REASON_PREFIX)
-}
-
-pub(crate) fn route_reason_starts_with_route_contract(
-    route_reason: &str,
-    contract_prefix: &str,
-) -> bool {
-    route_contract_tail(route_reason).is_some_and(|tail| tail.starts_with(contract_prefix))
-}
-
-pub(crate) fn route_reason_is_any_route_contract(route_reason: &str) -> bool {
-    route_contract_tail(route_reason).is_some()
 }
 
 impl RouteResult {
@@ -444,10 +431,7 @@ pub(crate) fn plan_step_from_agent_action(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        plan_step_from_agent_action, route_reason_is_any_route_contract,
-        route_reason_starts_with_route_contract, AgentAction, PlanStep,
-    };
+    use super::{plan_step_from_agent_action, AgentAction, PlanStep};
     use serde_json::json;
 
     #[test]
@@ -484,20 +468,5 @@ mod tests {
         assert_eq!(step.skill, "synthesize_answer");
         assert_eq!(step.args, json!({ "evidence_refs": ["last_output"] }));
         assert_eq!(step.depends_on, vec!["step_1".to_string()]);
-    }
-
-    #[test]
-    fn route_contract_reason_helpers_accept_route_contract_prefix_only() {
-        assert!(route_reason_starts_with_route_contract(
-            "route_contract:generic_filename_scalar_extract",
-            "generic_"
-        ));
-        assert!(route_reason_is_any_route_contract(
-            "route_contract:current_workspace_scalar_count"
-        ));
-        assert!(!route_reason_is_any_route_contract(
-            "old_contract:current_workspace_scalar_count"
-        ));
-        assert!(!route_reason_is_any_route_contract("normalizer:execute"));
     }
 }
