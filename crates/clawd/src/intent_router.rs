@@ -965,7 +965,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("Allowed semantic_kind: none, raw_command_output, service_status, hidden_entries_check, file_names, directory_purpose_summary, content_excerpt_summary, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, scalar_path_only, existence_with_path, recent_scalar_equality_check, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment.".to_string());
     parts.push("If the user asks to observe/list/read first but only return a scalar result, set response_shape=\"scalar\" and use a matching semantic_kind only when one applies: scalar_count for counts, scalar_path_only only for a path/current-directory/workspace-location answer. For config field values, package names, usernames, hostnames, titles, IDs, or other non-path scalar values, keep semantic_kind=\"none\" unless another specific enum applies. If the request requires an exact non-scalar format such as exactly N sentences/lines or body-only/no-extra-output, set response_shape=\"strict\" and preserve the exact format in resolved_user_intent.".to_string());
     parts.push("For directory/file inventory with name or extension filtering, set requires_content_evidence=true, locator_kind=\"current_workspace\" or \"path\", semantic_kind=\"file_names\", and preserve filter plus any explanation/synthesis requirement in resolved_user_intent. If a nuance has no enum, keep response_shape=\"free\" or semantic_kind=\"none\" and write the nuance in resolved_user_intent/reason instead of inventing enum values.".to_string());
-    parts.push("Use mode=\"chat_act\" when the request both inspects local/system/workspace state and asks for explanation, judgment, or narrative synthesis. Use mode=\"act\" when it asks only for a direct raw/scalar/list result. If HINTS says workspace_root_request_shape=CurrentPathScalar, set output_contract.response_shape=\"scalar\" and output_contract.semantic_kind=\"scalar_path_only\".".to_string());
+    parts.push("Use mode=\"chat_act\" when the request both inspects local/system/workspace state and asks for explanation, judgment, or narrative synthesis. Use mode=\"act\" when it asks only for a direct raw/scalar/list result. For current-directory or workspace-location scalar answers, set output_contract.response_shape=\"scalar\" and output_contract.semantic_kind=\"scalar_path_only\" from the request meaning, not from local phrase-classifier hints.".to_string());
     parts.push("For recall questions, use exact values from RECENT/MEMORY. If found, put the value in resolved_user_intent, set needs_clarify=false, and set mode=\"chat\". Never invent mode=\"recall\".".to_string());
     parts.push("For requests that depend on prior context, copy the relevant RECENT/MEMORY facts into resolved_user_intent so the next stage has enough context.".to_string());
     parts.push("Keep resolved_user_intent concise; preserve exact IDs, but summarize long user text instead of copying it.".to_string());
@@ -2313,7 +2313,7 @@ mod tests {
     #[test]
     fn compact_normalizer_prompt_pins_output_contract_schema() {
         let route_view = crate::task_context_builder::RouteContextView {
-            request_surface_hints: "workspace_root_request_shape=CurrentPathScalar".to_string(),
+            request_surface_hints: "requested_sentence_count: 1".to_string(),
             ..Default::default()
         };
         let context_bundle = crate::task_context_builder::TaskContextBundle {

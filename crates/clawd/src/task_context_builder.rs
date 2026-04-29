@@ -215,30 +215,12 @@ fn build_request_surface_hints(
     if let Some(limit) = surface.requested_listing_limit {
         lines.push(format!("requested_listing_limit: {limit}"));
     }
-    if let Some(shape) = surface.output_request_shape {
-        lines.push(format!("output_request_shape: {:?}", shape));
-    }
-    if let Some(shape) = surface.output_compression_shape {
-        lines.push(format!("output_compression_shape: {:?}", shape));
-    }
-    if let Some(shape) = surface.workspace_child_request_shape {
-        lines.push(format!("workspace_child_request_shape: {:?}", shape));
-    }
-    if let Some(shape) = surface.workspace_root_request_shape {
-        lines.push(format!("workspace_root_request_shape: {:?}", shape));
-    }
-    if let Some(shape) = surface.table_request_shape {
-        lines.push(format!("table_request_shape: {:?}", shape));
-    }
-    if let Some(shape) = surface.semantic_request_shape {
-        lines.push(format!("semantic_request_shape: {:?}", shape));
-    }
     if lines.is_empty() {
         "<none>".to_string()
     } else {
         let mut block = vec![
             "### REQUEST_SURFACE_HINTS".to_string(),
-            "Current-turn structural hints extracted from the user message. These are lightweight hints for locator/shape grounding, not final routing decisions.".to_string(),
+            "Current-turn structural hints extracted from the user message. These are locator and parameter hints only; semantic planning and response meaning must come from the planner contract, not local phrase classifiers.".to_string(),
         ];
         block.extend(lines);
         block.join("\n")
@@ -932,14 +914,23 @@ mod tests {
     }
 
     #[test]
-    fn request_surface_hints_include_output_and_table_shapes() {
+    fn request_surface_hints_do_not_export_semantic_phrase_shapes() {
         let surface = crate::intent::surface_signals::analyze_prompt_surface(
             "看看 data/db-basic-contract.sqlite 里有哪些表，并简短告诉我结果",
         );
         let rendered = build_request_surface_hints(&surface);
-        assert!(rendered.contains("### REQUEST_SURFACE_HINTS"));
-        assert!(rendered.contains("output_compression_shape: Brief"));
-        assert!(rendered.contains("table_request_shape: SqliteTableListing"));
+        assert_eq!(rendered, "<none>");
+
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(
+            "用一句话说当前机器的包管理器是什么",
+        );
+        let rendered = build_request_surface_hints(&surface);
+        assert!(rendered.contains("requested_sentence_count: 1"));
+        assert!(!rendered.contains("workspace_root_request_shape"));
+        assert!(!rendered.contains("semantic_request_shape"));
+        assert!(!rendered.contains("table_request_shape"));
+        assert!(!rendered.contains("output_request_shape"));
+        assert!(!rendered.contains("output_compression_shape"));
     }
 
     #[test]

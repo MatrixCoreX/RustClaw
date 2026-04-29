@@ -270,6 +270,11 @@ pub(crate) fn index_memory_row(
     if search_text.is_empty() {
         return Ok(());
     }
+    if role == MEMORY_ROLE_ASSISTANT
+        && super::is_transient_assistant_context_text_basic(search_text)
+    {
+        return Ok(());
+    }
     let source_ref = retrieval_source_ref_for_memory(source_memory_id);
 
     if memory_type == MEMORY_TYPE_UNFINISHED_GOAL {
