@@ -2,7 +2,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
+use tokio::sync::mpsc;
 
 use crate::{AppState, ClaimedTask};
 
@@ -206,6 +208,8 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     "suggest_once",
                     "llm_suggest_once",
                     "timeout_seconds",
+                    "idle_timeout_seconds",
+                    "max_output_bytes",
                 ],
             )?;
             let cwd = optional_string(map, "cwd").unwrap_or(".");
@@ -264,11 +268,22 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 .get("timeout_seconds")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(state.skill_rt.cmd_timeout_seconds);
+            let idle_timeout_seconds = map
+                .get("idle_timeout_seconds")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(state.skill_rt.cmd_idle_timeout_seconds);
+            let max_output_bytes = map
+                .get("max_output_bytes")
+                .and_then(|v| v.as_u64())
+                .and_then(|v| usize::try_from(v).ok())
+                .unwrap_or(state.skill_rt.cmd_max_output_bytes);
             run_safe_command(
                 &cwd_path,
                 &sanitized_command,
                 state.skill_rt.max_cmd_length,
                 timeout_seconds,
+                idle_timeout_seconds,
+                max_output_bytes,
                 crate::skills::task_allows_sudo(state, task),
             )
             .await
@@ -440,11 +455,151 @@ fn resolve_workspace_path(
     Ok(base)
 }
 
+#[derive(Debug, Clone, Copy)]
+enum CommandOutputStream {
+    Stdout,
+    Stderr,
+}
+
+enum CommandOutputEvent {
+    Chunk {
+        stream: CommandOutputStream,
+        bytes: Vec<u8>,
+    },
+    ReadError {
+        stream: CommandOutputStream,
+        error: String,
+    },
+}
+
+fn spawn_command_pipe_reader<R>(
+    mut reader: R,
+    stream: CommandOutputStream,
+    tx: mpsc::UnboundedSender<CommandOutputEvent>,
+) where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        let mut buf = vec![0_u8; 1024];
+        loop {
+            match reader.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    if tx
+                        .send(CommandOutputEvent::Chunk {
+                            stream,
+                            bytes: buf[..n].to_vec(),
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    let _ = tx.send(CommandOutputEvent::ReadError {
+                        stream,
+                        error: err.to_string(),
+                    });
+                    break;
+                }
+            }
+        }
+    });
+}
+
+fn append_command_output(
+    stream: CommandOutputStream,
+    bytes: &[u8],
+    stdout: &mut Vec<u8>,
+    stderr: &mut Vec<u8>,
+    captured_bytes: &mut usize,
+    max_output_bytes: usize,
+    output_truncated: &mut bool,
+) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+    let remaining = max_output_bytes.saturating_sub(*captured_bytes);
+    let take = bytes.len().min(remaining);
+    if take > 0 {
+        match stream {
+            CommandOutputStream::Stdout => stdout.extend_from_slice(&bytes[..take]),
+            CommandOutputStream::Stderr => stderr.extend_from_slice(&bytes[..take]),
+        }
+        *captured_bytes += take;
+    }
+    if take < bytes.len() || *captured_bytes >= max_output_bytes {
+        *output_truncated = true;
+        return true;
+    }
+    false
+}
+
+fn record_command_output_event(
+    event: CommandOutputEvent,
+    stdout: &mut Vec<u8>,
+    stderr: &mut Vec<u8>,
+    captured_bytes: &mut usize,
+    max_output_bytes: usize,
+    output_truncated: &mut bool,
+) -> Result<bool, String> {
+    match event {
+        CommandOutputEvent::Chunk { stream, bytes } => Ok(append_command_output(
+            stream,
+            &bytes,
+            stdout,
+            stderr,
+            captured_bytes,
+            max_output_bytes,
+            output_truncated,
+        )),
+        CommandOutputEvent::ReadError { stream, error } => {
+            Err(format!("read command {stream:?} failed: {error}"))
+        }
+    }
+}
+
+fn combine_command_output(
+    stdout: &[u8],
+    stderr: &[u8],
+    output_truncated: bool,
+) -> (String, String, String) {
+    let stdout_text = String::from_utf8_lossy(stdout).to_string();
+    let stderr_text = String::from_utf8_lossy(stderr).to_string();
+    let mut text = String::new();
+    text.push_str(&stdout_text);
+    if !stderr_text.is_empty() {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&stderr_text);
+    }
+    if output_truncated {
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str("...");
+    }
+    (text, stdout_text, stderr_text)
+}
+
+async fn kill_shell_pid(child_pid: Option<u32>) {
+    if let Some(pid) = child_pid {
+        let _ = Command::new("kill")
+            .arg("-9")
+            .arg(pid.to_string())
+            .status()
+            .await;
+    }
+}
+
 pub(crate) async fn run_safe_command(
     cwd: &Path,
     command: &str,
     max_cmd_length: usize,
     cmd_timeout_seconds: u64,
+    cmd_idle_timeout_seconds: u64,
+    cmd_max_output_bytes: usize,
     allow_sudo: bool,
 ) -> Result<String, String> {
     if command.len() > max_cmd_length {
@@ -478,72 +633,154 @@ pub(crate) async fn run_safe_command(
     cmd.kill_on_drop(true);
 
     let soft_timeout = cmd_timeout_seconds.max(1);
+    let idle_timeout = cmd_idle_timeout_seconds.max(1);
+    let max_output_bytes = cmd_max_output_bytes.max(128);
     let detached_background = looks_detached_background_command(command);
     let wait_timeout = if detached_background {
         soft_timeout.min(3)
     } else {
         soft_timeout
     };
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|err| format!("run command failed: {err}"))?;
     let child_pid = child.id();
-    let mut output_fut = Box::pin(child.wait_with_output());
 
-    let out = match tokio::time::timeout(Duration::from_secs(wait_timeout), &mut output_fut).await {
-        Ok(r) => r.map_err(|err| format!("run command failed: {err}"))?,
-        Err(_) => {
-            let detached_note = if detached_background {
-                "background start grace"
-            } else {
-                "soft-timeout"
-            };
-            tracing::info!(
-                "run_cmd {} reached; killing shell (wait={}s, configured={}s): {}",
-                detached_note,
-                wait_timeout,
-                soft_timeout,
-                crate::truncate_for_log(command)
-            );
-            if let Some(pid) = child_pid {
-                let _ = Command::new("kill")
-                    .arg("-9")
-                    .arg(pid.to_string())
-                    .status()
-                    .await;
-            }
-            if detached_background {
-                match tokio::time::timeout(Duration::from_secs(5), &mut output_fut).await {
-                    Ok(Ok(out)) => out,
-                    Ok(Err(err)) => return Err(format!("run command failed after detach: {err}")),
-                    Err(_) => {
-                        return Ok(format!("detached=1 command={}", command.trim()));
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    if let Some(stdout) = child.stdout.take() {
+        spawn_command_pipe_reader(stdout, CommandOutputStream::Stdout, tx.clone());
+    }
+    if let Some(stderr) = child.stderr.take() {
+        spawn_command_pipe_reader(stderr, CommandOutputStream::Stderr, tx.clone());
+    }
+    drop(tx);
+
+    let mut wait_fut = Box::pin(child.wait());
+    let total_sleep = tokio::time::sleep(Duration::from_secs(wait_timeout));
+    tokio::pin!(total_sleep);
+    let idle_sleep = tokio::time::sleep(Duration::from_secs(idle_timeout));
+    tokio::pin!(idle_sleep);
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let mut captured_bytes = 0usize;
+    let mut output_truncated = false;
+    let mut output_limit_reached = false;
+    let mut detached_timeout = false;
+    let mut timeout_error: Option<String> = None;
+    let mut status = None;
+    let mut pipes_closed = false;
+
+    loop {
+        tokio::select! {
+            result = &mut wait_fut => {
+                status = Some(result.map_err(|err| format!("run command failed: {err}"))?);
+                while let Ok(Some(event)) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
+                    let limit_hit = record_command_output_event(
+                        event,
+                        &mut stdout,
+                        &mut stderr,
+                        &mut captured_bytes,
+                        max_output_bytes,
+                        &mut output_truncated,
+                    )?;
+                    if limit_hit {
+                        output_limit_reached = true;
+                        break;
                     }
                 }
-            } else {
-                let _ = output_fut.await;
-                return Err(format!("Command timed out after {} seconds", soft_timeout));
+                break;
+            }
+            maybe_event = rx.recv(), if !pipes_closed => {
+                let Some(event) = maybe_event else {
+                    pipes_closed = true;
+                    continue;
+                };
+                let limit_hit = record_command_output_event(
+                    event,
+                    &mut stdout,
+                    &mut stderr,
+                    &mut captured_bytes,
+                    max_output_bytes,
+                    &mut output_truncated,
+                )?;
+                idle_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(idle_timeout));
+                if limit_hit {
+                    output_limit_reached = true;
+                    tracing::info!(
+                        "run_cmd output limit reached; killing shell (max_output_bytes={}): {}",
+                        max_output_bytes,
+                        crate::truncate_for_log(command)
+                    );
+                    kill_shell_pid(child_pid).await;
+                    let _ = tokio::time::timeout(Duration::from_secs(5), &mut wait_fut).await;
+                    break;
+                }
+            }
+            _ = &mut idle_sleep => {
+                tracing::info!(
+                    "run_cmd idle-timeout reached; killing shell (idle={}s, configured={}s): {}",
+                    idle_timeout,
+                    soft_timeout,
+                    crate::truncate_for_log(command)
+                );
+                kill_shell_pid(child_pid).await;
+                let _ = tokio::time::timeout(Duration::from_secs(5), &mut wait_fut).await;
+                timeout_error = Some(format!(
+                    "Command idle timed out after {} seconds without output",
+                    idle_timeout
+                ));
+                break;
+            }
+            _ = &mut total_sleep => {
+                let detached_note = if detached_background {
+                    "background start grace"
+                } else {
+                    "soft-timeout"
+                };
+                tracing::info!(
+                    "run_cmd {} reached; killing shell (wait={}s, configured={}s): {}",
+                    detached_note,
+                    wait_timeout,
+                    soft_timeout,
+                    crate::truncate_for_log(command)
+                );
+                kill_shell_pid(child_pid).await;
+                let _ = tokio::time::timeout(Duration::from_secs(5), &mut wait_fut).await;
+                if detached_background {
+                    detached_timeout = true;
+                } else {
+                    timeout_error = Some(format!("Command timed out after {} seconds", soft_timeout));
+                }
+                break;
             }
         }
-    };
-
-    let stdout_text = String::from_utf8_lossy(&out.stdout).to_string();
-    let stderr_text = String::from_utf8_lossy(&out.stderr).to_string();
-
-    let mut text = String::new();
-    text.push_str(&stdout_text);
-    if !stderr_text.is_empty() {
-        if !text.is_empty() {
-            text.push('\n');
-        }
-        text.push_str(&stderr_text);
     }
 
-    if text.len() > 8000 {
-        text.truncate(8000);
+    if let Some(err) = timeout_error {
+        return Err(err);
     }
 
-    let exit_code = out.status.code().unwrap_or(-1);
+    let (text, stdout_text, stderr_text) =
+        combine_command_output(&stdout, &stderr, output_truncated);
+
+    if output_limit_reached {
+        return if text.trim().is_empty() {
+            Ok(format!("exit=truncated command={}", command.trim()))
+        } else {
+            Ok(text)
+        };
+    }
+
+    if detached_timeout {
+        return if text.trim().is_empty() {
+            Ok(format!("detached=1 command={}", command.trim()))
+        } else {
+            Ok(text)
+        };
+    }
+
+    let status = status.ok_or_else(|| "run command status unavailable".to_string())?;
+    let exit_code = status.code().unwrap_or(-1);
     if exit_code == 0 {
         if text.trim().is_empty() {
             Ok(format!("exit=0 command={}", command.trim()))
@@ -565,8 +802,11 @@ pub(crate) async fn run_safe_command(
             detail.push_str("stdout:\n");
             detail.push_str(stdout_text.trim());
         }
-        if detail.len() > 8000 {
-            detail.truncate(8000);
+        if output_truncated {
+            if !detail.is_empty() && !detail.ends_with('\n') {
+                detail.push('\n');
+            }
+            detail.push_str("...");
         }
         Err(format!(
             "Command failed with exit code {}\n{}",
@@ -822,12 +1062,50 @@ mod tests {
         let output = execute_builtin_skill(
             &state,
             "run_cmd",
-            &json!({"command": "printf ok", "timeout_seconds": 1}),
+            &json!({
+                "command": "printf ok",
+                "timeout_seconds": 1,
+                "idle_timeout_seconds": 1,
+                "max_output_bytes": 8000
+            }),
         )
         .await
         .expect("run_cmd should succeed");
 
         assert_eq!(output, "ok");
+    }
+
+    #[tokio::test]
+    async fn run_safe_command_idle_timeout_kills_silent_command() {
+        let root = TempDirGuard::new("run_cmd_idle_timeout");
+        let err = super::run_safe_command(&root.path, "sleep 2", 4096, 10, 1, 8000, false)
+            .await
+            .expect_err("silent command should hit idle timeout");
+
+        assert!(err.contains("idle timed out"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn run_safe_command_truncates_noisy_command_output() {
+        let root = TempDirGuard::new("run_cmd_output_limit");
+        let output = super::run_safe_command(
+            &root.path,
+            "python3 - <<'PY'\nprint('A' * 2000)\nPY",
+            4096,
+            10,
+            10,
+            128,
+            false,
+        )
+        .await
+        .expect("noisy command should return truncated output");
+
+        assert!(output.ends_with("..."), "missing ellipsis: {output:?}");
+        assert!(
+            output.len() <= 132,
+            "output should be bounded, len={}: {output:?}",
+            output.len()
+        );
     }
 
     #[test]
@@ -857,7 +1135,7 @@ mod tests {
             "cd {} && python3 -m http.server {port} --bind 127.0.0.1 > /dev/null 2>&1 & echo started",
             root.path.display()
         );
-        let output = super::run_safe_command(&root.path, &command, 4096, 30, false)
+        let output = super::run_safe_command(&root.path, &command, 4096, 30, 30, 8000, false)
             .await
             .expect("background run_cmd should detach");
         assert!(
@@ -865,7 +1143,15 @@ mod tests {
             "unexpected output: {output}"
         );
 
-        std::net::TcpStream::connect(("127.0.0.1", port)).expect("http server should listen");
+        let mut connected = false;
+        for _ in 0..40 {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                connected = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(connected, "http server should listen on port {port}");
 
         let _ = std::process::Command::new("bash")
             .arg("-lc")

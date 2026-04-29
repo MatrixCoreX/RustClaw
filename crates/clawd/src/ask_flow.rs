@@ -2,62 +2,6 @@ use serde_json::{json, Value};
 
 use crate::{AppState, AskReply, ClaimedTask, RoutedMode};
 
-fn canonicalize_recent_scalar_reply(text: &str) -> String {
-    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.is_empty() {
-        return String::new();
-    }
-    collapsed.to_ascii_lowercase()
-}
-
-fn direct_same_or_different_answer_from_recent_replies(
-    prefer_english: bool,
-    recent_assistant_replies: &[String],
-) -> Option<String> {
-    if recent_assistant_replies.len() < 2 {
-        return None;
-    }
-    let latest = canonicalize_recent_scalar_reply(&recent_assistant_replies[0]);
-    let previous = canonicalize_recent_scalar_reply(&recent_assistant_replies[1]);
-    if latest.is_empty() || previous.is_empty() {
-        return None;
-    }
-    (latest == previous).then(|| if prefer_english { "same" } else { "一样" }.to_string())
-}
-
-fn direct_chat_answer_from_recent_replies(
-    state: &AppState,
-    task: &ClaimedTask,
-    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
-) -> Option<String> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.needs_clarify
-        || route.output_contract.requires_content_evidence
-        || route.output_contract.semantic_kind
-            != crate::OutputSemanticKind::RecentScalarEqualityCheck
-        || !matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::OneSentence
-        )
-    {
-        return None;
-    }
-    let recent_assistant_replies = crate::memory::read_recent_assistant_reply_texts(
-        state,
-        task.user_key.as_deref(),
-        task.user_id,
-        task.chat_id,
-        2,
-    );
-    let prefer_english = state
-        .policy
-        .command_intent
-        .default_locale
-        .to_ascii_lowercase()
-        .starts_with("en");
-    direct_same_or_different_answer_from_recent_replies(prefer_english, &recent_assistant_replies)
-}
-
 fn build_resume_continue_execute_prompt_from_parts(
     state: &AppState,
     task: &ClaimedTask,
@@ -449,11 +393,6 @@ pub(crate) async fn execute_ask_routed(
         crate::AskMode::ClarifyOrChat {
             entry: crate::ChatEntryStrategy::NormalizerThenChat,
         } => {
-            if let Some(direct_answer) =
-                direct_chat_answer_from_recent_replies(state, task, agent_run_context.as_ref())
-            {
-                return Ok(AskReply::non_llm(direct_answer));
-            }
             let chat_prompt_context = chat_prompt_context_with_route_resolution(
                 chat_prompt_context,
                 agent_run_context.as_ref(),
@@ -624,8 +563,7 @@ pub(crate) async fn analyze_attached_images_for_ask(
 mod tests {
     use super::{
         chat_prompt_context_with_route_resolution, chat_request_for_prompt, chat_user_request,
-        direct_same_or_different_answer_from_recent_replies, preferred_route_clarify_question,
-        route_structured_clarify_context, task_payload_text,
+        preferred_route_clarify_question, route_structured_clarify_context, task_payload_text,
     };
 
     #[test]
@@ -650,8 +588,6 @@ mod tests {
                 locator_hint: "scripts".to_string(),
                 ..Default::default()
             },
-                    direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
@@ -686,8 +622,6 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract::default(),
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
@@ -697,13 +631,6 @@ mod tests {
         assert!(!rendered.contains("<none>"));
         assert!(rendered.contains("### ROUTE_RESOLUTION"));
         assert!(rendered.contains("client-like-continuous-20260428_144029"));
-    }
-
-    #[test]
-    fn same_or_different_direct_answer_normalizes_exact_scalar_matches() {
-        let replies = vec!["  Value \n".to_string(), "value".to_string()];
-        let answer = direct_same_or_different_answer_from_recent_replies(false, &replies);
-        assert_eq!(answer.as_deref(), Some("一样"));
     }
 
     #[test]
@@ -792,8 +719,6 @@ mod tests {
                 locator_kind: crate::OutputLocatorKind::Path,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(route.clone()),
@@ -840,8 +765,6 @@ mod tests {
                 locator_kind: crate::OutputLocatorKind::Filename,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(route),

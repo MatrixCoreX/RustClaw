@@ -15,7 +15,7 @@ auto_invocable = false
 requires_confirmation = true
 side_effect = true
 retryable = true
-input_schema = { type = "object", required = ["command"], properties = { command = { type = "string" } } }
+input_schema = { type = "object", required = ["command"], properties = { command = { type = "string" }, cwd = { type = "string" }, timeout_seconds = { type = "integer" }, idle_timeout_seconds = { type = "integer" }, max_output_bytes = { type = "integer" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]

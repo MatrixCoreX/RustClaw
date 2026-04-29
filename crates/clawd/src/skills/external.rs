@@ -429,6 +429,8 @@ async fn execute_external_local_shell_recipe(
         &command,
         state.skill_rt.max_cmd_length,
         timeout_secs,
+        state.skill_rt.cmd_idle_timeout_seconds,
+        state.skill_rt.cmd_max_output_bytes,
         crate::skills::task_allows_sudo(state, Some(task)),
     )
     .await

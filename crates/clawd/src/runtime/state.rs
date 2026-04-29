@@ -158,6 +158,8 @@ pub(crate) struct SkillRuntime {
     pub(crate) skill_semaphore: Arc<Semaphore>,
     pub(crate) tools_policy: Arc<ToolsPolicy>,
     pub(crate) cmd_timeout_seconds: u64,
+    pub(crate) cmd_idle_timeout_seconds: u64,
+    pub(crate) cmd_max_output_bytes: usize,
     pub(crate) max_cmd_length: usize,
     pub(crate) workspace_root: PathBuf,
     pub(crate) default_locator_search_dir: PathBuf,
@@ -175,7 +177,9 @@ impl SkillRuntime {
             skill_runner_path: PathBuf::new(),
             skill_semaphore: Arc::new(Semaphore::new(1)),
             tools_policy: Arc::new(tools_policy),
-            cmd_timeout_seconds: 30,
+            cmd_timeout_seconds: 60,
+            cmd_idle_timeout_seconds: 60,
+            cmd_max_output_bytes: 8000,
             max_cmd_length: 4096,
             workspace_root: std::env::temp_dir(),
             default_locator_search_dir: std::env::temp_dir(),
@@ -727,6 +731,8 @@ impl AppState {
         self.skill_rt.skill_runner_path = workspace_root.join("target/release/skill-runner");
         self.skill_rt.tools_policy = Arc::new(tools_policy);
         self.skill_rt.cmd_timeout_seconds = config.tools.cmd_timeout_seconds.max(1);
+        self.skill_rt.cmd_idle_timeout_seconds = config.tools.cmd_idle_timeout_seconds.max(1);
+        self.skill_rt.cmd_max_output_bytes = config.tools.cmd_max_output_bytes.max(128);
         self.skill_rt.max_cmd_length = config.tools.max_cmd_length.max(16);
         self.skill_rt.default_locator_search_dir = default_locator_search_dir;
         self.skill_rt.locator_scan_max_depth = config.routing.locator_scan_max_depth;

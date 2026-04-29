@@ -49,7 +49,7 @@ pub(crate) fn inject_skill_memory_context(
             })
         })
         .collect::<Vec<_>>();
-    let lang_hint = state.policy.command_intent.default_locale.clone();
+    let lang_hint = skill_memory_language_hint(state, &obj);
     obj.insert(
         "_memory".to_string(),
         serde_json::json!({
@@ -61,6 +61,35 @@ pub(crate) fn inject_skill_memory_context(
         }),
     );
     Value::Object(obj)
+}
+
+fn skill_memory_language_hint(
+    state: &AppState,
+    args_obj: &serde_json::Map<String, Value>,
+) -> String {
+    for key in [
+        "text",
+        "query",
+        "instruction",
+        "goal",
+        "prompt",
+        "message",
+        "content",
+    ] {
+        let Some(trimmed) = args_obj
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let hint = crate::language_policy::preferred_response_language_hint(trimmed, None);
+        if hint != "config_default" {
+            return hint;
+        }
+    }
+    state.policy.command_intent.default_locale.clone()
 }
 
 fn skill_memory_anchor(skill_name: &str, args_obj: &serde_json::Map<String, Value>) -> String {
@@ -83,4 +112,34 @@ fn skill_memory_anchor(skill_name: &str, args_obj: &serde_json::Map<String, Valu
         }
     }
     parts.join(" | ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::skill_memory_language_hint;
+    use crate::AppState;
+    use serde_json::json;
+
+    fn object(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+        value.as_object().cloned().expect("object")
+    }
+
+    #[test]
+    fn skill_memory_language_hint_prefers_skill_args_over_config() {
+        let mut state = AppState::test_default_with_fixture_provider();
+        state.policy.command_intent.default_locale = "en-US".to_string();
+
+        assert_eq!(
+            skill_memory_language_hint(&state, &object(json!({"text": "请记住这个编号"}))),
+            "zh-CN"
+        );
+        assert_eq!(
+            skill_memory_language_hint(&state, &object(json!({"query": "remember this id"}))),
+            "en"
+        );
+        assert_eq!(
+            skill_memory_language_hint(&state, &object(json!({"action": "read"}))),
+            "en-US"
+        );
+    }
 }

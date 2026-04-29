@@ -19,7 +19,7 @@ If the user explicitly asks to receive a produced file as an actual file/documen
 All capabilities are skills. Use `{"type":"call_skill","skill":"<name>","args":{...}}` only.
 
 ### Base skills (standalone — file/command/dir; do not use system_basic for these)
-- `run_cmd`: `args.command` required; optional `args.cwd`. Run one shell command.
+- `run_cmd`: `args.command` required; optional `args.cwd`, `args.timeout_seconds`, `args.idle_timeout_seconds`, `args.max_output_bytes`. Run one bounded shell command.
 - `read_file`: `args.path` required. Read file content.
 - `write_file`: `args.path`, `args.content` required. Write file.
 - `list_dir`: `args.path` optional (default "."), `args.limit` or `args.max_entries` optional (1..200), `args.names_only` optional. List directory entries. Use `limit/max_entries` when the user asks for the first/top/recent N entries instead of listing everything and truncating later.
@@ -61,6 +61,8 @@ Skill behavior notes (file/path):
 - For service runtime status questions such as `is telegramd running right now`, prefer `service_control` (`status`/`verify`) or `process_basic` over checking whether the binary file exists.
 - For log analysis requests targeting a log directory, either select a concrete log file first or use `log_analyze` with the directory path only when the skill contract explicitly supports directory resolution. Do not pass a directory path to a file-only reader.
 - After a `list_dir` or directory-listing `run_cmd` step, do not treat the directory path itself as readable file content. If the task now depends on content, first resolve concrete file paths from the observed listing; otherwise answer directly from the listing.
+- For interactive or endless shell programs, never run the raw infinite form. Use a bounded sample form such as `top -b -n 1`, `timeout 5s top -b`, `tail -n 200 file`, `journalctl -n 200 --no-pager`, or `ps aux --sort=-%cpu | head -20`.
+- For slow build/test/admin checks, set a reasonable `timeout_seconds`; for commands that may hang silently, set `idle_timeout_seconds`; for noisy commands, set `max_output_bytes` instead of depending on final answer truncation.
 - When the user asks for a generic baseline health check and no narrower target is required, prefer `health_check` with minimal args instead of asking which service to inspect.
 
 ### image_vision

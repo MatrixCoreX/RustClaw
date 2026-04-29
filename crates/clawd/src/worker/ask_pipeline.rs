@@ -1001,8 +1001,6 @@ mod tests {
                 requires_content_evidence: false,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(should_attempt_auto_locator(&route));
     }
@@ -1030,8 +1028,6 @@ mod tests {
                 requires_content_evidence: false,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(!should_attempt_auto_locator(&route));
     }
@@ -1059,8 +1055,6 @@ mod tests {
                 requires_content_evidence: false,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(should_attempt_auto_locator(&route));
     }
@@ -1090,8 +1084,6 @@ mod tests {
                 requires_content_evidence: true,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(matches!(
             super::current_workspace_locator_resolution(&root, &route),
@@ -1124,8 +1116,6 @@ mod tests {
                 requires_content_evidence: true,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(should_attempt_auto_locator(&route));
     }
@@ -1154,8 +1144,6 @@ mod tests {
                 response_shape: crate::OutputResponseShape::OneSentence,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(!should_attempt_auto_locator(&route));
     }
@@ -1185,8 +1173,6 @@ mod tests {
                 response_shape: crate::OutputResponseShape::Free,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(!should_attempt_auto_locator(&route));
     }
@@ -1247,8 +1233,6 @@ mod tests {
                 response_shape: crate::OutputResponseShape::Scalar,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
 
         let resolution = structured_doc_filename_scalar_locator_resolution(&root, &route, 4, 1000);
@@ -1289,8 +1273,6 @@ mod tests {
                 response_shape: crate::OutputResponseShape::Scalar,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
 
         let resolution = structured_doc_filename_scalar_locator_resolution(&root, &route, 4, 1000);
@@ -1331,8 +1313,6 @@ mod tests {
                 response_shape: crate::OutputResponseShape::Scalar,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
 
         let resolution = structured_doc_filename_scalar_locator_resolution(&root, &route, 4, 1000);
@@ -1394,8 +1374,6 @@ mod tests {
                 response_shape: crate::OutputResponseShape::Scalar,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
 
         let resolution = structured_doc_filename_scalar_locator_resolution(&root, &route, 4, 1000);
@@ -1445,8 +1423,6 @@ mod tests {
                 response_shape: crate::OutputResponseShape::Scalar,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
 
         let resolution = structured_doc_filename_scalar_locator_resolution(&root, &route, 4, 1000);
@@ -1498,8 +1474,6 @@ mod tests {
                 response_shape: crate::OutputResponseShape::Scalar,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
 
         let resolution = structured_doc_filename_scalar_locator_resolution(&root, &route, 4, 1000);
@@ -1571,8 +1545,6 @@ mod tests {
                 response_shape: crate::OutputResponseShape::Scalar,
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         }
     }
 

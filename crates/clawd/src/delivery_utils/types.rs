@@ -38,7 +38,7 @@ impl DeliveryMessageKind {
         }
     }
 
-    fn default_text(self) -> &'static str {
+    fn default_en(self) -> &'static str {
         match self {
             Self::Rule1BothRootsMiss => "File not found at the provided path.",
             Self::Rule2DirNotFound => "Directory does not exist. Please provide a correct path.",
@@ -66,22 +66,31 @@ impl DeliveryMessageKind {
             }
         }
     }
+
+    fn default_zh(self) -> &'static str {
+        match self {
+            Self::Rule1BothRootsMiss => "未在提供的路径找到文件。",
+            Self::Rule2DirNotFound => "目录不存在，请提供正确路径。",
+            Self::Rule2FileNotFound => "该目录下没有找到这个文件。",
+            Self::Rule3ScanTooMany => "匹配文件过多，请提供精确路径。",
+            Self::Rule3FileNotFound => "未找到文件。",
+            Self::FilenameNotUnique => "找到多个同名文件，请提供精确路径。",
+            Self::DirectoryBothRootsMiss => "未在提供的路径找到目录。",
+            Self::DirectoryEntriesTooMany => {
+                "该目录下文件或子目录过多，请提供更具体路径或更小范围。"
+            }
+            Self::DirectoryMultipleCandidates => "找到多个可能的目录，请确认是哪一个：",
+            Self::DirectoryNoFilesInCurrentLevel => "当前目录层级没有找到文件。",
+            Self::DirectoryNoSendableFilesInCurrentLevel => "该目录当前层级没有找到可发送文件。",
+            Self::DirectoryHasChildDirsHint => {
+                "这个目录下还有其他子目录，如需继续发送，请提供更准确路径。"
+            }
+        }
+    }
 }
 
 pub(super) fn localize_delivery_message(state: &AppState, kind: DeliveryMessageKind) -> String {
-    crate::i18n_t_with_default(state, kind.i18n_key(), kind.default_text())
-}
-
-fn request_prefers_english(user_request: &str) -> bool {
-    let trimmed = user_request.trim();
-    !trimmed.is_empty()
-        && trimmed.chars().any(|ch| ch.is_ascii_alphabetic())
-        && !trimmed.chars().any(|ch| {
-            matches!(
-                ch as u32,
-                0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
-            )
-        })
+    crate::i18n_t_with_default(state, kind.i18n_key(), kind.default_en())
 }
 
 pub(super) fn localize_delivery_message_for_request(
@@ -89,10 +98,24 @@ pub(super) fn localize_delivery_message_for_request(
     kind: DeliveryMessageKind,
     user_request: &str,
 ) -> String {
-    if request_prefers_english(user_request) {
-        kind.default_text().to_string()
-    } else {
-        localize_delivery_message(state, kind)
+    match crate::language_policy::request_language_hint(user_request) {
+        "en" => crate::bilingual_t_with_default_vars(
+            state,
+            kind.i18n_key(),
+            kind.default_zh(),
+            kind.default_en(),
+            true,
+            &[],
+        ),
+        "zh-CN" => crate::bilingual_t_with_default_vars(
+            state,
+            kind.i18n_key(),
+            kind.default_zh(),
+            kind.default_en(),
+            false,
+            &[],
+        ),
+        _ => localize_delivery_message(state, kind),
     }
 }
 

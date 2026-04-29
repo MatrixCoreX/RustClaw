@@ -207,6 +207,8 @@ Output a single raw JSON object only (no markdown, no extra text, no code fences
   - raw_command_output: user explicitly wants command execution output / raw shell result itself. Also use this by default for concrete shell/system command execution requests from an admin/operator style turn (for example `执行 pwd`, `run ss -ltnp`, `execute journalctl -u nginx -n 20`) when the final user-visible answer should be the command result itself unchanged.
   - Do **not** use `raw_command_output` when the same request also asks for any post-processing of that command result, such as explanation, summary, comparison, judgment, takeaway, or a one-sentence interpretation. In those cases the command output is only evidence for a later answer shape, not the final answer itself.
   - file_names: user wants a directory/file listing as names only, one name per line, or an otherwise exact names list. Use this as the structured contract instead of relying on phrases like "only output names" later in finalize.
+    - Do not use `file_names` for compound requests that also ask for explanation, purpose, judgment, comparison, or a brief conclusion. In those cases the listing is evidence for a later synthesis, not the final exact answer contract.
+    - If the compound request asks what the entries are for / what they look more like, prefer `directory_purpose_summary`. Otherwise keep `semantic_kind="none"` with `response_shape="free"` or `one_sentence`, and preserve the combined listing+synthesis requirement in `resolved_user_intent`.
   - Examples:
     - `执行 pwd，只输出命令结果` => `raw_command_output`
     - `run ss -ltnp and return the command output only` => `raw_command_output`
@@ -214,6 +216,8 @@ Output a single raw JSON object only (no markdown, no extra text, no code fences
     - `run journalctl -u nginx -n 20 and briefly summarize whether it looks healthy` => **not** `raw_command_output`
     - `列出 logs 目录前 10 个文件名，只输出文件名列表` => `file_names`
     - `show the first 10 names in logs, names only` => `file_names`
+    - `列出当前目录顶层 toml 文件，再简短解释用途` => **not** `file_names`; the final answer needs listing plus synthesis
+    - `list the top-level toml files and briefly explain what they are for` => **not** `file_names`; the final answer needs listing plus synthesis
   - service_status: user wants service/process running-status judgment rather than raw probe output
   - scalar_count: scalar answer should be a count/number
     - Use this when the user asks "how many" / "有几个" / "count" and the requested final answer is only the number or a number with the minimal subject label.

@@ -1010,6 +1010,10 @@ pub struct ToolsConfig {
     pub deny: Vec<String>,
     #[serde(default = "default_tool_cmd_timeout_seconds")]
     pub cmd_timeout_seconds: u64,
+    #[serde(default = "default_tool_cmd_idle_timeout_seconds")]
+    pub cmd_idle_timeout_seconds: u64,
+    #[serde(default = "default_tool_cmd_max_output_bytes")]
+    pub cmd_max_output_bytes: usize,
     #[serde(default = "default_tool_max_cmd_length")]
     pub max_cmd_length: usize,
     #[serde(default)]
@@ -1027,6 +1031,8 @@ impl Default for ToolsConfig {
             allow: Vec::new(),
             deny: Vec::new(),
             cmd_timeout_seconds: default_tool_cmd_timeout_seconds(),
+            cmd_idle_timeout_seconds: default_tool_cmd_idle_timeout_seconds(),
+            cmd_max_output_bytes: default_tool_cmd_max_output_bytes(),
             max_cmd_length: default_tool_max_cmd_length(),
             allow_path_outside_workspace: false,
             allow_sudo: false,
@@ -1816,7 +1822,15 @@ fn default_sendfile_allowed_dirs() -> Vec<String> {
 }
 
 fn default_tool_cmd_timeout_seconds() -> u64 {
-    10
+    60
+}
+
+fn default_tool_cmd_idle_timeout_seconds() -> u64 {
+    60
+}
+
+fn default_tool_cmd_max_output_bytes() -> usize {
+    8000
 }
 
 fn default_tool_max_cmd_length() -> usize {

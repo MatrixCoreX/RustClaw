@@ -277,11 +277,16 @@ impl UserResponseContract {
     }
 }
 
-pub(crate) fn missing_file_delivery_default_text(state: &AppState) -> String {
-    crate::i18n_t_with_default(
+pub(crate) fn missing_file_delivery_default_text_for_language(
+    state: &AppState,
+    language_hint: &str,
+) -> String {
+    crate::app_helpers::bilingual_t_with_default(
         state,
         "clawd.msg.delivery.rule3_file_not_found",
+        "未找到该文件。",
         "File not found.",
+        fallback_prefers_english_for_language_hint(state, language_hint),
     )
 }
 
@@ -293,7 +298,7 @@ pub(crate) async fn compose_missing_file_delivery_response(
     locator_hint: Option<&str>,
     language_hint: &str,
 ) -> String {
-    let default_text = missing_file_delivery_default_text(state);
+    let default_text = missing_file_delivery_default_text_for_language(state, language_hint);
     let contract = UserResponseContract::missing_file_delivery(
         original_user_request,
         resolved_user_intent,
@@ -361,11 +366,12 @@ async fn compose_user_response_from_contract_impl(
                 if let Some(default_text) = default_text {
                     return default_text.to_string();
                 }
-                return render_clarify_fallback(
+                return render_clarify_fallback_with_language_hint(
                     state,
                     &task.task_id,
                     ClarifyFallbackSource::LlmUnavailable,
                     Some(&err.to_string()),
+                    &contract.language_hint,
                 );
             }
         };
@@ -403,11 +409,12 @@ async fn compose_user_response_from_contract_impl(
                 if let Some(default_text) = default_text {
                     return default_text.to_string();
                 }
-                render_clarify_fallback(
+                render_clarify_fallback_with_language_hint(
                     state,
                     &task.task_id,
                     ClarifyFallbackSource::EmptyResponse,
                     None,
+                    &contract.language_hint,
                 )
             } else {
                 trimmed.to_string()
@@ -423,11 +430,12 @@ async fn compose_user_response_from_contract_impl(
                 return default_text.to_string();
             }
             let hint = format!("source={},err={err}", fallback_source.as_metric_label());
-            render_clarify_fallback(
+            render_clarify_fallback_with_language_hint(
                 state,
                 &task.task_id,
                 ClarifyFallbackSource::LlmUnavailable,
                 Some(&hint),
+                &contract.language_hint,
             )
         }
     }
@@ -516,6 +524,34 @@ impl ClarifyFallbackSource {
         }
     }
 
+    /// 默认中文文案（当前请求明确是中文、但运行时 i18n 字典不是中文时使用）。
+    pub(crate) fn default_zh(self) -> &'static str {
+        match self {
+            Self::LlmUnavailable => {
+                "模型暂时不可用（鉴权失败 / 网络异常 / 限流熔断）。请稍后再试，或切换到可用模型继续。"
+            }
+            Self::EmptyResponse => "模型这次没给出回答。请把目标说得更具体一点，我立刻再试。",
+            Self::IntentUnresolved => {
+                "我没看出这条消息要做什么。请补充目标或上下文，例如：要看哪个文件？要做哪个操作？"
+            }
+            Self::PlannerFailed => {
+                "我没能把请求拆成可执行步骤。请说\"用 X 做 Y\"形式，或描述得更具体。"
+            }
+            Self::ExecutionFailedPartial => {
+                "执行到一半遇到问题。已经完成的部分：{context_hint}。要不要换条路继续？"
+            }
+            Self::SynthesisEmpty => {
+                "我还没能根据现有证据生成可靠最终答案。请补充缺少的目标，或让我重新整理一次。"
+            }
+            Self::VerifyRejected => {
+                "模型给的答案不符合预期格式（{context_hint}）。能告诉我你最想要的形式吗？"
+            }
+            Self::PolicyBlock => {
+                "当前运行策略阻止了这个请求。请调整策略或提供更安全的目标后再试。"
+            }
+        }
+    }
+
     /// 全部已知 source 列表（用于集合化比对端）。
     pub(crate) fn all() -> &'static [Self] {
         &[
@@ -535,16 +571,19 @@ impl ClarifyFallbackSource {
 pub(crate) const LEGACY_SUPER_FALLBACK_KEY: &str = "clawd.msg.clarify_question_fallback";
 pub(crate) const LEGACY_SUPER_FALLBACK_DEFAULT_EN: &str =
     "I need to clarify: what task is this message about? Please provide the target or context.";
+pub(crate) const LEGACY_SUPER_FALLBACK_DEFAULT_ZH: &str =
+    "我需要确认一下：你这条消息是针对哪件事情？请补充目标或上下文。";
 
 /// 渲染 fallback 文案 + 上报 trace（统一入口）。
 ///
 /// `context_hint` 仅用于 `ExecutionFailedPartial` / `VerifyRejected` 等带 `{context_hint}`
 /// 占位符的文案；其它 source 传 `None` 即可。
-pub(crate) fn render_clarify_fallback(
+pub(crate) fn render_clarify_fallback_with_language_hint(
     state: &AppState,
     task_id: &str,
     source: ClarifyFallbackSource,
     context_hint: Option<&str>,
+    language_hint: &str,
 ) -> String {
     let hint = context_hint.unwrap_or("").trim();
     tracing::info!(
@@ -553,12 +592,31 @@ pub(crate) fn render_clarify_fallback(
         context_hint = %hint,
         "clarify_fallback_emitted"
     );
-    crate::i18n_t_with_default_vars(
+    crate::bilingual_t_with_default_vars(
         state,
         source.i18n_key(),
+        source.default_zh(),
         source.default_en(),
+        fallback_prefers_english_for_language_hint(state, language_hint),
         &[("context_hint", hint)],
     )
+}
+
+fn fallback_prefers_english_for_language_hint(state: &AppState, language_hint: &str) -> bool {
+    let normalized = language_hint.trim().to_ascii_lowercase();
+    if normalized.starts_with("en") {
+        true
+    } else if normalized.starts_with("zh") {
+        false
+    } else {
+        state
+            .policy
+            .command_intent
+            .default_locale
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("en")
+    }
 }
 
 /// 集合：当前可能出现在历史 task `result_json.text` 里的所有 fallback 文案
@@ -574,18 +632,40 @@ pub(crate) fn all_clarify_fallback_texts(state: &AppState) -> Vec<String> {
 
 /// 底层 helper：直接接受 `i18n_dict`，不依赖 `AppState`，便于单测。
 pub(crate) fn all_clarify_fallback_texts_from_dict(dict: &HashMap<String, String>) -> Vec<String> {
-    let mut out: Vec<String> = ClarifyFallbackSource::all()
-        .iter()
-        .map(|src| lookup_or_default(dict, src.i18n_key(), src.default_en()))
-        .collect();
-    out.push(lookup_or_default(
-        dict,
-        LEGACY_SUPER_FALLBACK_KEY,
-        LEGACY_SUPER_FALLBACK_DEFAULT_EN,
-    ));
+    let mut out = Vec::new();
+    for src in ClarifyFallbackSource::all() {
+        push_fallback_text_variants(
+            &mut out,
+            &lookup_or_default(dict, src.i18n_key(), src.default_en()),
+        );
+        push_fallback_text_variants(&mut out, src.default_en());
+        push_fallback_text_variants(&mut out, src.default_zh());
+    }
+    push_fallback_text_variants(
+        &mut out,
+        &lookup_or_default(
+            dict,
+            LEGACY_SUPER_FALLBACK_KEY,
+            LEGACY_SUPER_FALLBACK_DEFAULT_EN,
+        ),
+    );
+    push_fallback_text_variants(&mut out, LEGACY_SUPER_FALLBACK_DEFAULT_EN);
+    push_fallback_text_variants(&mut out, LEGACY_SUPER_FALLBACK_DEFAULT_ZH);
     out.sort();
     out.dedup();
     out
+}
+
+fn push_fallback_text_variants(out: &mut Vec<String>, text: &str) {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    out.push(trimmed.to_string());
+    let context_empty = trimmed.replace("{context_hint}", "").trim().to_string();
+    if !context_empty.is_empty() {
+        out.push(context_empty);
+    }
 }
 
 /// 判定一段文本是不是已知的 clarify-fallback 占位符。
@@ -620,6 +700,52 @@ fn lookup_or_default(dict: &HashMap<String, String>, key: &str, default_text: &s
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    fn test_state(locale: &str, schedule_locale: &str) -> AppState {
+        let mut state = AppState::test_default_with_fixture_provider();
+        state.policy.command_intent.default_locale = locale.to_string();
+        state.policy.schedule.locale = schedule_locale.to_string();
+        state.policy.schedule.i18n_dict.clear();
+        state
+    }
+
+    #[test]
+    fn render_clarify_fallback_follows_language_hint_before_config_locale() {
+        let state = test_state("en-US", "en-US");
+        let text = render_clarify_fallback_with_language_hint(
+            &state,
+            "task-test",
+            ClarifyFallbackSource::IntentUnresolved,
+            None,
+            "zh-CN",
+        );
+        assert!(text.contains("我没看出这条消息要做什么"));
+
+        let state = test_state("zh-CN", "zh-CN");
+        let text = render_clarify_fallback_with_language_hint(
+            &state,
+            "task-test",
+            ClarifyFallbackSource::IntentUnresolved,
+            None,
+            "en",
+        );
+        assert!(text.contains("I couldn't tell what this message wants me to do"));
+    }
+
+    #[test]
+    fn missing_file_delivery_default_follows_language_hint_before_config_locale() {
+        let state = test_state("en-US", "en-US");
+        assert_eq!(
+            missing_file_delivery_default_text_for_language(&state, "zh-CN"),
+            "未找到该文件。"
+        );
+
+        let state = test_state("zh-CN", "zh-CN");
+        assert_eq!(
+            missing_file_delivery_default_text_for_language(&state, "en"),
+            "File not found."
+        );
+    }
 
     /// 7 source 的 metric label / i18n key 互不冲突。
     #[test]
@@ -742,6 +868,7 @@ mod tests {
     fn default_en_text_nonempty_and_key_namespaced() {
         for src in ClarifyFallbackSource::all() {
             assert!(!src.default_en().trim().is_empty(), "source={src:?}");
+            assert!(!src.default_zh().trim().is_empty(), "source={src:?}");
             assert!(
                 src.i18n_key().starts_with("clawd.msg.fallback."),
                 "source={src:?} key={}",
@@ -762,6 +889,12 @@ mod tests {
                 .iter()
                 .any(|t| t == LEGACY_SUPER_FALLBACK_DEFAULT_EN.trim()),
             "legacy default text missing from {texts:?}"
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|t| t == LEGACY_SUPER_FALLBACK_DEFAULT_ZH.trim()),
+            "legacy zh default text missing from {texts:?}"
         );
     }
 
@@ -789,11 +922,16 @@ mod tests {
         for src in ClarifyFallbackSource::all() {
             // ExecutionFailedPartial / VerifyRejected 默认文案带 {context_hint}
             // 占位符；用 lookup_or_default 拿到的就是含占位符的字面字符串，
-            // is_known 比对走的是字面 == ，所以仍可识别。
+            // is_known 同时识别模板和空 context 渲染后的结果。
             let text = lookup_or_default(&dict, src.i18n_key(), src.default_en());
             assert!(
                 is_known_clarify_fallback_text_with_dict(&dict, &text),
                 "source={src:?} text={text:?} not recognized by is_known"
+            );
+            let zh_text = src.default_zh().replace("{context_hint}", "");
+            assert!(
+                is_known_clarify_fallback_text_with_dict(&dict, &zh_text),
+                "source={src:?} zh_text={zh_text:?} not recognized by is_known"
             );
         }
     }

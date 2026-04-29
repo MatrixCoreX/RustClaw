@@ -378,8 +378,6 @@ mod tests {
                 locator_kind: crate::OutputLocatorKind::Path,
                 ..crate::IntentOutputContract::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let clarify_state = derive_clarify_state_for_ask_outcome(
             "task-1",
@@ -423,8 +421,6 @@ mod tests {
                 locator_kind: crate::OutputLocatorKind::Path,
                 ..crate::IntentOutputContract::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let clarify_state = derive_clarify_state_for_ask_outcome(
             "task-2",
@@ -530,8 +526,6 @@ mod tests {
                 locator_kind: crate::OutputLocatorKind::Path,
                 ..crate::IntentOutputContract::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: None,
