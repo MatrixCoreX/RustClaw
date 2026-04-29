@@ -215,38 +215,24 @@ fn chat_act_goal_from_prompt(prompt_with_memory: &str) -> String {
     )
 }
 
-fn fuzzy_locator_clarify_question(
-    state: &crate::AppState,
-    route: &crate::RouteResult,
-) -> Option<String> {
-    let candidates =
-        crate::post_route_policy::fuzzy_locator_candidates_from_route_reason(&route.route_reason);
+fn fuzzy_locator_clarify_context(candidates: &[String]) -> Option<String> {
     if candidates.is_empty() {
         return None;
     }
     let candidate_block = candidates
         .iter()
         .enumerate()
-        .map(|(idx, value)| format!("{}. {}", idx + 1, value))
+        .map(|(idx, value)| format!("candidate_{}: {}", idx + 1, value))
         .collect::<Vec<_>>()
         .join("\n");
-    let header = if state
-        .policy
-        .command_intent
-        .default_locale
-        .trim()
-        .to_ascii_lowercase()
-        .starts_with("en")
-    {
-        "I found multiple matching candidates. Reply with the number or the full path:"
-    } else {
-        "我找到了多个匹配候选，请直接回复序号或完整路径："
-    };
-    Some(format!("{header}\n{candidate_block}"))
+    Some(format!(
+        "clarify_case: fuzzy_locator_candidates\nexact_target_found: false\ncandidate_count: {}\n{}",
+        candidates.len(),
+        candidate_block
+    ))
 }
 
 fn preferred_route_clarify_question(
-    state: &crate::AppState,
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
 ) -> Option<String> {
     // Phase 0.3: 单入口复用 normalizer 的 clarify_question。
@@ -262,31 +248,54 @@ fn preferred_route_clarify_question(
     if !question.is_empty() {
         return Some(question.to_string());
     }
-    if let Some(question) = fuzzy_locator_clarify_question(state, route) {
-        return Some(question);
+    None
+}
+
+fn route_structured_clarify_context(
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> Option<String> {
+    let ctx = agent_run_context?;
+    let route = ctx.route_result.as_ref()?;
+    if let Some(context) = fuzzy_locator_clarify_context(&ctx.fuzzy_locator_suggestions) {
+        return Some(context);
     }
-    let missing_locator = route.output_contract.locator_hint.trim().is_empty();
-    if route.output_contract.delivery_required && missing_locator {
-        return Some(crate::i18n_t_with_default(
-            state,
-            "clawd.msg.clarify_missing_file_locator",
-            "Please provide the specific file name or path.",
-        ));
+    if !route.needs_clarify || !route.output_contract.locator_hint.trim().is_empty() {
+        return None;
     }
-    if route.output_contract.requires_content_evidence
+    let clarify_case = if route.output_contract.delivery_required {
+        Some("missing_file_locator")
+    } else if route.output_contract.requires_content_evidence
         && matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Scalar
         )
-        && missing_locator
     {
-        return Some(crate::i18n_t_with_default(
-            state,
-            "clawd.msg.clarify_missing_read_target",
-            "Please provide the specific file name or path to read.",
-        ));
-    }
-    None
+        Some("missing_read_target")
+    } else {
+        None
+    }?;
+    Some(
+        [
+            format!("clarify_case: {clarify_case}"),
+            format!(
+                "locator_kind: {}",
+                route.output_contract.locator_kind.as_str()
+            ),
+            format!(
+                "response_shape: {}",
+                route.output_contract.response_shape.as_str()
+            ),
+            format!(
+                "requires_content_evidence: {}",
+                route.output_contract.requires_content_evidence
+            ),
+            format!(
+                "delivery_required: {}",
+                route.output_contract.delivery_required
+            ),
+        ]
+        .join("\n"),
+    )
 }
 
 fn chat_route_resolution_context(
@@ -344,7 +353,9 @@ fn chat_request_for_prompt(original_user_request: &str, semantic_request: &str) 
     if original.is_empty() || original == semantic {
         return semantic.to_string();
     }
-    format!("Original user request:\n{original}\n\nResolved semantic intent:\n{semantic}")
+    format!(
+        "Original user request:\n{original}\n\nResolved semantic intent / answer candidate:\n{semantic}\n\nUse the resolved semantic intent to answer the original request. If the original request asks for only a value, ID, path, name, or one short answer, output only the resolved value with no preamble."
+    )
 }
 
 fn task_payload_text(task: &ClaimedTask) -> Option<String> {
@@ -517,13 +528,15 @@ pub(crate) async fn execute_ask_routed(
                 .and_then(|ctx| ctx.route_result.as_ref())
                 .map(|route| route.route_reason.as_str())
                 .unwrap_or("router_selected_ask_clarify");
-            let preferred_clarify =
-                preferred_route_clarify_question(state, agent_run_context.as_ref());
-            let clarify_policy = if preferred_clarify.is_none()
-                && agent_run_context
-                    .as_ref()
-                    .and_then(|ctx| ctx.route_result.as_ref())
-                    .is_some_and(|route| route.clarify_question.trim().is_empty())
+            let preferred_clarify = preferred_route_clarify_question(agent_run_context.as_ref());
+            let structured_clarify_context =
+                route_structured_clarify_context(agent_run_context.as_ref());
+            let clarify_policy = if structured_clarify_context.is_some()
+                || (preferred_clarify.is_none()
+                    && agent_run_context
+                        .as_ref()
+                        .and_then(|ctx| ctx.route_result.as_ref())
+                        .is_some_and(|route| route.clarify_question.trim().is_empty()))
             {
                 crate::intent_router::ClarifyQuestionPolicy::SafeFallback
             } else {
@@ -534,7 +547,7 @@ pub(crate) async fn execute_ask_routed(
                 task,
                 resolved_prompt,
                 clarify_reason,
-                None,
+                structured_clarify_context.as_deref(),
                 preferred_clarify.as_deref(),
                 clarify_policy,
                 // §7.2: ask_flow 路由到 AskClarify 但 route_result 也没给 clarify_question
@@ -612,7 +625,7 @@ mod tests {
     use super::{
         chat_prompt_context_with_route_resolution, chat_request_for_prompt, chat_user_request,
         direct_same_or_different_answer_from_recent_replies, preferred_route_clarify_question,
-        task_payload_text,
+        route_structured_clarify_context, task_payload_text,
     };
 
     #[test]
@@ -708,8 +721,9 @@ mod tests {
         );
         assert!(request.contains("Original user request:"));
         assert!(request.contains("只回答编号"));
-        assert!(request.contains("Resolved semantic intent:"));
+        assert!(request.contains("Resolved semantic intent / answer candidate:"));
         assert!(request.contains("client-like-continuous-20260428_144029"));
+        assert!(request.contains("output only the resolved value"));
     }
 
     #[test]
@@ -756,7 +770,6 @@ mod tests {
 
     #[test]
     fn preferred_route_clarify_question_respects_explicit_route_question_before_generic_fallback() {
-        let state = crate::AppState::test_default_with_fixture_provider();
         let mut route = crate::RouteResult {
             routed_mode: crate::RoutedMode::AskClarify,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
@@ -787,7 +800,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            preferred_route_clarify_question(&state, Some(&ctx)).as_deref(),
+            preferred_route_clarify_question(Some(&ctx)).as_deref(),
             Some("请提供具体要查看的目录名或路径。")
         );
 
@@ -797,22 +810,21 @@ mod tests {
             route_result: Some(route),
             ..Default::default()
         };
-        assert_eq!(
-            preferred_route_clarify_question(&state, Some(&ctx)).as_deref(),
-            Some("Please provide the specific file name or path to read.")
-        );
+        assert_eq!(preferred_route_clarify_question(Some(&ctx)), None);
+        let context = route_structured_clarify_context(Some(&ctx)).expect("structured context");
+        assert!(context.contains("clarify_case: missing_read_target"));
+        assert!(context.contains("locator_kind: path"));
     }
 
     #[test]
-    fn preferred_route_clarify_question_uses_fuzzy_locator_candidates_without_llm() {
-        let state = crate::AppState::test_default_with_fixture_provider();
+    fn fuzzy_locator_candidates_are_structured_context_not_hard_question() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::AskClarify,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
             resolved_intent: "读取 Cargo.toml 的 package.name，只输出值".to_string(),
             needs_clarify: true,
             clarify_question: String::new(),
-            route_reason: "route_contract:generic_filename_scalar_extract; fuzzy_locator_candidates=/tmp/a/Cargo.toml | /tmp/b/Cargo.toml".to_string(),
+            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
             route_confidence: Some(0.95),
             visible_skill_candidates: Vec::new(),
             risk_ceiling: crate::RiskCeiling::Unknown,
@@ -833,13 +845,16 @@ mod tests {
         };
         let ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
+            fuzzy_locator_suggestions: vec![
+                "/tmp/a/Cargo.toml".to_string(),
+                "/tmp/b/Cargo.toml".to_string(),
+            ],
             ..Default::default()
         };
-        let clarify = preferred_route_clarify_question(&state, Some(&ctx))
-            .expect("fuzzy locator clarify should be synthesized");
-        assert!(clarify.contains("/tmp/a/Cargo.toml"));
-        assert!(clarify.contains("/tmp/b/Cargo.toml"));
-        assert!(clarify.contains("1."));
-        assert!(clarify.contains("2."));
+        assert_eq!(preferred_route_clarify_question(Some(&ctx)), None);
+        let context = route_structured_clarify_context(Some(&ctx)).expect("structured context");
+        assert!(context.contains("clarify_case: fuzzy_locator_candidates"));
+        assert!(context.contains("candidate_1: /tmp/a/Cargo.toml"));
+        assert!(context.contains("candidate_2: /tmp/b/Cargo.toml"));
     }
 }

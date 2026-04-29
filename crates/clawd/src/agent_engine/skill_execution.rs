@@ -340,7 +340,7 @@ async fn handle_skill_step_success(
     })
 }
 
-fn handle_skill_step_failure(
+async fn handle_skill_step_failure(
     state: &AppState,
     task: &ClaimedTask,
     step_execution: &crate::executor::StepExecutionResult,
@@ -403,6 +403,24 @@ fn handle_skill_step_failure(
             .as_deref(),
         step_execution,
     );
+    if let Some(policy_block) = crate::skills::parse_policy_block_error(err) {
+        register_failed_step_output(
+            loop_state,
+            global_step,
+            step_in_round,
+            &format!("skill.{normalized_skill}"),
+            &format!("skill({normalized_skill})"),
+            &user_visible_err,
+        );
+        let message =
+            compose_policy_block_delivery(state, task, goal, user_text, &policy_block).await;
+        super::append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, message);
+        loop_state.history_compact.push(format!(
+            "round={} step={} skill={} policy_block reason={}",
+            loop_state.round_no, step_in_round, normalized_skill, policy_block.reason_code
+        ));
+        return Ok(Some("policy_block_user_visible".to_string()));
+    }
     if let Some(stop_reason) = classify_skill_failure_recovery(
         state,
         actions,
@@ -431,6 +449,7 @@ fn handle_skill_step_failure(
     }
     let resume_err = build_resume_context_error(
         state,
+        task,
         actions,
         round_steps,
         user_text,
@@ -440,8 +459,40 @@ fn handle_skill_step_failure(
         step_in_round,
         &format!("skill({normalized_skill})"),
         &user_visible_err,
-    );
+    )
+    .await;
     Err(resume_err)
+}
+
+async fn compose_policy_block_delivery(
+    state: &AppState,
+    task: &ClaimedTask,
+    goal: &str,
+    user_text: &str,
+    policy_block: &crate::skills::PolicyBlockError,
+) -> String {
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
+    let default_text =
+        crate::skills::policy_block_default_text(state, task, user_text, policy_block);
+    let mut policy_boundary = policy_block.policy_boundary.clone();
+    policy_boundary.push("Do not claim the blocked action was executed.".to_string());
+    policy_boundary.push("Do not expose raw policy payloads or internal action names.".to_string());
+    let contract = crate::fallback::UserResponseContract::policy_block(
+        &policy_block.reason_code,
+        user_text,
+        goal,
+        policy_block.observed_facts.clone(),
+        policy_boundary,
+        &language_hint,
+    );
+    crate::fallback::compose_user_response_from_contract_with_default(
+        state,
+        task,
+        &contract,
+        crate::fallback::ClarifyFallbackSource::PolicyBlock,
+        &default_text,
+    )
+    .await
 }
 
 pub(super) async fn execute_prepared_skill_action(
@@ -544,7 +595,9 @@ pub(super) async fn execute_prepared_skill_action(
                 recovery_args.as_ref().or(Some(&exec_args)),
                 &err,
                 action_trace_kind,
-            )? {
+            )
+            .await?
+            {
                 Some(stop_reason) if stop_reason == "recoverable_failure_continue_in_round" => {
                     Ok(SkillActionOutcome {
                         ended_with_user_visible_output: false,
@@ -572,7 +625,9 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
 
-    use super::{handle_skill_step_success, LoopState};
+    use super::{
+        handle_skill_step_failure, handle_skill_step_success, AgentLoopGuardPolicy, LoopState,
+    };
     use crate::{
         AgentRuntimeConfig, AppState, ClaimedTask, SkillViewsSnapshot, ToolsPolicy,
         DEFAULT_AGENT_ID,
@@ -642,6 +697,17 @@ mod tests {
         }
     }
 
+    fn test_policy() -> AgentLoopGuardPolicy {
+        AgentLoopGuardPolicy {
+            max_steps: 16,
+            max_rounds: 2,
+            repeat_action_limit: 4,
+            no_progress_limit: 1,
+            multi_round_enabled: true,
+            ops_closed_loop: Default::default(),
+        }
+    }
+
     fn ok_step(step_id: &str, skill: &str, output: &str) -> crate::executor::StepExecutionResult {
         crate::executor::StepExecutionResult {
             step_id: step_id.to_string(),
@@ -652,6 +718,125 @@ mod tests {
             started_at: 0,
             finished_at: 0,
         }
+    }
+
+    fn failed_step(
+        step_id: &str,
+        skill: &str,
+        error: &str,
+    ) -> crate::executor::StepExecutionResult {
+        crate::executor::StepExecutionResult {
+            step_id: step_id.to_string(),
+            skill: skill.to_string(),
+            status: crate::executor::StepExecutionStatus::Error,
+            output: None,
+            error: Some(error.to_string()),
+            started_at: 0,
+            finished_at: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn policy_block_failure_appends_user_visible_delivery() {
+        let state = test_state();
+        let task = test_task();
+        let mut loop_state = LoopState::new(4);
+        loop_state.round_no = 1;
+        let err = crate::skills::policy_block_error(
+            "path_outside_workspace",
+            vec!["denied_path: /etc/shadow".to_string()],
+            vec!["Do not access paths outside workspace.".to_string()],
+        );
+        let step = failed_step("step_1", "read_file", &err);
+
+        let stop = handle_skill_step_failure(
+            &state,
+            &task,
+            &step,
+            &[],
+            &["skill(read_file)".to_string()],
+            &mut loop_state,
+            0,
+            1,
+            1,
+            "Read the first line of /etc/shadow.",
+            "Read the first line of /etc/shadow",
+            &test_policy(),
+            "read_file",
+            Some(&serde_json::json!({"path": "/etc/shadow"})),
+            &err,
+            "skill",
+        )
+        .await
+        .expect("policy block should be converted to delivery");
+
+        assert_eq!(stop.as_deref(), Some("policy_block_user_visible"));
+        assert_eq!(loop_state.delivery_messages.len(), 1);
+        assert!(loop_state.delivery_messages[0].contains("/etc/shadow"));
+        assert!(loop_state.delivery_messages[0].contains("workspace"));
+        assert!(loop_state
+            .output_vars
+            .get("failed_step.error")
+            .is_some_and(|value| value.contains("path_outside_workspace")));
+    }
+
+    #[tokio::test]
+    async fn non_recoverable_failure_preserves_resume_context_and_user_error() {
+        let state = test_state();
+        let task = test_task();
+        let mut loop_state = LoopState::new(4);
+        loop_state.round_no = 1;
+        let err = "planner schema mismatch: missing field `path`";
+        let step = failed_step("step_1", "fragile_skill", err);
+        let actions = vec![
+            crate::AgentAction::CallSkill {
+                skill: "fragile_skill".to_string(),
+                args: serde_json::json!({}),
+            },
+            crate::AgentAction::CallSkill {
+                skill: "next_skill".to_string(),
+                args: serde_json::json!({}),
+            },
+        ];
+
+        let outcome = handle_skill_step_failure(
+            &state,
+            &task,
+            &step,
+            &actions,
+            &[
+                "skill(fragile_skill)".to_string(),
+                "skill(next_skill)".to_string(),
+            ],
+            &mut loop_state,
+            0,
+            1,
+            1,
+            "Run two ordered operations.",
+            "Run two ordered operations",
+            &test_policy(),
+            "fragile_skill",
+            Some(&serde_json::json!({})),
+            err,
+            "skill",
+        )
+        .await
+        .expect_err("non-recoverable failure should return resume context error");
+
+        let (user_error, payload) =
+            crate::parse_resume_context_error(&outcome).expect("resume context payload");
+        assert!(!user_error.trim().is_empty());
+        assert!(payload
+            .get("resume_context")
+            .and_then(|v| v.get("remaining_steps"))
+            .and_then(|v| v.as_array())
+            .is_some_and(|steps| steps.len() == 1));
+        assert!(payload
+            .get("resume_context")
+            .and_then(|v| v.get("failed_step"))
+            .and_then(|v| v.get("error"))
+            .and_then(|v| v.as_str())
+            .is_some_and(|value| value.contains("missing field")));
     }
 
     #[tokio::test]

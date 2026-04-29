@@ -10,6 +10,7 @@ pub(super) struct PreparedAskFlow {
     pub(super) route_result: crate::RouteResult,
     pub(super) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     pub(super) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
+    pub(super) clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     pub(super) auto_locator_path: Option<String>,
     pub(super) chat_prompt_context: String,
     pub(super) resolved_prompt_for_execution: String,
@@ -36,14 +37,10 @@ struct AppliedAskPostRoute {
     fuzzy_locator_suggestions: Vec<String>,
 }
 
-fn clarify_fallback_source_for_route(
-    route_result: &crate::RouteResult,
+fn clarify_fallback_source_or_default(
+    source: Option<crate::fallback::ClarifyFallbackSource>,
 ) -> crate::fallback::ClarifyFallbackSource {
-    if route_result.route_reason.contains("llm_failed") {
-        crate::fallback::ClarifyFallbackSource::LlmUnavailable
-    } else {
-        crate::fallback::ClarifyFallbackSource::IntentUnresolved
-    }
+    source.unwrap_or(crate::fallback::ClarifyFallbackSource::IntentUnresolved)
 }
 
 fn normalize_brief_route_text(input: &str) -> String {
@@ -155,8 +152,7 @@ fn should_reuse_route_clarify_question(
         && clarify_reason_allows_route_question_reuse(clarify_reason_kind)
 }
 
-fn structured_fuzzy_locator_clarify_question(
-    state: &AppState,
+fn structured_fuzzy_locator_clarify_context(
     fuzzy_locator_suggestions: &[String],
 ) -> Option<String> {
     if fuzzy_locator_suggestions.is_empty() {
@@ -165,82 +161,47 @@ fn structured_fuzzy_locator_clarify_question(
     let candidate_block = fuzzy_locator_suggestions
         .iter()
         .enumerate()
-        .map(|(idx, value)| format!("{}. {}", idx + 1, value))
+        .map(|(idx, value)| format!("candidate_{}: {}", idx + 1, value))
         .collect::<Vec<_>>()
         .join("\n");
-    let header = if state
-        .policy
-        .command_intent
-        .default_locale
-        .trim()
-        .to_ascii_lowercase()
-        .starts_with("en")
-    {
-        "I found multiple matching candidates. Reply with the number or the full path:"
-    } else {
-        "我找到了多个匹配候选，请直接回复序号或完整路径："
-    };
-    Some(format!("{header}\n{candidate_block}"))
+    Some(format!(
+        "clarify_case: fuzzy_locator_candidates\nexact_target_found: false\ncandidate_count: {}\n{}",
+        fuzzy_locator_suggestions.len(),
+        candidate_block
+    ))
 }
 
-fn structured_missing_locator_clarify_question(
-    state: &AppState,
+fn structured_missing_locator_clarify_context(
     route_result: &crate::RouteResult,
     fuzzy_locator_suggestions: &[String],
 ) -> Option<String> {
     if !route_result.needs_clarify {
         return None;
     }
-    if let Some(clarify) =
-        structured_fuzzy_locator_clarify_question(state, fuzzy_locator_suggestions)
-    {
-        return Some(clarify);
+    if let Some(context) = structured_fuzzy_locator_clarify_context(fuzzy_locator_suggestions) {
+        return Some(context);
     }
     if !route_result.output_contract.locator_hint.trim().is_empty() {
         return None;
     }
-    let route_question = route_result.clarify_question.trim();
-    if !route_question.is_empty() {
-        return Some(route_question.to_string());
-    }
-    if matches!(
+    let clarify_case = if matches!(
         route_result.output_contract.delivery_intent,
         crate::OutputDeliveryIntent::DirectoryLookup
     ) {
-        return Some(crate::i18n_t_with_default(
-            state,
-            "clawd.msg.clarify_missing_directory_locator",
-            "Please provide the specific directory name or path to inspect.",
-        ));
-    }
-    if matches!(
+        Some("missing_directory_locator")
+    } else if matches!(
         route_result.output_contract.semantic_kind,
         crate::OutputSemanticKind::ScalarCount
     ) {
-        return Some(crate::i18n_t_with_default(
-            state,
-            "clawd.msg.clarify_missing_count_target",
-            "Please provide the specific directory or path to count.",
-        ));
-    }
-    if matches!(
+        Some("missing_count_target")
+    } else if matches!(
         route_result.output_contract.semantic_kind,
         crate::OutputSemanticKind::ServiceStatus
     ) {
-        return Some(crate::i18n_t_with_default(
-            state,
-            "clawd.msg.clarify_missing_service_target",
-            "Please tell me which service you want to check, for example a service name or process name.",
-        ));
-    }
-    if route_result.output_contract.delivery_required {
-        return Some(crate::i18n_t_with_default(
-            state,
-            "clawd.msg.clarify_missing_file_locator",
-            "Please provide the specific file name or path.",
-        ));
-    }
-    if route_result.output_contract.requires_content_evidence
+        Some("missing_service_target")
+    } else if route_result.output_contract.delivery_required {
+        Some("missing_file_locator")
+    } else if route_result.output_contract.requires_content_evidence
         && matches!(
             route_result.output_contract.response_shape,
             crate::OutputResponseShape::Scalar
@@ -248,31 +209,41 @@ fn structured_missing_locator_clarify_question(
                 | crate::OutputResponseShape::OneSentence
         )
     {
-        return Some(crate::i18n_t_with_default(
-            state,
-            "clawd.msg.clarify_missing_read_target",
-            "Please provide the specific file name or path to read.",
+        Some("missing_read_target")
+    } else {
+        None
+    }?;
+    let mut lines = vec![
+        format!("clarify_case: {clarify_case}"),
+        format!(
+            "locator_kind: {}",
+            route_result.output_contract.locator_kind.as_str()
+        ),
+        format!(
+            "response_shape: {}",
+            route_result.output_contract.response_shape.as_str()
+        ),
+        format!(
+            "semantic_kind: {}",
+            route_result.output_contract.semantic_kind.as_str()
+        ),
+        format!(
+            "delivery_required: {}",
+            route_result.output_contract.delivery_required
+        ),
+        format!(
+            "requires_content_evidence: {}",
+            route_result.output_contract.requires_content_evidence
+        ),
+    ];
+    let route_question = route_result.clarify_question.trim();
+    if !route_question.is_empty() {
+        lines.push(format!(
+            "normalizer_clarify_question_candidate: {}",
+            crate::truncate_for_agent_trace(route_question)
         ));
     }
-    None
-}
-
-fn should_short_circuit_structured_clarify(
-    route_result: &crate::RouteResult,
-    fuzzy_locator_suggestions: &[String],
-) -> bool {
-    let fuzzy_locator_clarify = !fuzzy_locator_suggestions.is_empty();
-    let missing_locator_structured_clarify =
-        route_result.output_contract.locator_hint.trim().is_empty()
-            && (route_result.output_contract.delivery_required
-                || (route_result.output_contract.requires_content_evidence
-                    && matches!(
-                        route_result.output_contract.response_shape,
-                        crate::OutputResponseShape::Scalar
-                            | crate::OutputResponseShape::Free
-                            | crate::OutputResponseShape::OneSentence
-                    )));
-    route_result.needs_clarify && (fuzzy_locator_clarify || missing_locator_structured_clarify)
+    Some(lines.join("\n"))
 }
 
 fn structured_doc_filename_scalar_locator_resolution(
@@ -281,8 +252,7 @@ fn structured_doc_filename_scalar_locator_resolution(
     max_depth: usize,
     _max_files: usize,
 ) -> Option<crate::post_route_policy::LocatorResolution> {
-    if !route_supports_structured_doc_filename_scalar_resolution(route_result)
-        || route_result.output_contract.locator_kind != crate::OutputLocatorKind::Filename
+    if route_result.output_contract.locator_kind != crate::OutputLocatorKind::Filename
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.response_shape != crate::OutputResponseShape::Scalar
     {
@@ -300,15 +270,6 @@ fn structured_doc_filename_scalar_locator_resolution(
     let candidates =
         find_exact_filename_matches_with_depth(workspace_root, file_name, max_depth, 16);
     choose_structured_doc_scalar_candidate(workspace_root, candidates, field_path, format)
-}
-
-fn route_supports_structured_doc_filename_scalar_resolution(
-    route_result: &crate::RouteResult,
-) -> bool {
-    crate::route_reason_starts_with_route_contract(
-        &route_result.route_reason,
-        "generic_filename_scalar_extract",
-    )
 }
 
 fn find_exact_filename_matches_with_depth(
@@ -535,10 +496,8 @@ fn apply_ask_post_route(
     } else {
         crate::post_route_policy::LocatorResolution::None
     };
-    let request_surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
-    let post_route = crate::post_route_policy::apply_post_route_policy_with_surface(
+    let post_route = crate::post_route_policy::apply_post_route_policy(
         route_result.clone(),
-        &request_surface,
         super::has_concrete_locator_hint(prompt),
         super::has_concrete_locator_hint(resolved_prompt),
         super::has_explicit_path_or_url_locator_hint(prompt),
@@ -728,6 +687,7 @@ pub(super) async fn prepare_ask_flow(
         route_result: applied_post_route.execution_route_result,
         execution_recipe_hint: prepared_routing.execution_recipe_hint,
         turn_analysis: prepared_routing.turn_analysis,
+        clarify_fallback_source: prepared_routing.clarify_fallback_source,
         auto_locator_path: applied_post_route.auto_locator_path,
         chat_prompt_context: prepared_execution.chat_prompt_context,
         resolved_prompt_for_execution: applied_post_route.resolved_prompt_for_execution,
@@ -755,6 +715,7 @@ pub(super) async fn execute_ask_dispatch(
     agent_mode: bool,
     clarify_reason: &str,
     clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
+    clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     fuzzy_locator_suggestions: &[String],
     ask_mode: &crate::AskMode,
     should_route_schedule_direct: bool,
@@ -780,40 +741,44 @@ pub(super) async fn execute_ask_dispatch(
             fuzzy_locator_suggestions,
             !suppress_recent_execution_context,
         );
-        let structured_clarify_question = structured_missing_locator_clarify_question(
-            state,
+        let structured_clarify_context =
+            structured_missing_locator_clarify_context(route_result, fuzzy_locator_suggestions);
+        let clarify_context = match structured_clarify_context.as_deref() {
+            Some(context)
+                if clarify_context.trim().is_empty() || clarify_context.trim() == "<none>" =>
+            {
+                format!("### STRUCTURED_CLARIFY_CONTEXT\n{context}")
+            }
+            Some(context) => {
+                format!("{clarify_context}\n\n### STRUCTURED_CLARIFY_CONTEXT\n{context}")
+            }
+            None => clarify_context,
+        };
+        let preferred_clarify_question = if should_reuse_route_clarify_question(
+            prompt,
             route_result,
+            clarify_reason_kind,
             fuzzy_locator_suggestions,
-        );
-        if should_short_circuit_structured_clarify(route_result, fuzzy_locator_suggestions) {
-            if let Some(clarify) = structured_clarify_question {
-                return Ok(Some(Ok(crate::AskReply::non_llm(clarify))));
-            }
-        }
-        let preferred_clarify_question = structured_clarify_question.as_deref().or_else(|| {
-            if should_reuse_route_clarify_question(
-                prompt,
-                route_result,
-                clarify_reason_kind,
-                fuzzy_locator_suggestions,
-            ) {
-                let route_question = route_result.clarify_question.trim();
-                (!route_question.is_empty()).then_some(route_question)
-            } else {
-                None
-            }
-        });
-        let clarify_policy = if preferred_clarify_question.is_none()
-            && route_result.clarify_question.trim().is_empty()
-            && !matches!(
-                clarify_reason_kind,
-                crate::post_route_policy::ClarifyReasonKind::FuzzyLocatorCandidates
-            ) {
+        ) {
+            let route_question = route_result.clarify_question.trim();
+            (!route_question.is_empty()).then_some(route_question)
+        } else {
+            None
+        };
+        let structured_context_requires_llm =
+            structured_clarify_context.is_some() && preferred_clarify_question.is_none();
+        let clarify_policy = if structured_context_requires_llm
+            || (preferred_clarify_question.is_none()
+                && route_result.clarify_question.trim().is_empty()
+                && !matches!(
+                    clarify_reason_kind,
+                    crate::post_route_policy::ClarifyReasonKind::FuzzyLocatorCandidates
+                )) {
             crate::intent_router::ClarifyQuestionPolicy::SafeFallback
         } else {
             crate::intent_router::ClarifyQuestionPolicy::AllowModel
         };
-        let fallback_source = clarify_fallback_source_for_route(route_result);
+        let fallback_source = clarify_fallback_source_or_default(clarify_fallback_source);
         let clarify = crate::intent_router::generate_or_reuse_clarify_question(
             state,
             task,
@@ -969,13 +934,12 @@ pub(super) async fn execute_ask_dispatch(
 #[cfg(test)]
 mod tests {
     use super::{
-        clarify_fallback_source_for_route, execution_user_request, has_multiple_locator_targets,
+        clarify_fallback_source_or_default, execution_user_request, has_multiple_locator_targets,
         resolved_intent_inherits_prior_operation, should_attempt_auto_locator,
         should_preserve_original_inline_structured_input, should_reuse_route_clarify_question,
-        should_short_circuit_structured_clarify,
         should_suppress_recent_execution_in_clarify_context,
         structured_doc_filename_scalar_locator_resolution,
-        structured_missing_locator_clarify_question,
+        structured_missing_locator_clarify_context,
     };
     use std::{
         path::PathBuf,
@@ -997,21 +961,19 @@ mod tests {
     }
 
     #[test]
-    fn llm_failed_route_uses_llm_unavailable_fallback_source() {
-        let mut route = clarify_route(crate::OutputLocatorKind::None);
-        route.route_reason = "llm_failed_safe_clarify; normalizer_llm_failed".to_string();
+    fn llm_failed_normalizer_source_uses_llm_unavailable_fallback_source() {
         assert_eq!(
-            clarify_fallback_source_for_route(&route),
+            clarify_fallback_source_or_default(Some(
+                crate::fallback::ClarifyFallbackSource::LlmUnavailable
+            )),
             crate::fallback::ClarifyFallbackSource::LlmUnavailable
         );
     }
 
     #[test]
-    fn unresolved_route_uses_intent_unresolved_fallback_source() {
-        let mut route = clarify_route(crate::OutputLocatorKind::None);
-        route.route_reason = "clarify_target_missing".to_string();
+    fn absent_normalizer_fallback_source_uses_intent_unresolved() {
         assert_eq!(
-            clarify_fallback_source_for_route(&route),
+            clarify_fallback_source_or_default(None),
             crate::fallback::ClarifyFallbackSource::IntentUnresolved
         );
     }
@@ -1341,8 +1303,8 @@ mod tests {
     }
 
     #[test]
-    fn cargo_filename_scalar_locator_resolution_accepts_generic_filename_route() {
-        let root = make_temp_root("cargo_manifest_single_generic");
+    fn cargo_filename_scalar_locator_resolution_uses_contract_not_route_reason() {
+        let root = make_temp_root("cargo_manifest_single_contract");
         std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"single\"\n")
             .expect("single manifest");
 
@@ -1351,7 +1313,7 @@ mod tests {
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "读取 Cargo.toml 的 package.name，只输出值".to_string(),
             needs_clarify: false,
-            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
+            route_reason: String::new(),
             route_confidence: Some(0.98),
             visible_skill_candidates: Vec::new(),
             risk_ceiling: crate::RiskCeiling::Unknown,
@@ -1446,8 +1408,8 @@ mod tests {
     }
 
     #[test]
-    fn package_json_filename_scalar_resolution_accepts_generic_filename_route() {
-        let root = make_temp_root("package_json_prefer_ui_generic");
+    fn package_json_filename_scalar_resolution_uses_contract_not_route_reason() {
+        let root = make_temp_root("package_json_prefer_ui_contract");
         std::fs::write(
             root.join("package.json"),
             "{\"dependencies\":{\"x\":\"1.0.0\"}}",
@@ -1465,7 +1427,7 @@ mod tests {
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
             resolved_intent: "去 package.json 里找 name，只把值给我".to_string(),
             needs_clarify: false,
-            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
+            route_reason: String::new(),
             route_confidence: Some(0.98),
             visible_skill_candidates: Vec::new(),
             risk_ceiling: crate::RiskCeiling::Unknown,
@@ -1615,103 +1577,84 @@ mod tests {
     }
 
     #[test]
-    fn scalar_missing_locator_clarify_short_circuits_to_structured_prompt() {
+    fn scalar_missing_locator_attaches_structured_context() {
         let route = clarify_route(crate::OutputLocatorKind::Path);
-        assert!(should_short_circuit_structured_clarify(&route, &[]));
+        let context = structured_missing_locator_clarify_context(&route, &[])
+            .expect("structured clarify context");
+        assert!(context.contains("clarify_case: missing_read_target"));
+        assert!(context.contains("locator_kind: path"));
     }
 
     #[test]
-    fn structured_missing_locator_prefers_explicit_route_question() {
+    fn structured_missing_locator_records_explicit_route_question_as_context() {
         let mut route = clarify_route(crate::OutputLocatorKind::Filename);
         route.clarify_question = "请提供具体要查看的目录名或路径。".to_string();
         route.output_contract.delivery_intent = crate::OutputDeliveryIntent::DirectoryLookup;
-        let state = crate::AppState::test_default_with_fixture_provider();
-        let clarify = structured_missing_locator_clarify_question(&state, &route, &[])
-            .expect("clarify question");
-        assert_eq!(clarify, "请提供具体要查看的目录名或路径。");
+        let context = structured_missing_locator_clarify_context(&route, &[])
+            .expect("structured clarify context");
+        assert!(context.contains("clarify_case: missing_directory_locator"));
+        assert!(context.contains("normalizer_clarify_question_candidate"));
     }
 
     #[test]
-    fn content_missing_locator_clarify_short_circuits_to_structured_prompt() {
+    fn content_missing_locator_attaches_structured_context() {
         let mut route = clarify_route(crate::OutputLocatorKind::Path);
         route.clarify_question.clear();
         route.output_contract.response_shape = crate::OutputResponseShape::Free;
-        assert!(should_short_circuit_structured_clarify(&route, &[]));
-        let state = crate::AppState::test_default_with_fixture_provider();
-        let clarify = structured_missing_locator_clarify_question(&state, &route, &[])
-            .expect("content clarify question");
-        assert!(
-            clarify.contains("路径")
-                || clarify.to_ascii_lowercase().contains("path")
-                || clarify.contains("文件名")
-                || clarify.to_ascii_lowercase().contains("file name")
-        );
+        let context = structured_missing_locator_clarify_context(&route, &[])
+            .expect("structured clarify context");
+        assert!(context.contains("clarify_case: missing_read_target"));
+        assert!(context.contains("response_shape: free"));
     }
 
     #[test]
-    fn directory_lookup_missing_locator_uses_directory_specific_question() {
+    fn directory_lookup_missing_locator_records_directory_case() {
         let mut route = clarify_route(crate::OutputLocatorKind::Filename);
         route.clarify_question.clear();
         route.output_contract.response_shape = crate::OutputResponseShape::Free;
         route.output_contract.delivery_intent = crate::OutputDeliveryIntent::DirectoryLookup;
-        let state = crate::AppState::test_default_with_fixture_provider();
-        let clarify = structured_missing_locator_clarify_question(&state, &route, &[])
-            .expect("directory clarify question");
-        assert!(
-            clarify.contains("目录") || clarify.to_ascii_lowercase().contains("directory"),
-            "unexpected clarify question: {clarify}"
-        );
+        let context = structured_missing_locator_clarify_context(&route, &[])
+            .expect("structured clarify context");
+        assert!(context.contains("clarify_case: missing_directory_locator"));
     }
 
     #[test]
-    fn scalar_count_missing_locator_uses_count_specific_question() {
+    fn scalar_count_missing_locator_records_count_case() {
         let mut route = clarify_route(crate::OutputLocatorKind::Filename);
         route.clarify_question.clear();
         route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
-        let state = crate::AppState::test_default_with_fixture_provider();
-        let clarify = structured_missing_locator_clarify_question(&state, &route, &[])
-            .expect("count clarify question");
-        assert!(
-            clarify.contains("统计") || clarify.to_ascii_lowercase().contains("count"),
-            "unexpected clarify question: {clarify}"
-        );
+        let context = structured_missing_locator_clarify_context(&route, &[])
+            .expect("structured clarify context");
+        assert!(context.contains("clarify_case: missing_count_target"));
+        assert!(context.contains("semantic_kind: scalar_count"));
     }
 
     #[test]
-    fn delivery_missing_locator_clarify_short_circuits_to_structured_prompt() {
+    fn delivery_missing_locator_attaches_structured_context() {
         let mut route = clarify_route(crate::OutputLocatorKind::Filename);
         route.clarify_question.clear();
         route.output_contract.requires_content_evidence = false;
         route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
         route.output_contract.delivery_required = true;
         route.wants_file_delivery = true;
-        assert!(should_short_circuit_structured_clarify(&route, &[]));
-        let state = crate::AppState::test_default_with_fixture_provider();
-        let clarify = structured_missing_locator_clarify_question(&state, &route, &[])
-            .expect("delivery clarify question");
-        assert!(
-            clarify.contains("路径")
-                || clarify.to_ascii_lowercase().contains("path")
-                || clarify.contains("文件名")
-                || clarify.to_ascii_lowercase().contains("file name")
-        );
+        let context = structured_missing_locator_clarify_context(&route, &[])
+            .expect("structured clarify context");
+        assert!(context.contains("clarify_case: missing_file_locator"));
+        assert!(context.contains("delivery_required: true"));
     }
 
     #[test]
-    fn fuzzy_locator_candidates_short_circuit_to_structured_question() {
+    fn fuzzy_locator_candidates_attach_structured_context() {
         let route = clarify_route(crate::OutputLocatorKind::Filename);
-        let state = crate::AppState::test_default_with_fixture_provider();
         let candidates = vec![
             "/tmp/a/Cargo.toml".to_string(),
             "/tmp/b/Cargo.toml".to_string(),
         ];
-        assert!(should_short_circuit_structured_clarify(&route, &candidates));
-        let clarify = structured_missing_locator_clarify_question(&state, &route, &candidates)
-            .expect("fuzzy clarify question");
-        assert!(clarify.contains("/tmp/a/Cargo.toml"));
-        assert!(clarify.contains("/tmp/b/Cargo.toml"));
-        assert!(clarify.contains("1."));
-        assert!(clarify.contains("2."));
+        let context = structured_missing_locator_clarify_context(&route, &candidates)
+            .expect("structured clarify context");
+        assert!(context.contains("clarify_case: fuzzy_locator_candidates"));
+        assert!(context.contains("candidate_1: /tmp/a/Cargo.toml"));
+        assert!(context.contains("candidate_2: /tmp/b/Cargo.toml"));
     }
 
     #[test]

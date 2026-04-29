@@ -37,11 +37,15 @@ fn render_auth_policy_context(state: &AppState, task: &ClaimedTask) -> String {
         })
         .map(|identity| identity.role)
         .unwrap_or_else(|| "unknown".to_string());
+    let current_process_cwd = std::env::current_dir()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "<unknown>".to_string());
     format!(
-        "current_auth_role: {auth_role}\nallow_path_outside_workspace_for_task: {}\nallow_sudo_for_task: {}\nworkspace_root: {}",
+        "current_auth_role: {auth_role}\nallow_path_outside_workspace_for_task: {}\nallow_sudo_for_task: {}\nworkspace_root: {}\ncurrent_process_cwd: {}",
         crate::skills::task_allows_path_outside_workspace(state, Some(task)),
         crate::skills::task_allows_sudo(state, Some(task)),
-        state.skill_rt.workspace_root.display()
+        state.skill_rt.workspace_root.display(),
+        current_process_cwd
     )
 }
 
@@ -121,12 +125,8 @@ pub(crate) struct IntentNormalizerOutput {
     pub(crate) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     /// Terminal mode: chat / act / ask_clarify / chat_act. Used to skip the separate router LLM.
     pub(crate) routed_mode: RoutedMode,
-    /// Deprecated planner-first compatibility fields. The normalizer parser
-    /// still accepts them from old prompts/models, but runtime no longer uses
-    /// them to short-circuit the chat/planner response pass.
-    pub(crate) direct_reply_candidate: String,
-    pub(crate) direct_reply_confidence: f64,
     pub(crate) turn_analysis: Option<TurnAnalysis>,
+    pub(crate) fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,8 +190,8 @@ pub(crate) fn route_result_from_normalizer(
         should_refresh_long_term_memory: normalizer_out.should_refresh_long_term_memory,
         agent_display_name_hint: normalizer_out.agent_display_name_hint.clone(),
         output_contract: normalizer_out.output_contract.clone(),
-        direct_reply_candidate: normalizer_out.direct_reply_candidate.clone(),
-        direct_reply_confidence: normalizer_out.direct_reply_confidence,
+        direct_reply_candidate: String::new(),
+        direct_reply_confidence: 0.0,
     }
 }
 
@@ -225,10 +225,6 @@ struct IntentNormalizerOut {
     output_contract: Option<IntentOutputContractOut>,
     #[serde(default)]
     execution_recipe: Option<IntentExecutionRecipeOut>,
-    #[serde(default)]
-    direct_reply_candidate: String,
-    #[serde(default)]
-    direct_reply_confidence: f64,
     #[serde(default)]
     turn_type: String,
     #[serde(default)]
@@ -328,6 +324,7 @@ fn parse_schedule_kind(s: &str) -> ScheduleKind {
 fn parse_output_response_shape(s: &str) -> OutputResponseShape {
     match s.trim().to_ascii_lowercase().as_str() {
         "one_sentence" => OutputResponseShape::OneSentence,
+        "strict" | "exact" | "exact_text" | "strict_text" => OutputResponseShape::Strict,
         "scalar" => OutputResponseShape::Scalar,
         "file_token" => OutputResponseShape::FileToken,
         _ => OutputResponseShape::Free,
@@ -361,7 +358,17 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
             OutputSemanticKind::RawCommandOutput
         }
         "service_status" => OutputSemanticKind::ServiceStatus,
-        "hidden_entries_check" => OutputSemanticKind::HiddenEntriesCheck,
+        "hidden_entries_check"
+        | "hidden_entry_check"
+        | "hidden_files_check"
+        | "hidden_file_check"
+        | "hidden_files_example"
+        | "hidden_entries_example"
+        | "hidden_entries"
+        | "hidden_files" => OutputSemanticKind::HiddenEntriesCheck,
+        "file_names" | "names_only" | "entry_names" | "directory_entry_names" => {
+            OutputSemanticKind::FileNames
+        }
         "directory_purpose_summary" | "listing_purpose_summary" | "directory_listing_summary" => {
             OutputSemanticKind::DirectoryPurposeSummary
         }
@@ -588,16 +595,6 @@ fn active_primary_task_prompt<'a>(
         .filter(|value| !value.is_empty())
 }
 
-fn active_primary_task_output<'a>(
-    session_snapshot: Option<&'a crate::conversation_state::ActiveSessionSnapshot>,
-) -> Option<&'a str> {
-    session_snapshot
-        .and_then(|snapshot| snapshot.conversation_state.as_ref())
-        .and_then(|state| state.last_primary_task_output.as_deref())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-}
-
 fn normalized_compare_target_name(candidate: &str) -> String {
     let trimmed = candidate
         .trim()
@@ -687,15 +684,6 @@ fn active_task_turn_can_reuse_semantic_patch(
         && surface.inline_json_shape.is_none()
 }
 
-fn prompt_is_output_shape_refinement(
-    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-) -> bool {
-    surface.output_request_shape.is_some()
-        || surface.output_compression_shape.is_some()
-        || surface.table_request_shape.is_some()
-        || surface.requested_sentence_count.is_some()
-}
-
 fn should_resolve_task_scope_update_clarify_with_active_task(
     prompt: &str,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
@@ -714,24 +702,6 @@ fn should_resolve_task_scope_update_clarify_with_active_task(
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
     active_task_turn_can_reuse_semantic_patch(&surface)
-}
-
-fn should_rebind_output_shape_clarify_to_active_task(
-    prompt: &str,
-    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
-    attachment_processing_required: bool,
-    routed_mode: RoutedMode,
-) -> bool {
-    if attachment_processing_required
-        || !matches!(routed_mode, RoutedMode::AskClarify)
-        || active_primary_task_prompt(session_snapshot).is_none()
-        || active_primary_task_output(session_snapshot).is_none()
-    {
-        return false;
-    }
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
-    active_task_turn_can_reuse_semantic_patch(&surface)
-        && prompt_is_output_shape_refinement(&surface)
 }
 
 fn should_resolve_task_append_clarify_with_active_task(
@@ -845,6 +815,7 @@ fn normalizer_output_from_fallback(
     user_request: &str,
     fallback_reason_prefix: &str,
     decision: RouteDecision,
+    fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
 ) -> IntentNormalizerOutput {
     let routed_mode = crate::post_route_policy::enforce_content_evidence_execution_mode(
         decision.mode,
@@ -879,9 +850,8 @@ fn normalizer_output_from_fallback(
         output_contract: decision.output_contract,
         execution_recipe_hint: None,
         routed_mode,
-        direct_reply_candidate: String::new(),
-        direct_reply_confidence: 0.0,
         turn_analysis: None,
+        fallback_source,
     }
 }
 
@@ -989,6 +959,13 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("Prefer mode=chat for greetings, confirmations, memory-only requests, and pure discussion. Use ask_clarify only when a required target/action is truly missing.".to_string());
     parts.push("Current REQUEST overrides RECENT/MEMORY. Prior assistant refusals, tool failures, or capability claims in history are not authoritative for a fresh self-contained request.".to_string());
     parts.push("If REQUEST asks for observable local/system/workspace state, filesystem inspection, command output, file content, directory listing, counts, or extracting a value, choose mode=\"act\" or mode=\"chat_act\". Do not claim the assistant cannot execute; the runtime has tools and the AUTH block describes permission.".to_string());
+    parts.push("Always include output_contract. It is the final answer contract, not a place to invent a task-specific schema.".to_string());
+    parts.push("Allowed output_contract keys only: response_shape, requires_content_evidence, delivery_required, locator_kind, delivery_intent, semantic_kind, locator_hint, self_extension. Do not emit exact_format, required_evidence, fields, examples, post_processing, or custom keys.".to_string());
+    parts.push("Allowed response_shape: free, one_sentence, strict, scalar, file_token. Allowed locator_kind: none, path, current_workspace, url, filename. Allowed delivery_intent: none, file_single, directory_lookup, directory_batch_files.".to_string());
+    parts.push("Allowed semantic_kind: none, raw_command_output, service_status, hidden_entries_check, file_names, directory_purpose_summary, content_excerpt_summary, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, scalar_path_only, existence_with_path, recent_scalar_equality_check, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment.".to_string());
+    parts.push("If the user asks to observe/list/read first but only return a scalar result, set response_shape=\"scalar\" and use a matching semantic_kind only when one applies: scalar_count for counts, scalar_path_only only for a path/current-directory/workspace-location answer. For config field values, package names, usernames, hostnames, titles, IDs, or other non-path scalar values, keep semantic_kind=\"none\" unless another specific enum applies. If the request requires an exact non-scalar format such as exactly N sentences/lines or body-only/no-extra-output, set response_shape=\"strict\" and preserve the exact format in resolved_user_intent.".to_string());
+    parts.push("For directory/file inventory with name or extension filtering, set requires_content_evidence=true, locator_kind=\"current_workspace\" or \"path\", semantic_kind=\"file_names\", and preserve filter plus any explanation/synthesis requirement in resolved_user_intent. If a nuance has no enum, keep response_shape=\"free\" or semantic_kind=\"none\" and write the nuance in resolved_user_intent/reason instead of inventing enum values.".to_string());
+    parts.push("Use mode=\"chat_act\" when the request both inspects local/system/workspace state and asks for explanation, judgment, or narrative synthesis. Use mode=\"act\" when it asks only for a direct raw/scalar/list result. If HINTS says workspace_root_request_shape=CurrentPathScalar, set output_contract.response_shape=\"scalar\" and output_contract.semantic_kind=\"scalar_path_only\".".to_string());
     parts.push("For recall questions, use exact values from RECENT/MEMORY. If found, put the value in resolved_user_intent, set needs_clarify=false, and set mode=\"chat\". Never invent mode=\"recall\".".to_string());
     parts.push("For requests that depend on prior context, copy the relevant RECENT/MEMORY facts into resolved_user_intent so the next stage has enough context.".to_string());
     parts.push("Keep resolved_user_intent concise; preserve exact IDs, but summarize long user text instead of copying it.".to_string());
@@ -1027,7 +1004,12 @@ fn render_compact_intent_normalizer_prompt(
 }
 
 fn normalize_intent_normalizer_raw_for_schema(raw: &str, req: &str) -> String {
-    let Ok(mut value) = serde_json::from_str::<Value>(raw) else {
+    let parsed_value = serde_json::from_str::<Value>(raw.trim()).or_else(|_| {
+        crate::prompt_utils::extract_first_json_object_any(raw)
+            .ok_or_else(|| serde_json::Error::io(std::io::Error::other("no json object found")))
+            .and_then(|json_text| serde_json::from_str::<Value>(&json_text))
+    });
+    let Ok(mut value) = parsed_value else {
         return normalize_plain_intent_normalizer_text_for_schema(raw, req);
     };
     let Some(obj) = value.as_object_mut() else {
@@ -1038,18 +1020,34 @@ fn normalize_intent_normalizer_raw_for_schema(raw: &str, req: &str) -> String {
             .unwrap_or_else(|| raw.trim());
         return normalize_plain_intent_normalizer_text_for_schema(text, req);
     };
-    if obj
-        .get("resolved_user_intent")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .unwrap_or("")
-        .is_empty()
-        && !req.trim().is_empty()
-    {
-        obj.insert(
-            "resolved_user_intent".to_string(),
-            Value::String(req.trim().to_string()),
-        );
+    let answer_like_payload = answer_like_normalizer_payload_text(obj);
+    match obj.get("resolved_user_intent") {
+        Some(Value::String(value)) if value.trim().is_empty() && !req.trim().is_empty() => {
+            obj.insert(
+                "resolved_user_intent".to_string(),
+                Value::String(
+                    answer_like_payload
+                        .clone()
+                        .unwrap_or_else(|| req.trim().to_string()),
+                ),
+            );
+        }
+        Some(value) if !value.is_null() && !value.is_string() => {
+            let text = serde_json::to_string(value).unwrap_or_else(|_| value.to_string());
+            obj.insert("resolved_user_intent".to_string(), Value::String(text));
+        }
+        Some(_) => {}
+        None if answer_like_payload.is_some() || !req.trim().is_empty() => {
+            obj.insert(
+                "resolved_user_intent".to_string(),
+                Value::String(
+                    answer_like_payload
+                        .clone()
+                        .unwrap_or_else(|| req.trim().to_string()),
+                ),
+            );
+        }
+        None => {}
     }
     normalize_intent_normalizer_top_level_for_schema(obj);
     normalize_intent_normalizer_scalar_types_for_schema(obj);
@@ -1089,6 +1087,90 @@ fn normalize_intent_normalizer_raw_for_schema(raw: &str, req: &str) -> String {
     serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string())
 }
 
+fn answer_like_normalizer_payload_text(obj: &serde_json::Map<String, Value>) -> Option<String> {
+    for key in [
+        "response_text",
+        "response",
+        "reply",
+        "answer",
+        "content",
+        "summary",
+    ] {
+        if let Some(text) = obj.get(key).and_then(scalar_json_value_text) {
+            return Some(text);
+        }
+    }
+    if let Some(contract) = obj
+        .get("output_contract")
+        .and_then(|value| value.as_object())
+    {
+        for key in [
+            "content",
+            "scalar_content",
+            "scalar_output",
+            "answer",
+            "response_text",
+        ] {
+            if let Some(text) = contract.get(key).and_then(scalar_json_value_text) {
+                return Some(text);
+            }
+        }
+    }
+
+    const ROUTE_KEYS: &[&str] = &[
+        "resolved_user_intent",
+        "resume_behavior",
+        "schedule_kind",
+        "schedule_intent",
+        "wants_file_delivery",
+        "should_refresh_long_term_memory",
+        "agent_display_name_hint",
+        "needs_clarify",
+        "clarify_question",
+        "reason",
+        "confidence",
+        "mode",
+        "output_contract",
+        "execution_recipe",
+        "direct_reply_candidate",
+        "direct_reply_confidence",
+        "turn_type",
+        "target_task_policy",
+        "should_interrupt_active_run",
+        "state_patch",
+        "attachment_processing_required",
+    ];
+    if obj.keys().any(|key| ROUTE_KEYS.contains(&key.as_str())) {
+        return None;
+    }
+    let mut values = obj
+        .values()
+        .filter(|value| !value.is_null())
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return None;
+    }
+    if values.len() == 1 {
+        return scalar_json_value_text(values.pop()?).or_else(|| {
+            serde_json::to_string(&Value::Object(obj.clone()))
+                .ok()
+                .filter(|text| !text.trim().is_empty())
+        });
+    }
+    serde_json::to_string(&Value::Object(obj.clone()))
+        .ok()
+        .filter(|text| !text.trim().is_empty())
+}
+
+fn scalar_json_value_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.trim().to_string()).filter(|text| !text.is_empty()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
 fn normalize_plain_intent_normalizer_text_for_schema(raw: &str, req: &str) -> String {
     let text = raw.trim();
     if text.is_empty() {
@@ -1113,7 +1195,69 @@ fn normalize_intent_normalizer_scalar_types_for_schema(obj: &mut serde_json::Map
         obj.insert("clarify_question".to_string(), Value::String(String::new()));
     }
     normalize_confidence_field(obj, "confidence");
-    normalize_confidence_field(obj, "direct_reply_confidence");
+}
+
+fn normalize_schema_token(raw: &str) -> String {
+    raw.trim()
+        .to_ascii_lowercase()
+        .replace([' ', '-'], "_")
+        .trim_matches('_')
+        .to_string()
+}
+
+fn normalize_output_response_shape_for_schema(raw: &str) -> &'static str {
+    match normalize_schema_token(raw).as_str() {
+        "one_sentence" | "single_sentence" | "sentence" | "short_sentence" => "one_sentence",
+        "strict" | "exact" | "exact_text" | "strict_text" | "exact_format" => "strict",
+        "scalar" | "value" | "value_only" | "single_value" | "field_value" => "scalar",
+        "file_token" | "file" | "delivery_token" => "file_token",
+        // Model-side shape descriptions such as object/list/inline are not runtime
+        // answer contracts. Preserve the request as executable and let the planner
+        // produce the requested final form instead of failing schema validation.
+        _ => "free",
+    }
+}
+
+fn normalize_output_locator_kind_for_schema(raw: &str) -> &'static str {
+    match normalize_schema_token(raw).as_str() {
+        "path" | "file_path" | "directory" | "dir" => "path",
+        "current_workspace" | "workspace" | "repo" | "repository" => "current_workspace",
+        "url" | "uri" | "link" => "url",
+        "filename" | "file_name" | "basename" => "filename",
+        _ => "none",
+    }
+}
+
+fn normalize_output_delivery_intent_for_schema(raw: &str) -> &'static str {
+    match normalize_schema_token(raw).as_str() {
+        "file_single" | "single_file" | "file" | "deliver_file" | "file_delivery" => "file_single",
+        "directory_lookup" | "dir_lookup" | "directory" | "list_directory" => "directory_lookup",
+        "directory_batch_files" | "batch_directory_delivery" | "dir_batch" => {
+            "directory_batch_files"
+        }
+        _ => "none",
+    }
+}
+
+fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static str {
+    match normalize_schema_token(raw).as_str() {
+        "existence_boolean_with_path" | "boolean_with_path" | "exists_boolean_with_path" => {
+            OutputSemanticKind::ExistenceWithPath.as_str()
+        }
+        "hidden_files"
+        | "hidden_entries"
+        | "hidden_file_check"
+        | "hidden_files_check"
+        | "hidden_entry_check"
+        | "hidden_entries_check"
+        | "hidden_files_example"
+        | "hidden_entries_example" => OutputSemanticKind::HiddenEntriesCheck.as_str(),
+        "file_names" | "names_only" | "entry_names" | "directory_entry_names" => {
+            OutputSemanticKind::FileNames.as_str()
+        }
+        "value_only" | "file_field_value" | "field_value" => OutputSemanticKind::None.as_str(),
+        normalized => parse_output_semantic_kind(normalized).as_str(),
+    }
 }
 
 fn normalize_confidence_field(obj: &mut serde_json::Map<String, Value>, key: &str) {
@@ -1165,8 +1309,15 @@ fn normalize_intent_normalizer_top_level_for_schema(obj: &mut serde_json::Map<St
         .or_insert_with(|| Value::String("chat".to_string()));
     if let Some(mode) = obj.get("mode").and_then(|v| v.as_str()) {
         let normalized = mode.trim().to_ascii_lowercase();
-        if matches!(normalized.as_str(), "recall" | "memory_recall") {
-            obj.insert("mode".to_string(), Value::String("chat".to_string()));
+        let canonical = match normalized.as_str() {
+            "chat" | "act" | "chat_act" | "ask_clarify" => None,
+            "clarify" | "ask" => Some("ask_clarify"),
+            "recall" | "memory_recall" | "memory" | "memory_storage" | "save_context"
+            | "confirmation" | "respond" | "response" => Some("chat"),
+            _ => Some("chat"),
+        };
+        if let Some(canonical) = canonical {
+            obj.insert("mode".to_string(), Value::String(canonical.to_string()));
         }
     }
     obj.entry("output_contract".to_string())
@@ -1213,6 +1364,15 @@ fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>
     contract
         .entry("response_shape".to_string())
         .or_insert_with(|| Value::String("free".to_string()));
+    let response_shape = contract
+        .get("response_shape")
+        .and_then(|value| value.as_str())
+        .map(normalize_output_response_shape_for_schema)
+        .unwrap_or("free");
+    contract.insert(
+        "response_shape".to_string(),
+        Value::String(response_shape.to_string()),
+    );
     contract
         .entry("requires_content_evidence".to_string())
         .or_insert(Value::Bool(false));
@@ -1222,12 +1382,39 @@ fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>
     contract
         .entry("locator_kind".to_string())
         .or_insert_with(|| Value::String("none".to_string()));
+    let locator_kind = contract
+        .get("locator_kind")
+        .and_then(|value| value.as_str())
+        .map(normalize_output_locator_kind_for_schema)
+        .unwrap_or("none");
+    contract.insert(
+        "locator_kind".to_string(),
+        Value::String(locator_kind.to_string()),
+    );
     contract
         .entry("delivery_intent".to_string())
         .or_insert_with(|| Value::String("none".to_string()));
+    let delivery_intent = contract
+        .get("delivery_intent")
+        .and_then(|value| value.as_str())
+        .map(normalize_output_delivery_intent_for_schema)
+        .unwrap_or("none");
+    contract.insert(
+        "delivery_intent".to_string(),
+        Value::String(delivery_intent.to_string()),
+    );
     contract
         .entry("semantic_kind".to_string())
         .or_insert_with(|| Value::String("none".to_string()));
+    let semantic_kind = contract
+        .get("semantic_kind")
+        .and_then(|value| value.as_str())
+        .map(normalize_output_semantic_kind_for_schema)
+        .unwrap_or("none");
+    contract.insert(
+        "semantic_kind".to_string(),
+        Value::String(semantic_kind.to_string()),
+    );
     contract
         .entry("locator_hint".to_string())
         .or_insert_with(|| Value::String(String::new()));
@@ -1327,7 +1514,12 @@ pub(crate) async fn run_intent_normalizer(
                 task.task_id, err
             );
             let fallback = empty_ask_clarify_decision(req, "normalizer_prompt_missing");
-            return normalizer_output_from_fallback(req, "prompt_missing_safe_clarify", fallback);
+            return normalizer_output_from_fallback(
+                req,
+                "prompt_missing_safe_clarify",
+                fallback,
+                None,
+            );
         }
     };
     let prompt_template = resolved_prompt.template;
@@ -1425,7 +1617,12 @@ pub(crate) async fn run_intent_normalizer(
                 task.task_id, err
             );
             let fallback = empty_ask_clarify_decision(req, "normalizer_llm_failed");
-            return normalizer_output_from_fallback(req, "llm_failed_safe_clarify", fallback);
+            return normalizer_output_from_fallback(
+                req,
+                "llm_failed_safe_clarify",
+                fallback,
+                Some(crate::fallback::ClarifyFallbackSource::LlmUnavailable),
+            );
         }
     };
     let llm_out_for_parse = normalize_intent_normalizer_raw_for_schema(&llm_out, req);
@@ -1487,8 +1684,8 @@ pub(crate) async fn run_intent_normalizer(
             &clarify_question,
             confidence,
         );
-        let mut turn_type = parse_turn_type(&out.turn_type);
-        let mut target_task_policy = parse_target_task_policy(&out.target_task_policy);
+        let turn_type = parse_turn_type(&out.turn_type);
+        let target_task_policy = parse_target_task_policy(&out.target_task_policy);
         let state_patch = out.state_patch.clone().filter(|value| !value.is_null());
         let mut reason = out.reason;
         if let Some(scope_hint) = apply_workspace_scope_patch_to_contract(
@@ -1509,25 +1706,11 @@ pub(crate) async fn run_intent_normalizer(
                 crate::truncate_for_log(&scope_hint)
             );
         }
-        let had_normalizer_direct_reply =
-            !out.direct_reply_candidate.trim().is_empty() || out.direct_reply_confidence > 0.0;
-        // Planner-first: normalizer can still output these deprecated
-        // compatibility fields, but the main path must not consume them as
-        // direct-reply authority before the chat/planner response pass.
-        let mut direct_reply_candidate = String::new();
-        let mut direct_reply_confidence = 0.0;
         let mut resolved_user_intent = if resolved.is_empty() {
             req.to_string()
         } else {
             resolved.to_string()
         };
-        if had_normalizer_direct_reply {
-            if reason.trim().is_empty() {
-                reason = "direct_reply_candidate_disabled_in_planner_first".to_string();
-            } else if !reason.contains("direct_reply_candidate_disabled_in_planner_first") {
-                reason.push_str("; direct_reply_candidate_disabled_in_planner_first");
-            }
-        }
         if compare_targets_need_prompt_grounding_override(&req_surface, &output_contract) {
             if let Some((left, right)) = req_surface.compare_target_pair.as_ref() {
                 resolved_user_intent = req.to_string();
@@ -1558,8 +1741,6 @@ pub(crate) async fn run_intent_normalizer(
             needs_clarify = false;
             clarify_question.clear();
             routed_mode = RoutedMode::Chat;
-            direct_reply_candidate.clear();
-            direct_reply_confidence = 0.0;
             if reason.trim().is_empty() {
                 reason = "active_task_scope_update_resolves_clarify".to_string();
             } else if !reason.contains("active_task_scope_update_resolves_clarify") {
@@ -1582,8 +1763,6 @@ pub(crate) async fn run_intent_normalizer(
             &output_contract,
         ) {
             routed_mode = RoutedMode::Chat;
-            direct_reply_candidate.clear();
-            direct_reply_confidence = 0.0;
             if reason.trim().is_empty() {
                 reason = "active_task_mutation_to_chat".to_string();
             } else if !reason.contains("active_task_mutation_to_chat") {
@@ -1607,8 +1786,6 @@ pub(crate) async fn run_intent_normalizer(
             needs_clarify = false;
             clarify_question.clear();
             routed_mode = RoutedMode::Chat;
-            direct_reply_candidate.clear();
-            direct_reply_confidence = 0.0;
             if reason.trim().is_empty() {
                 reason = "active_task_replace_resolves_clarify".to_string();
             } else if !reason.contains("active_task_replace_resolves_clarify") {
@@ -1632,8 +1809,6 @@ pub(crate) async fn run_intent_normalizer(
             needs_clarify = false;
             clarify_question.clear();
             routed_mode = RoutedMode::Chat;
-            direct_reply_candidate.clear();
-            direct_reply_confidence = 0.0;
             if reason.trim().is_empty() {
                 reason = "active_task_append_resolves_clarify".to_string();
             } else if !reason.contains("active_task_append_resolves_clarify") {
@@ -1641,31 +1816,6 @@ pub(crate) async fn run_intent_normalizer(
             }
             info!(
                 "{} intent_normalizer task_id={} turn_analysis_override=active_task_append_resolves_clarify input={}",
-                crate::highlight_tag("routing"),
-                task.task_id,
-                crate::truncate_for_log(req)
-            );
-        }
-        if should_rebind_output_shape_clarify_to_active_task(
-            req,
-            session_snapshot,
-            out.attachment_processing_required,
-            routed_mode,
-        ) {
-            needs_clarify = false;
-            clarify_question.clear();
-            routed_mode = RoutedMode::Chat;
-            turn_type = Some(TurnType::TaskAppend);
-            target_task_policy = Some(TargetTaskPolicy::ReuseActive);
-            direct_reply_candidate.clear();
-            direct_reply_confidence = 0.0;
-            if reason.trim().is_empty() {
-                reason = "active_task_output_shape_rebind".to_string();
-            } else if !reason.contains("active_task_output_shape_rebind") {
-                reason.push_str("; active_task_output_shape_rebind");
-            }
-            info!(
-                "{} intent_normalizer task_id={} turn_analysis_override=active_task_output_shape_rebind input={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 crate::truncate_for_log(req)
@@ -1743,18 +1893,18 @@ pub(crate) async fn run_intent_normalizer(
         // instruction. This does not classify natural-language intent.
         let bare_path_only = is_bare_path_only_input_for_clarify(req, &req_surface);
         let (needs_clarify_eff, clarify_question_eff) = if !needs_clarify && bare_path_only {
-            let q = if clarify_question.is_empty() {
-                bare_path_clarify_question_for(req)
-            } else {
-                clarify_question.clone()
-            };
+            if reason.trim().is_empty() {
+                reason = "bare_path_no_verb".to_string();
+            } else if !reason.contains("bare_path_no_verb") {
+                reason.push_str("; bare_path_no_verb");
+            }
             info!(
-                "{} intent_normalizer task_id={} bare_path_no_verb_override needs_clarify=true clarify_question={}",
+                "{} intent_normalizer task_id={} bare_path_no_verb_override needs_clarify=true path_token={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
-                crate::truncate_for_log(&q)
+                crate::truncate_for_log(req.trim())
             );
-            (true, q)
+            (true, String::new())
         } else {
             (needs_clarify, clarify_question)
         };
@@ -1778,9 +1928,8 @@ pub(crate) async fn run_intent_normalizer(
             output_contract,
             execution_recipe_hint,
             routed_mode: routed_mode_eff,
-            direct_reply_candidate,
-            direct_reply_confidence,
             turn_analysis,
+            fallback_source: None,
         };
     }
     warn!(
@@ -1791,7 +1940,7 @@ pub(crate) async fn run_intent_normalizer(
     // Planner-first: do not synthesize Act/ChatAct locally on parser failure.
     let _ = (resume_context, binding_context);
     let fallback = empty_ask_clarify_decision(req, "normalizer_parse_failed");
-    normalizer_output_from_fallback(req, "parse_failed_safe_clarify", fallback)
+    normalizer_output_from_fallback(req, "parse_failed_safe_clarify", fallback, None)
 }
 
 fn is_bare_path_only_input_for_clarify(
@@ -1831,13 +1980,6 @@ fn token_looks_like_pathish_filename(token: &str) -> bool {
         && extension
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-}
-
-fn bare_path_clarify_question_for(text: &str) -> String {
-    let path = text.trim();
-    format!(
-        "你想对 `{path}` 做什么？比如列出内容、读取某个文件、还是发给我？ / What do you want to do with `{path}`? e.g. list its contents, read a file, or send it to me?"
-    )
 }
 
 /// Fallback `RouteDecision` used when normalizer LLM fails or its output cannot be parsed.
@@ -2090,18 +2232,272 @@ mod tests {
     }
 
     #[test]
+    fn normalizer_schema_normalization_preserves_object_resolved_intent() {
+        let raw = r#"{"resolved_user_intent":{"test_id":"client-like-continuous-123"},"needs_clarify":false,"mode":"chat"}"#;
+        let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        assert_eq!(
+            value.get("resolved_user_intent").and_then(|v| v.as_str()),
+            Some(r#"{"test_id":"client-like-continuous-123"}"#)
+        );
+    }
+
+    #[test]
     fn normalizer_schema_normalization_accepts_percent_confidence() {
-        let raw = r#"{"resolved_user_intent":"检查当前目录隐藏文件","needs_clarify":false,"clarify_question":"","reason":"local inspection","confidence":100,"direct_reply_confidence":"75","mode":"act"}"#;
+        let raw = r#"{"resolved_user_intent":"检查当前目录隐藏文件","needs_clarify":false,"clarify_question":"","reason":"local inspection","confidence":100,"mode":"act"}"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
         assert_eq!(value.get("confidence").and_then(|v| v.as_f64()), Some(1.0));
-        assert_eq!(
-            value
-                .get("direct_reply_confidence")
-                .and_then(|v| v.as_f64()),
-            Some(0.75)
-        );
         assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+    }
+
+    #[test]
+    fn normalizer_schema_normalization_coerces_model_contract_synonyms() {
+        let raw = r#"{
+          "resolved_user_intent": {"action":"find_file","target":"rustclaw.service","scope":"repository"},
+          "needs_clarify": false,
+          "reason": "repo inspection",
+          "confidence": 0.9,
+          "mode": "chat_act",
+          "output_contract": {
+            "response_shape": "inline",
+            "semantic_kind": "existence_boolean_with_path",
+            "locator_kind": "repository",
+            "delivery_intent": "list_directory",
+            "extra_model_field": "ignored"
+          },
+          "action": "find_file"
+        }"#;
+        let normalized = super::normalize_intent_normalizer_raw_for_schema(
+            raw,
+            "检查仓库里有没有 rustclaw.service",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        let resolved_value: serde_json::Value = serde_json::from_str(
+            value
+                .get("resolved_user_intent")
+                .and_then(|v| v.as_str())
+                .expect("resolved intent string"),
+        )
+        .expect("resolved intent json");
+        assert_eq!(
+            resolved_value
+                .get("target")
+                .and_then(|value| value.as_str()),
+            Some("rustclaw.service")
+        );
+        let contract = value
+            .get("output_contract")
+            .and_then(|value| value.as_object())
+            .expect("output contract");
+        assert_eq!(
+            contract.get("response_shape").and_then(|v| v.as_str()),
+            Some("free")
+        );
+        assert_eq!(
+            contract.get("semantic_kind").and_then(|v| v.as_str()),
+            Some("existence_with_path")
+        );
+        assert_eq!(
+            contract.get("locator_kind").and_then(|v| v.as_str()),
+            Some("current_workspace")
+        );
+        assert!(!contract.contains_key("extra_model_field"));
+        crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+            &normalized,
+            crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+        )
+        .expect("schema validation");
+    }
+
+    #[test]
+    fn compact_normalizer_prompt_pins_output_contract_schema() {
+        let route_view = crate::task_context_builder::RouteContextView {
+            request_surface_hints: "workspace_root_request_shape=CurrentPathScalar".to_string(),
+            ..Default::default()
+        };
+        let context_bundle = crate::task_context_builder::TaskContextBundle {
+            raw_sources: crate::task_context_builder::TaskContextRawSources::default(),
+            planner_view: crate::task_context_builder::PlannerContextView::default(),
+            route_view: Some(route_view.clone()),
+            execution_view: None,
+        };
+        let prompt = super::render_compact_intent_normalizer_prompt(
+            &route_view,
+            &context_bundle,
+            "admin=true current_process_cwd=/home/guagua/rustclaw",
+            "zh-CN",
+            "list current toml files and briefly explain them",
+        );
+
+        assert!(prompt.contains("Allowed output_contract keys only"));
+        assert!(prompt
+            .contains("Allowed response_shape: free, one_sentence, strict, scalar, file_token"));
+        assert!(prompt.contains("Allowed semantic_kind: none, raw_command_output"));
+        assert!(prompt.contains("Do not emit exact_format, required_evidence, fields"));
+        assert!(prompt.contains("instead of inventing enum values"));
+        assert!(prompt.contains("Use mode=\"chat_act\" when the request both inspects"));
+    }
+
+    #[test]
+    fn normalizer_schema_normalization_coerces_hidden_files_check_synonym() {
+        let raw = r#"{
+          "resolved_user_intent": "检查当前目录是否存在隐藏文件并提供3个示例",
+          "needs_clarify": false,
+          "reason": "local hidden entries check",
+          "confidence": 1.0,
+          "mode": "act",
+          "output_contract": {
+            "response_shape": "object",
+            "semantic_kind": "hidden_files_check"
+          }
+        }"#;
+        let normalized = super::normalize_intent_normalizer_raw_for_schema(
+            raw,
+            "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        let contract = value
+            .get("output_contract")
+            .and_then(|value| value.as_object())
+            .expect("output contract");
+        assert_eq!(
+            contract.get("semantic_kind").and_then(|v| v.as_str()),
+            Some("hidden_entries_check")
+        );
+        assert_eq!(
+            contract.get("response_shape").and_then(|v| v.as_str()),
+            Some("free")
+        );
+        crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+            &normalized,
+            crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+        )
+        .expect("schema validation");
+    }
+
+    #[test]
+    fn normalizer_schema_normalization_does_not_invent_contract_from_surface() {
+        let raw = r#"{
+          "resolved_user_intent": "检查当前目录是否有隐藏文件，如有则列出3个例子",
+          "needs_clarify": false,
+          "reason": "local hidden entries check",
+          "confidence": 0.98,
+          "mode": "act"
+        }"#;
+        let normalized = super::normalize_intent_normalizer_raw_for_schema(
+            raw,
+            "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        let contract = value
+            .get("output_contract")
+            .and_then(|value| value.as_object())
+            .expect("output contract");
+        assert_eq!(
+            contract.get("semantic_kind").and_then(|v| v.as_str()),
+            Some("none")
+        );
+        assert_eq!(
+            contract.get("response_shape").and_then(|v| v.as_str()),
+            Some("free")
+        );
+        crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+            &normalized,
+            crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+        )
+        .expect("schema validation");
+    }
+
+    #[test]
+    fn normalizer_schema_normalization_extracts_fenced_json() {
+        let raw = r#"```json
+{
+  "resolved_user_intent": "检查当前目录有没有隐藏文件，只回答有或没有，并补3个例子",
+  "needs_clarify": false,
+  "reason": "local hidden entries check",
+  "confidence": 0.95,
+  "mode": "act",
+  "output_contract": {
+    "response_shape": "scalar",
+    "requires_content_evidence": true,
+    "semantic_kind": "hidden_files_example",
+    "locator_kind": "current_workspace"
+  }
+}
+```"#;
+        let normalized = super::normalize_intent_normalizer_raw_for_schema(
+            raw,
+            "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        let contract = value
+            .get("output_contract")
+            .and_then(|value| value.as_object())
+            .expect("output contract");
+        assert_eq!(
+            contract.get("semantic_kind").and_then(|v| v.as_str()),
+            Some("hidden_entries_check")
+        );
+        assert_eq!(
+            contract.get("response_shape").and_then(|v| v.as_str()),
+            Some("scalar")
+        );
+        assert_eq!(
+            contract.get("locator_kind").and_then(|v| v.as_str()),
+            Some("current_workspace")
+        );
+        crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+            &normalized,
+            crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+        )
+        .expect("schema validation");
+    }
+
+    #[test]
+    fn normalizer_schema_normalization_preserves_act_when_shape_is_descriptive() {
+        let raw = r#"{
+          "resolved_user_intent": "列出 logs 目录下前 10 个文件名，不读取内容",
+          "needs_clarify": false,
+          "reason": "workspace directory listing",
+          "confidence": 0.9,
+          "mode": "act",
+          "output_contract": {
+            "response_shape": "list_of_strings",
+            "semantic_kind": "file_names"
+          },
+          "action": {"tool":"list_directory","path":"logs","limit":10}
+        }"#;
+        let normalized = super::normalize_intent_normalizer_raw_for_schema(
+            raw,
+            "列出 logs 目录下的前 10 个文件名",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("needs_clarify").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        let contract = value
+            .get("output_contract")
+            .and_then(|value| value.as_object())
+            .expect("output contract");
+        assert_eq!(
+            contract.get("response_shape").and_then(|v| v.as_str()),
+            Some("free")
+        );
+        assert_eq!(
+            contract.get("semantic_kind").and_then(|v| v.as_str()),
+            Some("file_names")
+        );
+        crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+            &normalized,
+            crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+        )
+        .expect("schema validation");
     }
 
     #[test]
@@ -2191,6 +2587,7 @@ mod tests {
                     self_extension: crate::SelfExtensionContract::default(),
                 },
             },
+            None,
         );
         assert_eq!(out.routed_mode, RoutedMode::Act);
         assert!(!out.needs_clarify);
@@ -2198,6 +2595,7 @@ mod tests {
             out.output_contract.locator_kind,
             OutputLocatorKind::CurrentWorkspace
         );
+        assert_eq!(out.fallback_source, None);
     }
 
     #[test]
@@ -2267,6 +2665,7 @@ mod tests {
                 agent_display_name_hint: String::new(),
                 output_contract: IntentOutputContract::default(),
             },
+            Some(crate::fallback::ClarifyFallbackSource::LlmUnavailable),
         );
         assert_eq!(out.routed_mode, RoutedMode::AskClarify);
         assert!(out.needs_clarify);
@@ -2287,6 +2686,10 @@ mod tests {
         assert!(out
             .reason
             .contains("llm_failed_safe_clarify; fallback_router_llm_failed"));
+        assert_eq!(
+            out.fallback_source,
+            Some(crate::fallback::ClarifyFallbackSource::LlmUnavailable)
+        );
     }
 
     #[test]
@@ -2576,48 +2979,6 @@ mod tests {
     }
 
     #[test]
-    fn output_shape_clarify_rebinds_to_active_output() {
-        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
-            conversation_state: Some(crate::conversation_state::ConversationState {
-                last_primary_task_prompt: Some("Summarize this repository".to_string()),
-                last_primary_task_output: Some(
-                    "RustClaw has a browser UI and channel adapters.".to_string(),
-                ),
-                ..crate::conversation_state::ConversationState::default()
-            }),
-            active_followup_frame: None,
-            active_clarify_state: None,
-            active_observed_facts: None,
-        };
-        assert!(super::should_rebind_output_shape_clarify_to_active_task(
-            "Output a two-row markdown table",
-            Some(&snapshot),
-            false,
-            RoutedMode::AskClarify,
-        ));
-    }
-
-    #[test]
-    fn output_shape_clarify_without_active_output_is_not_rebound() {
-        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
-            conversation_state: Some(crate::conversation_state::ConversationState {
-                last_primary_task_prompt: Some("Read README.md".to_string()),
-                last_primary_task_output: None,
-                ..crate::conversation_state::ConversationState::default()
-            }),
-            active_followup_frame: None,
-            active_clarify_state: None,
-            active_observed_facts: None,
-        };
-        assert!(!super::should_rebind_output_shape_clarify_to_active_task(
-            "Output a two-row markdown table",
-            Some(&snapshot),
-            false,
-            RoutedMode::AskClarify,
-        ));
-    }
-
-    #[test]
     fn workspace_scope_listing_shape_is_not_treated_as_fileish_cue() {
         let surface =
             crate::intent::surface_signals::analyze_prompt_surface("看看当前目录有哪些顶层文件夹");
@@ -2708,8 +3069,6 @@ mod tests {
             "schedule_intent",
             "output_contract",
             "execution_recipe",
-            "direct_reply_candidate",
-            "direct_reply_confidence",
             "turn_type",
             "target_task_policy",
             "should_interrupt_active_run",

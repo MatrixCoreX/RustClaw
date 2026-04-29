@@ -192,11 +192,19 @@ fn query_memories_since_id_for_chat(
         "SELECT id, role, content, safety_flag
          FROM memories
          WHERE user_id = ?1 AND chat_id = ?2 AND user_key = ?3 AND id > ?4
+           AND memory_type != ?5
          ORDER BY id ASC
-         LIMIT ?5",
+         LIMIT ?6",
     )?;
     let rows = stmt.query_map(
-        params![user_id, chat_id, user_key, source_memory_id, limit as i64],
+        params![
+            user_id,
+            chat_id,
+            user_key,
+            source_memory_id,
+            MEMORY_TYPE_UNFINISHED_GOAL,
+            limit as i64
+        ],
         |row| {
             let id: i64 = row.get(0)?;
             let role: String = row.get(1)?;
@@ -553,17 +561,6 @@ enum AssistantContextReplyKind {
     Normal,
     ClarifyPlaceholder,
     ProviderUnavailablePlaceholder,
-}
-
-/// §7.2 后保留：仅用于历史 DB 兼容场景与测试，拿到老 super-fallback 字面字符串。
-/// 真正的"是不是 fallback 占位符"判定走 [`crate::fallback::is_known_clarify_fallback_text`]。
-#[allow(dead_code)]
-fn provider_unavailable_clarify_fallback_text(state: &AppState) -> String {
-    crate::i18n_t_with_default(
-        state,
-        crate::fallback::LEGACY_SUPER_FALLBACK_KEY,
-        crate::fallback::LEGACY_SUPER_FALLBACK_DEFAULT_EN,
-    )
 }
 
 fn provider_unavailable_assistant_placeholder() -> &'static str {
@@ -1848,11 +1845,11 @@ mod tests {
         clarify_assistant_placeholder, classify_assistant_context_reply_kind,
         extract_result_text_for_recent_turns, insert_memory, legacy_principal_chat_id,
         ordered_entries_from_assistant_reply, provider_unavailable_assistant_placeholder,
-        recall_user_preferences, retrieval_source_ref_for_kb_chunk,
+        recall_memories_since_id, recall_user_preferences, retrieval_source_ref_for_kb_chunk,
         retrieval_source_ref_for_memory, retrieval_source_ref_for_preference,
         upsert_user_preferences_from_route_hint, AssistantContextReplyKind, MemoryWriteKind,
-        MEMORY_ROLE_ASSISTANT, RETRIEVAL_PRODUCER_KB, RETRIEVAL_PRODUCER_MEMORY_PIPELINE,
-        RETRIEVAL_SOURCE_MEMORY,
+        MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_SYSTEM, MEMORY_ROLE_USER, RETRIEVAL_PRODUCER_KB,
+        RETRIEVAL_PRODUCER_MEMORY_PIPELINE, RETRIEVAL_SOURCE_MEMORY,
     };
     use serde_json::json;
 
@@ -2099,6 +2096,49 @@ mod tests {
         let recent =
             build_recent_assistant_replies_context(&state, Some("test-user"), 1, 2, 3, 220);
         assert_eq!(recent, "<none>");
+    }
+
+    #[test]
+    fn long_term_source_recall_skips_unfinished_goal_runtime_memory() {
+        let state = test_state();
+        {
+            let db = state.core.db.get().expect("db");
+            create_memories_table(&db);
+        }
+        insert_memory(
+            &state,
+            1,
+            2,
+            Some("test-user"),
+            "local",
+            None,
+            MEMORY_ROLE_USER,
+            "帮我写一个 RustClaw 生产环境部署方案，包含启动、日志和回滚",
+            2000,
+            MemoryWriteKind::Default,
+        )
+        .expect("insert user memory");
+        insert_memory(
+            &state,
+            1,
+            2,
+            Some("test-user"),
+            "local",
+            None,
+            MEMORY_ROLE_SYSTEM,
+            "Unfinished goal\nUser request: 帮我写一个 RustClaw 生产环境部署方案，包含启动、日志和回滚\nCurrent blocker: provider timeout",
+            2000,
+            MemoryWriteKind::UnfinishedGoal,
+        )
+        .expect("insert unfinished runtime memory");
+
+        let recalled = recall_memories_since_id(&state, Some("test-user"), 1, 2, 0, 10)
+            .expect("recall memories");
+        assert_eq!(recalled.len(), 1);
+        assert!(recalled[0].2.contains("部署方案"));
+        assert!(!recalled
+            .iter()
+            .any(|(_, _, content, _)| content.contains("Unfinished goal")));
     }
 
     #[test]

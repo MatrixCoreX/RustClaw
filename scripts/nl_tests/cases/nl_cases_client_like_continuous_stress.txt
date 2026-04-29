@@ -1,0 +1,56 @@
+# Ordered client-like continuous NL stress cases.
+# Run with:
+#   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_continuous_stress.txt --prompt-reply-only
+#
+# This file intentionally depends on turn order. Keep it separate from nl_cases_full.txt.
+# Coverage map:
+# - clear task, split task, proactive supplement, correction, new constraint, goal replacement
+# - scope update, priority/order control, approval/refusal/control signal, status query
+# - side question, new task interruption, quality feedback, error recovery guidance
+# - direct command raw output, compound execution, alias rebinding, state/context/memory recall
+# - attachments are not covered here because this text runner does not submit media payloads.
+#
+# Format: suite|name|tags|prompt|expect=optional substring
+
+continuous|cn_memory_marker_set|cn,memory,state|本轮连续测试里，请记住编号 RC-CONT-CN-0428-A。只用一句中文确认。|expect=RC-CONT-CN-0428-A
+continuous|cn_memory_marker_recall|cn,memory,state|刚才让你记住的连续测试编号是什么？只回答编号。|expect=RC-CONT-CN-0428-A
+continuous|cn_split_task_start|cn,task_append,drafting|帮我写个方案
+continuous|cn_split_task_audience|cn,task_append,drafting|面向老板
+continuous|cn_split_task_constraints|cn,task_append,drafting|不要太技术，控制在 80 字内，只输出正文
+continuous|cn_correction_replace_audience|cn,task_correct,drafting|不对，目标用户改成开发者，不是老板。只输出修正后的正文。|expect=开发者
+continuous|cn_scope_shrink_login|cn,scope_update,drafting|再缩小到登录模块，只保留三条要点。|expect=登录
+continuous|cn_status_query_active_task|cn,status_query,state|刚才我们这段方案的目标用户是什么？只回答目标用户。|expect=开发者
+continuous|cn_side_question_no_pollution|cn,side_question,chat|顺便问下 JWT 是什么？用一句话回答，不要改变上面的方案任务。
+continuous|cn_resume_previous_task|cn,task_resume,drafting|回到刚才的方案，只输出三条登录模块要点。|expect=登录
+continuous|cn_new_task_interrupt_raw_pwd|cn,new_task,command,raw|先别管方案，请执行 pwd，只输出命令结果。|expect=/home/guagua/rustclaw
+continuous|cn_compound_no_connector_raw|cn,compound,command,raw|pwd whoami hostname 三个结果每个一行 不要总结
+continuous|cn_fixture_package_scalar|cn,file,scalar|读取 scripts/nl_tests/fixtures/device_local/package.json 的 name 字段，只输出值。|expect=rustclaw-nl-fixture
+continuous|cn_alias_bind_service_notes|cn,alias,state|先记一下，甲文件是 scripts/nl_tests/fixtures/device_local/docs/service_notes.md。只回复已记住。
+continuous|cn_alias_read_service_title|cn,alias,file,scalar|读取甲文件的标题，只输出标题。|expect=Service Notes
+continuous|cn_alias_rebind_release|cn,alias,correction,state|不对，甲文件改成 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md。只回复已更新。
+continuous|cn_alias_read_release_title|cn,alias,file,scalar|读取甲文件的标题，只输出标题。|expect=Release Checklist
+continuous|cn_ambiguous_delivery_should_clarify|cn,clarify,delivery|把那个最大的发给我。
+continuous|cn_stop_delivery_convert_to_clarify|cn,run_control,clarify|停一下，不要发文件，改为只告诉我你需要我确认哪个文件。
+continuous|cn_quality_feedback_rewrite|cn,feedback,drafting|刚才那句如果太生硬，就更口语化一点，只输出新版。
+continuous|cn_error_recovery_guidance|cn,error_report,recovery|如果刚才因为指代不清没法执行，只用一句话说明下一步需要我提供什么。
+
+continuous|en_memory_marker_set|en,memory,state|For this continuous test, remember marker RC-CONT-EN-0428-B. Reply with one short confirmation.|expect=RC-CONT-EN-0428-B
+continuous|en_memory_marker_recall|en,memory,state|What continuous test marker did I ask you to remember? Answer only the marker.|expect=RC-CONT-EN-0428-B
+continuous|en_split_task_start|en,task_append,drafting|Write a short release note for RustClaw.
+continuous|en_split_task_audience|en,task_append,drafting|Make it for non-technical users.
+continuous|en_replace_goal_checklist|en,task_replace,drafting|Actually switch it to a three-step checklist.
+continuous|en_correction_runtime|en,task_correct,drafting|Correction: mention Python 3.11, not Python 3.10.
+continuous|en_output_contract_final|en,output_contract,drafting|Output only the final checklist.|expect=Python 3.11
+continuous|en_status_query_corrected_version|en,status_query,state|What target runtime version did I correct it to? Answer only the version.|expect=Python 3.11
+continuous|en_side_question_no_pollution|en,side_question,chat|BTW, what is SQLite in one sentence? Do not change the checklist task.
+continuous|en_resume_previous_task|en,task_resume,drafting|Return to the checklist and output only three short bullets.
+continuous|en_new_task_raw_pwd|en,new_task,command,raw|Run pwd and output only the raw result.|expect=/home/guagua/rustclaw
+continuous|en_compound_package_compare|en,compound,file,summary|Read the name from scripts/nl_tests/fixtures/device_local/package.json. Read package.name from crates/clawd/Cargo.toml. Then answer in one line with the two names and whether they are the same or different.
+continuous|en_alias_bind_service_notes|en,alias,state|Remember that the note file means scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only confirmed.
+continuous|en_alias_read_service_title|en,alias,file,scalar|Read the note file title and output only the title.|expect=Service Notes
+continuous|en_alias_rebind_release|en,alias,correction,state|Correction: the note file now means scripts/nl_tests/fixtures/device_local/docs/release_checklist.md. Reply only updated.
+continuous|en_alias_read_release_title|en,alias,file,scalar|Read the note file title and output only the title.|expect=Release Checklist
+continuous|en_status_query_alias_basename|en,status_query,state|What file does the note file refer to now? Output only the basename.|expect=release_checklist.md
+continuous|en_refusal_no_execution|en,approval,run_control|Do not execute anything. Answer whether you are waiting for my approval in one short sentence.
+continuous|en_priority_order|en,priority,format|For the next answer, give the conclusion first, then at most two details.
+continuous|en_final_context_summary|en,status_query,summary|Summarize what this continuous test has covered so far in one short English sentence.

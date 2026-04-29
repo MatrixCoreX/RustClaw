@@ -1,5 +1,5 @@
 use claw_core::skill_registry::SkillKind;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::{Component, Path};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -124,6 +124,145 @@ use crate::worker::task_runtime_channel;
 use crate::{AppState, ClaimedTask, RuntimeChannel};
 
 const READ_FILE_NOT_FOUND_PREFIX: &str = "__RC_READ_FILE_NOT_FOUND__:";
+const POLICY_BLOCK_ERROR_PREFIX: &str = "__RC_POLICY_BLOCK__:";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PolicyBlockError {
+    pub(crate) reason_code: String,
+    pub(crate) observed_facts: Vec<String>,
+    pub(crate) policy_boundary: Vec<String>,
+}
+
+pub(crate) fn policy_block_error(
+    reason_code: &str,
+    observed_facts: Vec<String>,
+    policy_boundary: Vec<String>,
+) -> String {
+    let payload = json!({
+        "reason_code": reason_code.trim(),
+        "observed_facts": observed_facts,
+        "policy_boundary": policy_boundary,
+    });
+    let encoded = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+    format!("{POLICY_BLOCK_ERROR_PREFIX}{encoded}")
+}
+
+pub(crate) fn parse_policy_block_error(err: &str) -> Option<PolicyBlockError> {
+    let payload = err.trim().strip_prefix(POLICY_BLOCK_ERROR_PREFIX)?;
+    let value = serde_json::from_str::<Value>(payload).ok()?;
+    let reason_code = value
+        .get("reason_code")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())?
+        .to_string();
+    let strings_from_array = |key: &str| -> Vec<String> {
+        value
+            .get(key)
+            .and_then(|v| v.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::trim))
+                    .filter(|item| !item.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    Some(PolicyBlockError {
+        reason_code,
+        observed_facts: strings_from_array("observed_facts"),
+        policy_boundary: strings_from_array("policy_boundary"),
+    })
+}
+
+fn policy_fact_value<'a>(facts: &'a [String], key: &str) -> Option<&'a str> {
+    let prefix = format!("{key}:");
+    facts
+        .iter()
+        .find_map(|fact| fact.trim().strip_prefix(&prefix).map(str::trim))
+        .filter(|value| !value.is_empty())
+}
+
+pub(crate) fn policy_block_default_text(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    block: &PolicyBlockError,
+) -> String {
+    let prefer_english =
+        crate::language_policy::task_response_language_hint(state, task, user_text) == "en";
+    let fact = |key: &str| policy_fact_value(&block.observed_facts, key).unwrap_or("");
+    match block.reason_code.as_str() {
+        "path_parent_traversal" => {
+            if prefer_english {
+                "That path contains `..`, so I will not access it. Please provide a path inside the workspace.".to_string()
+            } else {
+                "这个路径包含 `..`，我不会访问它。请提供 workspace 内的明确路径。".to_string()
+            }
+        }
+        "path_outside_workspace" => {
+            let path = fact("denied_path");
+            if prefer_english {
+                if path.is_empty() {
+                    "The requested path is outside the allowed workspace. Please provide a path inside the workspace or use an admin-authorized run.".to_string()
+                } else {
+                    format!("The requested path `{path}` is outside the allowed workspace. Please provide a workspace path or use an admin-authorized run.")
+                }
+            } else if path.is_empty() {
+                "请求路径在允许的 workspace 外。请提供 workspace 内路径，或使用管理员授权运行。"
+                    .to_string()
+            } else {
+                format!("请求路径 `{path}` 在允许的 workspace 外。请提供 workspace 内路径，或使用管理员授权运行。")
+            }
+        }
+        "sudo_not_allowed" => {
+            if prefer_english {
+                "This task is not allowed to use sudo. Run clawd with an admin-authorized key and sudo-enabled policy if you need elevated access.".to_string()
+            } else {
+                "当前任务不允许使用 sudo。如果需要提权访问，请使用管理员 key 并开启 sudo 权限后运行。".to_string()
+            }
+        }
+        "config_requires_web_admin" => config_requires_web_admin_message(state, task),
+        "skill_policy_denied" => {
+            let skill = fact("skill");
+            if prefer_english {
+                if skill.is_empty() {
+                    "This capability is blocked by the current tools policy. Enable it in policy before retrying.".to_string()
+                } else {
+                    format!("The `{skill}` capability is blocked by the current tools policy. Enable it in policy before retrying.")
+                }
+            } else if skill.is_empty() {
+                "当前工具策略阻止了这个能力。请在策略里开启后再试。".to_string()
+            } else {
+                format!("当前工具策略阻止了 `{skill}` 能力。请在策略里开启后再试。")
+            }
+        }
+        "skill_disabled" | "agent_skill_disabled" => {
+            let skill = fact("skill");
+            if prefer_english {
+                if skill.is_empty() {
+                    "The required skill is not enabled for this run. Enable it in config and retry."
+                        .to_string()
+                } else {
+                    format!("The `{skill}` skill is not enabled for this run. Enable it in config and retry.")
+                }
+            } else if skill.is_empty() {
+                "这次运行需要的技能没有启用。请先在配置中开启后再试。".to_string()
+            } else {
+                format!("这次运行需要的 `{skill}` 技能没有启用。请先在配置中开启后再试。")
+            }
+        }
+        _ => {
+            if prefer_english {
+                "This request is blocked by the current runtime policy. Adjust the policy or provide a safer target, then retry.".to_string()
+            } else {
+                "当前运行策略阻止了这个请求。请调整策略或提供更安全的目标后再试。".to_string()
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RequestReplyLanguage {
@@ -156,6 +295,9 @@ pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
 }
 
 pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> String {
+    if let Some(policy_block) = parse_policy_block_error(err) {
+        return format!("blocked by runtime policy: {}", policy_block.reason_code);
+    }
     if skill_name.eq_ignore_ascii_case("read_file") {
         if let Some(path) = err.strip_prefix(READ_FILE_NOT_FOUND_PREFIX) {
             let trimmed = path.trim();
@@ -530,7 +672,14 @@ fn ensure_config_mutation_allowed(
     if !skill_attempts_config_mutation(state, skill_name, args) || task_is_admin(state, task) {
         return Ok(());
     }
-    Err(config_requires_web_admin_message(state, task))
+    Err(policy_block_error(
+        "config_requires_web_admin",
+        vec![format!("skill: {skill_name}")],
+        vec![
+            "Do not modify high-risk config files from a non-admin task.".to_string(),
+            "Tell the user to use the Web admin console or an admin-authorized key.".to_string(),
+        ],
+    ))
 }
 
 /// §P4.1 fallback：当 `SkillsRegistry` 还没装载（启动早期 / 某些测试 stub）时
@@ -571,27 +720,45 @@ pub(crate) async fn run_skill_with_runner_outcome(
         .tools_policy
         .is_allowed(&policy_token, state.core.active_provider_type.as_deref())
     {
-        return Err(format!("blocked by policy: {policy_token}"));
+        return Err(policy_block_error(
+            "skill_policy_denied",
+            vec![
+                format!("skill: {skill_name}"),
+                format!("policy_token: {policy_token}"),
+            ],
+            vec![
+                "Do not execute the blocked skill.".to_string(),
+                "Explain that the current tools policy blocks this capability.".to_string(),
+            ],
+        ));
     }
 
     if !state.get_skills_list().contains(&skill_name) {
         let mut allowed: Vec<String> = state.get_skills_list().iter().cloned().collect();
         allowed.sort();
-        let enabled = allowed.join(", ");
-        let err_text = crate::i18n_t_with_default(
-            state,
-            "clawd.msg.skill_disabled_with_enabled_list",
-            "Skill is not enabled: {skill}. Please enable it in config and try again. (Currently enabled: {enabled_skills})",
-        )
-        .replace("{skill}", &skill_name)
-        .replace("{enabled_skills}", &enabled);
-        return Err(err_text);
+        return Err(policy_block_error(
+            "skill_disabled",
+            vec![
+                format!("skill: {skill_name}"),
+                format!("enabled_skills: {}", allowed.join(", ")),
+            ],
+            vec![
+                "Do not execute skills that are not enabled.".to_string(),
+                "Tell the user to enable the skill in config before retrying.".to_string(),
+            ],
+        ));
     }
     if !state.task_allows_skill(task, &skill_name) {
-        return Err(format!(
-            "Skill is not enabled for agent {}: {}",
-            state.task_agent_id(task),
-            skill_name
+        return Err(policy_block_error(
+            "agent_skill_disabled",
+            vec![
+                format!("skill: {skill_name}"),
+                format!("agent_id: {}", state.task_agent_id(task)),
+            ],
+            vec![
+                "Do not execute skills disabled for the current agent.".to_string(),
+                "Tell the user to enable the skill for this agent before retrying.".to_string(),
+            ],
         ));
     }
     ensure_config_mutation_allowed(state, task, &skill_name, &args)?;
@@ -748,7 +915,8 @@ pub(crate) async fn run_skill_with_runner_outcome(
 mod tests {
     use super::{
         collect_whitelisted_env_pairs, extract_task_request_text, is_recoverable_skill_error,
-        normalize_skill_error_for_user, request_reply_language, skill_runner_env_strict_enabled,
+        normalize_skill_error_for_user, parse_policy_block_error, policy_block_default_text,
+        policy_block_error, request_reply_language, skill_runner_env_strict_enabled,
         task_allows_path_outside_workspace, task_allows_sudo, task_request_locale_tag,
         RequestReplyLanguage, READ_FILE_NOT_FOUND_PREFIX, SKILL_RUNNER_ENV_WHITELIST,
     };
@@ -969,6 +1137,54 @@ mod tests {
             "read_file",
             "some random error"
         ));
+    }
+
+    #[test]
+    fn policy_block_error_roundtrips_structured_payload() {
+        let encoded = policy_block_error(
+            "path_outside_workspace",
+            vec!["denied_path: /etc/shadow".to_string()],
+            vec!["Do not access the denied path.".to_string()],
+        );
+        let parsed = parse_policy_block_error(&encoded).expect("policy block payload");
+        assert_eq!(parsed.reason_code, "path_outside_workspace");
+        assert_eq!(parsed.observed_facts, vec!["denied_path: /etc/shadow"]);
+        assert_eq!(
+            parsed.policy_boundary,
+            vec!["Do not access the denied path."]
+        );
+        assert_eq!(
+            normalize_skill_error_for_user("read_file", &encoded),
+            "blocked by runtime policy: path_outside_workspace"
+        );
+    }
+
+    #[test]
+    fn policy_block_default_text_uses_request_language() {
+        let state = test_state("zh-CN");
+        let task = test_task(json!({
+            "text": "读取 /etc/shadow 第一行"
+        }));
+        let encoded = policy_block_error(
+            "path_outside_workspace",
+            vec!["denied_path: /etc/shadow".to_string()],
+            Vec::new(),
+        );
+        let parsed = parse_policy_block_error(&encoded).expect("policy block payload");
+        let text = policy_block_default_text(&state, &task, "读取 /etc/shadow 第一行", &parsed);
+        assert!(text.contains("/etc/shadow"));
+        assert!(text.contains("workspace"));
+
+        let english_task = test_task(json!({
+            "text": "Read the first line of /etc/shadow"
+        }));
+        let english = policy_block_default_text(
+            &state,
+            &english_task,
+            "Read the first line of /etc/shadow",
+            &parsed,
+        );
+        assert!(english.contains("outside the allowed workspace"));
     }
 
     // §E2 step1 ===============================================================

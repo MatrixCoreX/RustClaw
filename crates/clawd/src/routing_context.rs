@@ -54,17 +54,6 @@ fn query_recent_execution_rows(
     Ok(out)
 }
 
-/// §7.2 后保留：拿老 super-fallback 字面字符串，仅用于历史 DB 兼容场景与测试。
-/// 真正的"是不是 fallback 占位符"判定走 [`crate::fallback::is_known_clarify_fallback_text`]。
-#[allow(dead_code)]
-fn provider_unavailable_answer_text(state: &AppState) -> String {
-    crate::i18n_t_with_default(
-        state,
-        crate::fallback::LEGACY_SUPER_FALLBACK_KEY,
-        crate::fallback::LEGACY_SUPER_FALLBACK_DEFAULT_EN,
-    )
-}
-
 fn result_json_primary_text(result_json: &str) -> Option<String> {
     let parsed = serde_json::from_str::<Value>(result_json).ok()?;
     parsed

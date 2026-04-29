@@ -46,6 +46,11 @@ pub(crate) const FIXTURE_LLM_ROOT_ENV: &str = "RUSTCLAW_FIXTURE_LLM_ROOT";
 pub(crate) const FIXTURE_LLM_CASE_ENV: &str = "RUSTCLAW_FIXTURE_CASE";
 /// 诊断开关：命中 / miss 时把当前 prompt hash 与前缀打印到 stderr。
 pub(crate) const FIXTURE_LLM_DEBUG_ENV: &str = "RUSTCLAW_FIXTURE_DEBUG";
+/// 测试专用兼容开关：hash miss 时按 calls.jsonl 录制顺序回放。
+///
+/// 默认关闭，保证普通 fixture 测试仍然 fail-loud。E2E replay 可显式开启它，
+/// 用来承受 prompt 文案轻微演进，而不把宽松回放扩散到生产或普通单测。
+pub(crate) const FIXTURE_LLM_SEQUENCE_FALLBACK_ENV: &str = "RUSTCLAW_FIXTURE_SEQUENCE_FALLBACK";
 
 /// Fixture 文件名（位于 `<root>/<case>/<file>`）。
 pub(crate) const FIXTURE_CALLS_FILENAME: &str = "calls.jsonl";
@@ -71,20 +76,43 @@ pub(crate) struct RecordedCall {
     pub usage: Option<LlmUsageSnapshot>,
 }
 
-/// 进程级 (root, case) → 已加载的 hash 表。第一次访问加载并缓存，后续 O(1) 查表。
+#[derive(Debug)]
+struct FixtureTable {
+    by_hash: HashMap<String, RecordedCall>,
+    ordered: Vec<RecordedCall>,
+}
+
+/// 进程级 (root, case) → 已加载的 fixture 表。第一次访问加载并缓存，后续 O(1) 查表。
 ///
 /// 用 `OnceLock` 包 `RwLock<HashMap>` 避免每次 LLM 调用都 disk read；测试间
 /// case 切换会以 (root, case) 为 key 区分缓存项。
 static FIXTURE_TABLE_CACHE: std::sync::OnceLock<
-    RwLock<HashMap<(PathBuf, String), Arc<HashMap<String, RecordedCall>>>>,
+    RwLock<HashMap<(PathBuf, String), Arc<FixtureTable>>>,
 > = std::sync::OnceLock::new();
 
-fn cache() -> &'static RwLock<HashMap<(PathBuf, String), Arc<HashMap<String, RecordedCall>>>> {
+fn cache() -> &'static RwLock<HashMap<(PathBuf, String), Arc<FixtureTable>>> {
     FIXTURE_TABLE_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+static FIXTURE_SEQUENCE_CURSORS: std::sync::OnceLock<RwLock<HashMap<(PathBuf, String), usize>>> =
+    std::sync::OnceLock::new();
+
+fn sequence_cursors() -> &'static RwLock<HashMap<(PathBuf, String), usize>> {
+    FIXTURE_SEQUENCE_CURSORS.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
 fn fixture_debug_enabled() -> bool {
     std::env::var(FIXTURE_LLM_DEBUG_ENV)
+        .ok()
+        .map(|v| {
+            let trimmed = v.trim().to_ascii_lowercase();
+            trimmed == "1" || trimmed == "true" || trimmed == "yes"
+        })
+        .unwrap_or(false)
+}
+
+fn fixture_sequence_fallback_enabled() -> bool {
+    std::env::var(FIXTURE_LLM_SEQUENCE_FALLBACK_ENV)
         .ok()
         .map(|v| {
             let trimmed = v.trim().to_ascii_lowercase();
@@ -124,14 +152,12 @@ pub(crate) fn fnv1a_64_hex(input: &str) -> String {
 /// 失败模式：
 ///   * 文件不存在 / IO 失败 → `Err(io message)`，调用方包成 ProviderError 抛出。
 ///   * 个别行解析失败 → 跳过并 warn（保持其他录制可用，避免 1 行坏掉拖整个 case）。
-fn load_table_from_disk(
-    root: &PathBuf,
-    case: &str,
-) -> Result<HashMap<String, RecordedCall>, String> {
+fn load_table_from_disk(root: &PathBuf, case: &str) -> Result<FixtureTable, String> {
     let path = root.join(case).join(FIXTURE_CALLS_FILENAME);
     let raw = std::fs::read_to_string(&path)
         .map_err(|e| format!("read fixture {} failed: {e}", path.display()))?;
-    let mut table = HashMap::new();
+    let mut by_hash = HashMap::new();
+    let mut ordered = Vec::new();
     for (idx, line) in raw.lines().enumerate() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -139,7 +165,8 @@ fn load_table_from_disk(
         }
         match serde_json::from_str::<RecordedCall>(trimmed) {
             Ok(rec) => {
-                table.insert(rec.prompt_hash.clone(), rec);
+                by_hash.insert(rec.prompt_hash.clone(), rec.clone());
+                ordered.push(rec);
             }
             Err(err) => {
                 tracing::warn!(
@@ -151,14 +178,11 @@ fn load_table_from_disk(
             }
         }
     }
-    Ok(table)
+    Ok(FixtureTable { by_hash, ordered })
 }
 
 /// 取一份 (root, case) 对应的录制表 Arc；命中缓存直接返 Arc clone。
-fn get_or_load_table(
-    root: PathBuf,
-    case: String,
-) -> Result<Arc<HashMap<String, RecordedCall>>, String> {
+fn get_or_load_table(root: PathBuf, case: String) -> Result<Arc<FixtureTable>, String> {
     let key = (root.clone(), case.clone());
     if let Ok(guard) = cache().read() {
         if let Some(table) = guard.get(&key) {
@@ -170,6 +194,30 @@ fn get_or_load_table(
         guard.insert(key, loaded.clone());
     }
     Ok(loaded)
+}
+
+fn next_sequence_record(
+    root: &PathBuf,
+    case: &str,
+    table: &FixtureTable,
+) -> Option<(usize, RecordedCall)> {
+    let key = (root.clone(), case.to_string());
+    let mut guard = sequence_cursors().write().ok()?;
+    let idx = guard.entry(key).or_insert(0);
+    let rec = table.ordered.get(*idx).cloned()?;
+    let used = *idx;
+    *idx += 1;
+    Some((used, rec))
+}
+
+fn advance_sequence_cursor(root: &PathBuf, case: &str) {
+    if !fixture_sequence_fallback_enabled() {
+        return;
+    }
+    if let Ok(mut guard) = sequence_cursors().write() {
+        let key = (root.clone(), case.to_string());
+        *guard.entry(key).or_insert(0) += 1;
+    }
 }
 
 /// §7.5 Step 3：[`regen_fixture_from_log`] 的执行摘要。返回给调用方
@@ -282,6 +330,9 @@ pub(crate) fn regen_fixture_from_log(
 #[cfg(test)]
 pub(crate) fn clear_cache_for_test() {
     if let Ok(mut guard) = cache().write() {
+        guard.clear();
+    }
+    if let Ok(mut guard) = sequence_cursors().write() {
         guard.clear();
     }
 }
@@ -487,18 +538,19 @@ impl LlmProvider for FixtureReplayProvider {
             })?;
             let root = PathBuf::from(root_str);
             let prompt_hash = fnv1a_64_hex(&prompt);
-            let table = get_or_load_table(root, case.clone()).map_err(|e| {
+            let table = get_or_load_table(root.clone(), case.clone()).map_err(|e| {
                 ProviderError::non_retryable(
                     format!("fixture_replay load failed: {e}"),
                     json!({
                         "fixture_replay": true,
-                        "case": case,
+                        "case": case.clone(),
                         "prompt_hash": prompt_hash,
                     }),
                 )
             })?;
-            match table.get(&prompt_hash) {
+            match table.by_hash.get(&prompt_hash) {
                 Some(rec) => {
+                    advance_sequence_cursor(&root, &case);
                     if fixture_debug_enabled() {
                         eprintln!(
                             "[fixture_replay hit] case={case} prompt_hash={prompt_hash} prompt_chars={} prompt_prefix={}",
@@ -523,6 +575,38 @@ impl LlmProvider for FixtureReplayProvider {
                     })
                 }
                 None => {
+                    if fixture_sequence_fallback_enabled() {
+                        if let Some((sequence_index, rec)) =
+                            next_sequence_record(&root, &case, &table)
+                        {
+                            if fixture_debug_enabled() {
+                                eprintln!(
+                                    "[fixture_replay sequence_fallback] case={case} sequence_index={sequence_index} actual_prompt_hash={prompt_hash} recorded_prompt_hash={} prompt_chars={} prompt_prefix={}",
+                                    rec.prompt_hash,
+                                    prompt.chars().count(),
+                                    debug_prompt_prefix(&prompt, 240)
+                                );
+                            }
+                            let raw = rec
+                                .raw_response
+                                .clone()
+                                .unwrap_or_else(|| rec.clean_response.clone());
+                            return Ok(LlmProviderResponse {
+                                text: rec.clean_response.clone(),
+                                request_payload: json!({
+                                    "fixture_replay": true,
+                                    "fixture_replay_sequence_fallback": true,
+                                    "case": case,
+                                    "prompt_hash": prompt_hash,
+                                    "recorded_prompt_hash": rec.prompt_hash,
+                                    "sequence_index": sequence_index,
+                                    "prompt_source": rec.prompt_source,
+                                }),
+                                raw_response: raw,
+                                usage: rec.usage.clone(),
+                            });
+                        }
+                    }
                     if fixture_debug_enabled() {
                         eprintln!(
                             "[fixture_replay miss] case={case} prompt_hash={prompt_hash} prompt_chars={} prompt_prefix={}",
@@ -669,6 +753,64 @@ mod tests {
 
         std::env::remove_var(FIXTURE_LLM_ROOT_ENV);
         std::env::remove_var(FIXTURE_LLM_CASE_ENV);
+    }
+
+    #[tokio::test]
+    async fn replay_sequence_fallback_is_opt_in_and_ordered() {
+        let _g = env_guard();
+        clear_cache_for_test();
+        let tmp = ScopedTempDir::new("sequence_fallback");
+        let rec_a = RecordedCall {
+            prompt_hash: fnv1a_64_hex("old prompt a"),
+            prompt_source: Some("plan".to_string()),
+            prompt_preview: Some("old prompt a".to_string()),
+            clean_response: "response-a".to_string(),
+            raw_response: None,
+            usage: None,
+        };
+        let rec_b = RecordedCall {
+            prompt_hash: fnv1a_64_hex("old prompt b"),
+            prompt_source: Some("chat".to_string()),
+            prompt_preview: Some("old prompt b".to_string()),
+            clean_response: "response-b".to_string(),
+            raw_response: None,
+            usage: None,
+        };
+        write_fixture(tmp.path(), "case_sequence", &[rec_a, rec_b]);
+
+        std::env::set_var(FIXTURE_LLM_ROOT_ENV, tmp.path());
+        std::env::set_var(FIXTURE_LLM_CASE_ENV, "case_sequence");
+        std::env::set_var(FIXTURE_LLM_SEQUENCE_FALLBACK_ENV, "1");
+
+        let runtime = make_runtime();
+        let first = FixtureReplayProvider
+            .call(
+                runtime.clone(),
+                "new prompt a".to_string(),
+                ChatRequestHints::default(),
+            )
+            .await
+            .expect("first sequence fallback");
+        let second = FixtureReplayProvider
+            .call(
+                runtime,
+                "new prompt b".to_string(),
+                ChatRequestHints::default(),
+            )
+            .await
+            .expect("second sequence fallback");
+
+        assert_eq!(first.text, "response-a");
+        assert_eq!(second.text, "response-b");
+        assert_eq!(
+            first.request_payload["fixture_replay_sequence_fallback"],
+            true
+        );
+        assert_eq!(second.request_payload["sequence_index"], 1);
+
+        std::env::remove_var(FIXTURE_LLM_ROOT_ENV);
+        std::env::remove_var(FIXTURE_LLM_CASE_ENV);
+        std::env::remove_var(FIXTURE_LLM_SEQUENCE_FALLBACK_ENV);
     }
 
     #[tokio::test]

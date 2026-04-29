@@ -100,11 +100,10 @@ pub(crate) use log_utils::{
 pub(crate) use memory::dynamic_chat_memory_budget_chars;
 pub(crate) use output_paths::ensure_default_file_path;
 pub(crate) use pipeline_types::{
-    plan_step_from_agent_action, route_reason_is_any_route_contract,
-    route_reason_starts_with_route_contract, IntentOutputContract, OutputDeliveryIntent,
-    OutputLocatorKind, OutputResponseShape, OutputSemanticKind, PlanKind, PlanResult, PlanStep,
-    ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind, SelfExtensionContract,
-    SelfExtensionMode, SelfExtensionTrigger,
+    plan_step_from_agent_action, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputSemanticKind, PlanKind, PlanResult, PlanStep, ResumeBehavior,
+    RiskCeiling, RouteResult, ScheduleKind, SelfExtensionContract, SelfExtensionMode,
+    SelfExtensionTrigger,
 };
 pub(crate) use prompt_utils::{
     extract_first_json_value_any, log_prompt_render, log_prompt_render_with_version,

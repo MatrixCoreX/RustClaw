@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 
 use crate::memory;
 use crate::memory::service::PromptMemoryContext;
@@ -35,6 +36,8 @@ pub(crate) struct RouteContextView {
 pub(crate) struct ExecutionContextView {
     pub(crate) budget_tier: ExecutionContextBudgetTier,
     pub(crate) memory_ctx: PromptMemoryContext,
+    pub(crate) runtime_context: String,
+    pub(crate) recent_turns_full: String,
     pub(crate) last_turn_full: String,
     pub(crate) recent_execution_anchor: String,
     pub(crate) recent_execution_context: String,
@@ -117,6 +120,25 @@ fn serialize_context_value(value: Option<&Value>) -> String {
         .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
         .filter(|s| !s.is_empty() && s != "{}")
         .unwrap_or_else(|| "<none>".to_string())
+}
+
+fn canonicalize_for_context(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+pub(crate) fn build_runtime_context(state: &AppState) -> String {
+    let workspace_root = canonicalize_for_context(&state.skill_rt.workspace_root);
+    let current_process_cwd = std::env::current_dir()
+        .map(|path| canonicalize_for_context(&path))
+        .unwrap_or_else(|_| workspace_root.clone());
+    format!(
+        "### RUNTIME_CONTEXT\n\
+current_process_cwd: {}\n\
+workspace_root: {}\n\
+Use these as current-turn runtime facts. For local filesystem operations, workspace_root is the default workspace boundary; current_process_cwd is the clawd process working directory.",
+        current_process_cwd.display(),
+        workspace_root.display()
+    )
 }
 
 fn truncate_context_snippet(text: &str, max_chars: usize) -> String {
@@ -458,7 +480,7 @@ fn route_uses_structured_content_read(
 
 pub(crate) fn uses_light_execution_context_budget(
     route_result: &RouteResult,
-    resolved_prompt: &str,
+    _resolved_prompt: &str,
 ) -> bool {
     if route_result.needs_clarify {
         return false;
@@ -471,26 +493,25 @@ pub(crate) fn uses_light_execution_context_budget(
     if !route_result.ask_mode.is_plain_act() {
         return false;
     }
-    let resolved_prompt_trimmed = resolved_prompt.trim();
-    let resolved_prompt_matches_intent = resolved_prompt_trimmed == intent;
-    let resolved_prompt_surface = if resolved_prompt_matches_intent {
-        None
-    } else {
-        Some(crate::intent::surface_signals::analyze_prompt_surface(
-            resolved_prompt_trimmed,
-        ))
-    };
-    let resolved_prompt_surface = resolved_prompt_surface.as_ref().unwrap_or(&intent_surface);
-    let has_requested_slice_or_count = intent_surface.requested_read_range.is_some()
-        || intent_surface.requested_listing_limit.is_some()
-        || (!resolved_prompt_matches_intent
-            && (resolved_prompt_surface.requested_read_range.is_some()
-                || resolved_prompt_surface.requested_listing_limit.is_some()));
     route_uses_structured_bound_scalar_read(route_result)
         || route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
         || route_result.output_contract.semantic_kind
             == crate::OutputSemanticKind::ExistenceWithPath
-        || has_requested_slice_or_count
+        || route_uses_structured_listing(route_result)
+        || route_uses_structured_content_read(route_result, &intent_surface)
+}
+
+fn route_uses_structured_listing(route_result: &RouteResult) -> bool {
+    matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::SqliteTableListing
+            | crate::OutputSemanticKind::SqliteTableNamesOnly
+    ) || matches!(
+        route_result.output_contract.delivery_intent,
+        crate::OutputDeliveryIntent::DirectoryLookup
+            | crate::OutputDeliveryIntent::DirectoryBatchFiles
+    )
 }
 
 fn route_uses_structured_chat_wrapped_light_budget(
@@ -520,14 +541,13 @@ fn should_prefer_light_execution_memory_from_session(
     {
         return false;
     }
-    let stateful_normalizer_chat = route_result.ask_mode.is_normalizer_chat();
     let stateful_delivery_clarify_act = route_result.ask_mode.is_plain_act()
         && route_result.output_contract.delivery_required
         && session_snapshot.active_clarify_state.is_some();
     let chat_wrapped_content_read = route_result.ask_mode.finalize_chat_wrapped()
         && route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required;
-    chat_wrapped_content_read || stateful_normalizer_chat || stateful_delivery_clarify_act
+    chat_wrapped_content_read || stateful_delivery_clarify_act
 }
 
 fn should_suppress_execution_anchor_context(
@@ -725,6 +745,22 @@ pub(crate) fn build_execution_task_context_bundle(
     let mut execution_view = ExecutionContextView {
         budget_tier,
         memory_ctx,
+        runtime_context: build_runtime_context(state),
+        recent_turns_full: if matches!(budget_tier, ExecutionContextBudgetTier::Full)
+            && !suppress_execution_text_context
+        {
+            memory::build_recent_turns_full_context(
+                state,
+                task.user_key.as_deref(),
+                task.user_id,
+                task.chat_id,
+                5,
+                560,
+                6400,
+            )
+        } else {
+            "<none>".to_string()
+        },
         last_turn_full: if matches!(budget_tier, ExecutionContextBudgetTier::Full)
             && !suppress_execution_text_context
         {
@@ -786,7 +822,16 @@ pub(crate) fn apply_execution_context_to_prompts(
     let Some(execution_view) = bundle.execution_view.as_ref() else {
         return;
     };
-    if execution_view.last_turn_full != "<none>" {
+    if execution_view.runtime_context != "<none>" {
+        chat_prompt_context.push_str("\n\n");
+        chat_prompt_context.push_str(&execution_view.runtime_context);
+        prompt_with_memory_for_execution.push_str("\n\n");
+        prompt_with_memory_for_execution.push_str(&execution_view.runtime_context);
+    }
+    if execution_view.recent_turns_full != "<none>" {
+        chat_prompt_context.push_str("\n\n");
+        chat_prompt_context.push_str(&execution_view.recent_turns_full);
+    } else if execution_view.last_turn_full != "<none>" {
         chat_prompt_context.push_str("\n\n");
         chat_prompt_context.push_str(&execution_view.last_turn_full);
     }
@@ -813,14 +858,16 @@ Use this block only as supporting evidence for genuinely short follow-up request
 #[cfg(test)]
 mod tests {
     use super::{
-        build_active_task_context, build_request_surface_hints, classify_route_context_budget,
-        needs_text_anchor_probe_for_route, observed_facts_provide_immediate_anchor,
-        request_looks_like_active_clarify_reply, request_looks_like_fresh_deictic_reference,
+        apply_execution_context_to_prompts, build_active_task_context, build_request_surface_hints,
+        classify_route_context_budget, needs_text_anchor_probe_for_route,
+        observed_facts_provide_immediate_anchor, request_looks_like_active_clarify_reply,
+        request_looks_like_fresh_deictic_reference,
         request_qualifies_for_anchor_only_route_context,
         session_snapshot_provides_execution_state_anchor,
         should_prefer_light_execution_memory_from_session,
         should_suppress_execution_anchor_context, should_suppress_route_memory_context,
-        uses_light_execution_context_budget, RouteContextBudgetTier,
+        uses_light_execution_context_budget, ExecutionContextView, PlannerContextView,
+        RouteContextBudgetTier, TaskContextBundle, TaskContextRawSources,
     };
 
     #[test]
@@ -1391,7 +1438,7 @@ mod tests {
     }
 
     #[test]
-    fn session_anchored_stateful_normalizer_chat_prefers_light_memory_budget() {
+    fn session_anchored_normalizer_chat_keeps_full_memory_budget_for_recall() {
         let mut route = base_route_result();
         route.routed_mode = crate::RoutedMode::Chat;
         route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::Chat);
@@ -1412,7 +1459,7 @@ mod tests {
             }),
             active_observed_facts: None,
         };
-        assert!(should_prefer_light_execution_memory_from_session(
+        assert!(!should_prefer_light_execution_memory_from_session(
             &route,
             &anchored_snapshot
         ));
@@ -1547,6 +1594,87 @@ mod tests {
     }
 
     #[test]
+    fn execution_context_adds_recent_turns_to_chat_prompt_before_last_turn_fallback() {
+        let bundle = TaskContextBundle {
+            raw_sources: TaskContextRawSources::default(),
+            planner_view: PlannerContextView::default(),
+            route_view: None,
+            execution_view: Some(ExecutionContextView {
+                budget_tier: crate::task_context_builder::ExecutionContextBudgetTier::Full,
+                memory_ctx: crate::memory::service::PromptMemoryContext {
+                    prompt_with_memory: String::new(),
+                    chat_prompt_context: String::new(),
+                    long_term_summary: None,
+                    preferences: Vec::new(),
+                    recalled: Vec::new(),
+                    similar_triggers: Vec::new(),
+                    relevant_facts: Vec::new(),
+                    recent_related_events: Vec::new(),
+                },
+                runtime_context: "<none>".to_string(),
+                recent_turns_full: "### RECENT_TURNS_FULL\n[TURN -2]\nUser: 请记住测试编号 client-like-continuous-1\nAssistant: 已记住\n[/TURN]".to_string(),
+                last_turn_full: "### LAST_TURN_FULL\n[TURN -1]\nUser: other\nAssistant: other\n[/TURN]".to_string(),
+                recent_execution_anchor: "<none>".to_string(),
+                recent_execution_context: "<none>".to_string(),
+                image_context: None,
+            }),
+        };
+        let mut chat_context = "### MEMORY_CONTEXT\n<none>".to_string();
+        let mut resolved = "刚才编号是什么".to_string();
+        let mut execution = "刚才编号是什么".to_string();
+        apply_execution_context_to_prompts(
+            &bundle,
+            &mut chat_context,
+            &mut resolved,
+            &mut execution,
+        );
+        assert!(chat_context.contains("### RECENT_TURNS_FULL"));
+        assert!(chat_context.contains("client-like-continuous-1"));
+        assert!(!chat_context.contains("### LAST_TURN_FULL"));
+    }
+
+    #[test]
+    fn execution_context_adds_runtime_context_to_chat_and_planner_prompts() {
+        let bundle = TaskContextBundle {
+            raw_sources: TaskContextRawSources::default(),
+            planner_view: PlannerContextView::default(),
+            route_view: None,
+            execution_view: Some(ExecutionContextView {
+                budget_tier: crate::task_context_builder::ExecutionContextBudgetTier::Full,
+                memory_ctx: crate::memory::service::PromptMemoryContext {
+                    prompt_with_memory: String::new(),
+                    chat_prompt_context: String::new(),
+                    long_term_summary: None,
+                    preferences: Vec::new(),
+                    recalled: Vec::new(),
+                    similar_triggers: Vec::new(),
+                    relevant_facts: Vec::new(),
+                    recent_related_events: Vec::new(),
+                },
+                runtime_context: "### RUNTIME_CONTEXT\ncurrent_process_cwd: /tmp/workspace\nworkspace_root: /tmp/workspace".to_string(),
+                recent_turns_full: "<none>".to_string(),
+                last_turn_full: "<none>".to_string(),
+                recent_execution_anchor: "<none>".to_string(),
+                recent_execution_context: "<none>".to_string(),
+                image_context: None,
+            }),
+        };
+        let mut chat_context = "### MEMORY_CONTEXT\n<none>".to_string();
+        let mut resolved = "当前工作目录是哪个".to_string();
+        let mut execution = "当前工作目录是哪个".to_string();
+        apply_execution_context_to_prompts(
+            &bundle,
+            &mut chat_context,
+            &mut resolved,
+            &mut execution,
+        );
+        assert!(chat_context.contains("### RUNTIME_CONTEXT"));
+        assert!(chat_context.contains("current_process_cwd: /tmp/workspace"));
+        assert!(execution.contains("### RUNTIME_CONTEXT"));
+        assert!(execution.contains("workspace_root: /tmp/workspace"));
+    }
+
+    #[test]
     fn light_execution_budget_detects_generic_explicit_scalar_path_reads() {
         let mut route = base_route_result();
         route.resolved_intent =
@@ -1568,6 +1696,8 @@ mod tests {
         let mut route = base_route_result();
         route.resolved_intent = "看一下 /tmp/model_io.log 最后 5 行".to_string();
         route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/model_io.log".to_string();
         assert!(uses_light_execution_context_budget(
             &route,
             &route.resolved_intent
@@ -1578,6 +1708,10 @@ mod tests {
     fn light_execution_budget_detects_bounded_listing_and_existence() {
         let mut listing = base_route_result();
         listing.resolved_intent = "列出 logs 目录下前 5 个文件名".to_string();
+        listing.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+        listing.output_contract.requires_content_evidence = true;
+        listing.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        listing.output_contract.locator_hint = "logs".to_string();
         assert!(uses_light_execution_context_budget(
             &listing,
             &listing.resolved_intent

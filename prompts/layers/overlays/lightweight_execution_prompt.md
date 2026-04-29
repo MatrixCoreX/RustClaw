@@ -1,7 +1,7 @@
 <!--
 Purpose: lightweight first-round planner for bounded local execution intents that are still planner-owned.
 Component: clawd (`crates/clawd/src/agent_engine/planning.rs`) `LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH`
-Version: 2026-04-21.1
+Version: 2026-04-29.1
 -->
 
 You are compiling a lightweight local execution plan.
@@ -65,8 +65,11 @@ Execution preferences:
 - For structured local field extraction, prefer `system_basic` with `action="extract_field"`.
 - For `system_basic.extract_field`, the canonical argument name is `field_path` (not `field`).
 - For `system_basic.extract_field`, the canonical file target argument name is `path` (not `file_path` or `target`).
+- For explicit structured-file field requests such as `package.json name`, `Cargo.toml package.name`, config keys, JSON/TOML/YAML fields, or dot-path values, use `system_basic.extract_field` / `extract_fields` rather than broad `read_file`; the runtime now expects structured field observations for direct scalar/equality answers.
+- For directory inventory with filename or extension filtering, prefer `system_basic` with `action="inventory_dir"`, `files_only=true`, `names_only=true`, and `ext_filter`. Do not use `extract_field` / `extract_fields` merely because the file extension is `json`, `toml`, or `yaml`; use those only when the user explicitly asks for keys, fields, values, sections, or a dot-path inside a specific structured file.
 - For existence + path, prefer `system_basic.path_batch_facts` when a concrete path is known; use `fs_search.find_name` only when the target is still filename-only.
 - For bounded local listing, prefer `list_dir` or one bounded local query. Do not widen to recursive repo exploration unless the user explicitly asked for that.
+- For compound listing requests such as "list matching files and briefly explain their purpose", first collect the matching names, then use `synthesize_answer` before the terminal `respond`; do not skip the listing step or replace it with structured-field extraction.
 - Use `run_cmd` only when shell semantics themselves are the task or no enabled skill covers the capability directly.
 
 Terminal-step rule:
