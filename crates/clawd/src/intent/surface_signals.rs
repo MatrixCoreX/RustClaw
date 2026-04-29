@@ -1,68 +1,8 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PromptSemanticRequestShape {
-    ServiceStatusQuestion,
-    ScalarCount,
-    DirectoryLookup,
-    Existence,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WorkspaceRootRequestShape {
-    ProjectSummary,
-    TomlPathListing,
-    HiddenEntriesCount,
-    HiddenEntriesCheck,
-    DirsOnlyListing,
-    CurrentPathScalar,
-    PackageManagerDetection,
-    GitDirtySummary,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WorkspaceChildRequestShape {
-    Listing,
-    RecentArtifactsJudgment,
-    DirectoryPurposeSummary,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ShortJokePromptShape {
-    Eligible,
-    WeatherLookupBlocked,
-    FileToolingBlocked,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WorkspaceScopePromptShape {
     ExplicitScope,
     ReferenceScope,
     ExplicitAndReference,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OutputRequestShape {
-    ListOrTable,
-    Compare,
-    StructuredKeys,
-    ExcerptKindJudgment,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OutputCompressionShape {
-    Brief,
-    ScalarOnly,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PathOutputPromptShape {
-    ScalarOnly,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TableRequestShape {
-    SqliteTableListing,
-    SqliteSchemaVersion,
-    MarkdownRender,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,11 +28,6 @@ pub(crate) enum InlineTransformPromptShape {
 pub(crate) enum InlineJsonShape {
     WholeValue,
     EmbeddedPayload,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FieldReadPromptShape {
-    SimpleExplicitScalar,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,24 +70,14 @@ pub(crate) struct PromptSurfaceSignals {
     pub(crate) workspace_single_token_hint: Option<String>,
     pub(crate) file_reference_prompt_shape: Option<FileReferencePromptShape>,
     pub(crate) requested_sentence_count: Option<usize>,
-    pub(crate) output_request_shape: Option<OutputRequestShape>,
-    pub(crate) output_compression_shape: Option<OutputCompressionShape>,
-    pub(crate) path_output_prompt_shape: Option<PathOutputPromptShape>,
     pub(crate) delivery_prompt_shape: Option<DeliveryPromptShape>,
     pub(crate) inline_transform_prompt_shape: Option<InlineTransformPromptShape>,
-    pub(crate) field_read_prompt_shape: Option<FieldReadPromptShape>,
     pub(crate) deictic_prompt_shape: Option<DeicticPromptShape>,
     pub(crate) workspace_scope_prompt_shape: Option<WorkspaceScopePromptShape>,
     pub(crate) requested_read_range: Option<crate::read_range_request::RequestedReadRange>,
     pub(crate) requested_listing_limit: Option<usize>,
     pub(crate) workspace_child_directory_hint: Option<String>,
-    pub(crate) table_request_shape: Option<TableRequestShape>,
     pub(crate) compare_target_pair: Option<(String, String)>,
-    pub(crate) service_status_target: Option<String>,
-    pub(crate) semantic_request_shape: Option<PromptSemanticRequestShape>,
-    pub(crate) workspace_root_request_shape: Option<WorkspaceRootRequestShape>,
-    pub(crate) workspace_child_request_shape: Option<WorkspaceChildRequestShape>,
-    pub(crate) short_joke_prompt_shape: Option<ShortJokePromptShape>,
 }
 
 impl PromptSurfaceSignals {
@@ -301,9 +226,6 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
     );
     let locator_reply_prompt_shape =
         looks_like_locator_only_reply.then_some(LocatorReplyPromptShape::LocatorOnly);
-    let output_request_shape = detect_output_request_shape(trimmed);
-    let output_compression_shape = detect_output_compression_shape(trimmed);
-    let path_output_prompt_shape = detect_path_output_prompt_shape(trimmed);
     let requested_sentence_count = requested_sentence_count_shape(trimmed);
     let requests_inline_transform_action_shape =
         prompt_requests_inline_transform_action_shape(trimmed);
@@ -353,19 +275,6 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
         requests_inline_transform_action_shape,
         has_inline_transform_target_shape,
     );
-    let looks_like_simple_explicit_field_read_shape =
-        prompt_looks_like_simple_explicit_field_read_shape(
-            inline_json_shape.is_some(),
-            output_compression_shape,
-            output_request_shape,
-            has_explicit_path_or_url,
-            has_concrete_locator_hint,
-            requested_read_range.is_some(),
-            count_non_filename_field_mentions_shape(&field_selector_mentions, &filename_candidates),
-            token_count,
-        );
-    let field_read_prompt_shape = looks_like_simple_explicit_field_read_shape
-        .then_some(FieldReadPromptShape::SimpleExplicitScalar);
     let mentions_current_workspace_scope_shape = prompt_mentions_current_workspace_scope(trimmed);
     let mentions_current_workspace_scope_reference_shape =
         prompt_mentions_current_workspace_scope_reference_shape(trimmed);
@@ -373,91 +282,10 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
         mentions_current_workspace_scope_shape,
         mentions_current_workspace_scope_reference_shape,
     );
-    let mentions_current_workspace_or_this_directory =
-        prompt_mentions_current_workspace_or_this_directory(trimmed);
-    let requests_hidden_entries = prompt_requests_hidden_entries(trimmed);
-    let requests_workspace_child_listing = prompt_requests_workspace_child_listing(trimmed);
-    let requests_directory_only_listing = prompt_requests_directory_only_listing(trimmed);
-    let semantic_request_shape = detect_prompt_semantic_request_shape(trimmed);
-    let requests_scalar_count = matches!(
-        semantic_request_shape,
-        Some(PromptSemanticRequestShape::ScalarCount)
-    );
-    let lower = trimmed.to_ascii_lowercase();
-    let mentions_project_structure = trimmed.contains("怎么组织")
-        || trimmed.contains("大概怎么组织")
-        || trimmed.contains("怎么分区")
-        || trimmed.contains("大概怎么分区")
-        || trimmed.contains("像是什么项目")
-        || trimmed.contains("像什么项目")
-        || trimmed.contains("适合新手")
-        || lower.contains("how this project is organized")
-        || lower.contains("how the project is organized")
-        || lower.contains("what this project is")
-        || lower.contains("what kind of project")
-        || lower.contains("how this repo is organized")
-        || lower.contains("plain sentence");
-    let mentions_overview = trimmed.contains("扫一眼")
-        || trimmed.contains("整体")
-        || trimmed.contains("先看")
-        || trimmed.contains("先看看")
-        || lower.contains("inspect")
-        || lower.contains("overview")
-        || lower.contains("glance")
-        || lower.contains("top-level");
-    let compact_summary_shape = matches!(
-        output_compression_shape,
-        Some(OutputCompressionShape::Brief)
-    ) || requested_sentence_count == Some(1);
-    let requests_workspace_project_summary = mentions_current_workspace_scope_shape
-        && mentions_project_structure
-        && (mentions_overview || requests_workspace_child_listing || compact_summary_shape);
-    let requests_toml_path_listing = prompt_requests_toml_path_listing(trimmed);
-    let requests_directory_purpose_summary = requests_workspace_child_listing
-        && (trimmed.contains("更像说明文档还是运行产物")
-            || trimmed.contains("更像文档还是运行产物")
-            || trimmed.contains("这些是干什么的")
-            || lower.contains("more like docs or runtime")
-            || lower.contains("more like documentation or runtime")
-            || lower.contains("what these files are for"));
-    let requests_package_manager_detection = prompt_requests_package_manager_detection(trimmed);
-    let requests_current_workspace_path_scalar =
-        prompt_requests_current_workspace_path_scalar(trimmed);
     let requested_listing_limit =
         crate::listing_limit_request::requested_listing_limit_from_prompt(trimmed);
-    let requests_workspace_hidden_entries_count = mentions_current_workspace_or_this_directory
-        && requests_hidden_entries
-        && requests_scalar_count;
-    let requests_workspace_hidden_entries_check = mentions_current_workspace_or_this_directory
-        && requests_hidden_entries
-        && !requests_workspace_hidden_entries_count;
-    let requests_workspace_dirs_only_listing = requests_workspace_child_listing
-        && mentions_current_workspace_scope_shape
-        && requests_directory_only_listing
-        && requested_listing_limit.is_none();
     let workspace_child_directory_hint = extract_workspace_child_directory_hint_shape(trimmed);
-    let table_request_shape = detect_table_request_shape(trimmed);
-    let requests_git_dirty_summary = prompt_requests_git_dirty_summary(trimmed);
-    let requests_recent_artifacts_judgment = prompt_requests_recent_artifacts_judgment(trimmed);
-    let short_joke_prompt_shape = detect_short_joke_prompt_shape(trimmed);
     let compare_target_pair = detect_compare_targets_shape(trimmed);
-    let service_status_target = extract_service_status_target_shape(trimmed);
-    let workspace_root_request_shape = classify_workspace_root_request_shape(
-        requests_workspace_project_summary,
-        requests_toml_path_listing,
-        requests_package_manager_detection,
-        requests_current_workspace_path_scalar,
-        requests_workspace_hidden_entries_count,
-        requests_workspace_hidden_entries_check,
-        requests_workspace_dirs_only_listing,
-        requests_git_dirty_summary,
-        workspace_scope_prompt_shape,
-    );
-    let workspace_child_request_shape = classify_workspace_child_request_shape(
-        requests_directory_purpose_summary,
-        requests_recent_artifacts_judgment,
-        requests_workspace_child_listing,
-    );
     PromptSurfaceSignals {
         token_count,
         inline_json_shape,
@@ -476,24 +304,14 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
         workspace_single_token_hint,
         file_reference_prompt_shape,
         requested_sentence_count,
-        output_request_shape,
-        output_compression_shape,
-        path_output_prompt_shape,
         delivery_prompt_shape,
         inline_transform_prompt_shape,
-        field_read_prompt_shape,
         deictic_prompt_shape,
         workspace_scope_prompt_shape,
         requested_read_range,
         requested_listing_limit,
         workspace_child_directory_hint,
-        table_request_shape,
         compare_target_pair,
-        service_status_target,
-        semantic_request_shape,
-        workspace_root_request_shape,
-        workspace_child_request_shape,
-        short_joke_prompt_shape,
     }
 }
 
@@ -508,78 +326,6 @@ fn classify_locator_hint_prompt_shape(
         Some(LocatorHintPromptShape::ConcreteImplicit)
     } else if has_workspace_single_token_hint {
         Some(LocatorHintPromptShape::WorkspaceSingleToken)
-    } else {
-        None
-    }
-}
-
-fn detect_output_request_shape(prompt: &str) -> Option<OutputRequestShape> {
-    if prompt_requests_excerpt_kind_judgment(prompt) {
-        Some(OutputRequestShape::ExcerptKindJudgment)
-    } else if prompt_requests_compare_shape(prompt) {
-        Some(OutputRequestShape::Compare)
-    } else if prompt_requests_structured_keys_shape(prompt) {
-        Some(OutputRequestShape::StructuredKeys)
-    } else if prompt_requests_list_or_table_shape(prompt) {
-        Some(OutputRequestShape::ListOrTable)
-    } else {
-        None
-    }
-}
-
-fn detect_output_compression_shape(prompt: &str) -> Option<OutputCompressionShape> {
-    if prompt_requests_scalar_only_shape(prompt) {
-        Some(OutputCompressionShape::ScalarOnly)
-    } else if prompt_requests_brief_shape(prompt) {
-        Some(OutputCompressionShape::Brief)
-    } else {
-        None
-    }
-}
-
-fn detect_path_output_prompt_shape(prompt: &str) -> Option<PathOutputPromptShape> {
-    let lower = prompt.to_ascii_lowercase();
-    let asks_path = prompt.contains("路径")
-        || lower.contains(" path")
-        || lower.contains("path ")
-        || lower.ends_with("path");
-    let asks_location = prompt.contains("在哪")
-        || prompt.contains("在哪里")
-        || lower.contains("where is")
-        || lower.contains("where's");
-    let output_only = prompt.contains("只输出")
-        || prompt.contains("只给")
-        || prompt.contains("只回")
-        || prompt.contains("只要")
-        || prompt.contains("就行")
-        || prompt.contains("就好")
-        || lower.contains("path only")
-        || lower.contains("only path")
-        || lower.contains("only the path")
-        || lower.contains("output only the path")
-        || lower.contains("return only the path")
-        || lower.contains("just output the path")
-        || lower.contains("just give the path")
-        || lower.contains("just the path")
-        || lower.contains("just path");
-    let conflicting = prompt.contains("路径列表")
-        || lower.contains("path list")
-        || lower.contains("paths only")
-        || prompt.contains("发给我")
-        || prompt.contains("发我")
-        || lower.contains("send me");
-    ((asks_path && output_only) || (asks_location && asks_path && output_only))
-        .then_some(PathOutputPromptShape::ScalarOnly)
-        .filter(|_| !conflicting)
-}
-
-fn detect_table_request_shape(prompt: &str) -> Option<TableRequestShape> {
-    if prompt_requests_sqlite_table_listing(prompt) {
-        Some(TableRequestShape::SqliteTableListing)
-    } else if prompt_requests_sqlite_schema_version(prompt) {
-        Some(TableRequestShape::SqliteSchemaVersion)
-    } else if prompt_requests_markdown_table_render(prompt) {
-        Some(TableRequestShape::MarkdownRender)
     } else {
         None
     }
@@ -657,54 +403,6 @@ fn classify_file_reference_prompt_shape(
     }
 }
 
-fn detect_prompt_semantic_request_shape(prompt: &str) -> Option<PromptSemanticRequestShape> {
-    if looks_like_service_status_question(prompt) {
-        Some(PromptSemanticRequestShape::ServiceStatusQuestion)
-    } else if prompt_requests_scalar_count(prompt) {
-        Some(PromptSemanticRequestShape::ScalarCount)
-    } else if prompt_requests_directory_lookup(prompt) {
-        Some(PromptSemanticRequestShape::DirectoryLookup)
-    } else if prompt_requests_existence(prompt) {
-        Some(PromptSemanticRequestShape::Existence)
-    } else {
-        None
-    }
-}
-
-fn classify_workspace_root_request_shape(
-    requests_workspace_project_summary: bool,
-    requests_toml_path_listing: bool,
-    requests_package_manager_detection: bool,
-    requests_current_workspace_path_scalar: bool,
-    requests_workspace_hidden_entries_count: bool,
-    requests_workspace_hidden_entries_check: bool,
-    requests_workspace_dirs_only_listing: bool,
-    requests_git_dirty_summary: bool,
-    workspace_scope_prompt_shape: Option<WorkspaceScopePromptShape>,
-) -> Option<WorkspaceRootRequestShape> {
-    if requests_current_workspace_path_scalar {
-        Some(WorkspaceRootRequestShape::CurrentPathScalar)
-    } else if requests_workspace_hidden_entries_count {
-        Some(WorkspaceRootRequestShape::HiddenEntriesCount)
-    } else if requests_workspace_hidden_entries_check {
-        Some(WorkspaceRootRequestShape::HiddenEntriesCheck)
-    } else if requests_workspace_dirs_only_listing {
-        Some(WorkspaceRootRequestShape::DirsOnlyListing)
-    } else if requests_package_manager_detection {
-        Some(WorkspaceRootRequestShape::PackageManagerDetection)
-    } else if requests_git_dirty_summary
-        && workspace_scope_shape_has_explicit_scope(workspace_scope_prompt_shape)
-    {
-        Some(WorkspaceRootRequestShape::GitDirtySummary)
-    } else if requests_workspace_project_summary {
-        Some(WorkspaceRootRequestShape::ProjectSummary)
-    } else if requests_toml_path_listing {
-        Some(WorkspaceRootRequestShape::TomlPathListing)
-    } else {
-        None
-    }
-}
-
 fn classify_workspace_scope_prompt_shape(
     mentions_current_workspace_scope_shape: bool,
     mentions_current_workspace_scope_reference_shape: bool,
@@ -720,18 +418,6 @@ fn classify_workspace_scope_prompt_shape(
     }
 }
 
-pub(crate) fn workspace_scope_shape_has_explicit_scope(
-    shape: Option<WorkspaceScopePromptShape>,
-) -> bool {
-    matches!(
-        shape,
-        Some(
-            WorkspaceScopePromptShape::ExplicitScope
-                | WorkspaceScopePromptShape::ExplicitAndReference
-        )
-    )
-}
-
 pub(crate) fn workspace_scope_shape_has_reference_scope(
     shape: Option<WorkspaceScopePromptShape>,
 ) -> bool {
@@ -742,36 +428,6 @@ pub(crate) fn workspace_scope_shape_has_reference_scope(
                 | WorkspaceScopePromptShape::ExplicitAndReference
         )
     )
-}
-
-fn classify_workspace_child_request_shape(
-    requests_directory_purpose_summary: bool,
-    requests_recent_artifacts_judgment: bool,
-    requests_workspace_child_listing: bool,
-) -> Option<WorkspaceChildRequestShape> {
-    if requests_directory_purpose_summary {
-        Some(WorkspaceChildRequestShape::DirectoryPurposeSummary)
-    } else if requests_recent_artifacts_judgment {
-        Some(WorkspaceChildRequestShape::RecentArtifactsJudgment)
-    } else if requests_workspace_child_listing {
-        Some(WorkspaceChildRequestShape::Listing)
-    } else {
-        None
-    }
-}
-
-fn detect_short_joke_prompt_shape(prompt: &str) -> Option<ShortJokePromptShape> {
-    if !prompt_requests_short_joke_shape(prompt) {
-        None
-    } else if prompt_mentions_file_write_tooling_shape(prompt) {
-        Some(ShortJokePromptShape::FileToolingBlocked)
-    } else if prompt_mentions_weather_lookup_shape(prompt)
-        && !prompt_requests_weather_lookup_suppression_shape(prompt)
-    {
-        Some(ShortJokePromptShape::WeatherLookupBlocked)
-    } else {
-        Some(ShortJokePromptShape::Eligible)
-    }
 }
 
 fn has_explicit_path_or_url_shape(prompt: &str) -> bool {
@@ -792,65 +448,6 @@ fn contains_inline_transform_target_shape(
         && !has_delivery_token_reference
 }
 
-fn prompt_looks_like_simple_explicit_field_read_shape(
-    has_inline_json_shape: bool,
-    output_compression_shape: Option<OutputCompressionShape>,
-    output_request_shape: Option<OutputRequestShape>,
-    has_explicit_path_or_url: bool,
-    has_concrete_locator_hint: bool,
-    has_requested_read_range: bool,
-    non_filename_field_mention_count: usize,
-    token_count: usize,
-) -> bool {
-    if !(has_explicit_path_or_url || has_concrete_locator_hint)
-        || has_inline_json_shape
-        || matches!(
-            output_compression_shape,
-            Some(OutputCompressionShape::Brief)
-        )
-        || output_request_shape.is_some()
-        || has_requested_read_range
-    {
-        return false;
-    }
-    non_filename_field_mention_count == 1 && token_count <= 24
-}
-
-fn count_non_filename_field_mentions_shape(
-    field_selector_mentions: &[String],
-    filename_candidates: &[String],
-) -> usize {
-    let filename_candidates = filename_candidates
-        .iter()
-        .map(|token| token.to_ascii_lowercase())
-        .collect::<Vec<_>>();
-    field_selector_mentions
-        .iter()
-        .filter(|selector| {
-            !filename_candidates
-                .iter()
-                .any(|candidate| candidate.eq_ignore_ascii_case(selector))
-        })
-        .count()
-}
-
-pub(crate) fn looks_like_service_status_question(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    let asks_status = prompt.contains("在运行")
-        || prompt.contains("活着")
-        || prompt.contains("状态")
-        || lower.contains("is running")
-        || lower.contains("running right now")
-        || lower.contains("status");
-    let mutating = prompt.contains("重启")
-        || prompt.contains("停止")
-        || prompt.contains("启动")
-        || lower.contains("restart")
-        || lower.contains("stop ")
-        || lower.contains("start ");
-    asks_status && !mutating
-}
-
 pub(crate) fn prompt_requests_scalar_count(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     prompt.contains("数一下")
@@ -859,43 +456,6 @@ pub(crate) fn prompt_requests_scalar_count(prompt: &str) -> bool {
         || lower.contains("count ")
         || lower.contains("count how many")
         || lower.contains("how many")
-}
-
-pub(crate) fn prompt_requests_directory_lookup(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    let asks_listing = prompt.contains("有什么")
-        || prompt.contains("都有啥")
-        || prompt.contains("都有什么")
-        || prompt.contains("下面有什么")
-        || prompt.contains("下面都有什么")
-        || prompt.contains("里面有什么")
-        || lower.contains("what is in")
-        || lower.contains("what's in")
-        || lower.contains("what is inside")
-        || lower.contains("what's inside")
-        || lower.contains("list what is in")
-        || lower.contains("list what's in")
-        || lower.contains("show what is in")
-        || lower.contains("show what's in");
-    let mutating = prompt.contains("删除")
-        || prompt.contains("移动")
-        || prompt.contains("重命名")
-        || lower.contains("delete ")
-        || lower.contains("move ")
-        || lower.contains("rename ");
-    asks_listing && !mutating
-}
-
-pub(crate) fn prompt_requests_existence(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt.contains("在不在")
-        || prompt.contains("存不存在")
-        || prompt.contains("存在吗")
-        || prompt.contains("有没有")
-        || lower.contains("is there")
-        || lower.contains("does it exist")
-        || lower.contains("does that exist")
-        || lower.contains("exists")
 }
 
 pub(crate) fn prompt_mentions_current_workspace_scope(prompt: &str) -> bool {
@@ -998,6 +558,7 @@ pub(crate) fn prompt_requests_workspace_project_summary(prompt: &str) -> bool {
             || compact_summary_shape)
 }
 
+#[cfg(test)]
 pub(crate) fn prompt_requests_toml_path_listing(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     let asks_toml =
@@ -1022,11 +583,13 @@ pub(crate) fn prompt_requests_directory_purpose_summary(prompt: &str) -> bool {
             || lower.contains("what these files are for"))
 }
 
+#[cfg(test)]
 pub(crate) fn prompt_requests_package_manager_detection(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     prompt.contains("包管理器") || lower.contains("package manager")
 }
 
+#[cfg(test)]
 pub(crate) fn prompt_requests_git_dirty_summary(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     prompt.contains("未提交改动")
@@ -1036,6 +599,7 @@ pub(crate) fn prompt_requests_git_dirty_summary(prompt: &str) -> bool {
         || lower.contains("dirty working tree")
 }
 
+#[cfg(test)]
 pub(crate) fn prompt_requests_current_workspace_path_scalar(prompt: &str) -> bool {
     if prompt.is_empty() {
         return false;
@@ -1183,6 +747,7 @@ pub(crate) fn prompt_mentions_current_workspace_scope_reference_shape(prompt: &s
     .any(|needle| trimmed.contains(needle) || normalized_contains_phrase(&normalized, needle))
 }
 
+#[cfg(test)]
 pub(crate) fn prompt_requests_list_or_table_shape(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     ["markdown table", "table", "list", "列表", "表格"]
@@ -1190,6 +755,7 @@ pub(crate) fn prompt_requests_list_or_table_shape(prompt: &str) -> bool {
         .any(|needle| lower.contains(needle) || prompt.contains(needle))
 }
 
+#[cfg(test)]
 pub(crate) fn prompt_requests_excerpt_kind_judgment(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     prompt.contains("更像") || lower.contains("more like")
@@ -1357,6 +923,7 @@ pub(crate) fn extract_workspace_child_directory_hint_shape(prompt: &str) -> Opti
     None
 }
 
+#[cfg(test)]
 pub(crate) fn prompt_requests_sqlite_table_listing(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     (lower.contains(".sqlite") || lower.contains(".db"))
@@ -1373,11 +940,13 @@ pub(crate) fn prompt_requests_sqlite_table_listing(prompt: &str) -> bool {
             || lower.contains("which tables"))
 }
 
+#[cfg(test)]
 pub(crate) fn prompt_requests_sqlite_schema_version(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     (lower.contains(".sqlite") || lower.contains(".db")) && lower.contains("schema version")
 }
 
+#[cfg(test)]
 pub(crate) fn prompt_requests_markdown_table_render(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     lower.contains("markdown table")
@@ -1386,6 +955,7 @@ pub(crate) fn prompt_requests_markdown_table_render(prompt: &str) -> bool {
         || (prompt.contains("表格") && prompt.contains("markdown"))
 }
 
+#[cfg(test)]
 pub(crate) fn prompt_requests_structured_keys_shape(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     [
@@ -1431,28 +1001,6 @@ pub(crate) fn prompt_requests_brief_shape(prompt: &str) -> bool {
         || ["简短", "简要", "简洁", "一段", "brief"]
             .iter()
             .any(|needle| prompt.contains(needle))
-}
-
-pub(crate) fn extract_service_status_target_shape(prompt: &str) -> Option<String> {
-    const SERVICE_TOKENS: &[&str] = &[
-        "telegramd",
-        "clawd",
-        "whatsappd",
-        "whatsapp_webd",
-        "feishud",
-        "larkd",
-        "sshd",
-        "ssh",
-    ];
-    let lower = prompt.to_ascii_lowercase();
-    for token in
-        lower.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.'))
-    {
-        if SERVICE_TOKENS.iter().any(|candidate| token == *candidate) {
-            return Some(token.to_string());
-        }
-    }
-    None
 }
 
 pub(crate) fn prompt_requests_inline_transform_action_shape(prompt: &str) -> bool {
@@ -1530,36 +1078,13 @@ fn strip_delivery_tokens_for_phrase_match(prompt: &str) -> String {
         .join(" ")
 }
 
-pub(crate) fn prompt_requests_short_joke_shape(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt.contains("笑话") || lower.contains("joke")
-}
-
-pub(crate) fn prompt_requests_weather_lookup_suppression_shape(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt.contains("别查")
-        || prompt.contains("不要查")
-        || prompt.contains("不用查")
-        || lower.contains("don't check")
-        || lower.contains("do not check")
-        || lower.contains("no need to check")
-}
-
+#[cfg(test)]
 pub(crate) fn prompt_mentions_weather_lookup_shape(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     prompt.contains("天气") || lower.contains("weather")
 }
 
-pub(crate) fn prompt_mentions_file_write_tooling_shape(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt.contains("文件")
-        || prompt.contains("保存")
-        || prompt.contains("写入")
-        || lower.contains("save")
-        || lower.contains("write to")
-        || lower.contains("file")
-}
-
+#[cfg(test)]
 pub(crate) fn prompt_requests_scalar_only_shape(prompt: &str) -> bool {
     if prompt_requests_list_or_table_shape(prompt) {
         return false;
@@ -2068,11 +1593,8 @@ mod tests {
         prompt_requests_sqlite_table_listing, prompt_requests_structured_keys_shape,
         prompt_requests_toml_path_listing, prompt_requests_workspace_project_summary,
         requested_sentence_count_shape, DeicticPromptShape, DeliveryPromptShape,
-        FieldReadPromptShape, FileReferencePromptShape, InlineJsonShape,
-        InlineTransformPromptShape, LocatorHintPromptShape, LocatorReplyPromptShape,
-        OutputCompressionShape, OutputRequestShape, PathOutputPromptShape,
-        PromptSemanticRequestShape, ShortJokePromptShape, TableRequestShape,
-        WorkspaceChildRequestShape, WorkspaceRootRequestShape, WorkspaceScopePromptShape,
+        FileReferencePromptShape, InlineJsonShape, InlineTransformPromptShape,
+        LocatorHintPromptShape, LocatorReplyPromptShape, WorkspaceScopePromptShape,
     };
 
     #[test]
@@ -2089,18 +1611,11 @@ mod tests {
         assert_eq!(signals.filename_candidate_count, 0);
         assert_eq!(signals.bare_filename_stem_candidate_count, 0);
         assert!(signals.workspace_single_token_hint.is_none());
-        assert!(signals.output_request_shape.is_none());
-        assert!(signals.output_compression_shape.is_none());
         assert!(signals.inline_transform_prompt_shape.is_none());
         assert!(signals.delivery_prompt_shape.is_none());
         assert!(signals.file_reference_prompt_shape.is_none());
         assert!(signals.deictic_prompt_shape.is_none());
         assert!(signals.workspace_scope_prompt_shape.is_none());
-        assert!(signals.workspace_root_request_shape.is_none());
-        assert!(signals.workspace_child_request_shape.is_none());
-        assert!(signals.table_request_shape.is_none());
-        assert!(signals.semantic_request_shape.is_none());
-        assert!(signals.short_joke_prompt_shape.is_none());
     }
 
     #[test]
@@ -2247,80 +1762,6 @@ mod tests {
             signals.deictic_prompt_shape,
             Some(DeicticPromptShape::ObjectTarget)
         );
-        assert_eq!(
-            signals.output_compression_shape,
-            Some(OutputCompressionShape::ScalarOnly)
-        );
-    }
-
-    #[test]
-    fn lifts_router_deictic_shape_flags_into_surface_signals() {
-        let status = analyze_prompt_surface("那个服务现在在运行吗");
-        assert_eq!(
-            status.semantic_request_shape,
-            Some(PromptSemanticRequestShape::ServiceStatusQuestion)
-        );
-        let count = analyze_prompt_surface("那个目录里有多少个文件");
-        assert_eq!(
-            count.semantic_request_shape,
-            Some(PromptSemanticRequestShape::ScalarCount)
-        );
-        let lookup = analyze_prompt_surface("那个目录下面有什么");
-        assert_eq!(
-            lookup.semantic_request_shape,
-            Some(PromptSemanticRequestShape::DirectoryLookup)
-        );
-        let existence = analyze_prompt_surface("那个文件还在不在");
-        assert_eq!(
-            existence.semantic_request_shape,
-            Some(PromptSemanticRequestShape::Existence)
-        );
-    }
-
-    #[test]
-    fn lifts_workspace_root_request_shapes_into_surface_signals() {
-        let project = analyze_prompt_surface("用一句话说明当前工作区像什么项目");
-        assert_eq!(
-            project.workspace_root_request_shape,
-            Some(WorkspaceRootRequestShape::ProjectSummary)
-        );
-        let toml = analyze_prompt_surface("列出当前仓库里的 toml 文件路径列表，只输出路径");
-        assert_eq!(
-            toml.workspace_root_request_shape,
-            Some(WorkspaceRootRequestShape::TomlPathListing)
-        );
-        let hidden_count =
-            analyze_prompt_surface("数一下当前目录里以点开头的隐藏文件有几个，只输出数字");
-        assert_eq!(
-            hidden_count.workspace_root_request_shape,
-            Some(WorkspaceRootRequestShape::HiddenEntriesCount)
-        );
-        let hidden_check =
-            analyze_prompt_surface("这个目录里有没有那种点开头的隐藏文件？有的话随便举两个例子");
-        assert_eq!(
-            hidden_check.workspace_root_request_shape,
-            Some(WorkspaceRootRequestShape::HiddenEntriesCheck)
-        );
-        let dirs = analyze_prompt_surface("列出当前目录有哪些顶层文件夹，只输出目录名列表");
-        assert_eq!(
-            dirs.workspace_root_request_shape,
-            Some(WorkspaceRootRequestShape::DirsOnlyListing)
-        );
-        let path = analyze_prompt_surface("只输出当前工作目录的绝对路径，不要解释");
-        assert_eq!(
-            path.workspace_root_request_shape,
-            Some(WorkspaceRootRequestShape::CurrentPathScalar)
-        );
-        let pkg = analyze_prompt_surface("用一句话说当前机器的包管理器是什么");
-        assert_eq!(
-            pkg.workspace_root_request_shape,
-            Some(WorkspaceRootRequestShape::PackageManagerDetection)
-        );
-        let dirty = analyze_prompt_surface("看看当前仓库有没有改动");
-        assert_eq!(
-            dirty.workspace_root_request_shape,
-            Some(WorkspaceRootRequestShape::GitDirtySummary)
-        );
     }
 
     #[test]
@@ -2334,97 +1775,6 @@ mod tests {
         assert_eq!(
             reference.workspace_scope_prompt_shape,
             Some(WorkspaceScopePromptShape::ReferenceScope)
-        );
-    }
-
-    #[test]
-    fn lifts_output_request_shape_into_surface_signals() {
-        let list = analyze_prompt_surface("把结果输出成 markdown table");
-        assert_eq!(
-            list.output_request_shape,
-            Some(OutputRequestShape::ListOrTable)
-        );
-        let compare = analyze_prompt_surface("比较 Cargo.toml 和 Cargo.lock 哪个更大");
-        assert_eq!(
-            compare.output_request_shape,
-            Some(OutputRequestShape::Compare)
-        );
-        let keys = analyze_prompt_surface("读取 configs/config.toml 的顶层键名，只输出键名列表");
-        assert_eq!(
-            keys.output_request_shape,
-            Some(OutputRequestShape::StructuredKeys)
-        );
-        let judgment = analyze_prompt_surface("一句话说它更像日志还是清单");
-        assert_eq!(
-            judgment.output_request_shape,
-            Some(OutputRequestShape::ExcerptKindJudgment)
-        );
-    }
-
-    #[test]
-    fn lifts_table_request_shape_into_surface_signals() {
-        let sqlite = analyze_prompt_surface("看看 data/db-basic-contract.sqlite 里有哪些表");
-        assert_eq!(
-            sqlite.table_request_shape,
-            Some(TableRequestShape::SqliteTableListing)
-        );
-        let table_names =
-            analyze_prompt_surface("看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里有哪些表，只输出表名");
-        assert_eq!(
-            table_names.table_request_shape,
-            Some(TableRequestShape::SqliteTableListing)
-        );
-        let markdown = analyze_prompt_surface("把结果输出成 markdown table");
-        assert_eq!(
-            markdown.table_request_shape,
-            Some(TableRequestShape::MarkdownRender)
-        );
-    }
-
-    #[test]
-    fn lifts_workspace_child_request_shapes_into_surface_signals() {
-        let list = analyze_prompt_surface("列出 document 目录下有哪些文件，只输出文件名列表");
-        assert_eq!(
-            list.workspace_child_request_shape,
-            Some(WorkspaceChildRequestShape::Listing)
-        );
-        let recent = analyze_prompt_surface(
-            "列出 logs 目录最近修改的 3 个文件，再告诉我这更像测试日志还是正式产物",
-        );
-        assert_eq!(
-            recent.workspace_child_request_shape,
-            Some(WorkspaceChildRequestShape::RecentArtifactsJudgment)
-        );
-        let purpose = analyze_prompt_surface(
-            "列出 logs 目录最近修改的 3 个文件，再告诉我这更像说明文档还是运行产物",
-        );
-        assert_eq!(
-            purpose.workspace_child_request_shape,
-            Some(WorkspaceChildRequestShape::DirectoryPurposeSummary)
-        );
-    }
-
-    #[test]
-    fn lifts_short_joke_prompt_shape_into_surface_signals() {
-        let eligible = analyze_prompt_surface("讲个笑话");
-        assert_eq!(
-            eligible.short_joke_prompt_shape,
-            Some(ShortJokePromptShape::Eligible)
-        );
-        let weather_blocked = analyze_prompt_surface("讲个天气笑话");
-        assert_eq!(
-            weather_blocked.short_joke_prompt_shape,
-            Some(ShortJokePromptShape::WeatherLookupBlocked)
-        );
-        let weather_suppressed = analyze_prompt_surface("讲个天气笑话，但别查天气");
-        assert_eq!(
-            weather_suppressed.short_joke_prompt_shape,
-            Some(ShortJokePromptShape::Eligible)
-        );
-        let file_blocked = analyze_prompt_surface("写个保存到文件里的笑话");
-        assert_eq!(
-            file_blocked.short_joke_prompt_shape,
-            Some(ShortJokePromptShape::FileToolingBlocked)
         );
     }
 
@@ -2527,17 +1877,6 @@ mod tests {
     }
 
     #[test]
-    fn detects_path_output_prompt_shape_for_where_is_variant() {
-        let surface = analyze_prompt_surface(
-            "在 scripts/nl_tests/fixtures/locator_smart/case_only 里查一下 report.md 在哪，路径就行",
-        );
-        assert_eq!(
-            surface.path_output_prompt_shape,
-            Some(PathOutputPromptShape::ScalarOnly)
-        );
-    }
-
-    #[test]
     fn lifts_english_directory_file_pair_into_surface_signals() {
         let explicit = analyze_prompt_surface(
             "In scripts/nl_tests/fixtures/locator_smart/case_only, where is report.md? just output the path",
@@ -2563,47 +1902,10 @@ mod tests {
     }
 
     #[test]
-    fn detects_path_output_prompt_shape_for_english_where_is_variant() {
-        let surface = analyze_prompt_surface(
-            "In scripts/nl_tests/fixtures/locator_smart/case_only, where is report.md? just output the path",
-        );
-        assert_eq!(
-            surface.path_output_prompt_shape,
-            Some(PathOutputPromptShape::ScalarOnly)
-        );
-    }
-
-    #[test]
-    fn detects_path_output_prompt_shape_for_english_path_only_variants() {
-        let contracted = analyze_prompt_surface(
-            "In scripts/nl_tests/fixtures/locator_smart/case_only, where's report.md? only the path",
-        );
-        assert_eq!(
-            contracted.path_output_prompt_shape,
-            Some(PathOutputPromptShape::ScalarOnly)
-        );
-
-        let imperative = analyze_prompt_surface(
-            "Inside scripts/nl_tests/fixtures/locator_smart/stem_unique, find abcd and return only the path",
-        );
-        assert_eq!(
-            imperative.path_output_prompt_shape,
-            Some(PathOutputPromptShape::ScalarOnly)
-        );
-    }
-
-    #[test]
     fn detects_sqlite_schema_version_shape() {
         assert!(prompt_requests_sqlite_schema_version(
             "看一下 data/db-basic-contract.sqlite 的 schema version，只输出数字"
         ));
-        let sqlite = analyze_prompt_surface(
-            "看一下 data/db-basic-contract.sqlite 的 schema version，只输出数字",
-        );
-        assert_eq!(
-            sqlite.table_request_shape,
-            Some(TableRequestShape::SqliteSchemaVersion)
-        );
     }
 
     #[test]
@@ -2756,17 +2058,6 @@ mod tests {
     }
 
     #[test]
-    fn lifts_simple_explicit_field_read_shape_into_surface_signals() {
-        let signals = analyze_prompt_surface(
-            "读取 /home/guagua/rustclaw/configs/config.toml 里的 tools.allow_sudo",
-        );
-        assert_eq!(
-            signals.field_read_prompt_shape,
-            Some(FieldReadPromptShape::SimpleExplicitScalar)
-        );
-    }
-
-    #[test]
     fn detects_weather_lookup_shape() {
         assert!(prompt_mentions_weather_lookup_shape("天气怎么样"));
         assert!(prompt_mentions_weather_lookup_shape("what is the weather"));
@@ -2775,12 +2066,6 @@ mod tests {
     #[test]
     fn detects_delivery_phrase_shape() {
         assert!(prompt_requests_delivery_phrase("把 README.md 发给我"));
-    }
-
-    #[test]
-    fn lifts_service_status_target_into_surface_signals() {
-        let signals = analyze_prompt_surface("check whether telegramd is running");
-        assert_eq!(signals.service_status_target.as_deref(), Some("telegramd"));
     }
 
     #[test]

@@ -220,6 +220,35 @@ fn query_memories_since_id_for_chat(
     Ok(out)
 }
 
+fn strip_llm_reply_memory_prefix(text: &str) -> &str {
+    text.trim()
+        .strip_prefix(LLM_SHORT_TERM_MEMORY_PREFIX)
+        .unwrap_or_else(|| text.trim())
+        .trim()
+}
+
+pub(super) fn is_transient_assistant_context_text_basic(text: &str) -> bool {
+    let trimmed = strip_llm_reply_memory_prefix(text);
+    trimmed.is_empty()
+        || trimmed == provider_unavailable_assistant_placeholder()
+        || trimmed == clarify_assistant_placeholder()
+        || crate::finalize::is_execution_summary_message(trimmed)
+}
+
+fn is_transient_assistant_context_text(state: &AppState, text: &str) -> bool {
+    let trimmed = strip_llm_reply_memory_prefix(text);
+    is_transient_assistant_context_text_basic(trimmed)
+        || crate::fallback::is_known_clarify_fallback_text(state, trimmed)
+}
+
+fn assistant_context_text_for_recall<'a>(state: &AppState, text: &'a str) -> Option<&'a str> {
+    if is_transient_assistant_context_text(state, text) {
+        None
+    } else {
+        Some(strip_llm_reply_memory_prefix(text))
+    }
+}
+
 pub(crate) fn insert_memory(
     state: &AppState,
     user_id: i64,
@@ -543,6 +572,9 @@ pub(crate) fn recall_memories_since_id(
             )?;
         }
     }
+    out.retain(|(_, role, content, _)| {
+        role != MEMORY_ROLE_ASSISTANT || !is_transient_assistant_context_text(state, content)
+    });
     Ok(out)
 }
 
@@ -1259,7 +1291,9 @@ pub(crate) fn build_last_turn_full_context(
     for (role, content, safety_flag) in &recent {
         // First, find the most recent assistant reply
         if found_assistant.is_none() && role == MEMORY_ROLE_ASSISTANT {
-            found_assistant = Some((content.clone(), safety_flag.clone()));
+            if let Some(assistant_text) = assistant_context_text_for_recall(state, content) {
+                found_assistant = Some((assistant_text.to_string(), safety_flag.clone()));
+            }
             continue;
         }
         // After finding assistant, look for the user message that precedes it (comes later in DESC list = older)
@@ -1322,15 +1356,9 @@ pub(crate) fn build_recent_assistant_replies_context(
         {
             continue;
         }
-        let trimmed_content = content.trim();
-        // §7.2: 集合化 fallback 比对，新老 fallback 文案都跳过；仍单独识别
-        // ProviderUnavailable assistant placeholder（写入端的占位 marker）。
-        if trimmed_content.is_empty()
-            || crate::fallback::is_known_clarify_fallback_text(state, trimmed_content)
-            || trimmed_content == provider_unavailable_assistant_placeholder()
-        {
+        let Some(trimmed_content) = assistant_context_text_for_recall(state, &content) else {
             continue;
-        }
+        };
         let reply_index = lines.len() + 1;
         let relative_index = -(reply_index as i64);
         let preview = utf8_safe_prefix(trimmed_content, preview_chars)
@@ -1396,14 +1424,9 @@ pub(crate) fn read_recent_assistant_reply_texts(
         {
             continue;
         }
-        let trimmed = content.trim();
-        // §7.2: 同上 —— 集合化 fallback 比对。
-        if trimmed.is_empty()
-            || crate::fallback::is_known_clarify_fallback_text(state, trimmed)
-            || trimmed == provider_unavailable_assistant_placeholder()
-        {
+        let Some(trimmed) = assistant_context_text_for_recall(state, &content) else {
             continue;
-        }
+        };
         replies.push(trimmed.to_string());
         if replies.len() >= max_replies {
             break;
@@ -2078,6 +2101,7 @@ mod tests {
         {
             let db = state.core.db.get().expect("db");
             create_memories_table(&db);
+            create_user_preferences_table(&db);
         }
         insert_memory(
             &state,
@@ -2092,6 +2116,36 @@ mod tests {
             MemoryWriteKind::AssistantOutcome,
         )
         .expect("insert legacy assistant memory");
+
+        let recent =
+            build_recent_assistant_replies_context(&state, Some("test-user"), 1, 2, 3, 220);
+        assert_eq!(recent, "<none>");
+    }
+
+    #[test]
+    fn recent_assistant_replies_context_skips_execution_summary_noise() {
+        let state = test_state();
+        {
+            let db = state.core.db.get().expect("db");
+            create_memories_table(&db);
+            create_user_preferences_table(&db);
+        }
+        insert_memory(
+            &state,
+            1,
+            2,
+            Some("test-user"),
+            "local",
+            None,
+            MEMORY_ROLE_ASSISTANT,
+            &format!(
+                "{}**执行过程**\n1. 调用命令 `pwd`\n   输出：\n```text\n/tmp\n```",
+                crate::memory::LLM_SHORT_TERM_MEMORY_PREFIX
+            ),
+            2000,
+            MemoryWriteKind::AssistantOutcome,
+        )
+        .expect("insert execution summary memory");
 
         let recent =
             build_recent_assistant_replies_context(&state, Some("test-user"), 1, 2, 3, 220);
@@ -2139,6 +2193,68 @@ mod tests {
         assert!(!recalled
             .iter()
             .any(|(_, _, content, _)| content.contains("Unfinished goal")));
+    }
+
+    #[test]
+    fn long_term_source_recall_skips_transient_assistant_runtime_noise() {
+        let state = test_state();
+        {
+            let db = state.core.db.get().expect("db");
+            create_memories_table(&db);
+            create_user_preferences_table(&db);
+        }
+        insert_memory(
+            &state,
+            1,
+            2,
+            Some("test-user"),
+            "local",
+            None,
+            MEMORY_ROLE_USER,
+            "记住这个长期偏好：回复要简短。",
+            2000,
+            MemoryWriteKind::Default,
+        )
+        .expect("insert user memory");
+        insert_memory(
+            &state,
+            1,
+            2,
+            Some("test-user"),
+            "local",
+            None,
+            MEMORY_ROLE_ASSISTANT,
+            "**执行过程**\n1. 调用命令 `pwd`\n   输出：\n```text\n/tmp\n```",
+            2000,
+            MemoryWriteKind::AssistantOutcome,
+        )
+        .expect("insert transient assistant runtime memory");
+        insert_memory(
+            &state,
+            1,
+            2,
+            Some("test-user"),
+            "local",
+            None,
+            MEMORY_ROLE_ASSISTANT,
+            "已记住：后续回复保持简短。",
+            2000,
+            MemoryWriteKind::AssistantOutcome,
+        )
+        .expect("insert assistant answer memory");
+
+        let recalled = recall_memories_since_id(&state, Some("test-user"), 1, 2, 0, 10)
+            .expect("recall memories");
+        assert_eq!(recalled.len(), 2);
+        assert!(recalled
+            .iter()
+            .any(|(_, _, content, _)| content.contains("回复要简短")));
+        assert!(recalled
+            .iter()
+            .any(|(_, _, content, _)| content.contains("已记住")));
+        assert!(!recalled
+            .iter()
+            .any(|(_, _, content, _)| content.contains("执行过程")));
     }
 
     #[test]
