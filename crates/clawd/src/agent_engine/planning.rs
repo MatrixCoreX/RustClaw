@@ -12,8 +12,8 @@ use super::{
     PLAN_REPAIR_PROMPT_LOGICAL_PATH, SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH,
 };
 use crate::{
-    llm_gateway, plan_step_from_agent_action, read_range_request::RequestedReadRange, AgentAction,
-    AppState, ClaimedTask, PlanKind, PlanResult, RouteResult,
+    llm_gateway, plan_step_from_agent_action, AgentAction, AppState, ClaimedTask, PlanKind,
+    PlanResult, RouteResult,
 };
 
 fn build_incremental_plan_prompt(
@@ -790,191 +790,6 @@ fn extract_http_probe_url(command: &str) -> Option<String> {
         .find(|token| token.starts_with("http://") || token.starts_with("https://"))
 }
 
-fn extract_http_request_url(text: &str) -> Option<String> {
-    extract_http_probe_url(text).or_else(|| {
-        text.split_whitespace().find_map(|token| {
-            let token = token.trim_matches(|ch: char| {
-                ch.is_whitespace()
-                    || matches!(
-                        ch,
-                        '"' | '\'' | '`' | ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}'
-                    )
-            });
-            if token.starts_with("127.0.0.1:") || token.starts_with("localhost:") {
-                Some(format!("http://{token}"))
-            } else {
-                None
-            }
-        })
-    })
-}
-
-fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-fn text_contains_any(text: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| text.contains(needle))
-}
-
-fn looks_health_check_request(route_result: Option<&RouteResult>, user_text: &str) -> bool {
-    let route_context = route_result.map_or_else(String::new, |route| {
-        format!("{}\n{}", route.resolved_intent, route.route_reason)
-    });
-    let joined = format!("{route_context}\n{}", user_text.trim()).to_ascii_lowercase();
-    text_contains_any(
-        &joined,
-        &[
-            "health check",
-            "system health",
-            "host operating system",
-            "operating system",
-            "rustclaw itself",
-            "key fields",
-            "健康检查",
-            "操作系统",
-            "系统健康",
-            "只总结操作系统",
-        ],
-    )
-}
-
-fn looks_http_validate_then_repair_request(user_text: &str) -> bool {
-    let joined = user_text.trim().to_ascii_lowercase();
-    text_contains_any(
-        &joined,
-        &[
-            "if the first validation fails",
-            "if validation fails",
-            "validate first",
-            "then repair",
-            "repair and re-validate",
-            "先不要改",
-            "第一次验证失败",
-            "验证失败",
-            "先直接验证",
-            "再修复",
-            "重新验证",
-        ],
-    )
-}
-
-fn synthesize_ops_http_repair_fallback_actions(
-    loop_state: &LoopState,
-    user_text: &str,
-    auto_locator_path: Option<&str>,
-) -> Option<(Vec<AgentAction>, String)> {
-    if !loop_state.execution_recipe.is_active() {
-        return None;
-    }
-    let path = auto_locator_path
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            user_text.split_whitespace().find_map(|token| {
-                let token = token.trim_matches(|ch: char| {
-                    ch.is_whitespace()
-                        || matches!(
-                            ch,
-                            '"' | '\'' | '`' | ',' | ';' | '(' | ')' | '[' | ']' | '{' | '}'
-                        )
-                });
-                (token.contains('/') && (token.ends_with(".html") || token.ends_with(".htm")))
-                    .then_some(token)
-            })
-        })?;
-    let url = extract_http_request_url(user_text)?;
-    let marker = crate::verifier::extract_expected_http_marker(None, Some(user_text))?;
-    if matches!(
-        loop_state.execution_recipe.phase,
-        crate::execution_recipe::ExecutionRecipePhase::Inspect
-    ) && looks_http_validate_then_repair_request(user_text)
-    {
-        let actions = vec![AgentAction::CallSkill {
-            skill: "http_basic".to_string(),
-            args: serde_json::json!({ "action": "get", "url": url }),
-        }];
-        let raw_plan_text = serde_json::to_string_pretty(&serde_json::json!({
-            "steps": [
-                { "type": "call_skill", "skill": "http_basic", "args": { "action": "get", "url": url } }
-            ],
-            "notes": {
-                "expected_marker": marker,
-                "followup": "if validation fails, repair the target file in the next round"
-            }
-        }))
-        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
-        warn!(
-            "plan_repair_legacy_local_fallback_candidate kind=ops_http_validate_then_repair phase=inspect"
-        );
-        return Some((actions, raw_plan_text));
-    }
-    if !matches!(
-        loop_state.execution_recipe.phase,
-        crate::execution_recipe::ExecutionRecipePhase::Apply
-            | crate::execution_recipe::ExecutionRecipePhase::Repair
-    ) {
-        return None;
-    }
-    let command = format!(
-        "python3 - <<'PY'\nfrom pathlib import Path\npath = Path({path})\nmarker = {marker}\nif path.exists() and path.is_dir():\n    target = path / 'index.html'\nelif not path.suffix:\n    target = path / 'index.html'\nelse:\n    target = path\ntarget.parent.mkdir(parents=True, exist_ok=True)\ntext = target.read_text(encoding='utf-8') if target.exists() else ''\nif marker not in text:\n    if text and not text.endswith('\\n'):\n        text += '\\n'\n    text += marker + '\\n'\n    target.write_text(text, encoding='utf-8')\nprint(f'patched {{target}}')\nPY",
-        path = shell_single_quote(path),
-        marker = shell_single_quote(&marker),
-    );
-    let actions = vec![
-        AgentAction::CallSkill {
-            skill: "run_cmd".to_string(),
-            args: serde_json::json!({ "command": command }),
-        },
-        AgentAction::CallSkill {
-            skill: "http_basic".to_string(),
-            args: serde_json::json!({ "action": "get", "url": url }),
-        },
-    ];
-    let raw_plan_text = serde_json::to_string_pretty(&serde_json::json!({
-        "steps": [
-            { "type": "call_skill", "skill": "run_cmd", "args": { "command": command } },
-            { "type": "call_skill", "skill": "http_basic", "args": { "action": "get", "url": url } }
-        ]
-    }))
-    .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
-    warn!(
-        "plan_repair_legacy_local_fallback_candidate kind=ops_http_validate_then_repair phase=apply_or_repair"
-    );
-    Some((actions, raw_plan_text))
-}
-
-fn synthesize_health_check_fallback_actions(
-    route_result: Option<&RouteResult>,
-    user_text: &str,
-) -> Option<(Vec<AgentAction>, String)> {
-    if !looks_health_check_request(route_result, user_text) {
-        return None;
-    }
-    let actions = vec![AgentAction::CallSkill {
-        skill: "health_check".to_string(),
-        args: serde_json::json!({}),
-    }];
-    let raw_plan_text = serde_json::to_string_pretty(&serde_json::json!({
-        "steps": [
-            { "type": "call_skill", "skill": "health_check", "args": {} }
-        ]
-    }))
-    .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
-    warn!("plan_repair_legacy_local_fallback_candidate kind=health_check");
-    Some((actions, raw_plan_text))
-}
-
-fn synthesize_plan_repair_fallback_actions(
-    loop_state: &LoopState,
-    route_result: Option<&RouteResult>,
-    user_text: &str,
-    auto_locator_path: Option<&str>,
-) -> Option<(Vec<AgentAction>, String)> {
-    synthesize_ops_http_repair_fallback_actions(loop_state, user_text, auto_locator_path)
-        .or_else(|| synthesize_health_check_fallback_actions(route_result, user_text))
-}
-
 fn should_rewrite_http_probe_run_cmd(
     route_result: Option<&RouteResult>,
     actions: &[AgentAction],
@@ -1444,7 +1259,6 @@ fn normalize_planned_actions(
     auto_locator_path: Option<&str>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
-    let request_surface = crate::intent::surface_signals::analyze_prompt_surface(user_text);
     let actions =
         strip_terminal_discussion_for_observed_finalize(route_result, loop_state, actions);
     let actions =
@@ -1454,17 +1268,10 @@ fn normalize_planned_actions(
     let actions = rewrite_sqlite3_run_cmd_to_db_basic(actions);
     let actions = normalize_system_basic_schema_aliases(actions);
     let actions = rewrite_path_batch_size_facts_to_compare_paths(route_result, actions);
-    let actions =
-        rewrite_recent_artifacts_list_dir_to_inventory_dir(route_result, &request_surface, actions);
+    let actions = rewrite_recent_artifacts_list_dir_to_inventory_dir(route_result, actions);
     let actions = rewrite_overbroad_list_dir_to_compare_paths(route_result, actions);
     let actions =
         rewrite_single_target_file_read_to_auto_locator(route_result, auto_locator_path, actions);
-    let actions = rewrite_explicit_read_file_range_requests(
-        route_result,
-        &request_surface,
-        user_text,
-        actions,
-    );
     let actions = rewrite_extract_field_alias_args(actions);
     let actions = prune_unscoped_workspace_summary_evidence_for_scope(route_result, actions);
     let actions = strip_unrequested_workspace_artifact_mutations(route_result, loop_state, actions);
@@ -1751,6 +1558,30 @@ fn single_list_dir_like_action_index_path(actions: &[AgentAction]) -> Option<(us
         })
 }
 
+fn action_limit_arg(args: &Value) -> Option<usize> {
+    args.get("limit")
+        .or_else(|| args.get("max_entries"))
+        .and_then(|value| match value {
+            Value::Number(number) => number
+                .as_u64()
+                .and_then(|value| usize::try_from(value).ok()),
+            Value::String(value) => value.trim().parse::<usize>().ok(),
+            _ => None,
+        })
+        .map(|value| value.clamp(1, 1000))
+}
+
+fn single_list_dir_like_action_index_path_limit(
+    actions: &[AgentAction],
+) -> Option<(usize, String, Option<usize>)> {
+    let (idx, path) = single_list_dir_like_action_index_path(actions)?;
+    let limit = match actions.get(idx)? {
+        AgentAction::CallSkill { args, .. } => action_limit_arg(args),
+        _ => None,
+    };
+    Some((idx, path, limit))
+}
+
 fn compare_target_pair_from_locator_hint(route_result: &RouteResult) -> Option<(String, String)> {
     if route_result.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison {
         return None;
@@ -1773,7 +1604,6 @@ fn compare_target_pair_from_locator_hint(route_result: &RouteResult) -> Option<(
 
 fn rewrite_recent_artifacts_list_dir_to_inventory_dir(
     route_result: Option<&RouteResult>,
-    request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
     let Some(route) = route_result else {
@@ -1785,12 +1615,10 @@ fn rewrite_recent_artifacts_list_dir_to_inventory_dir(
     {
         return actions;
     }
-    let Some(limit) = request_surface.requested_listing_limit else {
+    let Some((idx, path, limit)) = single_list_dir_like_action_index_path_limit(&actions) else {
         return actions;
     };
-    let Some((idx, path)) = single_list_dir_like_action_index_path(&actions) else {
-        return actions;
-    };
+    let max_entries = limit.unwrap_or(20);
     let mut rewritten = actions;
     rewritten[idx] = AgentAction::CallSkill {
         skill: "system_basic".to_string(),
@@ -1798,11 +1626,11 @@ fn rewrite_recent_artifacts_list_dir_to_inventory_dir(
             "action": "inventory_dir",
             "path": path,
             "sort_by": "mtime_desc",
-            "max_entries": limit,
+            "max_entries": max_entries,
             "names_only": true,
         }),
     };
-    info!("plan_rewrite_recent_artifacts_to_inventory_dir limit={limit}");
+    info!("plan_rewrite_recent_artifacts_to_inventory_dir max_entries={max_entries}");
     rewritten
 }
 
@@ -1841,15 +1669,6 @@ fn rewrite_overbroad_list_dir_to_compare_paths(
         left, right
     );
     rewritten
-}
-
-fn requested_read_range(
-    request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    user_text: &str,
-) -> Option<RequestedReadRange> {
-    request_surface.requested_read_range.or_else(|| {
-        crate::intent::surface_signals::requested_read_range_from_prompt_pair(None, user_text)
-    })
 }
 
 fn action_is_workspace_summary_evidence(action: &AgentAction) -> bool {
@@ -2367,94 +2186,6 @@ fn rewrite_single_target_file_read_to_auto_locator(
     info!(
         "plan_rewrite_single_target_file_read_to_auto_locator idx={} kind={:?} from={} to={}",
         idx, kind, current_path, auto_locator_path
-    );
-    rewritten
-}
-
-fn rewrite_explicit_read_file_range_requests(
-    route_result: Option<&RouteResult>,
-    request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    user_text: &str,
-    actions: Vec<AgentAction>,
-) -> Vec<AgentAction> {
-    let Some(range_request) = requested_read_range(request_surface, user_text).or_else(|| {
-        route_result.and_then(|route| {
-            let resolved_intent = route.resolved_intent.trim();
-            if resolved_intent.is_empty() || resolved_intent == user_text.trim() {
-                return None;
-            }
-            let resolved_surface =
-                crate::intent::surface_signals::analyze_prompt_surface(resolved_intent);
-            requested_read_range(&resolved_surface, resolved_intent)
-        })
-    }) else {
-        return actions;
-    };
-
-    let mut read_file_idx = None;
-    let mut read_file_path = None;
-    for (idx, action) in actions.iter().enumerate() {
-        match action {
-            AgentAction::Think { .. }
-            | AgentAction::Respond { .. }
-            | AgentAction::SynthesizeAnswer { .. } => {}
-            AgentAction::CallSkill { skill, args }
-                if skill.eq_ignore_ascii_case("system_basic")
-                    && args
-                        .get("action")
-                        .and_then(|value| value.as_str())
-                        .is_some_and(|action| action.eq_ignore_ascii_case("read_range")) =>
-            {
-                return actions;
-            }
-            AgentAction::CallSkill { skill, args } if skill.eq_ignore_ascii_case("read_file") => {
-                let Some(path) = args.get("path").and_then(|value| value.as_str()) else {
-                    return actions;
-                };
-                if read_file_idx.is_some() {
-                    return actions;
-                }
-                read_file_idx = Some(idx);
-                read_file_path = Some(path.trim().to_string());
-            }
-            _ => return actions,
-        }
-    }
-
-    let Some(idx) = read_file_idx else {
-        return actions;
-    };
-    let Some(path) = read_file_path.filter(|value| !value.is_empty()) else {
-        return actions;
-    };
-
-    let read_range_args = match range_request {
-        RequestedReadRange::Head { n } => {
-            json!({ "action": "read_range", "path": path, "mode": "head", "n": n })
-        }
-        RequestedReadRange::Tail { n } => {
-            json!({ "action": "read_range", "path": path, "mode": "tail", "n": n })
-        }
-        RequestedReadRange::Range {
-            start_line,
-            end_line,
-        } => json!({
-            "action": "read_range",
-            "path": path,
-            "mode": "range",
-            "start_line": start_line,
-            "end_line": end_line
-        }),
-    };
-
-    let mut rewritten = actions;
-    rewritten[idx] = AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
-        args: read_range_args,
-    };
-    info!(
-        "plan_rewrite_explicit_read_file_range_request idx={} request={:?}",
-        idx, range_request
     );
     rewritten
 }
@@ -2982,60 +2713,26 @@ pub(super) async fn plan_round_actions(
             "plan_repair_required task_id={} round={} reason={}",
             task.task_id, loop_state.round_no, repair_reason
         );
-        // Phase 1.1: LLM 修复之前先尝试本地兜底
-        // (`synthesize_plan_repair_fallback_actions`)。命中时直接复用，避免
-        // 一次（可能两次）的 `plan_repair_prompt` LLM 调用。
-        // 只有在本地兜底找不到可用模式或产物仍被判定需要修复时，
-        // 才回退到原先的 LLM 修复链路。
-        let local_fallback_hit = synthesize_plan_repair_fallback_actions(
-            loop_state,
-            route_result,
+        // Planner-first: do not synthesize semantic repair plans from local keyword rules.
+        // Repair either comes from the LLM repair prompt or, if safe, from the original
+        // executable plan that the model already produced.
+        match repair_plan_actions(
+            state,
+            task,
+            goal,
+            &turn_analysis,
             user_text,
-            auto_locator_path,
+            repair_reason,
+            &tool_spec_template,
+            &skill_playbooks,
+            &plan_raw,
+            loop_state.round_no,
         )
-        .map(|(actions, raw_plan)| {
-            (
-                normalize_planned_actions(
-                    state,
-                    route_result,
-                    loop_state,
-                    user_text,
-                    auto_locator_path,
-                    actions,
-                ),
-                raw_plan,
-            )
-        })
-        .filter(|(actions, _)| {
-            !should_force_actionable_plan_repair(state, route_result, loop_state, actions)
-        });
-        if let Some((local_fallback_actions, local_fallback_raw_plan)) = local_fallback_hit {
-            info!(
-                "plan_repair_local_fallback_hit task_id={} round={} reason={}",
-                task.task_id, loop_state.round_no, repair_reason
-            );
-            (
-                local_fallback_actions,
-                PlanKind::Repair,
-                local_fallback_raw_plan,
-            )
-        } else {
-            match repair_plan_actions(
-                state,
-                task,
-                goal,
-                &turn_analysis,
-                user_text,
-                repair_reason,
-                &tool_spec_template,
-                &skill_playbooks,
-                &plan_raw,
-                loop_state.round_no,
-            )
-            .await
-            {
-                Ok(repaired) => {
-                    let repaired_actions = parse_single_plan_actions(&repaired, state, task)
+        .await
+        {
+            Ok(repaired) => {
+                let repaired_actions =
+                    parse_single_plan_actions(&repaired, state, task)
                         .await
                         .map(|actions| {
                             normalize_planned_actions(
@@ -3047,164 +2744,131 @@ pub(super) async fn plan_round_actions(
                                 actions,
                             )
                         });
-                    match repaired_actions {
-                        Some(actions)
-                            if !should_force_actionable_plan_repair(
-                                state,
-                                route_result,
-                                loop_state,
-                                &actions,
-                            ) =>
-                        {
-                            (actions, PlanKind::Repair, repaired)
-                        }
-                        Some(actions) => {
-                            let second_repair_reason =
-                                plan_repair_reason(state, route_result, loop_state, Some(&actions));
-                            warn!(
-                                "plan_repair_still_invalid task_id={} round={} reason={}",
-                                task.task_id, loop_state.round_no, second_repair_reason
-                            );
-                            let second_repaired = repair_plan_actions(
-                                state,
-                                task,
-                                goal,
-                                &turn_analysis,
-                                user_text,
-                                second_repair_reason,
-                                &tool_spec_template,
-                                &skill_playbooks,
-                                &repaired,
-                                loop_state.round_no,
-                            )
-                            .await?;
-                            let second_repaired_actions =
-                                parse_single_plan_actions(&second_repaired, state, task)
-                                    .await
-                                    .map(|actions| {
-                                        normalize_planned_actions(
-                                            state,
-                                            route_result,
-                                            loop_state,
-                                            user_text,
-                                            auto_locator_path,
-                                            actions,
-                                        )
-                                    });
-                            match second_repaired_actions {
-                                Some(second_actions)
-                                    if !should_force_actionable_plan_repair(
-                                        state,
-                                        route_result,
-                                        loop_state,
-                                        &second_actions,
-                                    ) =>
-                                {
-                                    (second_actions, PlanKind::Repair, second_repaired)
-                                }
-                                Some(_) => {
-                                    if let Some((fallback_actions, fallback_raw_plan)) =
-                                        synthesize_plan_repair_fallback_actions(
-                                            loop_state,
-                                            route_result,
-                                            user_text,
-                                            auto_locator_path,
-                                        )
-                                    {
-                                        warn!(
-                                            "plan_repair_synthesized_fallback task_id={} round={}",
-                                            task.task_id, loop_state.round_no
-                                        );
-                                        (fallback_actions, PlanKind::Repair, fallback_raw_plan)
-                                    } else {
-                                        return Err(
-                                            "repair plan still non-actionable after second repair"
-                                                .to_string(),
-                                        );
-                                    }
-                                }
-                                None => {
-                                    if let Some((fallback_actions, fallback_raw_plan)) =
-                                        synthesize_plan_repair_fallback_actions(
-                                            loop_state,
-                                            route_result,
-                                            user_text,
-                                            auto_locator_path,
-                                        )
-                                    {
-                                        warn!(
-                                            "plan_repair_synthesized_fallback_after_parse_fail task_id={} round={}",
-                                            task.task_id, loop_state.round_no
-                                        );
-                                        (fallback_actions, PlanKind::Repair, fallback_raw_plan)
-                                    } else {
-                                        return Err(
-                                            "second repair plan parser failed: no executable steps"
-                                                .to_string(),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            let fallback_actions = initial_actions.as_ref().filter(|actions| {
-                                can_fallback_to_initial_plan_after_repair_failure(
-                                    state,
-                                    route_result,
-                                    loop_state,
-                                    actions,
-                                )
-                            });
-                            if let Some(actions) = fallback_actions {
-                                warn!(
-                                    "plan_repair_parse_failed_fallback_to_initial task_id={} round={}",
-                                    task.task_id, loop_state.round_no
-                                );
-                                (
-                                    actions.clone(),
-                                    if loop_state.round_no <= 1 {
-                                        PlanKind::Single
-                                    } else {
-                                        PlanKind::Incremental
-                                    },
-                                    plan_raw.clone(),
-                                )
-                            } else {
-                                return Err(
-                                    "single plan parser failed: no executable steps".to_string()
-                                );
-                            }
-                        }
-                    }
-                }
-                Err(err) => {
-                    let fallback_actions = initial_actions.as_ref().filter(|actions| {
-                        can_fallback_to_initial_plan_after_repair_failure(
+                match repaired_actions {
+                    Some(actions)
+                        if !should_force_actionable_plan_repair(
                             state,
                             route_result,
                             loop_state,
-                            actions,
-                        )
-                    });
-                    if let Some(actions) = fallback_actions {
-                        warn!(
-                            "plan_repair_llm_failed_fallback_to_initial task_id={} round={} error={}",
-                            task.task_id,
-                            loop_state.round_no,
-                            crate::truncate_for_log(&err)
-                        );
-                        (
-                            actions.clone(),
-                            if loop_state.round_no <= 1 {
-                                PlanKind::Single
-                            } else {
-                                PlanKind::Incremental
-                            },
-                            plan_raw.clone(),
-                        )
-                    } else {
-                        return Err(err);
+                            &actions,
+                        ) =>
+                    {
+                        (actions, PlanKind::Repair, repaired)
                     }
+                    Some(actions) => {
+                        let second_repair_reason =
+                            plan_repair_reason(state, route_result, loop_state, Some(&actions));
+                        warn!(
+                            "plan_repair_still_invalid task_id={} round={} reason={}",
+                            task.task_id, loop_state.round_no, second_repair_reason
+                        );
+                        let second_repaired = repair_plan_actions(
+                            state,
+                            task,
+                            goal,
+                            &turn_analysis,
+                            user_text,
+                            second_repair_reason,
+                            &tool_spec_template,
+                            &skill_playbooks,
+                            &repaired,
+                            loop_state.round_no,
+                        )
+                        .await?;
+                        let second_repaired_actions =
+                            parse_single_plan_actions(&second_repaired, state, task)
+                                .await
+                                .map(|actions| {
+                                    normalize_planned_actions(
+                                        state,
+                                        route_result,
+                                        loop_state,
+                                        user_text,
+                                        auto_locator_path,
+                                        actions,
+                                    )
+                                });
+                        match second_repaired_actions {
+                            Some(second_actions)
+                                if !should_force_actionable_plan_repair(
+                                    state,
+                                    route_result,
+                                    loop_state,
+                                    &second_actions,
+                                ) =>
+                            {
+                                (second_actions, PlanKind::Repair, second_repaired)
+                            }
+                            Some(_) => {
+                                return Err("repair plan still non-actionable after second repair"
+                                    .to_string());
+                            }
+                            None => {
+                                return Err(
+                                    "second repair plan parser failed: no executable steps"
+                                        .to_string(),
+                                );
+                            }
+                        }
+                    }
+                    None => {
+                        let fallback_actions = initial_actions.as_ref().filter(|actions| {
+                            can_fallback_to_initial_plan_after_repair_failure(
+                                state,
+                                route_result,
+                                loop_state,
+                                actions,
+                            )
+                        });
+                        if let Some(actions) = fallback_actions {
+                            warn!(
+                                "plan_repair_parse_failed_fallback_to_initial task_id={} round={}",
+                                task.task_id, loop_state.round_no
+                            );
+                            (
+                                actions.clone(),
+                                if loop_state.round_no <= 1 {
+                                    PlanKind::Single
+                                } else {
+                                    PlanKind::Incremental
+                                },
+                                plan_raw.clone(),
+                            )
+                        } else {
+                            return Err(
+                                "single plan parser failed: no executable steps".to_string()
+                            );
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                let fallback_actions = initial_actions.as_ref().filter(|actions| {
+                    can_fallback_to_initial_plan_after_repair_failure(
+                        state,
+                        route_result,
+                        loop_state,
+                        actions,
+                    )
+                });
+                if let Some(actions) = fallback_actions {
+                    warn!(
+                        "plan_repair_llm_failed_fallback_to_initial task_id={} round={} error={}",
+                        task.task_id,
+                        loop_state.round_no,
+                        crate::truncate_for_log(&err)
+                    );
+                    (
+                        actions.clone(),
+                        if loop_state.round_no <= 1 {
+                            PlanKind::Single
+                        } else {
+                            PlanKind::Incremental
+                        },
+                        plan_raw.clone(),
+                    )
+                } else {
+                    return Err(err);
                 }
             }
         }
@@ -3243,9 +2907,8 @@ mod tests {
     use super::{
         build_lightweight_tool_spec, can_fallback_to_initial_plan_after_repair_failure,
         classify_planning_prompt_class, inject_synthesize_answer_for_bare_placeholder_respond,
-        is_bare_last_output_placeholder, looks_health_check_request,
-        looks_like_pre_observation_hallucinated_concrete_content, normalize_planned_actions,
-        normalize_system_basic_schema_aliases, plan_repair_reason,
+        is_bare_last_output_placeholder, looks_like_pre_observation_hallucinated_concrete_content,
+        normalize_planned_actions, normalize_system_basic_schema_aliases, plan_repair_reason,
         rewrite_extract_field_alias_args, rewrite_http_probe_actions,
         rewrite_path_batch_size_facts_to_compare_paths,
         rewrite_pre_observation_concrete_respond_to_placeholder,
@@ -3253,8 +2916,7 @@ mod tests {
         rewrite_terminal_placeholder_respond_to_synthesize_answer, round1_prompt_spec_for_class,
         should_force_actionable_plan_repair,
         strip_terminal_discussion_for_direct_skill_passthrough,
-        strip_terminal_discussion_for_observed_finalize, synthesize_health_check_fallback_actions,
-        synthesize_ops_http_repair_fallback_actions, LoopState, PlanningPromptClass,
+        strip_terminal_discussion_for_observed_finalize, LoopState, PlanningPromptClass,
     };
     use crate::{
         AgentAction, AgentRuntimeConfig, AppState, IntentOutputContract, OutputLocatorKind,
@@ -3402,7 +3064,7 @@ mod tests {
     #[test]
     fn planning_prompt_class_uses_lightweight_execution_for_pwd_only_route() {
         let mut route = base_route_result();
-        route.route_reason = "route_contract:pwd_only_current_workspace".to_string();
+        route.route_reason = "llm_contract:scalar_path_only".to_string();
         route.resolved_intent = "只输出当前工作目录的绝对路径，不要解释".to_string();
         route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
         route.output_contract.response_shape = OutputResponseShape::Scalar;
@@ -3941,7 +3603,7 @@ mod tests {
     }
 
     #[test]
-    fn clarify_followup_tail_request_rewrites_single_read_file_to_read_range() {
+    fn clarify_followup_tail_request_does_not_rewrite_single_read_file_from_text() {
         let state = test_state();
         let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Free);
         route.resolved_intent = "Continue the previous request that was waiting for clarification: 看看那个模型日志最后 5 行\nUser now provides the missing target/content: scripts/nl_tests/fixtures/device_local/logs/model_io.log".to_string();
@@ -3968,18 +3630,13 @@ mod tests {
 
         match &normalized[0] {
             AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
+                assert_eq!(skill, "read_file");
                 assert_eq!(
-                    args.get("action").and_then(|value| value.as_str()),
-                    Some("read_range")
+                    args.get("path").and_then(|value| value.as_str()),
+                    Some("scripts/nl_tests/fixtures/device_local/logs/model_io.log")
                 );
-                assert_eq!(
-                    args.get("mode").and_then(|value| value.as_str()),
-                    Some("tail")
-                );
-                assert_eq!(args.get("n").and_then(|value| value.as_u64()), Some(5));
             }
-            other => panic!("expected read_range rewrite, got {other:?}"),
+            other => panic!("expected read_file to stay unchanged, got {other:?}"),
         }
     }
 
@@ -4487,7 +4144,7 @@ mod tests {
         let actions = vec![
             AgentAction::CallSkill {
                 skill: "list_dir".to_string(),
-                args: serde_json::json!({ "path": "logs" }),
+                args: serde_json::json!({ "path": "logs", "limit": 2 }),
             },
             AgentAction::SynthesizeAnswer {
                 evidence_refs: vec!["last_output".to_string()],
@@ -4498,14 +4155,8 @@ mod tests {
         route.resolved_intent =
             "列出 logs 目录最近修改的 2 个文件名，再用一句中文告诉我这更像运行日志还是测试残留"
                 .to_string();
-        let request_surface =
-            crate::intent::surface_signals::analyze_prompt_surface(&route.resolved_intent);
-
-        let rewritten = super::rewrite_recent_artifacts_list_dir_to_inventory_dir(
-            Some(&route),
-            &request_surface,
-            actions,
-        );
+        let rewritten =
+            super::rewrite_recent_artifacts_list_dir_to_inventory_dir(Some(&route), actions);
         assert_eq!(rewritten.len(), 2);
         match &rewritten[0] {
             AgentAction::CallSkill { skill, args } => {
@@ -5791,121 +5442,6 @@ mod tests {
             )),
             &loop_state,
             &actions,
-        ));
-    }
-
-    #[test]
-    fn synthesize_ops_http_repair_fallback_builds_mutate_then_validate_plan() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
-            kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
-            phase: crate::execution_recipe::ExecutionRecipePhase::Apply,
-            inspect_first: true,
-            validation_required: true,
-            saw_inspect: true,
-            ..Default::default()
-        };
-        let (actions, raw_plan_text) = synthesize_ops_http_repair_fallback_actions(
-            &loop_state,
-            "先验证 127.0.0.1:64486 首页是否包含 ops-repair-ok；若失败则修复 index.html 使其包含 ops-repair-ok，再验证直到通过。",
-            Some("/tmp/document/nl_ops_http_repair_demo/index.html"),
-        )
-        .expect("fallback should be synthesized");
-        assert!(raw_plan_text.contains("\"run_cmd\""));
-        assert!(raw_plan_text.contains("\"http_basic\""));
-        assert!(matches!(
-            &actions[0],
-            AgentAction::CallSkill { skill, args }
-                if skill == "run_cmd"
-                    && args
-                        .get("command")
-                        .and_then(|v| v.as_str())
-                        .is_some_and(|command| command.contains("ops-repair-ok"))
-        ));
-        assert!(matches!(
-            &actions[1],
-            AgentAction::CallSkill { skill, args }
-                if skill == "http_basic"
-                    && args.get("url").and_then(|v| v.as_str()) == Some("http://127.0.0.1:64486")
-        ));
-    }
-
-    #[test]
-    fn synthesize_ops_http_repair_fallback_builds_validate_only_plan_during_inspect_phase() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
-            kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
-            phase: crate::execution_recipe::ExecutionRecipePhase::Inspect,
-            inspect_first: true,
-            validation_required: true,
-            ..Default::default()
-        };
-        let (actions, raw_plan_text) = synthesize_ops_http_repair_fallback_actions(
-            &loop_state,
-            "先不要改文件或进程，先直接验证当前已经在 127.0.0.1:64608 运行的本地静态 HTTP 服务首页是否包含 ops-repair-ok。如果第一次验证失败，再修复 document/nl_ops_http_repair_demo/index.html 的内容，使首页包含 ops-repair-ok，然后重新验证直到通过；通过时明确输出 VALIDATION_PASSED 后直接结束。",
-            Some("/tmp/document/nl_ops_http_repair_demo/index.html"),
-        )
-        .expect("inspect fallback should be synthesized");
-        assert!(raw_plan_text.contains("\"http_basic\""));
-        assert!(raw_plan_text.contains("\"expected_marker\": \"ops-repair-ok\""));
-        assert!(matches!(
-            actions.as_slice(),
-            [AgentAction::CallSkill { skill, args }]
-                if skill == "http_basic"
-                    && args.get("action").and_then(|v| v.as_str()) == Some("get")
-                    && args.get("url").and_then(|v| v.as_str()) == Some("http://127.0.0.1:64608")
-        ));
-    }
-
-    #[test]
-    fn synthesize_ops_http_repair_fallback_treats_directory_locator_as_index_html() {
-        let mut loop_state = LoopState::new(2);
-        loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
-            kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
-            phase: crate::execution_recipe::ExecutionRecipePhase::Apply,
-            inspect_first: true,
-            validation_required: true,
-            saw_inspect: true,
-            ..Default::default()
-        };
-        let (actions, _) = synthesize_ops_http_repair_fallback_actions(
-            &loop_state,
-            "Start a static HTTP server in the background from document/nl_ops_http_demo on 127.0.0.1:63848, then use curl to verify that the homepage contains ops-demo-ok; when validation passes, explicitly output VALIDATION_PASSED and finish immediately.",
-            Some("/tmp/document/nl_ops_http_demo"),
-        )
-        .expect("fallback should be synthesized");
-        assert!(matches!(
-            &actions[0],
-            AgentAction::CallSkill { skill, args }
-                if skill == "run_cmd"
-                    && args
-                        .get("command")
-                        .and_then(|v| v.as_str())
-                        .is_some_and(|command| {
-                            command.contains("path.is_dir()")
-                                && command.contains("target = path / 'index.html'")
-                                && command.contains("ops-demo-ok")
-                        })
-        ));
-    }
-
-    #[test]
-    fn synthesize_health_check_fallback_builds_observation_plan_for_english_request() {
-        let route = route_result(RoutedMode::Act, true, OutputResponseShape::OneSentence);
-        assert!(looks_health_check_request(
-            Some(&route),
-            "Run a basic health check. Summarize only the host operating system, and for RustClaw itself just list the key fields."
-        ));
-        let (actions, raw_plan_text) = synthesize_health_check_fallback_actions(
-            Some(&route),
-            "Run a basic health check. Summarize only the host operating system, and for RustClaw itself just list the key fields.",
-        )
-        .expect("health fallback should be synthesized");
-        assert!(raw_plan_text.contains("\"health_check\""));
-        assert!(matches!(
-            actions.as_slice(),
-            [AgentAction::CallSkill { skill, args }]
-                if skill == "health_check" && args.as_object().is_some_and(|map| map.is_empty())
         ));
     }
 

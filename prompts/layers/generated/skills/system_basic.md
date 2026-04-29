@@ -11,6 +11,8 @@
 - `system_basic` provides system/runtime introspection plus higher-level read-only query helpers.
 - It does **not** replace standalone base skills for raw file, directory, or command operations.
 - It is intended for complex composed queries where builtin primitives alone are too low-level for stable planning.
+- For directory inventory with filename or extension filtering, use `inventory_dir` with `files_only=true` and `ext_filter`; do not use `extract_field` / `extract_fields` unless the user explicitly asks for fields, keys, or values inside a specific structured document.
+- When the user asks to list files and then briefly explain their purpose, first collect the file names with `inventory_dir`; the final explanation should be synthesized from the names and known project conventions, not from missing structured fields.
 
 ## Config Entry Points (from interface)
 - No dedicated config entry points declared.
@@ -162,6 +164,16 @@ Request:
 Response:
 ```json
 {"request_id":"demo-6","status":"ok","text":"{\"action\":\"dir_compare\",\"counts\":{\"common\":8,\"left_only\":3,\"right_only\":1},\"left_only\":[\"channels\"],\"right_only\":[\"example.toml\"]}","extra":{"action":"dir_compare","counts":{"common":8,"left_only":3,"right_only":1},"left_only":["channels"],"right_only":["example.toml"]},"error_text":null}
+```
+
+### Example 7
+Request:
+```json
+{"request_id":"demo-7","args":{"action":"inventory_dir","path":".","files_only":true,"ext_filter":"toml","names_only":true}}
+```
+Response:
+```json
+{"request_id":"demo-7","status":"ok","text":"{\"action\":\"inventory_dir\",\"names\":[\"Cargo.toml\",\"rustfmt.toml\"],\"counts\":{\"total\":2}}","extra":{"action":"inventory_dir","names":["Cargo.toml","rustfmt.toml"],"counts":{"total":2}},"error_text":null}
 ```
 
 ## Output Contract

@@ -314,12 +314,9 @@ fn looks_like_hidden_entries_evidence(text: &str) -> bool {
 }
 
 fn verify_hidden_entries_check(
-    contract: &IntentOutputContract,
+    _contract: &IntentOutputContract,
     text: &str,
 ) -> OutputContractVerdict {
-    if contract.response_shape == OutputResponseShape::Scalar {
-        return verify_scalar_count(text);
-    }
     if contains_existence_yes_token(text)
         || contains_existence_no_token(text)
         || looks_like_hidden_entries_evidence(text)
@@ -602,10 +599,27 @@ mod tests {
     }
 
     #[test]
-    fn hidden_entries_count_uses_scalar_count_contract() {
+    fn hidden_entries_check_scalar_accepts_yes_no_with_examples() {
         let contract = IntentOutputContract {
             response_shape: OutputResponseShape::Scalar,
             semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
+            ..IntentOutputContract::default()
+        };
+        assert_eq!(
+            verify_output_contract(
+                &contract,
+                "有。示例：.codex, .git/, .gitignore",
+                "检查隐藏文件",
+            ),
+            OutputContractVerdict::Pass
+        );
+    }
+
+    #[test]
+    fn hidden_entries_count_uses_scalar_count_contract() {
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Scalar,
+            semantic_kind: OutputSemanticKind::ScalarCount,
             ..IntentOutputContract::default()
         };
         assert_eq!(

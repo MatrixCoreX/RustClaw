@@ -11,7 +11,6 @@ pub(crate) struct ObservedFacts {
     pub(crate) bound_target: Option<String>,
     pub(crate) ordered_entries: Vec<String>,
     pub(crate) selected_entry_index: Option<usize>,
-    pub(crate) requested_count_limit: Option<usize>,
     pub(crate) observed_entry_count: Option<usize>,
     pub(crate) slice_spec: Option<crate::followup_frame::FollowupSliceSpec>,
     pub(crate) output_shape: Option<String>,
@@ -23,7 +22,6 @@ impl ObservedFacts {
         self.bound_target.is_none()
             && self.ordered_entries.is_empty()
             && self.selected_entry_index.is_none()
-            && self.requested_count_limit.is_none()
             && self.observed_entry_count.is_none()
             && self.slice_spec.is_none()
             && self.delivery_targets.is_empty()
@@ -208,20 +206,14 @@ pub(crate) fn replace_active_observed_facts_from_ask_outcome(
 pub(crate) fn sync_active_observed_facts_from_ask_outcome_tx(
     tx: &rusqlite::Transaction<'_>,
     task: &ClaimedTask,
-    prompt: &str,
+    _prompt: &str,
     route_result: &crate::RouteResult,
     answer_text: &str,
     answer_messages: &[String],
     journal: &crate::task_journal::TaskJournal,
 ) -> Result<Option<String>> {
-    let request_surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
-    let observed_facts = derive_observed_facts_from_ask_outcome_with_surface(
-        answer_text,
-        answer_messages,
-        journal,
-        route_result,
-        &request_surface,
-    );
+    let observed_facts =
+        derive_observed_facts_from_ask_outcome(answer_text, answer_messages, journal, route_result);
     if observed_facts.is_empty() {
         clear_active_observed_facts_tx(tx, task)?;
         return Ok(None);
@@ -230,30 +222,11 @@ pub(crate) fn sync_active_observed_facts_from_ask_outcome_tx(
     Ok(Some(task.task_id.clone()))
 }
 
-#[cfg(test)]
 pub(crate) fn derive_observed_facts_from_ask_outcome(
     answer_text: &str,
     answer_messages: &[String],
     journal: &crate::task_journal::TaskJournal,
     route_result: &crate::RouteResult,
-) -> ObservedFacts {
-    let request_surface =
-        crate::intent::surface_signals::analyze_prompt_surface(&route_result.resolved_intent);
-    derive_observed_facts_from_ask_outcome_with_surface(
-        answer_text,
-        answer_messages,
-        journal,
-        route_result,
-        &request_surface,
-    )
-}
-
-pub(crate) fn derive_observed_facts_from_ask_outcome_with_surface(
-    answer_text: &str,
-    answer_messages: &[String],
-    journal: &crate::task_journal::TaskJournal,
-    route_result: &crate::RouteResult,
-    request_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
 ) -> ObservedFacts {
     let mut combined = answer_text.trim().to_string();
     let publishable_messages = answer_messages
@@ -314,20 +287,14 @@ pub(crate) fn derive_observed_facts_from_ask_outcome_with_surface(
         )
     });
 
-    let requested_count_limit = request_surface.requested_listing_limit;
     let observed_entry_count = (!ordered_entries.is_empty()).then_some(ordered_entries.len());
 
     ObservedFacts {
         bound_target,
         ordered_entries,
         selected_entry_index,
-        requested_count_limit,
         observed_entry_count,
-        slice_spec: crate::followup_frame::derive_slice_spec_from_journal(journal).or_else(|| {
-            request_surface
-                .requested_read_range
-                .map(crate::followup_frame::followup_slice_spec_from_requested_range_for_tests)
-        }),
+        slice_spec: crate::followup_frame::derive_slice_spec_from_journal(journal),
         output_shape: (!matches!(
             route_result.output_contract.response_shape,
             crate::OutputResponseShape::Free
@@ -492,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn derives_slice_spec_from_resolved_intent_when_journal_has_no_range_step() {
+    fn does_not_infer_slice_spec_from_request_text_when_journal_has_no_range_step() {
         let journal = crate::task_journal::TaskJournal::new("clarify_rewrite");
         let mut route = dummy_route_result();
         route.resolved_intent =
@@ -509,20 +476,12 @@ mod tests {
             &route,
         );
 
-        assert_eq!(
-            facts.slice_spec,
-            Some(crate::followup_frame::FollowupSliceSpec {
-                kind: crate::followup_frame::FollowupSliceKind::Tail,
-                n: Some(5),
-                start_line: None,
-                end_line: None,
-            })
-        );
+        assert_eq!(facts.slice_spec, None);
         assert_eq!(facts.bound_target.as_deref(), Some("/tmp/model_io.log"));
     }
 
     #[test]
-    fn uses_route_locator_hint_and_listing_limit_when_journal_lacks_scope() {
+    fn uses_route_locator_hint_and_observed_entry_count_when_journal_lacks_scope() {
         let journal = crate::task_journal::TaskJournal::new("list");
         let mut route = dummy_route_result();
         route.resolved_intent = "先列出 logs 目录下前 5 个文件名".to_string();
@@ -534,7 +493,6 @@ mod tests {
             &route,
         );
         assert_eq!(facts.bound_target.as_deref(), Some("logs"));
-        assert_eq!(facts.requested_count_limit, Some(5));
         assert_eq!(facts.observed_entry_count, Some(3));
     }
 
@@ -559,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn separates_requested_count_limit_from_observed_entry_count() {
+    fn observed_entry_count_is_derived_from_visible_entries_not_request_text() {
         let journal = crate::task_journal::TaskJournal::new("list");
         let mut route = dummy_route_result();
         route.resolved_intent = "先列出 logs 目录下前 5 个文件名".to_string();
@@ -569,7 +527,6 @@ mod tests {
             &journal,
             &route,
         );
-        assert_eq!(facts.requested_count_limit, Some(5));
         assert_eq!(facts.observed_entry_count, Some(3));
     }
 }

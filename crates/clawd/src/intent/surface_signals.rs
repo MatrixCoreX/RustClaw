@@ -497,46 +497,6 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
     }
 }
 
-fn normalize_surface_prompt<'a>(prompt: Option<&'a str>) -> Option<&'a str> {
-    prompt.map(str::trim).filter(|value| !value.is_empty())
-}
-
-pub(crate) fn requested_read_range_from_prompt_pair(
-    primary_prompt: Option<&str>,
-    fallback_prompt: &str,
-) -> Option<crate::read_range_request::RequestedReadRange> {
-    let primary_prompt = normalize_surface_prompt(primary_prompt);
-    let fallback_prompt = normalize_surface_prompt(Some(fallback_prompt));
-    if let Some(range) =
-        primary_prompt.and_then(|prompt| analyze_prompt_surface(prompt).requested_read_range)
-    {
-        return Some(range);
-    }
-    let fallback_prompt = fallback_prompt?;
-    if primary_prompt.is_some_and(|prompt| prompt == fallback_prompt) {
-        return None;
-    }
-    analyze_prompt_surface(fallback_prompt).requested_read_range
-}
-
-pub(crate) fn requested_listing_limit_from_prompt_pair(
-    primary_prompt: Option<&str>,
-    fallback_prompt: &str,
-) -> Option<usize> {
-    let primary_prompt = normalize_surface_prompt(primary_prompt);
-    let fallback_prompt = normalize_surface_prompt(Some(fallback_prompt));
-    if let Some(limit) =
-        primary_prompt.and_then(|prompt| analyze_prompt_surface(prompt).requested_listing_limit)
-    {
-        return Some(limit);
-    }
-    let fallback_prompt = fallback_prompt?;
-    if primary_prompt.is_some_and(|prompt| prompt == fallback_prompt) {
-        return None;
-    }
-    analyze_prompt_surface(fallback_prompt).requested_listing_limit
-}
-
 fn classify_locator_hint_prompt_shape(
     has_explicit_path_or_url: bool,
     has_concrete_locator_hint: bool,
@@ -2107,7 +2067,6 @@ mod tests {
         prompt_requests_scalar_only_shape, prompt_requests_sqlite_schema_version,
         prompt_requests_sqlite_table_listing, prompt_requests_structured_keys_shape,
         prompt_requests_toml_path_listing, prompt_requests_workspace_project_summary,
-        requested_listing_limit_from_prompt_pair, requested_read_range_from_prompt_pair,
         requested_sentence_count_shape, DeicticPromptShape, DeliveryPromptShape,
         FieldReadPromptShape, FileReferencePromptShape, InlineJsonShape,
         InlineTransformPromptShape, LocatorHintPromptShape, LocatorReplyPromptShape,
@@ -2177,42 +2136,6 @@ mod tests {
         );
         assert!(signals.has_explicit_path_or_url());
         assert!(signals.looks_like_locator_only_reply());
-    }
-
-    #[test]
-    fn requested_read_range_from_prompt_pair_prefers_primary_then_fallback() {
-        assert_eq!(
-            requested_read_range_from_prompt_pair(
-                Some("把 README.md 开头读 10 行"),
-                "把 README.md 开头读 10 行"
-            ),
-            Some(crate::read_range_request::RequestedReadRange::Head { n: 10 })
-        );
-        assert_eq!(
-            requested_read_range_from_prompt_pair(
-                Some("继续刚才那个请求"),
-                "把 README.md 开头读 10 行"
-            ),
-            Some(crate::read_range_request::RequestedReadRange::Head { n: 10 })
-        );
-    }
-
-    #[test]
-    fn requested_listing_limit_from_prompt_pair_prefers_primary_then_fallback() {
-        assert_eq!(
-            requested_listing_limit_from_prompt_pair(
-                Some("列出 logs 目录最近修改的 3 个文件"),
-                "列出 logs 目录最近修改的 3 个文件"
-            ),
-            Some(3)
-        );
-        assert_eq!(
-            requested_listing_limit_from_prompt_pair(
-                Some("继续刚才那个请求"),
-                "列出 logs 目录最近修改的 3 个文件"
-            ),
-            Some(3)
-        );
     }
 
     #[test]

@@ -269,6 +269,8 @@ pub(crate) async fn parse_schedule_intent(
     // render（写锁短命，避免 reload 时阻塞当前 LLM 调用）。
     let intent_prompt_template = state.policy.schedule.intent_prompt_template_string();
     let intent_rules_template = state.policy.schedule.intent_rules_template_string();
+    let request_language_hint =
+        crate::language_policy::task_response_language_hint(state, task, request);
     let prompt = crate::render_prompt_template(
         &intent_prompt_template,
         &[
@@ -286,6 +288,7 @@ pub(crate) async fn parse_schedule_intent(
                 "__CONFIG_RESPONSE_LANGUAGE__",
                 &state.policy.schedule.locale,
             ),
+            ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
             ("__REQUEST__", request),
         ],
     );

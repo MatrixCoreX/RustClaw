@@ -16,6 +16,7 @@ START_TIMEOUT_SECONDS="80"
 REUSE_SERVER=1
 BUILD_RELEASE=0
 EXTRA_SUITE_ARGS=()
+USER_KEY_VALUE="${USER_KEY:-${RUSTCLAW_USER_KEY:-}}"
 
 usage() {
   cat <<'EOF'
@@ -119,7 +120,24 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-health_url="${BASE_URL%/}/health"
+resolve_user_key() {
+  if [[ -n "${USER_KEY_VALUE:-}" ]]; then
+    return 0
+  fi
+  if [[ -x "${ROOT_DIR}/scripts/auth-key.sh" ]]; then
+    USER_KEY_VALUE="$("${ROOT_DIR}/scripts/auth-key.sh" list | awk '$2 == "admin" && $3 == "enabled" { print $1; exit }')"
+  fi
+}
+
+curl_health() {
+  local -a auth_args=()
+  if [[ -n "${USER_KEY_VALUE:-}" ]]; then
+    auth_args=(-H "X-RustClaw-Key: ${USER_KEY_VALUE}")
+  fi
+  curl -sS "${auth_args[@]}" "${health_url}" >/dev/null
+}
+
+health_url="${BASE_URL%/}/v1/health"
 started_pid=""
 
 cleanup() {
@@ -140,12 +158,21 @@ if [[ -n "${RUNTIME_ENV_FILE}" && -f "${RUNTIME_ENV_FILE}" ]]; then
 elif [[ -n "${RUNTIME_ENV_FILE}" ]]; then
   echo "runtime_env=missing:${RUNTIME_ENV_FILE}"
 fi
+USER_KEY_VALUE="${USER_KEY_VALUE:-${USER_KEY:-${RUSTCLAW_USER_KEY:-}}}"
+resolve_user_key
+if [[ -n "${USER_KEY_VALUE:-}" ]]; then
+  export USER_KEY="${USER_KEY_VALUE}"
+  export RUSTCLAW_USER_KEY="${RUSTCLAW_USER_KEY:-${USER_KEY_VALUE}}"
+  echo "auth_key=resolved"
+else
+  echo "auth_key=missing"
+fi
 
 if [[ "${BUILD_RELEASE}" -eq 1 ]]; then
   cargo build -p clawd --release
 fi
 
-if curl -sS "${health_url}" >/dev/null 2>&1; then
+if curl_health >/dev/null 2>&1; then
   if [[ "${REUSE_SERVER}" -eq 1 ]]; then
     echo "clawd_health=ok existing_server=${BASE_URL}"
   else
@@ -166,7 +193,7 @@ else
   echo "server_pid=${started_pid}"
 
   for second in $(seq 1 "${START_TIMEOUT_SECONDS}"); do
-    if curl -sS "${health_url}" >/dev/null 2>&1; then
+    if curl_health >/dev/null 2>&1; then
       echo "clawd_health=ok after ${second}s"
       break
     fi

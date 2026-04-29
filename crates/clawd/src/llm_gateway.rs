@@ -24,7 +24,12 @@ pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
         "router_legacy"
     } else if s.contains("plan_repair") {
         "plan_repair"
-    } else if s.contains("single_step_planner") || s.contains("plan_") {
+    } else if s.contains("single_step_planner")
+        || s.contains("single_plan_execution")
+        || s.contains("lightweight_execution")
+        || s.contains("loop_incremental_plan")
+        || s.contains("plan_")
+    {
         "plan"
     } else if s.contains("delivery_text_classifier") {
         "delivery_classifier"
@@ -740,6 +745,12 @@ mod tests {
         assert_eq!(
             classify_prompt_source("inline:direct_classifier"),
             "direct_classifier"
+        );
+        assert_eq!(
+            classify_prompt_source(
+                "layered:prompts/lightweight_execution_prompt.md#vendor=minimax"
+            ),
+            "plan"
         );
     }
 

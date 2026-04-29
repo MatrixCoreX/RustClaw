@@ -38,16 +38,12 @@ fn verify_mode_for_state(state: &AppState) -> crate::verifier::VerifyMode {
     }
 }
 
-fn build_verifier_gate_response(
+fn verifier_gate_default_response(
     state: &AppState,
+    language_hint: &str,
     verify_result: &crate::verifier::VerifyResult,
 ) -> String {
-    let prefer_english = state
-        .policy
-        .command_intent
-        .default_locale
-        .to_ascii_lowercase()
-        .starts_with("en");
+    let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
     let first_detail = verify_result
         .issues
         .first()
@@ -94,6 +90,95 @@ fn build_verifier_gate_response(
             &[("detail", &first_detail)],
         )
     }
+}
+
+async fn build_verifier_gate_response(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    resolved_user_intent: &str,
+    verify_result: &crate::verifier::VerifyResult,
+) -> String {
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
+    let first_detail = verify_result
+        .issues
+        .first()
+        .map(|issue| crate::truncate_for_agent_trace(&issue.detail))
+        .or_else(|| {
+            verify_result
+                .blocked_reason
+                .as_deref()
+                .map(crate::truncate_for_agent_trace)
+        })
+        .unwrap_or_else(|| "verification did not provide a detailed reason".to_string());
+    let needs_confirmation = verify_result.issues.iter().any(|issue| {
+        matches!(
+            issue.kind,
+            crate::verifier::VerifyIssueKind::ConfirmationRequired
+        )
+    });
+    let needs_clarify = verify_result.issues.iter().any(|issue| {
+        matches!(
+            issue.kind,
+            crate::verifier::VerifyIssueKind::RouteClarifyRequired
+        )
+    });
+    let (reason_code, missing_slots, response_shape, fallback_source) = if needs_confirmation {
+        (
+            "execution_confirmation_required",
+            vec!["explicit_user_confirmation".to_string()],
+            "one_short_confirmation_question",
+            crate::fallback::ClarifyFallbackSource::VerifyRejected,
+        )
+    } else if needs_clarify {
+        (
+            "execution_clarification_required",
+            vec!["execution_target_or_boundary".to_string()],
+            "one_short_clarification",
+            crate::fallback::ClarifyFallbackSource::VerifyRejected,
+        )
+    } else {
+        (
+            "execution_precheck_blocked",
+            Vec::new(),
+            "brief_failure_with_next_step",
+            crate::fallback::ClarifyFallbackSource::PolicyBlock,
+        )
+    };
+    let mut observed_facts = vec![
+        format!("verification_detail: {first_detail}"),
+        format!("verification_issue_count: {}", verify_result.issues.len()),
+        format!("needs_confirmation: {needs_confirmation}"),
+    ];
+    if let Some(reason) = verify_result
+        .blocked_reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        observed_facts.push(format!(
+            "blocked_reason: {}",
+            crate::truncate_for_agent_trace(reason)
+        ));
+    }
+    let contract = crate::fallback::UserResponseContract::verifier_gate(
+        reason_code,
+        user_text,
+        resolved_user_intent,
+        missing_slots,
+        observed_facts,
+        response_shape,
+        &language_hint,
+    );
+    let fallback_text = verifier_gate_default_response(state, &language_hint, verify_result);
+    crate::fallback::compose_user_response_from_contract_with_default(
+        state,
+        task,
+        &contract,
+        fallback_source,
+        &fallback_text,
+    )
+    .await
 }
 
 pub(super) async fn prepare_round_actions(
@@ -198,9 +283,15 @@ pub(super) async fn prepare_round_actions(
     let actions = if matches!(verify_result.mode, crate::verifier::VerifyMode::Enforce)
         && (!verify_result.approved || verify_result.needs_confirmation)
     {
-        vec![AgentAction::Respond {
-            content: build_verifier_gate_response(state, &verify_result),
-        }]
+        let content = build_verifier_gate_response(
+            state,
+            task,
+            planner_user_text,
+            &plan_result.goal,
+            &verify_result,
+        )
+        .await;
+        vec![AgentAction::Respond { content }]
     } else if matches!(verify_result.mode, crate::verifier::VerifyMode::Enforce) {
         let verified_steps = if !verify_result.rewritten_steps.is_empty() {
             &verify_result.rewritten_steps

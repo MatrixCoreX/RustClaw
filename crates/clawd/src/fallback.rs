@@ -169,6 +169,97 @@ impl UserResponseContract {
         }
     }
 
+    pub(crate) fn policy_block(
+        reason_code: &str,
+        original_user_request: &str,
+        resolved_user_intent: &str,
+        observed_facts: Vec<String>,
+        policy_boundary: Vec<String>,
+        language_hint: &str,
+    ) -> Self {
+        Self {
+            kind: UserResponseKind::PolicyBlock,
+            reason_code: reason_code.trim().to_string(),
+            missing_slots: Vec::new(),
+            observed_facts,
+            policy_boundary,
+            original_user_request: original_user_request.trim().to_string(),
+            resolved_user_intent: resolved_user_intent.trim().to_string(),
+            response_shape: "brief_failure_with_next_step".to_string(),
+            language_hint: language_hint.trim().to_string(),
+        }
+    }
+
+    pub(crate) fn verifier_gate(
+        reason_code: &str,
+        original_user_request: &str,
+        resolved_user_intent: &str,
+        missing_slots: Vec<String>,
+        observed_facts: Vec<String>,
+        response_shape: &str,
+        language_hint: &str,
+    ) -> Self {
+        let kind = if missing_slots.is_empty() {
+            UserResponseKind::PolicyBlock
+        } else {
+            UserResponseKind::Clarify
+        };
+        Self {
+            kind,
+            reason_code: reason_code.trim().to_string(),
+            missing_slots,
+            observed_facts,
+            policy_boundary: vec![
+                "Do not expose internal verifier names, schema names, prompt names, or raw model output."
+                    .to_string(),
+                "Do not claim the blocked or unconfirmed action was executed.".to_string(),
+                "If explicit confirmation is required, ask for confirmation in one concise sentence."
+                    .to_string(),
+                "If clarification is required, ask only for the smallest missing detail needed before execution."
+                    .to_string(),
+            ],
+            original_user_request: original_user_request.trim().to_string(),
+            resolved_user_intent: resolved_user_intent.trim().to_string(),
+            response_shape: response_shape.trim().to_string(),
+            language_hint: language_hint.trim().to_string(),
+        }
+    }
+
+    pub(crate) fn missing_file_delivery(
+        original_user_request: &str,
+        resolved_user_intent: &str,
+        locator_hint: Option<&str>,
+        language_hint: &str,
+    ) -> Self {
+        let mut observed_facts = vec![
+            "file_delivery_required: true".to_string(),
+            "fs_search_action: find_name".to_string(),
+            "matched_files_count: 0".to_string(),
+        ];
+        if let Some(locator) = locator_hint
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            observed_facts.push(format!("locator_hint: {locator}"));
+        }
+        Self {
+            kind: UserResponseKind::ToolFailure,
+            reason_code: "missing_file_delivery_not_found".to_string(),
+            missing_slots: Vec::new(),
+            observed_facts,
+            policy_boundary: vec![
+                "Do not claim a file was found or delivered.".to_string(),
+                "Do not invent alternative file paths or similar filenames.".to_string(),
+                "Explain that the requested file delivery target was not found and give one concise recovery option."
+                    .to_string(),
+            ],
+            original_user_request: original_user_request.trim().to_string(),
+            resolved_user_intent: resolved_user_intent.trim().to_string(),
+            response_shape: "brief_failure_with_next_step".to_string(),
+            language_hint: language_hint.trim().to_string(),
+        }
+    }
+
     pub(crate) fn to_prompt_context_block(&self) -> String {
         let value = json!({
             "kind": self.kind.as_str(),
@@ -184,6 +275,39 @@ impl UserResponseContract {
         let body = serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
         format!("### USER_RESPONSE_CONTRACT\n{body}")
     }
+}
+
+pub(crate) fn missing_file_delivery_default_text(state: &AppState) -> String {
+    crate::i18n_t_with_default(
+        state,
+        "clawd.msg.delivery.rule3_file_not_found",
+        "File not found.",
+    )
+}
+
+pub(crate) async fn compose_missing_file_delivery_response(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    original_user_request: &str,
+    resolved_user_intent: &str,
+    locator_hint: Option<&str>,
+    language_hint: &str,
+) -> String {
+    let default_text = missing_file_delivery_default_text(state);
+    let contract = UserResponseContract::missing_file_delivery(
+        original_user_request,
+        resolved_user_intent,
+        locator_hint,
+        language_hint,
+    );
+    compose_user_response_from_contract_with_default(
+        state,
+        task,
+        &contract,
+        ClarifyFallbackSource::ExecutionFailedPartial,
+        &default_text,
+    )
+    .await
 }
 
 pub(crate) async fn compose_user_response_from_contract(
@@ -329,6 +453,8 @@ pub(crate) enum ClarifyFallbackSource {
     /// 预留：§7.1 contract verifier 二次拒绝。
     #[allow(dead_code)]
     VerifyRejected,
+    /// 策略 / 权限阻断后，用户可见说明交给 composer 生成。
+    PolicyBlock,
 }
 
 impl ClarifyFallbackSource {
@@ -342,6 +468,7 @@ impl ClarifyFallbackSource {
             Self::ExecutionFailedPartial => "execution_failed_partial",
             Self::SynthesisEmpty => "synthesis_empty",
             Self::VerifyRejected => "verify_rejected",
+            Self::PolicyBlock => "policy_block",
         }
     }
 
@@ -355,6 +482,7 @@ impl ClarifyFallbackSource {
             Self::ExecutionFailedPartial => "clawd.msg.fallback.execution_failed_partial",
             Self::SynthesisEmpty => "clawd.msg.fallback.synthesis_empty",
             Self::VerifyRejected => "clawd.msg.fallback.verify_rejected",
+            Self::PolicyBlock => "clawd.msg.fallback.policy_block",
         }
     }
 
@@ -377,10 +505,13 @@ impl ClarifyFallbackSource {
                 "I hit a problem partway through. Already done: {context_hint}. Want me to try a different path?"
             }
             Self::SynthesisEmpty => {
-                "I got results but couldn't settle on a definitive answer. Which specific item do you want?"
+                "I couldn't produce a reliable final answer from the available evidence. Please add the missing target or ask me to retry the synthesis."
             }
             Self::VerifyRejected => {
                 "The model's answer didn't match the expected shape ({context_hint}). Could you tell me the exact form you want?"
+            }
+            Self::PolicyBlock => {
+                "This request is blocked by the current runtime policy. Adjust the policy or provide a safer target, then retry."
             }
         }
     }
@@ -395,6 +526,7 @@ impl ClarifyFallbackSource {
             Self::ExecutionFailedPartial,
             Self::SynthesisEmpty,
             Self::VerifyRejected,
+            Self::PolicyBlock,
         ]
     }
 }
@@ -545,6 +677,65 @@ mod tests {
         assert!(block.contains("Do not mark the run as successful."));
     }
 
+    #[test]
+    fn user_response_contract_renders_missing_file_delivery_context() {
+        let contract = UserResponseContract::missing_file_delivery(
+            "把 definitely_missing.txt 发给我",
+            "Deliver definitely_missing.txt",
+            Some("definitely_missing.txt"),
+            "zh-CN",
+        );
+        let block = contract.to_prompt_context_block();
+        assert!(block.contains("\"kind\": \"tool_failure\""));
+        assert!(block.contains("\"reason_code\": \"missing_file_delivery_not_found\""));
+        assert!(block.contains("matched_files_count: 0"));
+        assert!(block.contains("locator_hint: definitely_missing.txt"));
+        assert!(block.contains("Do not claim a file was found or delivered."));
+    }
+
+    #[test]
+    fn user_response_contract_renders_verifier_gate_context() {
+        let contract = UserResponseContract::verifier_gate(
+            "execution_confirmation_required",
+            "删除 logs 目录",
+            "delete logs directory",
+            vec!["explicit_user_confirmation".to_string()],
+            vec![
+                "verification_detail: destructive filesystem action".to_string(),
+                "needs_confirmation: true".to_string(),
+            ],
+            "one_short_confirmation_question",
+            "zh-CN",
+        );
+        let block = contract.to_prompt_context_block();
+        assert!(block.contains("\"kind\": \"clarify\""));
+        assert!(block.contains("\"reason_code\": \"execution_confirmation_required\""));
+        assert!(block.contains("explicit_user_confirmation"));
+        assert!(block.contains("destructive filesystem action"));
+        assert!(block.contains("Do not claim the blocked or unconfirmed action was executed."));
+    }
+
+    #[test]
+    fn user_response_contract_renders_structured_policy_block_context() {
+        let contract = UserResponseContract::policy_block(
+            "path_outside_workspace",
+            "读取 /etc/shadow 第一行",
+            "Read the first line of /etc/shadow.",
+            vec!["denied_path: /etc/shadow".to_string()],
+            vec![
+                "Do not claim the path was read.".to_string(),
+                "Explain the permission boundary and one safe next step.".to_string(),
+            ],
+            "zh-CN",
+        );
+        let block = contract.to_prompt_context_block();
+        assert!(block.contains("\"kind\": \"policy_block\""));
+        assert!(block.contains("\"reason_code\": \"path_outside_workspace\""));
+        assert!(block.contains("denied_path: /etc/shadow"));
+        assert!(block.contains("brief_failure_with_next_step"));
+        assert!(block.contains("Do not claim the path was read."));
+    }
+
     /// 每个 source 的英文默认文案非空，且 i18n key 都在
     /// `clawd.msg.fallback.` 命名空间下，避免被误用为其它字典。
     #[test]
@@ -615,11 +806,11 @@ mod tests {
         let mut dict = HashMap::new();
         dict.insert(
             ClarifyFallbackSource::SynthesisEmpty.i18n_key().to_string(),
-            "我拿到结果了但没整理出确定答案。你最想看的是哪一项？".to_string(),
+            "我还没能根据现有证据生成可靠最终答案。请补充缺少的目标。".to_string(),
         );
         assert!(is_known_clarify_fallback_text_with_dict(
             &dict,
-            "我拿到结果了但没整理出确定答案。你最想看的是哪一项？"
+            "我还没能根据现有证据生成可靠最终答案。请补充缺少的目标。"
         ));
     }
 

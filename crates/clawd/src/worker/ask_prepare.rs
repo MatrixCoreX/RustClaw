@@ -15,6 +15,7 @@ pub(super) struct PreparedAskRouting {
     pub(super) route_result: crate::RouteResult,
     pub(super) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     pub(super) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
+    pub(super) clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     pub(super) resolved_prompt: String,
     pub(super) agent_mode: bool,
     pub(super) immediate_prior_turn_was_clarify: bool,
@@ -35,7 +36,6 @@ pub(super) struct PreparedRunSkillInput {
 }
 
 fn apply_fresh_deictic_clarify_guard(
-    state: &AppState,
     prompt: &str,
     prompt_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     route_result: &mut crate::RouteResult,
@@ -58,8 +58,7 @@ fn apply_fresh_deictic_clarify_guard(
     route_result.set_routed_mode(crate::RoutedMode::AskClarify);
     route_result.needs_clarify = true;
     route_result.resolved_intent = prompt.trim().to_string();
-    route_result.clarify_question =
-        crate::i18n_t_with_default(state, decision.question_i18n_key, decision.default_question);
+    route_result.clarify_question.clear();
     route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
     route_result.output_contract.locator_hint.clear();
     if route_result.route_reason.trim().is_empty() {
@@ -582,6 +581,7 @@ pub(super) async fn prepare_ask_routing(
         state.cache_task_schedule_intent(&task.task_id, &normalizer_prompt, intent);
     }
     let turn_analysis = normalizer_out.turn_analysis.clone();
+    let clarify_fallback_source = normalizer_out.fallback_source;
     let mut execution_recipe_hint = normalizer_out.execution_recipe_hint;
     let mut route_result =
         crate::intent_router::route_result_from_normalizer(state, task, &normalizer_out);
@@ -633,7 +633,6 @@ pub(super) async fn prepare_ask_routing(
         recent_assistant_replies.get_or_insert_with(|| "<none>".to_string())
     };
     apply_fresh_deictic_clarify_guard(
-        state,
         &routed_prompt,
         &routed_prompt_surface,
         &mut route_result,
@@ -685,9 +684,6 @@ pub(super) async fn prepare_ask_routing(
         );
         runtime_prompt = merged_prompt;
         route_result.resolved_intent = runtime_prompt.clone();
-        if !route_result.route_reason.contains("task_turn_merge") {
-            route_result.route_reason.push_str(";task_turn_merge");
-        }
     }
     info!(
         "worker_once: ask received_message task_id={} user_id={} chat_id={} text={}",
@@ -750,6 +746,7 @@ pub(super) async fn prepare_ask_routing(
         route_result,
         execution_recipe_hint,
         turn_analysis,
+        clarify_fallback_source,
         resolved_prompt,
         agent_mode,
         immediate_prior_turn_was_clarify,
