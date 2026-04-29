@@ -6,22 +6,10 @@ pub(crate) enum WorkspaceScopePromptShape {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DeliveryPromptShape {
-    PhraseWithoutTarget,
-    PhraseWithTarget,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DeicticPromptShape {
     ObjectTarget,
     FreshReference,
     GeneralReference,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum InlineTransformPromptShape {
-    ActionWithoutTarget,
-    ActionWithTarget,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,8 +58,6 @@ pub(crate) struct PromptSurfaceSignals {
     pub(crate) workspace_single_token_hint: Option<String>,
     pub(crate) file_reference_prompt_shape: Option<FileReferencePromptShape>,
     pub(crate) requested_sentence_count: Option<usize>,
-    pub(crate) delivery_prompt_shape: Option<DeliveryPromptShape>,
-    pub(crate) inline_transform_prompt_shape: Option<InlineTransformPromptShape>,
     pub(crate) deictic_prompt_shape: Option<DeicticPromptShape>,
     pub(crate) workspace_scope_prompt_shape: Option<WorkspaceScopePromptShape>,
     pub(crate) requested_read_range: Option<crate::read_range_request::RequestedReadRange>,
@@ -227,9 +213,6 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
     let locator_reply_prompt_shape =
         looks_like_locator_only_reply.then_some(LocatorReplyPromptShape::LocatorOnly);
     let requested_sentence_count = requested_sentence_count_shape(trimmed);
-    let requests_inline_transform_action_shape =
-        prompt_requests_inline_transform_action_shape(trimmed);
-    let requests_delivery_phrase = prompt_requests_delivery_phrase(trimmed);
     let references_deictic_object = prompt_references_deictic_object(trimmed);
     let has_delivery_token_reference = prompt_contains_delivery_token_reference(trimmed);
     let mentions_generic_file_object = prompt_mentions_generic_file_object(trimmed);
@@ -247,34 +230,6 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
     );
     let requested_read_range =
         crate::read_range_request::extract_explicit_read_range_request(trimmed);
-    let has_delivery_target_shape = has_concrete_locator_hint
-        || filename_candidate_count > 0
-        || bare_filename_stem_candidate_count > 0
-        || workspace_single_token_hint.is_some()
-        || has_delivery_token_reference
-        || matches!(deictic_prompt_shape, Some(DeicticPromptShape::ObjectTarget));
-    let delivery_prompt_shape = classify_delivery_prompt_shape(
-        requests_delivery_phrase,
-        has_delivery_target_shape,
-        matches!(
-            file_reference_prompt_shape,
-            Some(
-                FileReferencePromptShape::GenericObject
-                    | FileReferencePromptShape::DeliveryTokenAndGenericObject
-            )
-        ),
-    );
-    let has_inline_transform_target_shape = contains_inline_transform_target_shape(
-        inline_json_shape.is_some(),
-        looks_like_locator_only_reply,
-        requested_read_range.is_some(),
-        field_selector_count,
-        has_delivery_token_reference,
-    );
-    let inline_transform_prompt_shape = classify_inline_transform_prompt_shape(
-        requests_inline_transform_action_shape,
-        has_inline_transform_target_shape,
-    );
     let mentions_current_workspace_scope_shape = prompt_mentions_current_workspace_scope(trimmed);
     let mentions_current_workspace_scope_reference_shape =
         prompt_mentions_current_workspace_scope_reference_shape(trimmed);
@@ -304,8 +259,6 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
         workspace_single_token_hint,
         file_reference_prompt_shape,
         requested_sentence_count,
-        delivery_prompt_shape,
-        inline_transform_prompt_shape,
         deictic_prompt_shape,
         workspace_scope_prompt_shape,
         requested_read_range,
@@ -331,20 +284,6 @@ fn classify_locator_hint_prompt_shape(
     }
 }
 
-fn classify_delivery_prompt_shape(
-    requests_delivery_phrase: bool,
-    has_delivery_target_shape: bool,
-    mentions_generic_file_object: bool,
-) -> Option<DeliveryPromptShape> {
-    if !requests_delivery_phrase {
-        None
-    } else if has_delivery_target_shape || mentions_generic_file_object {
-        Some(DeliveryPromptShape::PhraseWithTarget)
-    } else {
-        Some(DeliveryPromptShape::PhraseWithoutTarget)
-    }
-}
-
 fn classify_deictic_prompt_shape(
     references_deictic_object: bool,
     contains_deictic_reference_shape: bool,
@@ -358,19 +297,6 @@ fn classify_deictic_prompt_shape(
         Some(DeicticPromptShape::GeneralReference)
     } else {
         None
-    }
-}
-
-fn classify_inline_transform_prompt_shape(
-    requests_inline_transform_action_shape: bool,
-    has_inline_transform_target_shape: bool,
-) -> Option<InlineTransformPromptShape> {
-    if !requests_inline_transform_action_shape {
-        None
-    } else if has_inline_transform_target_shape {
-        Some(InlineTransformPromptShape::ActionWithTarget)
-    } else {
-        Some(InlineTransformPromptShape::ActionWithoutTarget)
     }
 }
 
@@ -432,20 +358,6 @@ pub(crate) fn workspace_scope_shape_has_reference_scope(
 
 fn has_explicit_path_or_url_shape(prompt: &str) -> bool {
     crate::worker::has_explicit_path_or_url_locator_hint(prompt)
-}
-
-fn contains_inline_transform_target_shape(
-    has_inline_json_shape: bool,
-    looks_like_locator_only_reply: bool,
-    has_requested_read_range: bool,
-    field_selector_count: usize,
-    has_delivery_token_reference: bool,
-) -> bool {
-    has_inline_json_shape
-        && !looks_like_locator_only_reply
-        && !has_requested_read_range
-        && field_selector_count == 0
-        && !has_delivery_token_reference
 }
 
 pub(crate) fn prompt_mentions_current_workspace_scope(prompt: &str) -> bool {
@@ -699,30 +611,6 @@ pub(crate) fn extract_workspace_child_directory_hint_shape(prompt: &str) -> Opti
         }
     }
     None
-}
-
-pub(crate) fn prompt_requests_inline_transform_action_shape(prompt: &str) -> bool {
-    let lower = prompt.trim().to_ascii_lowercase();
-    ["sort", "markdown", "table", "render", "convert"]
-        .iter()
-        .any(|needle| lower.contains(needle))
-}
-
-pub(crate) fn prompt_requests_delivery_phrase(prompt: &str) -> bool {
-    let lower = prompt.trim().to_ascii_lowercase();
-    [
-        "send me",
-        "send it",
-        "deliver",
-        "attach",
-        "upload",
-        "as a file",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
-        || ["发给我", "发我", "直接发文件", "别贴正文", "作为文件"]
-            .iter()
-            .any(|needle| prompt.contains(needle))
 }
 
 pub(crate) fn prompt_references_deictic_object(prompt: &str) -> bool {
@@ -1245,11 +1133,9 @@ mod tests {
         prompt_mentions_current_workspace_scope_reference_shape,
         prompt_mentions_fileish_reference_shape, prompt_mentions_generic_file_object,
         prompt_references_deictic_object, prompt_requests_compare_shape,
-        prompt_requests_delivery_phrase, prompt_requests_inline_transform_action_shape,
         prompt_requests_quantity_comparison_shape, requested_sentence_count_shape,
-        DeicticPromptShape, DeliveryPromptShape, FileReferencePromptShape, InlineJsonShape,
-        InlineTransformPromptShape, LocatorHintPromptShape, LocatorReplyPromptShape,
-        WorkspaceScopePromptShape,
+        DeicticPromptShape, FileReferencePromptShape, InlineJsonShape, LocatorHintPromptShape,
+        LocatorReplyPromptShape, WorkspaceScopePromptShape,
     };
 
     #[test]
@@ -1266,8 +1152,6 @@ mod tests {
         assert_eq!(signals.filename_candidate_count, 0);
         assert_eq!(signals.bare_filename_stem_candidate_count, 0);
         assert!(signals.workspace_single_token_hint.is_none());
-        assert!(signals.inline_transform_prompt_shape.is_none());
-        assert!(signals.delivery_prompt_shape.is_none());
         assert!(signals.file_reference_prompt_shape.is_none());
         assert!(signals.deictic_prompt_shape.is_none());
         assert!(signals.workspace_scope_prompt_shape.is_none());
@@ -1405,10 +1289,6 @@ mod tests {
     #[test]
     fn lifts_phrase_fallbacks_into_surface_signal_flags() {
         let signals = analyze_prompt_surface("把这个文件发给我，只输出值，简短说明一下");
-        assert_eq!(
-            signals.delivery_prompt_shape,
-            Some(DeliveryPromptShape::PhraseWithTarget)
-        );
         assert_eq!(
             signals.file_reference_prompt_shape,
             Some(FileReferencePromptShape::GenericObject)
@@ -1562,38 +1442,6 @@ mod tests {
             signals.workspace_child_directory_hint.as_deref(),
             Some("logs")
         );
-    }
-
-    #[test]
-    fn lifts_delivery_target_shape_into_surface_signals() {
-        let signals = analyze_prompt_surface("把 readme 发给我");
-        assert_eq!(
-            signals.delivery_prompt_shape,
-            Some(DeliveryPromptShape::PhraseWithTarget)
-        );
-    }
-
-    #[test]
-    fn detects_inline_transform_action_shape() {
-        assert!(prompt_requests_inline_transform_action_shape(
-            "sort this JSON array by score descending and render it as a markdown table"
-        ));
-    }
-
-    #[test]
-    fn lifts_inline_transform_target_shape_into_surface_signals() {
-        let signals = analyze_prompt_surface(
-            r#"sort this JSON array by score descending and render it as a markdown table: [{"name":"alpha","score":7}]"#,
-        );
-        assert_eq!(
-            signals.inline_transform_prompt_shape,
-            Some(InlineTransformPromptShape::ActionWithTarget)
-        );
-    }
-
-    #[test]
-    fn detects_delivery_phrase_shape() {
-        assert!(prompt_requests_delivery_phrase("把 README.md 发给我"));
     }
 
     #[test]
