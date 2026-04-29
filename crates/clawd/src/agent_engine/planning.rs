@@ -2,7 +2,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::OnceLock;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use super::{
     build_loop_history_compact, build_single_plan_prompt, build_skill_playbooks_text,
@@ -360,23 +360,7 @@ async fn parse_single_plan_actions(
         };
         match action {
             AgentAction::Think { .. } => {}
-            AgentAction::Respond { content } => {
-                // §3.4: planning 阶段不再调 semantic_judge LLM；改用本地启发式
-                // looks_like_meta_respond_directive_local 过滤明显的 meta 占位
-                // Respond 步骤。漏判会在 finalize 层 (loop_finalize::drop_passthrough_*)
-                // 被 LLM 二次剔除，业务无损。
-                if !actions.is_empty()
-                    && crate::semantic_judge::looks_like_meta_respond_directive_local(&content)
-                {
-                    debug!(
-                        "plan_meta_respond_suppressed task_id={} content={}",
-                        task.task_id,
-                        crate::truncate_for_log(&content)
-                    );
-                    continue;
-                }
-                actions.push(AgentAction::Respond { content });
-            }
+            AgentAction::Respond { content } => actions.push(AgentAction::Respond { content }),
             _ => actions.push(action),
         }
     }
@@ -2863,8 +2847,6 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract::default(),
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         }
     }
 
@@ -3180,8 +3162,6 @@ mod tests {
                 locator_hint: String::new(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         }
     }
 

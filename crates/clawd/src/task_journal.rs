@@ -641,8 +641,6 @@ mod tests {
                 },
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         });
         journal.record_finalizer_summary(TaskJournalFinalizerSummary {
             stage: Some(TaskJournalFinalizerStage::General),

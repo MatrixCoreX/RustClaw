@@ -1395,46 +1395,6 @@ pub(crate) fn build_recent_assistant_replies_context(
     }
 }
 
-pub(crate) fn read_recent_assistant_reply_texts(
-    state: &AppState,
-    user_key: Option<&str>,
-    user_id: i64,
-    chat_id: i64,
-    max_replies: usize,
-) -> Vec<String> {
-    let max_replies = max_replies.max(1);
-    let user_key = effective_user_key(user_key, user_id, chat_id);
-    let db = match state.core.db.get() {
-        Ok(db) => db,
-        Err(_) => return Vec::new(),
-    };
-    let rows = query_recent_memories_for_chat(&db, user_id, chat_id, &user_key, max_replies * 6)
-        .unwrap_or_default();
-    if rows.is_empty() {
-        return Vec::new();
-    }
-
-    let mut replies = Vec::new();
-    for (role, content, safety_flag) in rows {
-        if role != MEMORY_ROLE_ASSISTANT {
-            continue;
-        }
-        if state.policy.memory.safety_filter_enabled
-            && safety_flag == MEMORY_SAFETY_FLAG_INJECTION_LIKE
-        {
-            continue;
-        }
-        let Some(trimmed) = assistant_context_text_for_recall(state, &content) else {
-            continue;
-        };
-        replies.push(trimmed.to_string());
-        if replies.len() >= max_replies {
-            break;
-        }
-    }
-    replies
-}
-
 pub(crate) fn read_long_term_source_memory_id(
     state: &AppState,
     user_key: Option<&str>,

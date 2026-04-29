@@ -240,10 +240,6 @@ pub(crate) struct RouteResult {
     pub(crate) should_refresh_long_term_memory: bool,
     pub(crate) agent_display_name_hint: String,
     pub(crate) output_contract: IntentOutputContract,
-    /// Planner-first 兼容字段。normalizer 仍可返回这两个字段，但主链不再把
-    /// 它们当作 direct-reply 短路权威；普通回答继续进入 chat/planner 层。
-    pub(crate) direct_reply_candidate: String,
-    pub(crate) direct_reply_confidence: f64,
 }
 
 impl RouteResult {

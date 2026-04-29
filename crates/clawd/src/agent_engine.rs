@@ -602,10 +602,14 @@ fn plan_step_label(action: &AgentAction) -> String {
     }
 }
 
-fn user_safe_step_error(err: &str) -> String {
+fn user_safe_step_error(err: &str, prefer_english: bool) -> String {
     let trimmed = err.trim();
     if trimmed.is_empty() {
-        return "执行失败，但没有返回明确原因".to_string();
+        return if prefer_english {
+            "Execution failed without a clear reason.".to_string()
+        } else {
+            "执行失败，但没有返回明确原因".to_string()
+        };
     }
     crate::truncate_for_agent_trace(trimmed)
 }
@@ -676,14 +680,11 @@ async fn build_resume_context_error(
         .and_then(|v| v.as_array())
         .map(|v| !v.is_empty())
         .unwrap_or(false);
-    let prefer_english = state
-        .policy
-        .command_intent
-        .default_locale
-        .to_ascii_lowercase()
-        .starts_with("en");
+    let language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_request);
+    let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
     let failed_index_text = failed_index.to_string();
-    let safe_err = user_safe_step_error(err);
+    let safe_err = user_safe_step_error(err, prefer_english);
     let fallback_user_error = if has_remaining_actions {
         crate::bilingual_t_with_default_vars(
             state,
@@ -711,8 +712,6 @@ async fn build_resume_context_error(
             ],
         )
     };
-    let language_hint =
-        crate::language_policy::task_response_language_hint(state, task, user_request);
     let mut observed_facts = vec![
         format!("failed_step_index: {failed_index}"),
         format!("failed_action: {failed_action}"),
@@ -1243,13 +1242,22 @@ mod tests {
     fn test_user_safe_step_error_preserves_sanitized_error_excerpt() {
         assert_eq!(
             user_safe_step_error(
-                "synthesize_answer could not produce a grounded publishable answer"
+                "synthesize_answer could not produce a grounded publishable answer",
+                false,
             ),
             "synthesize_answer could not produce a grounded publishable answer"
         );
         assert_eq!(
-            user_safe_step_error("unknown action: read; allowed: info|inventory_dir"),
+            user_safe_step_error("unknown action: read; allowed: info|inventory_dir", true),
             "unknown action: read; allowed: info|inventory_dir"
+        );
+        assert_eq!(
+            user_safe_step_error("", false),
+            "执行失败，但没有返回明确原因"
+        );
+        assert_eq!(
+            user_safe_step_error("  ", true),
+            "Execution failed without a clear reason."
         );
     }
 

@@ -234,8 +234,6 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract::default(),
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let binding = ResumeContextBinding {
             source: ResumeContextSource::RecentFailedCandidate,
@@ -273,8 +271,6 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract::default(),
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let binding = ResumeContextBinding {
             source: ResumeContextSource::ExplicitContinue,
@@ -322,8 +318,6 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract::default(),
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let binding = ResumeContextBinding {
             source: ResumeContextSource::ExplicitContinue,

@@ -938,8 +938,6 @@ mod tests {
                 locator_hint: "model_io.log".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         replace_active_frame_from_ask_outcome(
             &state,
@@ -1008,8 +1006,6 @@ mod tests {
                 locator_hint: "logs".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         replace_active_frame_from_ask_outcome(
             &state,
@@ -1090,8 +1086,6 @@ mod tests {
                 locator_hint: "logs".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         replace_active_frame_from_ask_outcome(
             &state,
@@ -1193,8 +1187,6 @@ mod tests {
                 locator_hint: "logs/clawd.log".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         replace_active_frame_from_ask_outcome(
             &state,
@@ -1269,8 +1261,6 @@ mod tests {
                 locator_hint: String::new(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         replace_active_frame_from_ask_outcome(
             &state,
@@ -1345,8 +1335,6 @@ mod tests {
                 locator_hint: String::new(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         replace_active_frame_from_ask_outcome(
             &state,
@@ -1408,8 +1396,6 @@ mod tests {
                 locator_hint: String::new(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         replace_active_frame_from_ask_outcome(
             &state,
@@ -1468,8 +1454,6 @@ mod tests {
                 locator_hint: "/tmp/rustclaw-workspace/old/logs/model_io.log".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         replace_active_frame_from_ask_outcome(
             &state,

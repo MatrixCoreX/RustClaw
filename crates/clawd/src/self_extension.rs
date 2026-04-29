@@ -78,42 +78,11 @@ fn self_extension_t_with_vars(
     }
 }
 
-fn text_contains_cjk(text: &str) -> bool {
-    text.chars().any(|ch| {
-        matches!(
-            ch as u32,
-            0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
-        )
-    })
-}
-
-fn text_contains_ascii_alpha(text: &str) -> bool {
-    text.chars().any(|ch| ch.is_ascii_alphabetic())
-}
-
 fn request_language(state: &AppState, request: &str) -> ReplyLanguage {
-    let trimmed = request.trim();
-    if trimmed.is_empty() {
-        return if state.policy.command_intent.default_locale.starts_with("en") {
-            ReplyLanguage::En
-        } else {
-            ReplyLanguage::ZhCn
-        };
-    }
-    match (
-        text_contains_cjk(trimmed),
-        text_contains_ascii_alpha(trimmed),
-    ) {
-        (true, false) => ReplyLanguage::ZhCn,
-        (false, true) => ReplyLanguage::En,
-        (true, true) => {
-            if state.policy.command_intent.default_locale.starts_with("en") {
-                ReplyLanguage::En
-            } else {
-                ReplyLanguage::ZhCn
-            }
-        }
-        (false, false) => {
+    match crate::language_policy::request_language_hint(request) {
+        "zh-CN" => ReplyLanguage::ZhCn,
+        "en" => ReplyLanguage::En,
+        _ => {
             if state.policy.command_intent.default_locale.starts_with("en") {
                 ReplyLanguage::En
             } else {
@@ -1111,8 +1080,6 @@ mod tests {
                 },
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(!self_extension_enabled_for_route(false, false, &route));
         assert!(self_extension_enabled_for_route(true, false, &route));
@@ -1144,8 +1111,6 @@ mod tests {
                 },
                 ..Default::default()
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(!self_extension_enabled_for_route(true, false, &route));
         assert!(self_extension_enabled_for_route(true, true, &route));
@@ -1447,8 +1412,6 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract::default(),
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let request = effective_request("resolved prompt", "请不要走现有技能", &route);
         assert_eq!(

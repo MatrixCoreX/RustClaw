@@ -447,8 +447,10 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     info!(
-        "run_cmd config: timeout_seconds={}, max_cmd_length={}, allow_outside_workspace={}, allow_sudo={}",
+        "run_cmd config: timeout_seconds={}, idle_timeout_seconds={}, max_output_bytes={}, max_cmd_length={}, allow_outside_workspace={}, allow_sudo={}",
         config.tools.cmd_timeout_seconds.max(1),
+        config.tools.cmd_idle_timeout_seconds.max(1),
+        config.tools.cmd_max_output_bytes.max(128),
         config.tools.max_cmd_length.max(16),
         config.tools.allow_path_outside_workspace,
         config.tools.allow_sudo
@@ -626,6 +628,8 @@ async fn main() -> anyhow::Result<()> {
             skill_semaphore: Arc::new(Semaphore::new(config.skills.skill_max_concurrency.max(1))),
             tools_policy: Arc::new(tools_policy),
             cmd_timeout_seconds: config.tools.cmd_timeout_seconds.max(1),
+            cmd_idle_timeout_seconds: config.tools.cmd_idle_timeout_seconds.max(1),
+            cmd_max_output_bytes: config.tools.cmd_max_output_bytes.max(128),
             max_cmd_length: config.tools.max_cmd_length.max(16),
             workspace_root,
             default_locator_search_dir,

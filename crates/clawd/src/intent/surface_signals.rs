@@ -49,9 +49,7 @@ pub(crate) struct PromptSurfaceSignals {
     pub(crate) field_selector_count: usize,
     pub(crate) dotted_field_selector: Option<String>,
     pub(crate) filename_candidates: Vec<String>,
-    pub(crate) filename_candidate_count: usize,
     pub(crate) bare_filename_stem_candidates: Vec<String>,
-    pub(crate) bare_filename_stem_candidate_count: usize,
     pub(crate) single_filename_candidate: Option<String>,
     pub(crate) single_bare_filename_stem_candidate: Option<String>,
     pub(crate) directory_file_pair: Option<(String, String)>,
@@ -185,7 +183,6 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
     let dotted_field_selector = extract_dotted_field_selector(trimmed);
     let inline_json_shape = classify_inline_json_shape(trimmed);
     let filename_candidates = crate::delivery_utils::extract_filename_candidates(trimmed);
-    let filename_candidate_count = filename_candidates.len();
     let single_filename_candidate = {
         let mut unique = filename_candidates.clone();
         unique.dedup();
@@ -193,7 +190,6 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
     };
     let bare_filename_stem_candidates =
         crate::delivery_utils::extract_bare_filename_stem_candidates(trimmed);
-    let bare_filename_stem_candidate_count = bare_filename_stem_candidates.len();
     let single_bare_filename_stem_candidate = {
         let mut unique = bare_filename_stem_candidates.clone();
         unique.dedup();
@@ -250,9 +246,7 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
         field_selector_count,
         dotted_field_selector,
         filename_candidates,
-        filename_candidate_count,
         bare_filename_stem_candidates,
-        bare_filename_stem_candidate_count,
         single_filename_candidate,
         single_bare_filename_stem_candidate,
         directory_file_pair,
@@ -1149,8 +1143,8 @@ mod tests {
         assert!(!signals.has_concrete_locator_hint());
         assert!(!signals.looks_like_locator_only_reply());
         assert_eq!(signals.field_selector_count, 0);
-        assert_eq!(signals.filename_candidate_count, 0);
-        assert_eq!(signals.bare_filename_stem_candidate_count, 0);
+        assert!(signals.filename_candidates.is_empty());
+        assert!(signals.bare_filename_stem_candidates.is_empty());
         assert!(signals.workspace_single_token_hint.is_none());
         assert!(signals.file_reference_prompt_shape.is_none());
         assert!(signals.deictic_prompt_shape.is_none());
@@ -1174,7 +1168,7 @@ mod tests {
         assert!(signals.has_explicit_path_or_url());
         assert!(signals.has_concrete_locator_hint());
         assert_eq!(signals.field_selector_count, 1);
-        assert!(signals.filename_candidate_count >= 1);
+        assert!(!signals.filename_candidates.is_empty());
     }
 
     #[test]

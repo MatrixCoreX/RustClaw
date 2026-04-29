@@ -12,7 +12,7 @@
 #                                              allow_path_outside_workspace=false
 #   - WorkerConfig::default()              => task_timeout_seconds=3600 (1h)
 #   - default_skill_timeout_seconds()      => 30s
-#   - default_tool_cmd_timeout_seconds()   => 10s
+#   - default_tool_cmd_timeout_seconds()   => 60s
 #
 # 部署生产环境的推荐做法：
 #   1. 复制本文件，删掉所有 [self_extension] / [tools] 整节，让它们走代码安全默认；
@@ -439,7 +439,9 @@ note = "placeholder"
 # 已收敛项：
 # - `allow_sudo`               true → false  （需要 sudo 的场景请按渠道/任务显式打开）
 # - `allow_path_outside_workspace` true → false  （只读写当前 workspace 内路径）
-# - `cmd_timeout_seconds`      60 → 30        （单次 shell 命令墙钟上限）
+# - `cmd_timeout_seconds`      30 → 60        （单次 shell 命令墙钟上限）
+# - `cmd_idle_timeout_seconds` 新增 60        （stdout/stderr 无输出卡住上限）
+# - `cmd_max_output_bytes`     新增 8000      （持续输出截断上限）
 # 暂未收敛：
 # - `allow = ["*"]`：保持全开。改成白名单需要枚举所有 skills_list 中的工具
 #   名（约 38 项），并与 NL 回归套对齐验证；该工作单独排期。
@@ -454,7 +456,9 @@ allow_path_outside_workspace = true
 # Global baseline switch. Runtime only honors this for admin-authenticated tasks;
 # ordinary users are always treated as false even when this is true.
 allow_sudo = true
-cmd_timeout_seconds = 30
+cmd_timeout_seconds = 60
+cmd_idle_timeout_seconds = 60
+cmd_max_output_bytes = 8000
 deny = []
 max_cmd_length = 2400
 profile = "full"

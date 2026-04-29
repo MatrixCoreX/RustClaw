@@ -23,8 +23,9 @@ use super::locator::{
 use super::output_contract::{sync_output_payload, take_first_sentence};
 use super::{
     classify_batch_directory_delivery_input, classify_directory_lookup_input,
-    intercept_response_payload_for_delivery, resolve_directory_locator_for_execution,
-    resolve_file_delivery_target, BatchDirectoryDeliveryResolution, CurrentLevelDeliveryEntries,
+    intercept_response_payload_for_delivery, localize_delivery_message_for_request,
+    resolve_directory_locator_for_execution, resolve_file_delivery_target,
+    BatchDirectoryDeliveryResolution, CurrentLevelDeliveryEntries,
     CurrentLevelDeliveryEntriesResult, DeliveryMessageKind, DirectoryEntriesListResult,
     DirectoryFileLookupResult, DirectoryLocatorExecutionResolution, DirectoryLookupInput,
     DirectoryLookupResolution, FileDeliveryTargetResolution, FilenameScanResult,
@@ -58,6 +59,29 @@ impl TempDirGuard {
     fn path(&self) -> &Path {
         &self.path
     }
+}
+
+#[test]
+fn delivery_message_language_follows_current_request_before_config() {
+    let mut state = AppState::test_default_with_fixture_provider();
+    state.policy.schedule.locale = "en-US".to_string();
+
+    assert_eq!(
+        localize_delivery_message_for_request(
+            &state,
+            DeliveryMessageKind::Rule3FileNotFound,
+            "请把不存在的文件发给我"
+        ),
+        "未找到文件。"
+    );
+    assert_eq!(
+        localize_delivery_message_for_request(
+            &state,
+            DeliveryMessageKind::Rule3FileNotFound,
+            "send me the missing file"
+        ),
+        "File not found."
+    );
 }
 
 impl Drop for TempDirGuard {

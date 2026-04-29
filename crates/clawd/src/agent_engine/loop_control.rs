@@ -446,8 +446,6 @@ mod tests {
                 locator_hint: String::new(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         }
     }
 
@@ -710,7 +708,7 @@ mod tests {
     }
 
     #[test]
-    fn health_check_scalar_output_can_stop_with_structured_summary() {
+    fn health_check_scalar_summary_continues_to_synthesis() {
         let mut loop_state = LoopState::new(2);
         loop_state.has_tool_or_skill_output = true;
         loop_state.executed_step_results.push(ok_step(
@@ -726,7 +724,7 @@ mod tests {
             skill: "health_check".to_string(),
             args: json!({}),
         }];
-        assert!(should_stop_for_observed_finalize(
+        assert!(!should_stop_for_observed_finalize(
             Some(&AgentRunContext {
                 route_result: Some(route),
                 ..Default::default()
