@@ -448,16 +448,6 @@ fn contains_inline_transform_target_shape(
         && !has_delivery_token_reference
 }
 
-pub(crate) fn prompt_requests_scalar_count(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt.contains("数一下")
-        || prompt.contains("多少个")
-        || prompt.contains("几个")
-        || lower.contains("count ")
-        || lower.contains("count how many")
-        || lower.contains("how many")
-}
-
 pub(crate) fn prompt_mentions_current_workspace_scope(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     prompt.contains("当前目录")
@@ -469,175 +459,6 @@ pub(crate) fn prompt_mentions_current_workspace_scope(prompt: &str) -> bool {
         || lower.contains("current workspace")
         || lower.contains("current repo")
         || lower.contains("top-level")
-}
-
-pub(crate) fn prompt_mentions_current_workspace_or_this_directory(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt_mentions_current_workspace_scope(prompt)
-        || prompt.contains("这个目录")
-        || lower.contains("this directory")
-}
-
-pub(crate) fn prompt_requests_hidden_entries(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt.contains("隐藏文件")
-        || prompt.contains("点开头")
-        || prompt.contains("点前缀")
-        || lower.contains("hidden file")
-        || lower.contains("hidden files")
-        || lower.contains("hidden entry")
-        || lower.contains("hidden entries")
-        || lower.contains("dot-prefixed")
-        || lower.contains("starting with a dot")
-}
-
-pub(crate) fn prompt_requests_workspace_child_listing(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt.contains("列出")
-        || prompt.contains("有哪些文件")
-        || prompt.contains("文件名列表")
-        || prompt.contains("哪些文件")
-        || lower.contains("list ")
-        || lower.contains("show ")
-        || lower.contains("which files")
-        || lower.contains("file names")
-}
-
-pub(crate) fn prompt_requests_directory_only_listing(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt.contains("文件夹")
-        || prompt.contains("目录名")
-        || lower.contains("directories")
-        || lower.contains("directory names")
-        || lower.contains("folders")
-}
-
-pub(crate) fn prompt_requests_recent_artifacts_judgment(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    let mentions_recent = prompt.contains("最近修改")
-        || lower.contains("recently modified")
-        || lower.contains("most recently modified")
-        || lower.contains("recent ");
-    let mentions_judgment =
-        prompt.contains("更像") || lower.contains("more like") || lower.contains("formal deliver");
-    mentions_recent && mentions_judgment
-}
-
-#[allow(dead_code)]
-pub(crate) fn prompt_requests_workspace_project_summary(prompt: &str) -> bool {
-    if !prompt_mentions_current_workspace_scope(prompt) {
-        return false;
-    }
-    let lower = prompt.to_ascii_lowercase();
-    let mentions_structure = prompt.contains("怎么组织")
-        || prompt.contains("大概怎么组织")
-        || prompt.contains("怎么分区")
-        || prompt.contains("大概怎么分区")
-        || prompt.contains("像是什么项目")
-        || prompt.contains("像什么项目")
-        || prompt.contains("适合新手")
-        || lower.contains("how this project is organized")
-        || lower.contains("how the project is organized")
-        || lower.contains("what this project is")
-        || lower.contains("what kind of project")
-        || lower.contains("how this repo is organized")
-        || lower.contains("plain sentence");
-    let mentions_overview = prompt.contains("扫一眼")
-        || prompt.contains("整体")
-        || prompt.contains("先看")
-        || prompt.contains("先看看")
-        || lower.contains("inspect")
-        || lower.contains("overview")
-        || lower.contains("glance")
-        || lower.contains("top-level");
-    let compact_summary_shape =
-        prompt_requests_brief_shape(prompt) || requested_sentence_count_shape(prompt) == Some(1);
-    mentions_structure
-        && (mentions_overview
-            || prompt_requests_workspace_child_listing(prompt)
-            || compact_summary_shape)
-}
-
-#[cfg(test)]
-pub(crate) fn prompt_requests_toml_path_listing(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    let asks_toml =
-        prompt.contains("toml 文件") || lower.contains("toml file") || lower.contains("toml files");
-    let asks_paths = prompt.contains("路径列表")
-        || prompt.contains("只输出路径")
-        || lower.contains("path list")
-        || lower.contains("paths only")
-        || lower.contains("output only paths");
-    asks_toml && asks_paths
-}
-
-#[allow(dead_code)]
-pub(crate) fn prompt_requests_directory_purpose_summary(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt_requests_workspace_child_listing(prompt)
-        && (prompt.contains("更像说明文档还是运行产物")
-            || prompt.contains("更像文档还是运行产物")
-            || prompt.contains("这些是干什么的")
-            || lower.contains("more like docs or runtime")
-            || lower.contains("more like documentation or runtime")
-            || lower.contains("what these files are for"))
-}
-
-#[cfg(test)]
-pub(crate) fn prompt_requests_package_manager_detection(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt.contains("包管理器") || lower.contains("package manager")
-}
-
-#[cfg(test)]
-pub(crate) fn prompt_requests_git_dirty_summary(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt.contains("未提交改动")
-        || prompt.contains("有没有改动")
-        || lower.contains("uncommitted changes")
-        || lower.contains("git dirty")
-        || lower.contains("dirty working tree")
-}
-
-#[cfg(test)]
-pub(crate) fn prompt_requests_current_workspace_path_scalar(prompt: &str) -> bool {
-    if prompt.is_empty() {
-        return false;
-    }
-    let lower = prompt.to_ascii_lowercase();
-    let mentions_current_dir = prompt.contains("当前工作目录")
-        || prompt.contains("当前目录")
-        || prompt.contains("当前路径")
-        || prompt.contains("现在在哪个目录")
-        || lower.contains("current working directory")
-        || lower.contains("current directory")
-        || lower.contains("pwd");
-    let asks_for_path = prompt.contains("绝对路径")
-        || prompt.contains("完整路径")
-        || prompt.contains("路径")
-        || lower.contains("absolute path")
-        || lower.contains("full path")
-        || lower.contains("path")
-        || lower.contains("pwd");
-    let output_only = prompt.contains("只输出")
-        || prompt.contains("只回")
-        || prompt.contains("直接把")
-        || prompt.contains("发我就行")
-        || prompt.contains("不要解释")
-        || prompt.contains("不用解释")
-        || lower.contains("only")
-        || lower.contains("just")
-        || lower.contains("do not explain")
-        || lower.contains("don't explain")
-        || lower.contains("without explanation");
-    let conflicting = prompt.contains("比较")
-        || prompt.contains("对比")
-        || prompt.contains("列出")
-        || prompt.contains("笑话")
-        || lower.contains("compare")
-        || lower.contains("list ")
-        || lower.contains("joke");
-    mentions_current_dir && asks_for_path && output_only && !conflicting
 }
 
 fn normalize_nl_phrase(prompt: &str) -> String {
@@ -747,20 +568,6 @@ pub(crate) fn prompt_mentions_current_workspace_scope_reference_shape(prompt: &s
     .any(|needle| trimmed.contains(needle) || normalized_contains_phrase(&normalized, needle))
 }
 
-#[cfg(test)]
-pub(crate) fn prompt_requests_list_or_table_shape(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    ["markdown table", "table", "list", "列表", "表格"]
-        .iter()
-        .any(|needle| lower.contains(needle) || prompt.contains(needle))
-}
-
-#[cfg(test)]
-pub(crate) fn prompt_requests_excerpt_kind_judgment(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt.contains("更像") || lower.contains("more like")
-}
-
 pub(crate) fn prompt_requests_compare_shape(prompt: &str) -> bool {
     let lower = prompt.to_ascii_lowercase();
     ["比较", "对比", "哪个", "compare", "which one"]
@@ -831,31 +638,6 @@ pub(crate) fn detect_compare_targets_shape(prompt: &str) -> Option<(String, Stri
     (filenames.len() == 2).then(|| (filenames.remove(0), filenames.remove(0)))
 }
 
-#[allow(dead_code)]
-pub(crate) fn prompt_requests_workspace_hidden_entries_count_shape(prompt: &str) -> bool {
-    prompt_mentions_current_workspace_or_this_directory(prompt)
-        && prompt_requests_hidden_entries(prompt)
-        && prompt_requests_scalar_count(prompt)
-}
-
-#[allow(dead_code)]
-pub(crate) fn prompt_requests_workspace_hidden_entries_check_shape(prompt: &str) -> bool {
-    prompt_mentions_current_workspace_or_this_directory(prompt)
-        && prompt_requests_hidden_entries(prompt)
-        && !prompt_requests_workspace_hidden_entries_count_shape(prompt)
-}
-
-#[allow(dead_code)]
-pub(crate) fn prompt_requests_workspace_dirs_only_listing_shape(
-    prompt: &str,
-    requested_listing_limit: Option<usize>,
-) -> bool {
-    prompt_requests_workspace_child_listing(prompt)
-        && prompt_mentions_current_workspace_scope(prompt)
-        && prompt_requests_directory_only_listing(prompt)
-        && requested_listing_limit.is_none()
-}
-
 pub(crate) fn extract_workspace_child_directory_hint_shape(prompt: &str) -> Option<String> {
     let trimmed = prompt.trim();
     if trimmed.is_empty() {
@@ -891,116 +673,32 @@ pub(crate) fn extract_workspace_child_directory_hint_shape(prompt: &str) -> Opti
         }
     }
     let lower = trimmed.to_ascii_lowercase();
-    let listing_like = prompt_requests_workspace_child_listing(trimmed)
-        || prompt_requests_recent_artifacts_judgment(trimmed);
-    if listing_like {
-        for marker in ["under ", "inside ", "within ", "in "] {
-            let Some(idx) = lower.find(marker) else {
-                continue;
-            };
-            let mut rest = &trimmed[idx + marker.len()..];
-            for article in ["the ", "this ", "that ", "current "] {
-                if rest.to_ascii_lowercase().starts_with(article) {
-                    rest = &rest[article.len()..];
-                    break;
-                }
+    for marker in ["under ", "inside ", "within ", "in "] {
+        let Some(idx) = lower.find(marker) else {
+            continue;
+        };
+        let mut rest = &trimmed[idx + marker.len()..];
+        for article in ["the ", "this ", "that ", "current "] {
+            if rest.to_ascii_lowercase().starts_with(article) {
+                rest = &rest[article.len()..];
+                break;
             }
-            let token: String = rest
-                .chars()
-                .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-                .collect();
-            if !token.is_empty()
-                && token != "current"
-                && token != "workspace"
-                && token != "directory"
-                && token != "folder"
-                && token != "dir"
-            {
-                return Some(token);
-            }
+        }
+        let token: String = rest
+            .chars()
+            .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+            .collect();
+        if !token.is_empty()
+            && token != "current"
+            && token != "workspace"
+            && token != "directory"
+            && token != "folder"
+            && token != "dir"
+        {
+            return Some(token);
         }
     }
     None
-}
-
-#[cfg(test)]
-pub(crate) fn prompt_requests_sqlite_table_listing(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    (lower.contains(".sqlite") || lower.contains(".db"))
-        && (prompt.contains("有哪些表")
-            || prompt.contains("所有表")
-            || prompt.contains("全部表")
-            || prompt.contains("什么表")
-            || prompt.contains("哪些表")
-            || prompt.contains("表名")
-            || lower.contains("all tables")
-            || lower.contains("list the tables")
-            || lower.contains("table names")
-            || lower.contains("what tables")
-            || lower.contains("which tables"))
-}
-
-#[cfg(test)]
-pub(crate) fn prompt_requests_sqlite_schema_version(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    (lower.contains(".sqlite") || lower.contains(".db")) && lower.contains("schema version")
-}
-
-#[cfg(test)]
-pub(crate) fn prompt_requests_markdown_table_render(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    lower.contains("markdown table")
-        || (lower.contains("markdown") && prompt.contains("表格"))
-        || prompt.contains("markdown 表格")
-        || (prompt.contains("表格") && prompt.contains("markdown"))
-}
-
-#[cfg(test)]
-pub(crate) fn prompt_requests_structured_keys_shape(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    [
-        "子键",
-        "子字段",
-        "顶层键",
-        "顶层键名",
-        "顶层 key",
-        "顶层字段",
-        "有哪些键",
-        "键名列表",
-        "哪些 key",
-        "哪些字段",
-        "subkey",
-        "subkeys",
-        "child key",
-        "child keys",
-        "key names",
-        "top-level key",
-        "top-level keys",
-        "top-level key names",
-        "top level key",
-        "which keys",
-        "what keys",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle) || prompt.contains(needle))
-}
-
-pub(crate) fn prompt_requests_brief_shape(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    [
-        "keep it brief",
-        "briefly",
-        "brief ",
-        "short ",
-        "shortly",
-        "short note",
-        "short setup note",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
-        || ["简短", "简要", "简洁", "一段", "brief"]
-            .iter()
-            .any(|needle| prompt.contains(needle))
 }
 
 pub(crate) fn prompt_requests_inline_transform_action_shape(prompt: &str) -> bool {
@@ -1076,42 +774,6 @@ fn strip_delivery_tokens_for_phrase_match(prompt: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-#[cfg(test)]
-pub(crate) fn prompt_mentions_weather_lookup_shape(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    prompt.contains("天气") || lower.contains("weather")
-}
-
-#[cfg(test)]
-pub(crate) fn prompt_requests_scalar_only_shape(prompt: &str) -> bool {
-    if prompt_requests_list_or_table_shape(prompt) {
-        return false;
-    }
-    let lower = prompt.to_ascii_lowercase();
-    [
-        "output only",
-        "return only",
-        "just the value",
-        "nothing else",
-        "don't add anything else",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
-        || [
-            "只输出",
-            "只返回",
-            "只给结果",
-            "只回答",
-            "只回",
-            "只输出值",
-            "别补别的",
-            "别加别的",
-        ]
-        .iter()
-        .any(|needle| prompt.contains(needle))
-        || (prompt.contains("只") && prompt.contains("值") && prompt.contains("给我"))
 }
 
 fn trim_sentence_count_token(token: &str) -> &str {
@@ -1582,19 +1244,12 @@ mod tests {
         prompt_contains_deictic_reference_shape, prompt_contains_delivery_token_reference,
         prompt_mentions_current_workspace_scope_reference_shape,
         prompt_mentions_fileish_reference_shape, prompt_mentions_generic_file_object,
-        prompt_mentions_weather_lookup_shape, prompt_references_deictic_object,
-        prompt_requests_brief_shape, prompt_requests_compare_shape,
-        prompt_requests_current_workspace_path_scalar, prompt_requests_delivery_phrase,
-        prompt_requests_directory_purpose_summary, prompt_requests_excerpt_kind_judgment,
-        prompt_requests_git_dirty_summary, prompt_requests_inline_transform_action_shape,
-        prompt_requests_list_or_table_shape, prompt_requests_markdown_table_render,
-        prompt_requests_package_manager_detection, prompt_requests_quantity_comparison_shape,
-        prompt_requests_scalar_only_shape, prompt_requests_sqlite_schema_version,
-        prompt_requests_sqlite_table_listing, prompt_requests_structured_keys_shape,
-        prompt_requests_toml_path_listing, prompt_requests_workspace_project_summary,
-        requested_sentence_count_shape, DeicticPromptShape, DeliveryPromptShape,
-        FileReferencePromptShape, InlineJsonShape, InlineTransformPromptShape,
-        LocatorHintPromptShape, LocatorReplyPromptShape, WorkspaceScopePromptShape,
+        prompt_references_deictic_object, prompt_requests_compare_shape,
+        prompt_requests_delivery_phrase, prompt_requests_inline_transform_action_shape,
+        prompt_requests_quantity_comparison_shape, requested_sentence_count_shape,
+        DeicticPromptShape, DeliveryPromptShape, FileReferencePromptShape, InlineJsonShape,
+        InlineTransformPromptShape, LocatorHintPromptShape, LocatorReplyPromptShape,
+        WorkspaceScopePromptShape,
     };
 
     #[test]
@@ -1779,79 +1434,6 @@ mod tests {
     }
 
     #[test]
-    fn detects_workspace_project_summary_shape() {
-        assert!(prompt_requests_workspace_project_summary(
-            "别细看，先整体扫一眼当前工作区，然后用一句适合新手的话告诉我这里像是什么项目"
-        ));
-    }
-
-    #[test]
-    fn detects_workspace_project_summary_shape_for_compact_one_sentence_variant() {
-        assert!(prompt_requests_workspace_project_summary(
-            "用一句话说明当前工作区像什么项目"
-        ));
-    }
-
-    #[test]
-    fn detects_toml_path_listing_shape() {
-        assert!(prompt_requests_toml_path_listing(
-            "列出当前仓库里的 toml 文件路径列表，只输出路径"
-        ));
-    }
-
-    #[test]
-    fn detects_directory_purpose_summary_shape() {
-        assert!(prompt_requests_directory_purpose_summary(
-            "列出 logs 目录最近修改的 3 个文件，再告诉我这更像说明文档还是运行产物"
-        ));
-    }
-
-    #[test]
-    fn detects_package_manager_detection_shape() {
-        assert!(prompt_requests_package_manager_detection(
-            "用一句话说当前机器的包管理器是什么"
-        ));
-    }
-
-    #[test]
-    fn detects_git_dirty_summary_shape() {
-        assert!(prompt_requests_git_dirty_summary("看看当前仓库有没有改动"));
-        assert!(prompt_requests_git_dirty_summary(
-            "tell me whether this repo has uncommitted changes"
-        ));
-    }
-
-    #[test]
-    fn detects_current_workspace_path_scalar_shape() {
-        assert!(prompt_requests_current_workspace_path_scalar(
-            "只输出当前工作目录的绝对路径，不要解释"
-        ));
-    }
-
-    #[test]
-    fn detects_excerpt_kind_judgment_shape() {
-        assert!(prompt_requests_excerpt_kind_judgment(
-            "一句话说它更像日志还是清单"
-        ));
-    }
-
-    #[test]
-    fn detects_sqlite_table_listing_shape() {
-        assert!(prompt_requests_sqlite_table_listing(
-            "看看 data/db-basic-contract.sqlite 里有哪些表"
-        ));
-        assert!(prompt_requests_sqlite_table_listing(
-            "查看 data/db-basic-contract.sqlite 中的所有表"
-        ));
-        assert!(prompt_requests_sqlite_table_listing(
-            "看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里有哪些表，只输出表名"
-        ));
-        assert!(prompt_requests_sqlite_table_listing(
-            "list all tables in data/db-basic-contract.sqlite"
-        ));
-    }
-
-    #[test]
     fn lifts_directory_file_pair_into_surface_signals() {
         let explicit = analyze_prompt_surface(
             "去 scripts/nl_tests/fixtures/locator_smart/case_only 找 report.md，只输出路径",
@@ -1902,27 +1484,6 @@ mod tests {
     }
 
     #[test]
-    fn detects_sqlite_schema_version_shape() {
-        assert!(prompt_requests_sqlite_schema_version(
-            "看一下 data/db-basic-contract.sqlite 的 schema version，只输出数字"
-        ));
-    }
-
-    #[test]
-    fn detects_markdown_table_render_shape() {
-        assert!(prompt_requests_markdown_table_render(
-            "把这个 JSON 数组按 score 从高到低排一下，再输出成 markdown 表格"
-        ));
-    }
-
-    #[test]
-    fn detects_list_or_table_shape() {
-        assert!(prompt_requests_list_or_table_shape(
-            "把结果输出成 markdown table"
-        ));
-    }
-
-    #[test]
     fn detects_compare_shape() {
         assert!(prompt_requests_compare_shape(
             "比较 Cargo.toml 和 Cargo.lock 哪个更大"
@@ -1943,23 +1504,6 @@ mod tests {
             signals.compare_target_pair,
             Some(("Cargo.lock".to_string(), "Cargo.toml".to_string()))
         );
-    }
-
-    #[test]
-    fn detects_structured_keys_shape() {
-        assert!(prompt_requests_structured_keys_shape(
-            "读取 configs/config.toml 的顶层键名，只输出键名列表"
-        ));
-    }
-
-    #[test]
-    fn detects_brief_shape() {
-        assert!(prompt_requests_brief_shape("briefly explain this"));
-        assert!(prompt_requests_brief_shape(
-            "Write a short RustClaw setup note"
-        ));
-        assert!(prompt_requests_brief_shape("简短说明一下"));
-        assert!(prompt_requests_brief_shape("帮我写一段 RustClaw 安装说明"));
     }
 
     #[test]
@@ -2021,16 +1565,6 @@ mod tests {
     }
 
     #[test]
-    fn detects_scalar_only_shape() {
-        assert!(prompt_requests_scalar_only_shape(
-            "去 package.json 里找 name，只把值给我"
-        ));
-        assert!(!prompt_requests_scalar_only_shape(
-            "把结果输出成 markdown table"
-        ));
-    }
-
-    #[test]
     fn lifts_delivery_target_shape_into_surface_signals() {
         let signals = analyze_prompt_surface("把 readme 发给我");
         assert_eq!(
@@ -2055,12 +1589,6 @@ mod tests {
             signals.inline_transform_prompt_shape,
             Some(InlineTransformPromptShape::ActionWithTarget)
         );
-    }
-
-    #[test]
-    fn detects_weather_lookup_shape() {
-        assert!(prompt_mentions_weather_lookup_shape("天气怎么样"));
-        assert!(prompt_mentions_weather_lookup_shape("what is the weather"));
     }
 
     #[test]
