@@ -57,12 +57,6 @@ struct RouteDecision {
     clarify_question: String,
     reason: String,
     confidence: Option<f64>,
-    /// Phase 2.7: legacy router parser populated this; main path no longer reads it,
-    /// but fallback constructors still set it to `Vec::new()` for symmetry. Kept as a
-    /// field so future telemetry / sanity-check layers (see hard-match plan stage 3)
-    /// can re-enable it without an API change.
-    #[allow(dead_code)]
-    evidence_refs: Vec<String>,
     schedule_kind: ScheduleKind,
     schedule_intent: Option<crate::ScheduleIntentOutput>,
     wants_file_delivery: bool,
@@ -190,8 +184,6 @@ pub(crate) fn route_result_from_normalizer(
         should_refresh_long_term_memory: normalizer_out.should_refresh_long_term_memory,
         agent_display_name_hint: normalizer_out.agent_display_name_hint.clone(),
         output_contract: normalizer_out.output_contract.clone(),
-        direct_reply_candidate: String::new(),
-        direct_reply_confidence: 0.0,
     }
 }
 
@@ -964,7 +956,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("Allowed response_shape: free, one_sentence, strict, scalar, file_token. Allowed locator_kind: none, path, current_workspace, url, filename. Allowed delivery_intent: none, file_single, directory_lookup, directory_batch_files.".to_string());
     parts.push("Allowed semantic_kind: none, raw_command_output, service_status, hidden_entries_check, file_names, directory_purpose_summary, content_excerpt_summary, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, scalar_path_only, existence_with_path, recent_scalar_equality_check, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment.".to_string());
     parts.push("If the user asks to observe/list/read first but only return a scalar result, set response_shape=\"scalar\" and use a matching semantic_kind only when one applies: scalar_count for counts, scalar_path_only only for a path/current-directory/workspace-location answer. For config field values, package names, usernames, hostnames, titles, IDs, or other non-path scalar values, keep semantic_kind=\"none\" unless another specific enum applies. If the request requires an exact non-scalar format such as exactly N sentences/lines or body-only/no-extra-output, set response_shape=\"strict\" and preserve the exact format in resolved_user_intent.".to_string());
-    parts.push("For directory/file inventory with name or extension filtering, set requires_content_evidence=true, locator_kind=\"current_workspace\" or \"path\", semantic_kind=\"file_names\", and preserve filter plus any explanation/synthesis requirement in resolved_user_intent. If a nuance has no enum, keep response_shape=\"free\" or semantic_kind=\"none\" and write the nuance in resolved_user_intent/reason instead of inventing enum values.".to_string());
+    parts.push("For directory/file inventory with name or extension filtering, set requires_content_evidence=true and locator_kind=\"current_workspace\" or \"path\". Use semantic_kind=\"file_names\" only when the final answer is an exact names-only list. If the same request also asks for explanation, purpose, judgment, comparison, or a brief conclusion, do not use the exact file_names contract; use directory_purpose_summary when it asks what entries are for / more like, otherwise keep semantic_kind=\"none\" and preserve the combined listing+synthesis requirement in resolved_user_intent/reason. If a nuance has no enum, keep response_shape=\"free\" or semantic_kind=\"none\" instead of inventing enum values.".to_string());
     parts.push("Use mode=\"chat_act\" when the request both inspects local/system/workspace state and asks for explanation, judgment, or narrative synthesis. Use mode=\"act\" when it asks only for a direct raw/scalar/list result. For current-directory or workspace-location scalar answers, set output_contract.response_shape=\"scalar\" and output_contract.semantic_kind=\"scalar_path_only\" from the request meaning, not from local phrase-classifier hints.".to_string());
     parts.push("For recall questions, use exact values from RECENT/MEMORY. If found, put the value in resolved_user_intent, set needs_clarify=false, and set mode=\"chat\". Never invent mode=\"recall\".".to_string());
     parts.push("For requests that depend on prior context, copy the relevant RECENT/MEMORY facts into resolved_user_intent so the next stage has enough context.".to_string());
@@ -1132,8 +1124,6 @@ fn answer_like_normalizer_payload_text(obj: &serde_json::Map<String, Value>) -> 
         "mode",
         "output_contract",
         "execution_recipe",
-        "direct_reply_candidate",
-        "direct_reply_confidence",
         "turn_type",
         "target_task_policy",
         "should_interrupt_active_run",
@@ -1341,13 +1331,59 @@ fn normalize_intent_normalizer_top_level_for_schema(obj: &mut serde_json::Map<St
         .or_insert(Value::Bool(false));
 }
 
+fn coerce_output_contract_value_for_schema(value: &mut Value) {
+    if value.is_object() {
+        return;
+    }
+
+    let mut contract = serde_json::Map::new();
+    if let Some(raw) = value.as_str().map(str::trim).filter(|raw| !raw.is_empty()) {
+        let response_shape = normalize_output_response_shape_for_schema(raw);
+        if response_shape != "free" {
+            contract.insert(
+                "response_shape".to_string(),
+                Value::String(response_shape.to_string()),
+            );
+        }
+        let semantic_kind = normalize_output_semantic_kind_for_schema(raw);
+        if semantic_kind != "none" {
+            contract.insert(
+                "semantic_kind".to_string(),
+                Value::String(semantic_kind.to_string()),
+            );
+        }
+    }
+    *value = Value::Object(contract);
+}
+
+fn normalize_output_contract_aliases(contract: &mut serde_json::Map<String, Value>) {
+    if !contract.contains_key("response_shape") {
+        for alias in ["shape", "answer_shape", "format", "response_format"] {
+            if let Some(value) = contract.get(alias).cloned() {
+                contract.insert("response_shape".to_string(), value);
+                break;
+            }
+        }
+    }
+    if !contract.contains_key("semantic_kind") {
+        for alias in ["semantic", "kind", "answer_kind", "semantic_type"] {
+            if let Some(value) = contract.get(alias).cloned() {
+                contract.insert("semantic_kind".to_string(), value);
+                break;
+            }
+        }
+    }
+}
+
 fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>) {
-    let Some(contract) = obj
-        .get_mut("output_contract")
-        .and_then(|v| v.as_object_mut())
-    else {
+    let Some(value) = obj.get_mut("output_contract") else {
         return;
     };
+    coerce_output_contract_value_for_schema(value);
+    let Some(contract) = value.as_object_mut() else {
+        return;
+    };
+    normalize_output_contract_aliases(contract);
     contract.retain(|key, _| {
         matches!(
             key.as_str(),
@@ -1993,7 +2029,6 @@ fn empty_ask_clarify_decision(user_request: &str, reason: &str) -> RouteDecision
         clarify_question: String::new(),
         reason: reason.to_string(),
         confidence: None,
-        evidence_refs: Vec::new(),
         schedule_kind: ScheduleKind::None,
         schedule_intent: None,
         wants_file_delivery: false,
@@ -2010,6 +2045,8 @@ pub(crate) async fn generate_clarify_question(
     resolver_reason: &str,
     candidate_context: Option<&str>,
 ) -> String {
+    let request_language_hint =
+        crate::language_policy::task_response_language_hint(state, task, user_request);
     let (prompt_template, prompt_source) =
         match crate::bootstrap::load_required_prompt_template_for_state(
             state,
@@ -2021,16 +2058,15 @@ pub(crate) async fn generate_clarify_question(
                     "generate_clarify_question prompt load failed, fallback default: task_id={} err={}",
                     task.task_id, err
                 );
-                return crate::fallback::render_clarify_fallback(
+                return crate::fallback::render_clarify_fallback_with_language_hint(
                     state,
                     &task.task_id,
                     crate::fallback::ClarifyFallbackSource::LlmUnavailable,
                     Some(&err.to_string()),
+                    &request_language_hint,
                 );
             }
         };
-    let request_language_hint =
-        crate::language_policy::task_response_language_hint(state, task, user_request);
     let prompt = crate::render_prompt_template(
         &prompt_template,
         &[
@@ -2065,11 +2101,12 @@ pub(crate) async fn generate_clarify_question(
             let out = v.trim();
             if out.is_empty() {
                 // §7.2: LLM 调用 OK 但内容为空 → EmptyResponse 特化文案 + tracing 上报。
-                crate::fallback::render_clarify_fallback(
+                crate::fallback::render_clarify_fallback_with_language_hint(
                     state,
                     &task.task_id,
                     crate::fallback::ClarifyFallbackSource::EmptyResponse,
                     None,
+                    &request_language_hint,
                 )
             } else {
                 out.to_string()
@@ -2083,11 +2120,12 @@ pub(crate) async fn generate_clarify_question(
             // §7.2: LLM 直接 Err（401 / 熔断 / 超时 / 网络）→ LlmUnavailable 特化文案。
             // err 概要写进 context_hint，便于 inspect_task.sh 关联。
             let hint = format!("err={err}");
-            crate::fallback::render_clarify_fallback(
+            crate::fallback::render_clarify_fallback_with_language_hint(
                 state,
                 &task.task_id,
                 crate::fallback::ClarifyFallbackSource::LlmUnavailable,
                 Some(&hint),
+                &request_language_hint,
             )
         }
     }
@@ -2117,11 +2155,14 @@ pub(crate) async fn generate_or_reuse_clarify_question(
     if matches!(policy, ClarifyQuestionPolicy::SafeFallback)
         && !safe_fallback_source_should_try_llm(default_source)
     {
-        return crate::fallback::render_clarify_fallback(
+        let request_language_hint =
+            crate::language_policy::task_response_language_hint(state, task, user_request);
+        return crate::fallback::render_clarify_fallback_with_language_hint(
             state,
             &task.task_id,
             default_source,
             None,
+            &request_language_hint,
         );
     }
     if matches!(policy, ClarifyQuestionPolicy::SafeFallback) {
@@ -2501,6 +2542,57 @@ mod tests {
     }
 
     #[test]
+    fn normalizer_schema_normalization_coerces_output_contract_scalar_and_aliases() {
+        let raw = r#"{
+          "resolved_user_intent": "列出 README.md 和 AGENTS.md，只输出文件名",
+          "needs_clarify": false,
+          "reason": "names-only inventory",
+          "confidence": 0.9,
+          "mode": "act",
+          "output_contract": "file_names"
+        }"#;
+        let normalized =
+            super::normalize_intent_normalizer_raw_for_schema(raw, "列出文件，只输出文件名");
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        let contract = value
+            .get("output_contract")
+            .and_then(|value| value.as_object())
+            .expect("output contract");
+        assert_eq!(
+            contract.get("semantic_kind").and_then(|v| v.as_str()),
+            Some("file_names")
+        );
+
+        let raw = r#"{
+          "resolved_user_intent": "严格输出两行",
+          "needs_clarify": false,
+          "reason": "exact output",
+          "confidence": 0.9,
+          "mode": "chat",
+          "output_contract": {"shape":"exact_format","semantic":"sqlite_table_names"}
+        }"#;
+        let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "严格输出两行");
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        let contract = value
+            .get("output_contract")
+            .and_then(|value| value.as_object())
+            .expect("output contract");
+        assert_eq!(
+            contract.get("response_shape").and_then(|v| v.as_str()),
+            Some("strict")
+        );
+        assert_eq!(
+            contract.get("semantic_kind").and_then(|v| v.as_str()),
+            Some("sqlite_table_names_only")
+        );
+        crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+            &normalized,
+            crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+        )
+        .expect("schema validation");
+    }
+
+    #[test]
     fn safe_fallback_tries_llm_except_when_model_unavailable() {
         assert!(!super::safe_fallback_source_should_try_llm(
             crate::fallback::ClarifyFallbackSource::LlmUnavailable
@@ -2570,7 +2662,6 @@ mod tests {
                 clarify_question: String::new(),
                 reason: "current workspace executable request".to_string(),
                 confidence: Some(0.72),
-                evidence_refs: Vec::new(),
                 schedule_kind: super::ScheduleKind::None,
                 schedule_intent: None,
                 wants_file_delivery: false,
@@ -2657,7 +2748,6 @@ mod tests {
                 clarify_question: String::new(),
                 reason: "fallback_router_llm_failed".to_string(),
                 confidence: None,
-                evidence_refs: Vec::new(),
                 schedule_kind: super::ScheduleKind::None,
                 schedule_intent: None,
                 wants_file_delivery: false,

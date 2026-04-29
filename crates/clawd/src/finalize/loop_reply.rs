@@ -507,27 +507,10 @@ fn direct_scalar_observed_answer(
     ))
 }
 
-fn text_contains_cjk(text: &str) -> bool {
-    text.chars().any(|ch| {
-        matches!(
-            ch as u32,
-            0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
-        )
-    })
-}
-
-fn text_contains_ascii_alpha(text: &str) -> bool {
-    text.chars().any(|ch| ch.is_ascii_alphabetic())
-}
-
 fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
-    let trimmed = user_text.trim();
-    match (
-        text_contains_cjk(trimmed),
-        text_contains_ascii_alpha(trimmed),
-    ) {
-        (true, false) => false,
-        (false, true) => true,
+    match crate::language_policy::request_language_hint(user_text) {
+        "zh-CN" => false,
+        "en" => true,
         _ => state
             .policy
             .command_intent
@@ -681,15 +664,7 @@ fn execution_recipe_profile_closeout_label(
 }
 
 fn prefer_english_for_user_text_without_state(user_text: &str) -> bool {
-    let trimmed = user_text.trim();
-    match (
-        text_contains_cjk(trimmed),
-        text_contains_ascii_alpha(trimmed),
-    ) {
-        (true, false) => false,
-        (false, true) => true,
-        _ => false,
-    }
+    crate::language_policy::request_language_hint(user_text) == "en"
 }
 
 fn execution_recipe_closeout_note(
@@ -893,32 +868,6 @@ fn direct_structured_observed_answer(
     ) {
         return None;
     }
-    if let Some(answer) = state
-        .and_then(|state| {
-            crate::agent_engine::observed_output::extract_structured_scalar_pair_direct_answer_i18n(
-                loop_state,
-                state,
-                agent_run_context,
-            )
-        })
-        .or_else(|| {
-            crate::agent_engine::observed_output::extract_structured_scalar_pair_direct_answer(
-                loop_state,
-                agent_run_context,
-            )
-        })
-    {
-        return Some((
-            answer,
-            crate::task_journal::TaskJournalFinalizerSummary {
-                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-                contract_ok: true,
-                used_evidence_ids_count: 2,
-                ..Default::default()
-            },
-        ));
-    }
     if crate::agent_engine::observed_output::recent_structured_scalar_observation_count(loop_state)
         > 1
     {
@@ -1055,6 +1004,15 @@ fn direct_non_builtin_skill_raw_answer(
     if direct_structured_observed_answer(None, loop_state, agent_run_context)
         .is_some_and(|(structured_answer, _)| structured_answer.trim() != answer.trim())
     {
+        return None;
+    }
+    if matches!(
+        route.map(|route| route.output_contract.response_shape),
+        Some(crate::OutputResponseShape::OneSentence)
+    ) && !matches!(
+        route.map(|route| route.output_contract.semantic_kind),
+        Some(crate::OutputSemanticKind::RawCommandOutput)
+    ) {
         return None;
     }
     if crate::finalize::looks_like_planner_artifact(&answer)
@@ -1298,15 +1256,26 @@ fn command_arg_from_plan_step(plan_step: Option<&crate::PlanStep>) -> Option<Str
 fn execution_summary_invocation_label(
     step: &crate::executor::StepExecutionResult,
     plan_step: Option<&crate::PlanStep>,
+    prefer_english: bool,
 ) -> String {
     if let Some(command) = command_arg_from_plan_step(plan_step) {
-        return format!("命令 `{command}`");
+        return if prefer_english {
+            format!("command `{command}`")
+        } else {
+            format!("命令 `{command}`")
+        };
     }
 
     let action_type = plan_step
         .map(|step| step.action_type.as_str())
         .unwrap_or("call_skill");
-    let kind = if action_type == "call_tool" {
+    let kind = if prefer_english {
+        if action_type == "call_tool" {
+            "tool"
+        } else {
+            "skill"
+        }
+    } else if action_type == "call_tool" {
         "工具"
     } else {
         "技能"
@@ -1319,6 +1288,8 @@ fn execution_summary_invocation_label(
         .unwrap_or_default();
     if args.is_empty() {
         format!("{kind} `{skill}`")
+    } else if prefer_english {
+        format!("{kind} `{skill}` ({args})")
     } else {
         format!("{kind} `{skill}`（{args}）")
     }
@@ -1387,25 +1358,53 @@ fn build_execution_summary_message(
         return None;
     }
 
-    let mut lines = vec![crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX.to_string()];
+    let prefer_english = user_text
+        .map(prefer_english_for_user_text_without_state)
+        .unwrap_or(false);
+    let mut lines = vec![if prefer_english {
+        crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN.to_string()
+    } else {
+        crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX.to_string()
+    }];
     for (index, step) in steps.iter().take(EXECUTION_SUMMARY_MAX_STEPS).enumerate() {
         let plan_step = plan_step_for_execution(loop_state, &step.step_id);
         let output = output_text_from_execution_result(step)?.replace("```", "'''");
         let output = truncate_with_ellipsis(&output, EXECUTION_SUMMARY_OUTPUT_MAX_CHARS);
-        let status_label = if step.is_ok() { "输出" } else { "错误" };
-        lines.push(format!(
-            "{}. 调用{}",
-            index + 1,
-            execution_summary_invocation_label(step, plan_step)
-        ));
-        lines.push(format!("   {status_label}："));
+        let status_label = if prefer_english {
+            if step.is_ok() {
+                "Output"
+            } else {
+                "Error"
+            }
+        } else if step.is_ok() {
+            "输出"
+        } else {
+            "错误"
+        };
+        let invocation = execution_summary_invocation_label(step, plan_step, prefer_english);
+        let line = if prefer_english {
+            format!("{}. Called {}", index + 1, invocation)
+        } else {
+            format!("{}. 调用{}", index + 1, invocation)
+        };
+        lines.push(line);
+        if prefer_english {
+            lines.push(format!("   {status_label}:"));
+        } else {
+            lines.push(format!("   {status_label}："));
+        }
         lines.push("```text".to_string());
         lines.push(output);
         lines.push("```".to_string());
     }
     let omitted = steps.len().saturating_sub(EXECUTION_SUMMARY_MAX_STEPS);
     if omitted > 0 {
-        lines.push(format!("...（还有 {omitted} 个执行步骤已省略）"));
+        if prefer_english {
+            let suffix = if omitted == 1 { "step" } else { "steps" };
+            lines.push(format!("... ({omitted} more execution {suffix} omitted)"));
+        } else {
+            lines.push(format!("...（还有 {omitted} 个执行步骤已省略）"));
+        }
     }
     Some(lines.join("\n"))
 }
@@ -2469,8 +2468,6 @@ mod tests {
                 locator_hint: "package.json".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         }
     }
 
@@ -2550,6 +2547,48 @@ mod tests {
             "这更像运行日志。",
             &delivery
         ));
+    }
+
+    #[test]
+    fn execution_summary_uses_english_labels_for_english_requests() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "list recent logs".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: serde_json::json!({"command": "ls -t logs | head -2"}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "run_cmd",
+            "model_io.log\nact_plan.log\n",
+        ));
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(free_route_result()),
+            ..Default::default()
+        };
+
+        let summary = build_execution_summary_message(
+            &loop_state,
+            Some(&ctx),
+            Some("List the two most recently modified files in logs, then tell me what they are."),
+        )
+        .expect("execution summary");
+
+        assert!(summary.starts_with("**Execution**"));
+        assert!(summary.contains("1. Called command `ls -t logs | head -2`"));
+        assert!(summary.contains("   Output:"));
+        assert!(crate::finalize::is_execution_summary_message(&summary));
     }
 
     #[tokio::test]
@@ -3440,7 +3479,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_structured_observed_answer_keeps_semantic_pair_answer() {
+    fn direct_structured_observed_answer_defers_semantic_pair_answer_to_llm() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(StepExecutionResult {
             step_id: "step_1".to_string(),
@@ -3473,11 +3512,10 @@ mod tests {
             route_result: Some(route),
             ..Default::default()
         };
-        let (answer, summary) =
+        assert!(
             direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
-                .expect("semantic pair answer should be direct");
-        assert_eq!(answer, "不一样");
-        assert_eq!(summary.used_evidence_ids_count, 2);
+                .is_none()
+        );
     }
 
     #[test]
@@ -3513,7 +3551,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_scalar_finalize_prefers_health_check_summary_over_raw_scalar_field() {
+    fn direct_scalar_finalize_defers_health_check_summary_to_synthesis() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(StepExecutionResult {
             step_id: "step_1".to_string(),
@@ -3535,12 +3573,10 @@ mod tests {
             route_result: Some(route),
             ..Default::default()
         };
-        let (answer, _) =
-            direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
-                .expect("health_check scalar fallback should succeed");
-        assert!(answer.contains("macOS 宿主机"));
-        assert!(answer.contains("clawd_process_count=1"));
-        assert!(answer.contains("clawd_health_port_open=true"));
+        assert!(
+            direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context)).is_none(),
+            "health_check scalar summary should be synthesized from observed evidence"
+        );
     }
 
     #[test]
@@ -3862,8 +3898,6 @@ mod tests {
                 locator_hint: "docs".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
@@ -3925,8 +3959,6 @@ mod tests {
                 locator_hint: "docs".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
@@ -4024,8 +4056,6 @@ mod tests {
                 locator_hint: "scripts/skill_calls -> tmp/nl_archive_case.zip".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
@@ -4067,7 +4097,7 @@ mod tests {
     }
 
     #[test]
-    fn structured_observed_answer_beats_non_builtin_raw_passthrough() {
+    fn package_manager_summary_defers_to_synthesis_instead_of_raw_passthrough() {
         let state = test_state();
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state
@@ -4097,20 +4127,21 @@ mod tests {
             ..Default::default()
         };
 
-        let structured =
+        assert!(
             direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
-                .expect("structured observed answer");
-        assert!(structured.0.contains("package manager"));
+                .is_none(),
+            "package manager summary should be synthesized from observed evidence"
+        );
 
         assert!(
             direct_non_builtin_skill_raw_answer(&state, &loop_state, Some(&agent_run_context))
                 .is_none(),
-            "raw non-builtin passthrough should yield to structured observed answer"
+            "one-sentence summary should not raw-passthrough package_manager output"
         );
     }
 
     #[test]
-    fn git_status_structured_observed_answer_beats_non_builtin_raw_passthrough() {
+    fn git_status_summary_defers_to_synthesis_instead_of_raw_passthrough() {
         let state = test_state();
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state
@@ -4139,15 +4170,16 @@ mod tests {
             ..Default::default()
         };
 
-        let structured =
+        assert!(
             direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
-                .expect("structured observed answer");
-        assert_eq!(structured.0, "当前仓库有未提交改动。");
+                .is_none(),
+            "git status summary should be synthesized from observed evidence"
+        );
 
         assert!(
             direct_non_builtin_skill_raw_answer(&state, &loop_state, Some(&agent_run_context))
                 .is_none(),
-            "git status raw passthrough should yield to structured observed answer"
+            "one-sentence summary should not raw-passthrough git status output"
         );
     }
 

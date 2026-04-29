@@ -388,7 +388,6 @@ fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value,
     match (schema_id, value) {
         (PromptSchemaId::IntentNormalizer, Value::Object(mut map)) => {
             let mut normalized = false;
-            let mut lifted_fields = Vec::new();
             let mut execution_recipe_locator_hint: Option<Value> = None;
             let mut execution_recipe_self_extension: Option<Value> = None;
             if let Some(Value::Object(execution_recipe)) = map.get_mut("execution_recipe") {
@@ -404,14 +403,6 @@ fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value,
                     }
                 }
                 for (field, value) in stray_fields {
-                    if field.contains("direct_reply_candidate") {
-                        lifted_fields.push(("direct_reply_candidate".to_string(), value));
-                        continue;
-                    }
-                    if field.contains("direct_reply_confidence") {
-                        lifted_fields.push(("direct_reply_confidence".to_string(), value));
-                        continue;
-                    }
                     if field.contains("locator_hint") {
                         execution_recipe_locator_hint.get_or_insert(value);
                         continue;
@@ -421,9 +412,6 @@ fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value,
                         continue;
                     }
                 }
-            }
-            for (field, value) in lifted_fields {
-                map.entry(field).or_insert(value);
             }
             if execution_recipe_locator_hint.is_some() || execution_recipe_self_extension.is_some()
             {
@@ -912,11 +900,10 @@ fn parse_json_with_repair<T: DeserializeOwned>(raw: &str) -> Option<T> {
             serde_json::from_str::<T>(&deduped).ok()
         })
         // §F3-a：补齐截断 JSON 末尾未闭合的 `{`/`[`。
-        // adv12 复现：MiniMax 偶发把 envelope 末尾 `}` 漏掉 + 把
-        // `direct_reply_candidate`/`direct_reply_confidence` 误嵌入
-        // `execution_recipe` 内部，导致 normalizer 解析失败 → 走 ask_clarify
-        // 兜底，永远到不了 planner。补齐括号后 serde 用 `#[serde(default)]`
-        // 拿到字段的默认值，路由路径恢复。
+        // adv12 复现：MiniMax 偶发把 envelope 末尾 `}` 漏掉 + 把废弃字段误嵌入
+        // `execution_recipe` 内部，导致 normalizer 解析失败 → 走 ask_clarify 兜底，
+        // 永远到不了 planner。补齐括号后 serde 用 `#[serde(default)]` 拿到字段的
+        // 默认值，路由路径恢复。
         .or_else(|| {
             let balanced = balance_unclosed_brackets(raw)?;
             serde_json::from_str::<T>(&balanced).ok()
@@ -1375,10 +1362,18 @@ mod tests {
     }
 
     #[test]
-    fn validate_against_schema_repairs_misplaced_intent_direct_reply_fields() {
+    fn validate_against_schema_drops_legacy_execution_recipe_stray_fields() {
         let raw = r#"{
             "resolved_user_intent":"列出 document 目录下前 5 个文件名",
             "mode":"act",
+            "output_contract":{
+                "response_shape":"free",
+                "requires_content_evidence":true,
+                "delivery_required":false,
+                "locator_kind":"filename",
+                "delivery_intent":"none",
+                "semantic_kind":"none"
+            },
             "needs_clarify":false,
             "reason":"r",
             "confidence":0.92,
@@ -1386,32 +1381,18 @@ mod tests {
                 "kind":"none",
                 "profile":"none",
                 "target_scope":"current_repo",
-                "direct_reply_candidate":"wrong place",
-                "direct_reply_confidence":0.61
+                "legacy_reply_candidate":"wrong place",
+                "legacy_reply_confidence":0.61
             }
         }"#;
         let validated =
             super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
-                .expect("misplaced direct-reply fields should be canonicalized");
+                .expect("legacy execution_recipe stray fields should be dropped");
         assert!(validated.schema_normalized);
-        assert_eq!(
-            validated
-                .value
-                .get("direct_reply_candidate")
-                .and_then(|v| v.as_str()),
-            Some("wrong place")
-        );
-        assert_eq!(
-            validated
-                .value
-                .get("direct_reply_confidence")
-                .and_then(|v| v.as_f64()),
-            Some(0.61)
-        );
         assert!(validated
             .value
             .get("execution_recipe")
-            .and_then(|v| v.get("direct_reply_candidate"))
+            .and_then(|v| v.get("legacy_reply_candidate"))
             .is_none());
     }
 
@@ -1597,9 +1578,9 @@ mod tests {
                 "kind":"none",
                 "profile":"none",
                 "target_scope":"current_repo",
-                "},\"direct_reply_candidate":""
+                "},\"legacy_reply_candidate":""
             },
-            "direct_reply_confidence":0.0
+            "legacy_reply_confidence":0.0
         }"#;
         let validated =
             super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
@@ -1614,7 +1595,7 @@ mod tests {
         );
         assert!(validated
             .value
-            .pointer("/execution_recipe/},\\\"direct_reply_candidate")
+            .pointer("/execution_recipe/},\\\"legacy_reply_candidate")
             .is_none());
     }
 
@@ -1701,15 +1682,13 @@ mod tests {
     }
 
     /// §F3-a：adv12 复现的真实 MiniMax 输出（结尾少一个 `}` +
-    /// `direct_reply_*` 误嵌入 `execution_recipe`）必须能被 repair 成可解析。
+    /// 废弃/未知字段误嵌入 `execution_recipe`）必须能被 repair 成可解析。
     #[test]
     fn parse_llm_json_raw_or_any_with_repair_recovers_adv12_minimax_envelope() {
         // 注意：原始 JSON 末尾少了 envelope 自己的最后一个 `}`，
-        // 且 `direct_reply_candidate` / `direct_reply_confidence` 错误地嵌入
-        // 在 `execution_recipe` 内部（这两个字段顶层是 IntentNormalizerOut
-        // 用 #[serde(default)]，缺失也 OK；嵌进 execution_recipe 也不会让
-        // 顶层 deserialize 失败）。
-        let raw = r#"{"resolved_user_intent":"x","resume_behavior":"none","schedule_kind":"none","schedule_intent":null,"wants_file_delivery":false,"should_refresh_long_term_memory":false,"agent_display_name_hint":"","needs_clarify":false,"clarify_question":"","reason":"r","confidence":0.95,"mode":"act","output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":false,"locator_kind":"filename","delivery_intent":"none","semantic_kind":"existence_with_path","locator_hint":"AGENTS.md","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"current_repo","direct_reply_candidate":"","direct_reply_confidence":0.0}"#;
+        // 且废弃字段错误地嵌入 `execution_recipe`。repair 后应能解析并保留
+        // envelope 顶层字段。
+        let raw = r#"{"resolved_user_intent":"x","resume_behavior":"none","schedule_kind":"none","schedule_intent":null,"wants_file_delivery":false,"should_refresh_long_term_memory":false,"agent_display_name_hint":"","needs_clarify":false,"clarify_question":"","reason":"r","confidence":0.95,"mode":"act","output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":false,"locator_kind":"filename","delivery_intent":"none","semantic_kind":"existence_with_path","locator_hint":"AGENTS.md","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"current_repo","legacy_reply_candidate":"","legacy_reply_confidence":0.0}"#;
         // 直接 from_str 必失败：少最后一个 `}`。
         assert!(serde_json::from_str::<serde_json::Value>(raw).is_err());
         let parsed = super::parse_llm_json_raw_or_any_with_repair::<serde_json::Value>(raw)

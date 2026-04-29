@@ -809,8 +809,6 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract::default(),
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let binding = crate::intent::resume_policy::ResumeContextBinding {
             source: crate::intent::resume_policy::ResumeContextSource::RecentFailedCandidate,
@@ -853,8 +851,6 @@ mod tests {
                 locator_hint: "config.toml".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
@@ -897,8 +893,6 @@ mod tests {
                 locator_hint: "README.md".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             crate::intent::continuation_resolver::context_contains_immediate_locator_anchor(
@@ -955,8 +949,6 @@ mod tests {
                 locator_hint: "package.json".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
@@ -999,8 +991,6 @@ mod tests {
                 locator_hint: "package.json".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
@@ -1042,8 +1032,6 @@ mod tests {
                 locator_hint: "model_io.log".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
@@ -1086,8 +1074,6 @@ mod tests {
                 locator_hint: "model_io.log".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
@@ -1129,8 +1115,6 @@ mod tests {
                 locator_hint: "README.md".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
@@ -1172,8 +1156,6 @@ mod tests {
                 locator_hint: "README".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
@@ -1215,8 +1197,6 @@ mod tests {
                 locator_hint: "README".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(
@@ -1258,8 +1238,6 @@ mod tests {
                 locator_hint: String::new(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             crate::intent::continuation_resolver::resolve_fresh_deictic_clarify_guard(

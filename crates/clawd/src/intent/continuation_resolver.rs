@@ -797,8 +797,6 @@ mod tests {
                 locator_hint: "config.toml".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             resolve_fresh_deictic_clarify_guard(
@@ -841,8 +839,6 @@ mod tests {
                 locator_hint: "package.json".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             resolve_fresh_deictic_clarify_guard(
@@ -884,8 +880,6 @@ mod tests {
                 locator_hint: "model_io.log".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             resolve_fresh_deictic_clarify_guard(
@@ -929,8 +923,6 @@ mod tests {
                 locator_hint: "/tmp/device_local/README.md".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let out = resolve_fresh_deictic_clarify_guard(
             &route,
@@ -971,8 +963,6 @@ mod tests {
                 locator_hint: "README".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(resolve_fresh_deictic_clarify_guard(
             &route,
@@ -1014,8 +1004,6 @@ mod tests {
                 locator_hint: "logs".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             resolve_fresh_deictic_clarify_guard(
@@ -1060,8 +1048,6 @@ mod tests {
                 locator_hint: String::new(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(resolve_fresh_deictic_clarify_guard(
             &route,
@@ -1107,8 +1093,6 @@ mod tests {
                 locator_hint: String::new(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(resolve_fresh_deictic_clarify_guard(
             &route,
@@ -1155,8 +1139,6 @@ mod tests {
                 locator_hint: "/tmp/device_local/README.md".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: None,
@@ -1203,8 +1185,6 @@ mod tests {
                 locator_hint: "model_io.log".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(!super::fresh_deictic_guard_needs_recent_assistant_probe(
             &route,
@@ -1243,8 +1223,6 @@ mod tests {
                 locator_hint: "README.md".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         assert!(
             resolve_fresh_deictic_clarify_guard(
@@ -1287,8 +1265,6 @@ mod tests {
                 locator_hint: "README.md".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: None,
@@ -1340,8 +1316,6 @@ mod tests {
                 locator_hint: "app.log".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
-            direct_reply_candidate: String::new(),
-            direct_reply_confidence: 0.0,
         };
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: Some(crate::conversation_state::ConversationState {

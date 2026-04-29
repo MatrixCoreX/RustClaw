@@ -660,6 +660,23 @@ fn inherit_schedule_delivery_context(task: &ClaimedTask, payload: Value) -> Valu
     payload
 }
 
+fn schedule_needs_more_info_fallback_text(
+    state: &AppState,
+    task: &ClaimedTask,
+    prompt: &str,
+) -> String {
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, prompt);
+    let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
+    crate::bilingual_t_with_default_vars(
+        state,
+        "schedule.msg.create_needs_more_info",
+        "请补充必要信息后，我再帮你创建这个定时任务。",
+        "Please provide the necessary details first, then I can create this scheduled job for you.",
+        prefer_english,
+        &[],
+    )
+}
+
 pub(crate) async fn try_handle_schedule_request(
     state: &AppState,
     task: &ClaimedTask,
@@ -696,10 +713,8 @@ pub(crate) async fn try_handle_schedule_request(
         if !reason.is_empty() {
             return Ok(Some(reason.to_string()));
         }
-        return Ok(Some(crate::i18n_t_with_default(
-            state,
-            "schedule.msg.create_needs_more_info",
-            "请补充必要信息后，我再帮你创建这个定时任务。",
+        return Ok(Some(schedule_needs_more_info_fallback_text(
+            state, task, prompt,
         )));
     }
     if kind.is_empty() || kind == "none" {
@@ -1171,6 +1186,25 @@ output_kind = "text"
         assert_eq!(
             merged.get("context_token").and_then(|v| v.as_str()),
             Some("ctx-existing")
+        );
+    }
+
+    #[test]
+    fn schedule_needs_more_info_fallback_uses_current_request_language() {
+        let state = AppState::test_default_with_fixture_provider();
+        let task = claimed_task_with_payload("api", json!({"text": "placeholder"}));
+
+        assert_eq!(
+            schedule_needs_more_info_fallback_text(
+                &state,
+                &task,
+                "Remind me tomorrow to check deployment"
+            ),
+            "Please provide the necessary details first, then I can create this scheduled job for you."
+        );
+        assert_eq!(
+            schedule_needs_more_info_fallback_text(&state, &task, "明天提醒我检查部署"),
+            "请补充必要信息后，我再帮你创建这个定时任务。"
         );
     }
 

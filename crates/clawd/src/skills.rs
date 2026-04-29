@@ -375,31 +375,11 @@ pub(crate) fn task_allows_path_outside_workspace(
         && task.map(|task| task_is_admin(state, task)).unwrap_or(false)
 }
 
-fn text_contains_cjk(text: &str) -> bool {
-    text.chars().any(|ch| {
-        matches!(
-            ch as u32,
-            0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
-        )
-    })
-}
-
-fn text_contains_ascii_alpha(text: &str) -> bool {
-    text.chars().any(|ch| ch.is_ascii_alphabetic())
-}
-
 fn request_reply_language(user_text: &str) -> RequestReplyLanguage {
-    let trimmed = user_text.trim();
-    if trimmed.is_empty() {
-        return RequestReplyLanguage::ConfigDefault;
-    }
-    match (
-        text_contains_cjk(trimmed),
-        text_contains_ascii_alpha(trimmed),
-    ) {
-        (true, false) => RequestReplyLanguage::ZhCn,
-        (false, true) => RequestReplyLanguage::En,
-        (true, true) | (false, false) => RequestReplyLanguage::ConfigDefault,
+    match crate::language_policy::request_language_hint(user_text) {
+        "zh-CN" => RequestReplyLanguage::ZhCn,
+        "en" => RequestReplyLanguage::En,
+        _ => RequestReplyLanguage::ConfigDefault,
     }
 }
 
