@@ -14,7 +14,7 @@ Output must be exactly one JSON object and nothing else:
   "reason": "short reason"
 }
 
-Hard constraints:
+Strict constraints:
 1) Always output valid JSON, no markdown, no code fence.
 2) `mode` must be one of: voice, text, both, reset, show, none.
 3) `confidence` must be a float in [0,1].
@@ -31,7 +31,7 @@ Label guidance:
 - show: ask current reply mode/status.
 - none: not about reply mode switching.
 
-Examples:
+Illustrative samples:
 Input: switch back to text chat mode
 Output: {"mode":"text","confidence":0.97,"reason":"explicit switch to text mode"}
 
@@ -61,7 +61,7 @@ __USER_TEXT__
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en
@@ -69,6 +69,6 @@ Use subheadings such as:
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
 ### zh-CN
-- Chinese mode-switch wording such as `切成语音`、`只用文字`、`语音和文字都要`、`恢复默认`、`看看现在是什么模式` should map directly to voice/text/both/reset/show when the intent is explicit.
-- Chinese negative forms such as `别发语音了`、`不要语音` usually mean `text`, while `别只发文字` may indicate `voice` or `both` depending on the rest of the sentence.
+- Chinese mode-switch wording should map directly to voice/text/both/reset/show when the intent is explicit.
+- Chinese negative forms must be interpreted by semantic target: disabling voice maps to `text`; rejecting text-only may indicate `voice` or `both` depending on the rest of the sentence.
 - Do not classify unrelated Chinese speech/chat requests as mode switching merely because they contain the word `语音` or `文字`; require explicit switching intent.

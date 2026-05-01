@@ -23,8 +23,8 @@ Current runtime notes:
 - document KB is workspace-scoped by default; it is not tied to a single chat.
 
 Natural-language intent mapping:
-- Phrases such as `导入知识库`、`建立知识库`、`建索引`、`收录这些文档` usually map to `ingest`.
-- Phrases such as `查知识库`、`搜知识库`、`在某个库里找`、`从资料库里查` usually map to `search`.
+- Requests that semantically mean "add documents to an indexed knowledge base" should use `ingest` when required args are available; examples are illustrative only.
+- Requests that semantically mean "retrieve from an indexed knowledge base" should use `search` when the namespace is known or uniquely bound; examples are illustrative only.
 - `kb` is for indexed retrieval over previously ingested local content, not for direct file reading, ad hoc filesystem search, or open-ended chat.
 
 ## Config Entry Points (from interface)
@@ -157,7 +157,7 @@ Natural-language mapping examples:
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en
@@ -165,9 +165,8 @@ Use subheadings such as:
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
 ### zh-CN
-- Chinese colloquial requests such as `帮我看下`、`瞄一眼`、`顺手查一下`、`帮我确认下` should still be interpreted by capability semantics rather than downgraded to pure chat.
-- Chinese delivery wording such as `发我`、`甩给我`、`直接给我`、`别贴正文` usually indicates file/result delivery intent instead of inline pasted content.
-- Chinese brevity/format wording such as `只回数字`、`只给结果`、`只回路径`、`一句话说完` should constrain the planner's final expected output shape when that skill can support it.
-- Chinese style wording such as `用人话说`、`通俗点`、`给新手讲` means keep the eventual explanation low-jargon and user-friendly.
-- Chinese deictic wording such as `那个`、`它`、`上面那个` should rely on immediate concrete context only; do not guess unsupported targets or invent missing args just to force a skill call.
-
+- Interpret Chinese colloquial phrasing by capability semantics and requested task shape, not by a fixed phrase list.
+- Judge Chinese delivery intent semantically: if the user asks to receive a file/result rather than inline body text, plan toward delivery without depending on fixed wording.
+- Preserve Chinese brevity and format constraints as final output contracts when the skill can support them; do not convert those constraints into token-level matching rules.
+- Treat Chinese style constraints as audience/tone constraints for the eventual explanation, not as skill-selection shortcuts.
+- Resolve Chinese deictic references only from immediate, concrete, type-compatible context; do not guess unsupported targets or invent missing args just to force a skill call.

@@ -14,7 +14,7 @@
 - 当前已显式支持 `macOS` 与 `Linux` 的挂载点发现与路径提示；其他平台仍可手动传入绝对路径使用。
 - 默认安全模式是 `plan`，只做预览，不直接改动文件。
 - 整理层级默认是：`品牌 / 机型 / 镜头 / 焦段 / 年月`。
-- 支持按需求动态改变目录层级：例如只按品牌分开、先按镜头再按年月等。
+- 支持按需求动态改变目录层级，由 planner 将用户语义归一到 `group_by` 顺序。
 - 支持轻量自然语言解析：可以从 `args` 字符串，或 object 里的 `text|prompt|input|instruction|query` 中推断 `source_dir`、`mode`、`group_by`、`capture_month`、`include_subdirs`、`preview_limit`。
 - 输出语言由 `configs/photo_organize.toml` 和 `configs/i18n/photo_organize.<locale>.toml` 控制，也可被 `args.locale/lang` 或 `context.locale/lang` 覆盖。
 
@@ -34,12 +34,12 @@
 | `organize` | `output_dir` | no | string(path) | `<source_dir>/_organized_by_camera` | 整理后的输出目录。相对路径按 `source_dir` 解析。 |
 | `organize` | `group_by` | no | string/string[] | `["brand","model","lens","focal_length","year_month"]` | 目录层级顺序。支持 `brand`、`model`、`lens`、`focal_length`、`year_month`。 |
 | `organize` | `capture_month` | no | string | - | 仅整理指定月份拍摄的照片，格式建议 `YYYY-MM`。 |
-| `organize` | `selected_brands` / `brands` | no | string/string[] | - | 仅整理指定品牌的照片，例如 `["Canon","Sony"]`。其他品牌不动。 |
+| `organize` | `selected_brands` / `brands` | no | string/string[] | - | 仅整理指定品牌的照片；接受品牌名字符串或品牌名数组，其他品牌不动。 |
 | `organize` | `include_subdirs` | no | bool | `true` | 是否递归扫描子目录。 |
 | `organize` | `preview_limit` | no | integer | `12` | 返回的预览条目上限。 |
 | all | `locale` / `lang` / `language` | no | string | config default | 输出语言，如 `zh-CN`、`en-US`。 |
 | `organize` | `text` / `prompt` / `input` / `instruction` / `query` | no | string | - | 自然语言请求，可推断路径、模式、是否递归和预览上限。 |
-| all | raw string `args` | no | string | - | 纯字符串请求也可直接解析，例如 `整理 /Volumes/SDCARD/DCIM 里的照片，先预览`。 |
+| all | raw string `args` | no | string | - | 纯字符串请求也可直接解析；planner 应按语义抽取路径、模式和约束。 |
 
 ## Error Contract (from interface)
 - `args` 不是 object。
@@ -122,7 +122,7 @@ Response:
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en
@@ -130,9 +130,8 @@ Use subheadings such as:
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
 ### zh-CN
-- Chinese colloquial requests such as `帮我看下`、`瞄一眼`、`顺手查一下`、`帮我确认下` should still be interpreted by capability semantics rather than downgraded to pure chat.
-- Chinese delivery wording such as `发我`、`甩给我`、`直接给我`、`别贴正文` usually indicates file/result delivery intent instead of inline pasted content.
-- Chinese brevity/format wording such as `只回数字`、`只给结果`、`只回路径`、`一句话说完` should constrain the planner's final expected output shape when that skill can support it.
-- Chinese style wording such as `用人话说`、`通俗点`、`给新手讲` means keep the eventual explanation low-jargon and user-friendly.
-- Chinese deictic wording such as `那个`、`它`、`上面那个` should rely on immediate concrete context only; do not guess unsupported targets or invent missing args just to force a skill call.
-
+- Interpret Chinese colloquial phrasing by capability semantics and requested task shape, not by a fixed phrase list.
+- Judge Chinese delivery intent semantically: if the user asks to receive a file/result rather than inline body text, plan toward delivery without depending on fixed wording.
+- Preserve Chinese brevity and format constraints as final output contracts when the skill can support them; do not convert those constraints into token-level matching rules.
+- Treat Chinese style constraints as audience/tone constraints for the eventual explanation, not as skill-selection shortcuts.
+- Resolve Chinese deictic references only from immediate, concrete, type-compatible context; do not guess unsupported targets or invent missing args just to force a skill call.

@@ -20,6 +20,7 @@
 **/*.log
 __pycache__/
 *.pyc
+Untitled
 
 # =============================================================================
 # Node / frontend
@@ -66,6 +67,7 @@ runtime_env*.sh
 # under scripts/nl_tests/cases/ without an underscore prefix.
 # =============================================================================
 scripts/nl_tests/cases/_probe/
+scripts/nl_tests/cases/_tmp_*.txt
 
 # =============================================================================
 # Cursor / agent transcripts

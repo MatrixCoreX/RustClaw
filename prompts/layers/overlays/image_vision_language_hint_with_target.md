@@ -3,7 +3,7 @@ Keep product names, IDs, and file paths unchanged when needed for accuracy.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en

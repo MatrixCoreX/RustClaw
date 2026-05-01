@@ -384,6 +384,93 @@ fn validate_schema_value(
     }
 }
 
+fn canonicalize_plan_action_step_value(value: Value) -> (Value, bool) {
+    let Value::Object(mut map) = value else {
+        return (value, false);
+    };
+    let Some(kind) = map
+        .get("type")
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+    else {
+        return (Value::Object(map), false);
+    };
+    let allowed_keys: &[&str] = match kind.as_str() {
+        "think" => &["type", "content"],
+        "call_skill" => &["type", "skill", "args"],
+        "call_tool" => &["type", "tool", "args"],
+        "synthesize_answer" => &["type", "evidence_refs"],
+        "respond" => &["type", "content"],
+        _ => return (Value::Object(map), false),
+    };
+    let original_len = map.len();
+    map.retain(|key, _| allowed_keys.contains(&key.as_str()));
+    let mut normalized = map.len() != original_len;
+    if map.get("type").and_then(|value| value.as_str()) != Some(kind.as_str()) {
+        map.insert("type".to_string(), Value::String(kind));
+        normalized = true;
+    }
+    (Value::Object(map), normalized)
+}
+
+fn canonicalize_plan_steps_value(value: Value) -> (Value, bool) {
+    match value {
+        Value::Array(steps) => {
+            let mut normalized = false;
+            let steps = steps
+                .into_iter()
+                .map(|step| {
+                    let (step, step_normalized) = canonicalize_plan_action_step_value(step);
+                    normalized |= step_normalized;
+                    step
+                })
+                .collect::<Vec<_>>();
+            (Value::Array(steps), normalized)
+        }
+        Value::Object(_) => {
+            let (step, _) = canonicalize_plan_action_step_value(value);
+            (json!([step]), true)
+        }
+        other => (other, false),
+    }
+}
+
+fn canonicalize_plan_result_object(mut map: serde_json::Map<String, Value>) -> (Value, bool) {
+    let mut normalized = false;
+    let steps = if let Some(steps) = map.remove("steps") {
+        steps
+    } else {
+        let mut alias_steps = None;
+        for alias in ["actions", "plan", "tool_calls"] {
+            if let Some(steps) = map.remove(alias) {
+                alias_steps = Some(steps);
+                normalized = true;
+                break;
+            }
+        }
+        match alias_steps {
+            Some(steps) => steps,
+            None => {
+                let (step, _) = canonicalize_plan_action_step_value(Value::Object(map));
+                return (json!({ "steps": [step] }), true);
+            }
+        }
+    };
+    let (steps, steps_normalized) = canonicalize_plan_steps_value(steps);
+    normalized |= steps_normalized;
+
+    let planner_notes = map.remove("planner_notes");
+    normalized |= !map.is_empty();
+
+    let mut out = serde_json::Map::new();
+    out.insert("steps".to_string(), steps);
+    if let Some(planner_notes) = planner_notes {
+        out.insert("planner_notes".to_string(), planner_notes);
+    }
+    (Value::Object(out), normalized)
+}
+
 fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value, bool) {
     match (schema_id, value) {
         (PromptSchemaId::IntentNormalizer, Value::Object(mut map)) => {
@@ -452,10 +539,11 @@ fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value,
             }
             (Value::Object(map), normalized)
         }
-        (PromptSchemaId::PlanResult, Value::Array(steps)) => (json!({ "steps": steps }), true),
-        (PromptSchemaId::PlanResult, Value::Object(map)) if !map.contains_key("steps") => {
-            (json!({ "steps": [Value::Object(map)] }), true)
+        (PromptSchemaId::PlanResult, Value::Array(steps)) => {
+            let (steps, _) = canonicalize_plan_steps_value(Value::Array(steps));
+            (json!({ "steps": steps }), true)
         }
+        (PromptSchemaId::PlanResult, Value::Object(map)) => canonicalize_plan_result_object(map),
         (_, value) => (value, false),
     }
 }
@@ -795,6 +883,51 @@ fn repair_invalid_json_escapes(raw: &str) -> String {
     out
 }
 
+fn repair_stray_quote_after_primitive(raw: &str) -> String {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut out = String::with_capacity(raw.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut i = 0usize;
+
+    while i < chars.len() {
+        let ch = chars[i];
+        if in_string {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if ch == '"' {
+            let prev = out.chars().rev().find(|c| !c.is_whitespace());
+            let next = chars
+                .iter()
+                .skip(i + 1)
+                .copied()
+                .find(|c| !c.is_whitespace());
+            if prev.is_some_and(|c| c.is_ascii_alphanumeric())
+                && next.is_some_and(|c| matches!(c, ',' | '}' | ']'))
+            {
+                i += 1;
+                continue;
+            }
+            in_string = true;
+        }
+
+        out.push(ch);
+        i += 1;
+    }
+
+    out
+}
+
 fn repair_unescaped_inner_quotes(raw: &str) -> String {
     let chars: Vec<char> = raw.chars().collect();
     let mut out = String::with_capacity(raw.len() + 16);
@@ -868,6 +1001,14 @@ fn parse_json_with_repair<T: DeserializeOwned>(raw: &str) -> Option<T> {
         .ok()
         .or_else(|| {
             let repaired = repair_invalid_json_escapes(raw);
+            serde_json::from_str::<T>(&repaired).ok()
+        })
+        .or_else(|| {
+            let repaired = repair_stray_quote_after_primitive(raw);
+            serde_json::from_str::<T>(&repaired).ok()
+        })
+        .or_else(|| {
+            let repaired = repair_stray_quote_after_primitive(&repair_invalid_json_escapes(raw));
             serde_json::from_str::<T>(&repaired).ok()
         })
         .or_else(|| {
@@ -1010,6 +1151,34 @@ fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
                 "type": "respond",
                 "content": content,
             });
+        }
+        if let Some(raw_action) = obj.get("action").and_then(|v| v.as_str()) {
+            let action = raw_action.trim().to_ascii_lowercase();
+            let args = collect_bare_action_alias_args(obj);
+            if matches!(action.as_str(), "respond" | "reply" | "answer" | "final") {
+                let content = args
+                    .get("content")
+                    .or_else(|| args.get("text"))
+                    .or_else(|| args.get("message"))
+                    .or_else(|| args.get("body"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                return json!({
+                    "type": "respond",
+                    "content": content,
+                });
+            }
+            if action == "run_cmd" {
+                return normalize_run_cmd_call(obj, args.as_object());
+            }
+            let normalized_skill = state.resolve_canonical_skill_name(&action);
+            if state.is_builtin_skill(&normalized_skill) {
+                return json!({
+                    "type": "call_skill",
+                    "skill": normalized_skill,
+                    "args": args,
+                });
+            }
         }
         return value;
     };
@@ -1310,6 +1479,14 @@ fn collect_bare_action_args(obj: &serde_json::Map<String, Value>) -> Value {
     Value::Object(args)
 }
 
+fn collect_bare_action_alias_args(obj: &serde_json::Map<String, Value>) -> Value {
+    let mut args = collect_bare_action_args(obj);
+    if let Value::Object(map) = &mut args {
+        map.remove("action");
+    }
+    args
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{json, Value};
@@ -1362,7 +1539,84 @@ mod tests {
     }
 
     #[test]
-    fn validate_against_schema_drops_legacy_execution_recipe_stray_fields() {
+    fn validate_against_schema_canonicalizes_plan_action_alias_array() {
+        let raw = r#"{"actions":[{"type":"respond","content":"done"}]}"#;
+        let validated =
+            super::validate_against_schema::<Value>(raw, super::PromptSchemaId::PlanResult)
+                .expect("actions alias should canonicalize to steps envelope");
+        assert!(validated.schema_normalized);
+        assert_eq!(
+            validated
+                .value
+                .pointer("/steps/0/content")
+                .and_then(|v| v.as_str()),
+            Some("done")
+        );
+        assert!(validated.value.get("actions").is_none());
+    }
+
+    #[test]
+    fn validate_against_schema_strips_plan_result_noise_fields() {
+        let raw = r#"{
+            "goal":"ignored envelope noise",
+            "planner_notes":"kept",
+            "steps":[
+                {
+                    "type":"RESPOND",
+                    "content":"done",
+                    "id":"step_1",
+                    "description":"ignored action noise"
+                }
+            ]
+        }"#;
+        let validated =
+            super::validate_against_schema::<Value>(raw, super::PromptSchemaId::PlanResult)
+                .expect("plan_result noise fields should be stripped before schema validation");
+        assert!(validated.schema_normalized);
+        assert_eq!(
+            validated
+                .value
+                .pointer("/steps/0/type")
+                .and_then(|v| v.as_str()),
+            Some("respond")
+        );
+        assert_eq!(
+            validated
+                .value
+                .pointer("/steps/0/content")
+                .and_then(|v| v.as_str()),
+            Some("done")
+        );
+        assert_eq!(
+            validated
+                .value
+                .get("planner_notes")
+                .and_then(|v| v.as_str()),
+            Some("kept")
+        );
+        assert!(validated.value.get("goal").is_none());
+        assert!(validated.value.pointer("/steps/0/id").is_none());
+        assert!(validated.value.pointer("/steps/0/description").is_none());
+    }
+
+    #[test]
+    fn validate_against_schema_canonicalizes_single_plan_step_object() {
+        let raw = r#"{"steps":{"type":"respond","content":"done"}}"#;
+        let validated =
+            super::validate_against_schema::<Value>(raw, super::PromptSchemaId::PlanResult)
+                .expect("single object steps should canonicalize to steps array");
+        assert!(validated.schema_normalized);
+        assert_eq!(
+            validated
+                .value
+                .pointer("/steps/0/type")
+                .and_then(|v| v.as_str()),
+            Some("respond")
+        );
+    }
+
+    #[test]
+    fn validate_against_schema_drops_execution_recipe_stray_fields() {
         let raw = r#"{
             "resolved_user_intent":"列出 document 目录下前 5 个文件名",
             "mode":"act",
@@ -1381,8 +1635,8 @@ mod tests {
                 "kind":"none",
                 "profile":"none",
                 "target_scope":"current_repo",
-                "legacy_reply_candidate":"wrong place",
-                "legacy_reply_confidence":0.61
+                "unknown_extra_text":"wrong place",
+                "unknown_extra_score":0.61
             }
         }"#;
         let validated =
@@ -1392,7 +1646,7 @@ mod tests {
         assert!(validated
             .value
             .get("execution_recipe")
-            .and_then(|v| v.get("legacy_reply_candidate"))
+            .and_then(|v| v.get("unknown_extra_text"))
             .is_none());
     }
 
@@ -1578,9 +1832,9 @@ mod tests {
                 "kind":"none",
                 "profile":"none",
                 "target_scope":"current_repo",
-                "},\"legacy_reply_candidate":""
+                "},\"unknown_extra_text":""
             },
-            "legacy_reply_confidence":0.0
+            "unknown_extra_score":0.0
         }"#;
         let validated =
             super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
@@ -1595,7 +1849,7 @@ mod tests {
         );
         assert!(validated
             .value
-            .pointer("/execution_recipe/},\\\"legacy_reply_candidate")
+            .pointer("/execution_recipe/},\\\"unknown_extra_text")
             .is_none());
     }
 
@@ -1681,14 +1935,14 @@ mod tests {
         );
     }
 
-    /// §F3-a：adv12 复现的真实 MiniMax 输出（结尾少一个 `}` +
+    /// §F3-a：adv12 复现的 MiniMax 输出模式（结尾少一个 `}` +
     /// 废弃/未知字段误嵌入 `execution_recipe`）必须能被 repair 成可解析。
     #[test]
     fn parse_llm_json_raw_or_any_with_repair_recovers_adv12_minimax_envelope() {
         // 注意：原始 JSON 末尾少了 envelope 自己的最后一个 `}`，
         // 且废弃字段错误地嵌入 `execution_recipe`。repair 后应能解析并保留
         // envelope 顶层字段。
-        let raw = r#"{"resolved_user_intent":"x","resume_behavior":"none","schedule_kind":"none","schedule_intent":null,"wants_file_delivery":false,"should_refresh_long_term_memory":false,"agent_display_name_hint":"","needs_clarify":false,"clarify_question":"","reason":"r","confidence":0.95,"mode":"act","output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":false,"locator_kind":"filename","delivery_intent":"none","semantic_kind":"existence_with_path","locator_hint":"AGENTS.md","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"current_repo","legacy_reply_candidate":"","legacy_reply_confidence":0.0}"#;
+        let raw = r#"{"resolved_user_intent":"x","resume_behavior":"none","schedule_kind":"none","schedule_intent":null,"wants_file_delivery":false,"should_refresh_long_term_memory":false,"agent_display_name_hint":"","needs_clarify":false,"clarify_question":"","reason":"r","confidence":0.95,"mode":"act","output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":false,"locator_kind":"filename","delivery_intent":"none","semantic_kind":"existence_with_path","locator_hint":"AGENTS.md","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"current_repo","unknown_extra_text":"","unknown_extra_score":0.0}"#;
         // 直接 from_str 必失败：少最后一个 `}`。
         assert!(serde_json::from_str::<serde_json::Value>(raw).is_err());
         let parsed = super::parse_llm_json_raw_or_any_with_repair::<serde_json::Value>(raw)
@@ -1722,6 +1976,19 @@ mod tests {
                 .and_then(|v| v.as_str())
                 .unwrap_or_default(),
             "chat"
+        );
+    }
+
+    #[test]
+    fn parse_llm_json_raw_or_any_with_repair_removes_stray_quote_after_bool() {
+        let raw = r#"{"mode":"act","needs_clarify":false","confidence":0.9}"#;
+        assert!(serde_json::from_str::<Value>(raw).is_err());
+        let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
+            .expect("stray quote after primitive should repair");
+        assert_eq!(parsed.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            parsed.get("needs_clarify").and_then(|v| v.as_bool()),
+            Some(false)
         );
     }
 
@@ -1828,7 +2095,7 @@ mod tests {
 
     #[test]
     fn extract_agent_action_objects_recovers_inner_actions_from_malformed_wrapper() {
-        let raw = r#"{"steps":[{"type":"call_skill","skill":"read_file","args":{"path":"README.md"}},{"type":"call_skill","skill":"chat","args":{"text":"summarize","style":"chat"}]}"#;
+        let raw = r#"{"steps":[{"type":"call_skill","skill":"read_file","args":{"path":"README.md"}},{"type":"call_skill","skill":"system_basic","args":{"action":"info"}]}"#;
         let extracted = super::extract_agent_action_objects(raw);
         assert_eq!(extracted.len(), 2);
         let parsed: Value =
@@ -1841,7 +2108,7 @@ mod tests {
             serde_json::from_str(&extracted[1]).expect("second inner action should parse");
         assert_eq!(
             parsed_second.get("skill").and_then(|v| v.as_str()),
-            Some("chat")
+            Some("system_basic")
         );
     }
 
@@ -1862,6 +2129,48 @@ mod tests {
                     "command": "pwd",
                     "cwd": "/tmp",
                     "timeout_seconds": 3
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn normalize_agent_action_shape_rewrites_action_run_cmd_alias() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let normalized = super::parse_agent_action_json_with_repair(
+            r#"{"action":"run_cmd","cmd":"pwd","workdir":"/tmp"}"#,
+            &state,
+        )
+        .expect("action run_cmd should normalize");
+        assert_eq!(
+            normalized,
+            json!({
+                "type": "call_skill",
+                "skill": "run_cmd",
+                "args": {
+                    "command": "pwd",
+                    "cwd": "/tmp"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn normalize_agent_action_shape_rewrites_action_builtin_skill_alias() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let normalized = super::parse_agent_action_json_with_repair(
+            r#"{"action":"list_dir","path":"logs","limit":2}"#,
+            &state,
+        )
+        .expect("action builtin skill should normalize");
+        assert_eq!(
+            normalized,
+            json!({
+                "type": "call_skill",
+                "skill": "list_dir",
+                "args": {
+                    "path": "logs",
+                    "limit": 2
                 }
             })
         );

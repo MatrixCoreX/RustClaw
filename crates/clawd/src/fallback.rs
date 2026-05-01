@@ -504,10 +504,10 @@ impl ClarifyFallbackSource {
                 "The model returned an empty answer this time. Please describe the goal more concretely and I'll try again."
             }
             Self::IntentUnresolved => {
-                "I couldn't tell what this message wants me to do. Please add a target or context — for example, which file to look at or which action to perform."
+                "I couldn't determine the requested action. Please add the target, context, and action you want."
             }
             Self::PlannerFailed => {
-                "I couldn't break the request into executable steps. Please rephrase as \"do Y by using X\", or be more specific."
+                "I couldn't break the request into executable steps. Please restate the goal, target, and constraints more concretely."
             }
             Self::ExecutionFailedPartial => {
                 "I hit a problem partway through. Already done: {context_hint}. Want me to try a different path?"
@@ -532,10 +532,10 @@ impl ClarifyFallbackSource {
             }
             Self::EmptyResponse => "模型这次没给出回答。请把目标说得更具体一点，我立刻再试。",
             Self::IntentUnresolved => {
-                "我没看出这条消息要做什么。请补充目标或上下文，例如：要看哪个文件？要做哪个操作？"
+                "我没看出这条消息要做什么。请补充目标、上下文或你希望我采取的动作。"
             }
             Self::PlannerFailed => {
-                "我没能把请求拆成可执行步骤。请说\"用 X 做 Y\"形式，或描述得更具体。"
+                "我没能把请求拆成可执行步骤。请补充目标、操作边界和关键约束。"
             }
             Self::ExecutionFailedPartial => {
                 "执行到一半遇到问题。已经完成的部分：{context_hint}。要不要换条路继续？"
@@ -729,7 +729,7 @@ mod tests {
             None,
             "en",
         );
-        assert!(text.contains("I couldn't tell what this message wants me to do"));
+        assert!(text.contains("I couldn't determine the requested action"));
     }
 
     #[test]

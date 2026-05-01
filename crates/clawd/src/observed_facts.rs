@@ -246,10 +246,21 @@ pub(crate) fn derive_observed_facts_from_ask_outcome(
         );
     }
 
-    let mut ordered_entries = crate::followup_frame::extract_ordered_entries_from_text(&combined);
-    if ordered_entries.is_empty() {
-        ordered_entries = crate::followup_frame::derive_ordered_entries_from_journal(journal);
-    }
+    let journal_ordered_entries =
+        crate::followup_frame::derive_ordered_entries_from_journal(journal);
+    let may_capture_ordered_entries = route_contract_can_publish_ordered_entries(route_result)
+        || !journal_ordered_entries.is_empty()
+        || combined_contains_delivery_file_token(&combined);
+    let mut ordered_entries = if may_capture_ordered_entries {
+        let entries = crate::followup_frame::extract_ordered_entries_from_text(&combined);
+        if entries.is_empty() {
+            journal_ordered_entries
+        } else {
+            entries
+        }
+    } else {
+        Vec::new()
+    };
     ordered_entries.truncate(crate::followup_frame::MAX_ORDERED_ENTRIES);
 
     let mut delivery_targets = crate::extract_delivery_file_tokens(answer_text)
@@ -310,6 +321,29 @@ pub(crate) fn derive_observed_facts_from_ask_outcome(
     }
 }
 
+fn route_contract_can_publish_ordered_entries(route_result: &crate::RouteResult) -> bool {
+    route_result.wants_file_delivery
+        || route_result.output_contract.delivery_required
+        || matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::FileNames
+                | crate::OutputSemanticKind::SqliteTableListing
+                | crate::OutputSemanticKind::SqliteTableNamesOnly
+        )
+        || matches!(
+            route_result.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::DirectoryLookup
+                | crate::OutputDeliveryIntent::DirectoryBatchFiles
+        )
+}
+
+fn combined_contains_delivery_file_token(combined: &str) -> bool {
+    combined
+        .lines()
+        .map(str::trim_start)
+        .any(|line| line.starts_with("FILE:"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{derive_observed_facts_from_ask_outcome, ObservedFacts};
@@ -338,11 +372,14 @@ mod tests {
     #[test]
     fn derives_ordered_entries_from_numbered_answer_text() {
         let journal = crate::task_journal::TaskJournal::new("list");
+        let mut route = dummy_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
         let facts = derive_observed_facts_from_ask_outcome(
             "1. README.md\n2. Cargo.toml\n3. configs",
             &[],
             &journal,
-            &dummy_route_result(),
+            &route,
         );
         assert_eq!(
             facts.ordered_entries,
@@ -353,6 +390,21 @@ mod tests {
             ]
         );
         assert_eq!(facts.selected_entry_index, None);
+    }
+
+    #[test]
+    fn ignores_plain_chat_numbered_text_as_ordered_entries() {
+        let journal = crate::task_journal::TaskJournal::new("chat");
+        let facts = derive_observed_facts_from_ask_outcome(
+            "1. Keep the intro short\n2. Use concrete examples\n3. End with next steps",
+            &[],
+            &journal,
+            &dummy_route_result(),
+        );
+        assert!(
+            facts.ordered_entries.is_empty(),
+            "plain generated prose should not become follow-up list state"
+        );
     }
 
     #[test]
@@ -413,11 +465,14 @@ mod tests {
                 ),
                 ..Default::default()
             });
+        let mut route = dummy_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
         let facts = derive_observed_facts_from_ask_outcome(
             "1. act_plan.log\n2. clawd.log\n3. clawd.run.log",
             &[],
             &journal,
-            &dummy_route_result(),
+            &route,
         );
         assert_eq!(facts.selected_entry_index, Some(1));
     }
@@ -484,6 +539,8 @@ mod tests {
         let mut route = dummy_route_result();
         route.resolved_intent = "先列出 logs 目录下前 5 个文件名".to_string();
         route.output_contract.locator_hint = "logs".to_string();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
         let facts = derive_observed_facts_from_ask_outcome(
             "1. act_plan.log\n2. clawd.log\n3. clawd.run.log",
             &[],
@@ -495,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn derives_output_shape_hint_from_route_contract() {
+    fn derives_output_shape_hint_from_output_contract() {
         let journal = crate::task_journal::TaskJournal::new("send");
         let mut route = dummy_route_result();
         route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
@@ -519,6 +576,8 @@ mod tests {
         let journal = crate::task_journal::TaskJournal::new("list");
         let mut route = dummy_route_result();
         route.resolved_intent = "先列出 logs 目录下前 5 个文件名".to_string();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
         let facts = derive_observed_facts_from_ask_outcome(
             "1. act_plan.log\n2. clawd.log\n3. clawd.run.log",
             &[],

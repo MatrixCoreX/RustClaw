@@ -194,12 +194,14 @@ async fn enforce_delivery_output_contract(
         );
 
     // §7.1 output_contract verifier hook：在 enforce_output_contract 的"shape 整形"
-    // 之后再做一层"语义合规性"判定。三态结果：
+    // 之后再做一层最小结构合规性判定。不要在这里用自然语言词表判断 yes/no、
+    // same/different、语气或意图；这些交给 LLM composer/prompt。
+    // 三态结果：
     // - Pass：已合规，原文直出。
-    // - Reshape：候选基本合规但缺关键 token（如 existence_with_path 缺 yes/no 前缀），
-    //   verifier 给出已修复文本，直接覆盖 normalized_text。
-    // - Reject：候选明显违反 contract（如把"有没有 + 路径"答成纯描述段），
-    //   走 §7.2 ClarifyFallbackSource::VerifyRejected fallback，丢弃 candidate。
+    // - Reshape：候选基本合规但可结构化抽取严格值（如 scalar path/count），verifier
+    //   给出已修复文本，直接覆盖 normalized_text。
+    // - Reject：候选明显违反结构 contract（如 strict scalar 缺路径/整数），走 §7.2
+    //   ClarifyFallbackSource::VerifyRejected fallback，丢弃 candidate。
     // 三种情况都打 tracing event verify_contract_emitted，便于 inspect_task.sh 关联。
     if !normalized_text.trim().is_empty() {
         let verdict = crate::output_contract_verifier::verify_output_contract(
@@ -364,7 +366,7 @@ fn should_drop_passthrough_delivery_for_content_evidence(
                 return Some(true);
             }
             (step.skill == "list_dir"
-                && crate::agent_engine::observed_output::normalized_observed_listing(body, None)
+                && crate::agent_engine::observed_output::normalized_observed_listing(body)
                     .is_some_and(|listing| {
                         listing.trim() == respond
                             || listing
@@ -392,15 +394,6 @@ fn discard_raw_passthrough_delivery_when_structured_answer_available(
     if current_delivery.is_empty() {
         return;
     }
-    let Some((structured_answer, _)) =
-        direct_structured_observed_answer(None, loop_state, agent_run_context)
-    else {
-        return;
-    };
-    if structured_answer.trim().is_empty() || structured_answer.trim() == current_delivery {
-        return;
-    }
-
     let raw_passthrough = loop_state
         .executed_step_results
         .iter()
@@ -423,11 +416,26 @@ fn discard_raw_passthrough_delivery_when_structured_answer_available(
         return;
     }
 
+    let structured_answer = direct_structured_observed_answer(None, loop_state, agent_run_context)
+        .map(|(answer, _)| answer.trim().to_string())
+        .filter(|answer| !answer.is_empty() && answer != current_delivery);
+
+    let exact_delivery_requested = agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .map(output_contract_requests_exact_delivery)
+        .unwrap_or(false);
+    if structured_answer.is_none()
+        && (exact_delivery_requested
+            || !crate::agent_engine::observed_output::has_observed_answer_candidates(loop_state))
+    {
+        return;
+    }
+
     info!(
         "drop_raw_passthrough_delivery_for_structured_answer task_id={} raw={} structured={}",
         task.task_id,
         crate::truncate_for_log(current_delivery),
-        crate::truncate_for_log(structured_answer.trim())
+        crate::truncate_for_log(structured_answer.as_deref().unwrap_or("<synthesis>"))
     );
     loop_state.delivery_messages.clear();
     loop_state.last_user_visible_respond = None;
@@ -926,7 +934,7 @@ fn direct_structured_observed_answer(
 fn prefer_observed_answer_for_exact_contract(
     state: &AppState,
     task_id: &str,
-    loop_state: &LoopState,
+    loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
     delivery_messages: &mut Vec<String>,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
@@ -939,6 +947,25 @@ fn prefer_observed_answer_for_exact_contract(
     }
     if delivery_messages.is_empty() {
         return;
+    }
+    if let Some(synthesis) = loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        if delivery_messages
+            .last()
+            .map(|message| message.trim() == synthesis)
+            .unwrap_or(false)
+        {
+            info!(
+                "delivery exact_contract_keep_synthesis task_id={} answer={}",
+                task_id,
+                crate::truncate_for_log(synthesis)
+            );
+            return;
+        }
     }
     let Some((answer, summary)) =
         direct_scalar_observed_answer(Some(state), loop_state, agent_run_context).or_else(|| {
@@ -960,6 +987,7 @@ fn prefer_observed_answer_for_exact_contract(
         .map(|message| message.trim() == answer)
         .unwrap_or(false)
     {
+        loop_state.last_user_visible_respond = Some(answer.to_string());
         *finalizer_summary = Some(summary);
         return;
     }
@@ -977,6 +1005,7 @@ fn prefer_observed_answer_for_exact_contract(
     );
     delivery_messages.clear();
     delivery_messages.push(answer.to_string());
+    loop_state.last_user_visible_respond = Some(answer.to_string());
     *finalizer_summary = Some(summary);
 }
 
@@ -1114,7 +1143,7 @@ fn route_explicitly_requests_command_result(route: &crate::RouteResult) -> bool 
     route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
 }
 
-fn route_contract_requests_exact_delivery(route: &crate::RouteResult) -> bool {
+fn output_contract_requests_exact_delivery(route: &crate::RouteResult) -> bool {
     matches!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::Scalar
@@ -1126,13 +1155,31 @@ fn route_contract_requests_exact_delivery(route: &crate::RouteResult) -> bool {
     )
 }
 
+fn output_contract_suppresses_execution_summary(route: &crate::RouteResult) -> bool {
+    output_contract_requests_exact_delivery(route)
+        || matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ScalarPathOnly
+                | crate::OutputSemanticKind::ScalarCount
+                | crate::OutputSemanticKind::ExistenceWithPath
+                | crate::OutputSemanticKind::HiddenEntriesCheck
+                | crate::OutputSemanticKind::RecentScalarEqualityCheck
+                | crate::OutputSemanticKind::SqliteTableNamesOnly
+        )
+}
+
 fn route_prefers_observed_answer(route: &crate::RouteResult) -> bool {
+    if output_contract_requests_exact_delivery(route) {
+        return true;
+    }
     matches!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::Scalar
     ) || matches!(
         route.output_contract.semantic_kind,
         crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::ExistenceWithPath
+            | crate::OutputSemanticKind::HiddenEntriesCheck
     )
 }
 
@@ -1147,7 +1194,7 @@ fn should_attach_execution_summary(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
-    if route_contract_requests_exact_delivery(route) {
+    if output_contract_suppresses_execution_summary(route) {
         return false;
     }
     !matches!(
@@ -1336,6 +1383,41 @@ fn output_text_from_execution_result(
     Some(trimmed.to_string())
 }
 
+fn structured_observation_suppresses_execution_summary(
+    step: &crate::executor::StepExecutionResult,
+) -> bool {
+    if !step.is_ok() {
+        return false;
+    }
+    let Some(raw) = step
+        .output
+        .as_deref()
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+    else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return false;
+    };
+    let Some(action) = value
+        .get("action")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+    else {
+        return false;
+    };
+    match step.skill.as_str() {
+        "system_basic" => matches!(
+            action.as_str(),
+            "extract_field" | "extract_fields" | "structured_keys"
+        ),
+        "fs_search" => matches!(action.as_str(), "find_name" | "find_ext"),
+        _ => false,
+    }
+}
+
 fn build_execution_summary_message(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -1351,7 +1433,8 @@ fn build_execution_summary_message(
             !matches!(
                 step.skill.as_str(),
                 "respond" | "think" | "synthesize_answer"
-            ) && output_text_from_execution_result(step).is_some()
+            ) && !structured_observation_suppresses_execution_summary(step)
+                && output_text_from_execution_result(step).is_some()
         })
         .collect::<Vec<_>>();
     if steps.is_empty() {
@@ -1810,7 +1893,7 @@ async fn observed_execution_without_publishable_delivery_reply(
     clarify_reason: &str,
 ) -> Option<AskReply> {
     let execution_summary =
-        build_execution_summary_message(loop_state, agent_run_context, Some(user_text))?;
+        build_execution_summary_message(loop_state, agent_run_context, Some(user_text));
     let message = missing_delivery_after_observation_message(
         state,
         task,
@@ -1820,7 +1903,11 @@ async fn observed_execution_without_publishable_delivery_reply(
         clarify_reason,
     )
     .await;
-    let delivery_messages = vec![execution_summary, message.clone()];
+    let mut delivery_messages = Vec::new();
+    if let Some(execution_summary) = execution_summary {
+        delivery_messages.push(execution_summary);
+    }
+    delivery_messages.push(message.clone());
     let delivery_consistent =
         crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
     let journal = build_loop_journal(
@@ -2236,14 +2323,14 @@ pub(crate) async fn finalize_loop_reply(
     prefer_observed_answer_for_exact_contract(
         state,
         &task.task_id,
-        &loop_state,
+        &mut loop_state,
         agent_run_context,
         &mut delivery_deduped,
         &mut finalizer_summary,
     );
     let exact_delivery_requested = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
-        .map(route_contract_requests_exact_delivery)
+        .map(output_contract_requests_exact_delivery)
         .unwrap_or(false);
     if !exact_delivery_requested {
         attach_execution_recipe_closeout_to_delivery(
@@ -2643,6 +2730,58 @@ mod tests {
         assert!(!reply.text.contains("你最想看的是哪一项"));
     }
 
+    #[tokio::test]
+    async fn observed_execution_without_delivery_skips_summary_for_extract_field_result() {
+        let state = test_state();
+        let task = claimed_task("task-missing-field-observed");
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "read package name".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "system_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": "extract_field",
+                        "path": "package.json",
+                        "field_path": "name"
+                    }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "system_basic",
+            r#"{"action":"extract_field","exists":false,"field_path":"name","format":"json","path":"package.json","resolved_path":"/tmp/package.json","value":null,"value_text":"","value_type":"null"}"#,
+        ));
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(free_route_result()),
+            ..Default::default()
+        };
+
+        let reply = observed_execution_without_publishable_delivery_reply(
+            &state,
+            &task,
+            "读取 package.json 里的 name 字段，只输出值",
+            &loop_state,
+            Some(&ctx),
+            None,
+            "no publishable final answer was produced",
+        )
+        .await
+        .expect("observed execution reply");
+
+        assert_eq!(reply.messages.len(), 1);
+        assert!(!reply.text.contains("**执行过程**"));
+        assert!(!reply.text.contains("**Execution**"));
+    }
+
     #[test]
     fn execution_summary_skips_exact_observed_passthrough_delivery() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -2720,6 +2859,50 @@ mod tests {
     }
 
     #[test]
+    fn execution_summary_skips_existence_with_path_contract() {
+        let mut route = free_route_result();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_hint = "rustclaw.service".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_search",
+            r#"{"action":"find_name","count":1,"results":["rustclaw.service"]}"#,
+        ));
+        let mut delivery = vec!["有，路径：rustclaw.service".to_string()];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(delivery, vec!["有，路径：rustclaw.service"]);
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
+    }
+
+    #[test]
+    fn execution_summary_skips_direct_fs_search_structured_observation() {
+        let route = free_route_result();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_search",
+            r#"{"action":"find_name","count":1,"results":["rustclaw.service"],"root":""}"#,
+        ));
+        let mut delivery = vec!["有，路径：rustclaw.service".to_string()];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(delivery, vec!["有，路径：rustclaw.service"]);
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
+    }
+
+    #[test]
     fn execution_summary_skips_scalar_contract_without_reading_user_text() {
         let mut route = free_route_result();
         route.output_contract.response_shape = OutputResponseShape::Scalar;
@@ -2781,7 +2964,7 @@ mod tests {
         prefer_observed_answer_for_exact_contract(
             &state,
             "task_test",
-            &loop_state,
+            &mut loop_state,
             Some(&ctx),
             &mut delivery,
             &mut finalizer_summary,
@@ -3370,7 +3553,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_scalar_finalize_uses_structured_extract_field_missing_result() {
+    fn direct_scalar_finalize_uses_structured_extract_field_missing_message() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(StepExecutionResult {
             step_id: "step_1".to_string(),
@@ -3391,7 +3574,7 @@ mod tests {
         let (answer, summary) =
             direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
                 .expect("scalar fallback should succeed");
-        assert_eq!(answer, "name 字段不存在");
+        assert_eq!(answer, "未找到 name 字段");
         assert_eq!(
             summary.disposition,
             Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
@@ -3614,7 +3797,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_structured_finalize_uses_existence_with_path_answer_when_shape_drifted_free() {
+    fn direct_structured_finalize_answers_existence_with_path_from_single_observation() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(StepExecutionResult {
             step_id: "step_1".to_string(),
@@ -3641,7 +3824,7 @@ mod tests {
         };
         let (answer, summary) =
             super::direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
-                .expect("existence-with-path fallback should succeed");
+                .expect("single path_batch_facts observation should answer existence-with-path");
         assert_eq!(answer, "有，路径：/tmp/rustclaw-workspace/rustclaw.service");
         assert_eq!(
             summary.disposition,
@@ -3758,6 +3941,62 @@ mod tests {
         assert_eq!(reply.messages, vec!["有，路径：/tmp/rustclaw.service"]);
         assert!(!reply.should_fail_task);
         assert!(!reply.is_llm_reply);
+    }
+
+    #[test]
+    fn exact_contract_keeps_publishable_synthesis_over_raw_observed_inventory() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"action":"inventory_dir","counts":{"dirs":1,"files":1,"total":2},"ext_filter":["md"],"names":["regression_llm_first","垃圾代码端分析报告.md"],"names_only":true}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "synthesize_answer".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("垃圾代码端分析报告.md".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.last_user_visible_respond = Some("垃圾代码端分析报告.md".to_string());
+        loop_state.last_publishable_synthesis_output = Some("垃圾代码端分析报告.md".to_string());
+        let mut delivery_messages = vec!["垃圾代码端分析报告.md".to_string()];
+        let mut route = scalar_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+        route.output_contract.locator_hint = "document".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut finalizer_summary = None;
+
+        prefer_observed_answer_for_exact_contract(
+            &state,
+            "task-synth-file-names",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut delivery_messages,
+            &mut finalizer_summary,
+        );
+
+        assert_eq!(delivery_messages, vec!["垃圾代码端分析报告.md"]);
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some("垃圾代码端分析报告.md")
+        );
+        assert!(finalizer_summary.is_none());
     }
 
     #[tokio::test]
@@ -4119,7 +4358,7 @@ mod tests {
         route.resolved_intent =
             "check which package manager is recognized and briefly say the everyday default"
                 .to_string();
-        route.route_reason = "route_contract:package_manager_detect_summary".to_string();
+        route.route_reason = "llm_contract:package_manager_detect_summary".to_string();
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.requires_content_evidence = true;
         let agent_run_context = crate::agent_engine::AgentRunContext {

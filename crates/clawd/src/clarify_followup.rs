@@ -2,17 +2,17 @@
 //
 // 触发证据 (2026-04-19)：multi-turn case clarify_sqlite_schema_version_fixture /
 // context_alias_switch_archive_chain / clarify_find_which_script 一类 ——
-// turn N-1 系统问 "请提供路径"，turn N 用户只贴一个 path/单文件名，按理说
+// turn N-1 系统询问缺失 locator，turn N 用户只贴一个 path/单文件名，按理说
 // normalizer 需要拿到上一轮缺失 slot 的上下文，因为：
 //   1. "上一轮要 clarify 什么" 已经写在 last_turn_full / [clarification_requested]
-//   2. "用户回了什么" 可以靠 prompt_looks_like_clarify_target_only 判定
+//   2. "用户回了什么" 只做 locator/path/filename 形态判断，不做语义路由
 //
 // 2026-04-23 planner-first 改造后，这里不再跳过 normalizer，也不本地合成
 // RouteResult；只把 prior + current 合并成 normalizer 输入，让 LLM 继续做语义规划。
 //
 // V1 仍然故意收窄：
-//   - 不 resolve alias-deictic（"那个文件"指 X 已绑定）；alias 走 retrieval
-//     型 fact，没有 KV，要做需要扩 schema/扩 retrieval，留 follow-up
+//   - 不 resolve alias-deictic（"那个文件"指 X 已绑定）；alias bindings 已作为
+//     route context 提供给 normalizer，由 LLM 基于 session state 解析
 //   - 不决定 act/chat，也不决定 output_contract；这些继续交给 normalizer/planner。
 
 /// Clarify 续答命中后的 normalizer rewrite 信息。
@@ -61,18 +61,18 @@ pub(crate) fn extract_prior_user_text(last_turn_full: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-/// 当前 prompt 是否看起来"整段就是 clarify 槽位的 locator/path/单文件名"。
+/// 当前 prompt 是否是"整段只有 locator/path/单文件名"的结构化续答。
 ///
-/// 故意比 ask_prepare::prompt_looks_like_clarify_target_only 更严：那个口径只
-/// 判 "prompt 中含 locator token"（用来增强 normalizer 输入，错了代价小），
-/// rewrite 错了代价大，必须 "整段都是 locator-like token"。
+/// 这不是自然语言意图分类，只做路径、URL、文件名、inline JSON 等结构形态判断。
+/// 命中后仍然交给 normalizer/planner 做语义规划，不在本地决定 act/chat 或
+/// output contract。
 ///
 /// 命中规则（任一即可）：
 ///   1. 整段是合法 inline JSON value（结构化续答）
 ///   2. 整段（按 whitespace + 中英文逗号/分号分词）所有 token 都是 locator-like
 ///      （path / url / filename.ext / 大写裸 stem 如 README），且至少有一个
 ///      "明确路径/URL" token（含 / \ 或扩展名 / 协议头），且 token 总数 ≤ 4
-pub(crate) fn prompt_looks_like_locator_only(prompt: &str) -> bool {
+pub(crate) fn prompt_is_structural_locator_only(prompt: &str) -> bool {
     let trimmed = prompt.trim();
     if trimmed.is_empty() {
         return false;
@@ -197,7 +197,7 @@ fn looks_like_bare_uppercase_stem(token: &str) -> bool {
 ///
 /// 命中条件（全部满足）：
 ///   1. 上一轮 [clarification_requested]
-///   2. 当前 prompt 只贴 locator/path/单文件名（prompt_looks_like_locator_only）
+///   2. 当前 prompt 只贴 locator/path/单文件名（prompt_is_structural_locator_only）
 ///   3. 上一轮能解析出非空的 User 原话（extract_prior_user_text Some）
 ///
 /// 返回 None 时，调用方按原路径继续走 normalizer。
@@ -208,7 +208,7 @@ pub(crate) fn try_clarify_reply_rewrite(
     if !last_turn_was_clarify(last_turn_full) {
         return None;
     }
-    if !prompt_looks_like_locator_only(prompt) {
+    if !prompt_is_structural_locator_only(prompt) {
         return None;
     }
     let prior_user_text = extract_prior_user_text(last_turn_full)?;
@@ -289,29 +289,29 @@ mod tests {
     }
 
     #[test]
-    fn prompt_looks_like_locator_only_accepts_explicit_path() {
-        assert!(prompt_looks_like_locator_only(
+    fn prompt_is_structural_locator_only_accepts_explicit_path() {
+        assert!(prompt_is_structural_locator_only(
             "scripts/nl_tests/fixtures/test_contract.sqlite"
         ));
-        assert!(prompt_looks_like_locator_only(
+        assert!(prompt_is_structural_locator_only(
             "/home/guagua/rustclaw/Cargo.toml"
         ));
     }
 
     #[test]
-    fn prompt_looks_like_locator_only_accepts_bare_filename() {
-        assert!(prompt_looks_like_locator_only("Cargo.toml"));
-        assert!(prompt_looks_like_locator_only("README.md"));
+    fn prompt_is_structural_locator_only_accepts_bare_filename() {
+        assert!(prompt_is_structural_locator_only("Cargo.toml"));
+        assert!(prompt_is_structural_locator_only("README.md"));
     }
 
     #[test]
-    fn prompt_looks_like_locator_only_rejects_full_sentence() {
+    fn prompt_is_structural_locator_only_rejects_full_sentence() {
         // 一个长描述不像单纯 locator 续答，绝不能命中 rewrite
-        assert!(!prompt_looks_like_locator_only(
+        assert!(!prompt_is_structural_locator_only(
             "我现在想知道我们项目里有几个 service 文件，你给我列一下"
         ));
-        assert!(!prompt_looks_like_locator_only(""));
-        assert!(!prompt_looks_like_locator_only("   "));
+        assert!(!prompt_is_structural_locator_only(""));
+        assert!(!prompt_is_structural_locator_only("   "));
     }
 
     #[test]

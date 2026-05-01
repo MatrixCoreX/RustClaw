@@ -30,8 +30,8 @@ __SKILL_CONTRACTS__
 - If key schedule fields or required skill args are missing, set `needs_clarify=true` and provide one concise `clarify_question`. Do not create a placeholder task just to ask the question later.
 - Request language hint: `__REQUEST_LANGUAGE_HINT__`.
 - Configured fallback language: `__CONFIG_RESPONSE_LANGUAGE__`.
-- Language policy (strict): follow `__REQUEST_LANGUAGE_HINT__` when it is clear (`zh-CN`, `en`, or `mixed`) for any user-visible text such as `clarify_question`. Use `__CONFIG_RESPONSE_LANGUAGE__` only when the hint is `config_default` or otherwise unclear.
-- Do not switch `clarify_question` language just because a downstream skill prefers normalized English arguments such as city names.
+- Language policy (strict): follow `__REQUEST_LANGUAGE_HINT__` when it is clear (`zh-CN`, `en`, or `mixed`) for any user-visible text in `clarify_question`. Use `__CONFIG_RESPONSE_LANGUAGE__` only when the hint is `config_default` or otherwise unclear.
+- Do not switch `clarify_question` language just because a downstream skill prefers normalized English arguments.
 
 Output JSON only. Never output <think> tags, code fences, or extra explanation before/after the JSON:
 {
@@ -66,7 +66,7 @@ Contract for action kinds:
 - When time/date information is insufficient for `create`, lower confidence and use the most conservative supported parse rather than inventing missing calendar details.
 - When a schedule can be recognized but required information is missing, keep the best-known structure, set `needs_clarify=true`, and ask exactly one concise follow-up question in `clarify_question`.
 
-Few-shot examples:
+Illustrative JSON shape samples:
 User: Delete all scheduled tasks
 Output:
 {"kind":"delete","timezone":"__TIMEZONE__","schedule":{"type":"once","run_at":"","time":"","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"ask","payload":{}},"target_job_id":"","raw":"Delete all scheduled tasks","confidence":0.62,"reason":"bulk delete intent without concrete job_id"}
@@ -85,7 +85,7 @@ Output:
 
 User: Tell me today's weather and the next three days every day at 8 AM
 Output:
-{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"weather","args":{}}},"target_job_id":"","raw":"Tell me today's weather and the next three days every day at 8 AM","confidence":0.84,"reason":"weather schedule recognized but english city name missing","needs_clarify":true,"clarify_question":"Please provide the city name in English (for example, Nanjing)."}
+{"kind":"create","timezone":"__TIMEZONE__","schedule":{"type":"daily","run_at":"","time":"08:00","weekday":1,"every_minutes":0,"cron":""},"task":{"kind":"run_skill","payload":{"skill_name":"weather","args":{}}},"target_job_id":"","raw":"Tell me today's weather and the next three days every day at 8 AM","confidence":0.84,"reason":"weather schedule recognized but english city name missing","needs_clarify":true,"clarify_question":"Please provide the city name in English."}
 
 User: Tell me Nanjing weather for today and the next three days every day at 8 AM
 Output:
@@ -102,7 +102,7 @@ __REQUEST__
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en
@@ -110,8 +110,8 @@ Use subheadings such as:
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
 ### zh-CN
-- Chinese scheduling phrases such as `每天早上八点`、`明天提醒我`、`下周一`、`每隔 10 分钟` should be parsed semantically as schedule expressions rather than treated as general chat.
-- Chinese batch-management wording such as `都删掉`、`全暂停`、`全部恢复` usually implies bulk schedule operations even without an explicit job id.
-- Chinese clarify questions for missing scheduling details should remain short and natural, for example `你想几点执行？` or `你是想每天还是只执行一次？`.
+- Chinese scheduling wording should be parsed semantically as schedule expressions rather than treated as general chat; examples are illustrative only.
+- Chinese batch-management wording semantically implies bulk schedule operations even without an explicit job id.
+- Chinese clarify questions for missing scheduling details should remain short and natural.
 - Do not switch `clarify_question` to English merely because downstream skill arguments may later require normalized English values.
 - Mixed Chinese schedule requests that contain English city names, symbols, or skill names should still keep Chinese as the user-visible clarification language when configured.

@@ -18,7 +18,7 @@ REGISTRY_PATH = REPO_ROOT / "configs" / "skills_registry.toml"
 PROMPT_MANAGED_MARKER = "<!-- AUTO-GENERATED: sync_skill_docs.py -->"
 MULTILINGUAL_REINFORCEMENT_BLOCK = """## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en
@@ -26,11 +26,11 @@ Use subheadings such as:
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
 ### zh-CN
-- Chinese colloquial requests such as `帮我看下`、`瞄一眼`、`顺手查一下`、`帮我确认下` should still be interpreted by capability semantics rather than downgraded to pure chat.
-- Chinese delivery wording such as `发我`、`甩给我`、`直接给我`、`别贴正文` usually indicates file/result delivery intent instead of inline pasted content.
-- Chinese brevity/format wording such as `只回数字`、`只给结果`、`只回路径`、`一句话说完` should constrain the planner's final expected output shape when that skill can support it.
-- Chinese style wording such as `用人话说`、`通俗点`、`给新手讲` means keep the eventual explanation low-jargon and user-friendly.
-- Chinese deictic wording such as `那个`、`它`、`上面那个` should rely on immediate concrete context only; do not guess unsupported targets or invent missing args just to force a skill call.
+- Interpret Chinese colloquial phrasing by capability semantics and requested task shape, not by a fixed phrase list.
+- Judge Chinese delivery intent semantically: if the user asks to receive a file/result rather than inline body text, plan toward delivery without depending on fixed wording.
+- Preserve Chinese brevity and format constraints as final output contracts when the skill can support them; do not convert those constraints into token-level matching rules.
+- Treat Chinese style constraints as audience/tone constraints for the eventual explanation, not as skill-selection shortcuts.
+- Resolve Chinese deictic references only from immediate, concrete, type-compatible context; do not guess unsupported targets or invent missing args just to force a skill call.
 """
 RESERVED_PROMPT_STEMS = {"README"}
 
@@ -136,7 +136,7 @@ def _extract_section(md: str, title: str) -> str:
     return match.group(1).strip()
 
 
-def prompt_template(skill: str, interface_md: str) -> str:
+def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
     capability = _extract_section(interface_md, "Capability Summary")
     config_entry_points = _extract_section(interface_md, "Config Entry Points")
     actions = _extract_section(interface_md, "Actions")
@@ -150,13 +150,15 @@ def prompt_template(skill: str, interface_md: str) -> str:
     errors = errors or "- TODO: list error conventions."
     examples = examples or "- TODO: add request/response examples."
 
-    return f"""{PROMPT_MANAGED_MARKER}
+    source_path = interface_path.relative_to(REPO_ROOT).as_posix()
+
+    content = f"""{PROMPT_MANAGED_MARKER}
 ## Role & Boundaries
 - You are the `{skill}` skill planner.
 - Follow this skill's `INTERFACE.md` strictly when selecting actions and parameters.
 
 ## Interface Source
-- Primary source: `crates/skills/{skill}/INTERFACE.md`
+- Primary source: `{source_path}`
 - If the request exceeds interface scope, ask a concise clarification instead of guessing.
 
 ## Capability Summary (from interface)
@@ -185,6 +187,7 @@ def prompt_template(skill: str, interface_md: str) -> str:
 
 {MULTILINGUAL_REINFORCEMENT_BLOCK}
 """
+    return content.rstrip() + "\n"
 
 
 def write_if_missing(path: Path, content: str, apply: bool) -> bool:
@@ -263,7 +266,7 @@ def sync(apply: bool, adopt_skills: set[str] | None = None) -> int:
             if interface_path.exists()
             else interface_template(skill)
         )
-        prompt_md = prompt_template(skill, interface_md)
+        prompt_md = prompt_template(skill, interface_md, interface_path)
         if skill in adopt_skills:
             if write_adopted(prompt_path, prompt_md, apply):
                 changed += 1
@@ -325,7 +328,10 @@ def main() -> int:
             print("--adopt requires a non-empty skill name", file=sys.stderr)
             return 1
         if skill not in skill_set:
-            print(f"--adopt skill not found under crates/skills: {skill}", file=sys.stderr)
+            print(
+                f"--adopt skill not found under crates/skills or external_skills: {skill}",
+                file=sys.stderr,
+            )
             return 1
         adopt_skills = {skill}
 
