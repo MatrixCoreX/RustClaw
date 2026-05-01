@@ -13,6 +13,9 @@
 - It is intended for complex composed queries where builtin primitives alone are too low-level for stable planning.
 - For directory inventory with filename or extension filtering, use `inventory_dir` with `files_only=true` and `ext_filter`; do not use `extract_field` / `extract_fields` unless the user explicitly asks for fields, keys, or values inside a specific structured document.
 - When the user asks to list files and then briefly explain their purpose, first collect the file names with `inventory_dir`; the final explanation should be synthesized from the names and known project conventions, not from missing structured fields.
+- For recent/latest/last-modified directory inventory, use `inventory_dir` with `sort_by="mtime_desc"` exactly. If the request asks for files, set `files_only=true`; use `max_entries` for the requested count. Do not emit unsupported values such as `mtime`.
+- `extract_field` and `extract_fields` operate on exactly one structured file per call: use `path` plus `field_path`/`field_paths`. Do not pass `paths`, `targets`, or other multi-file arrays to these actions; for multiple files, call the action once per file.
+- For file metadata checks or comparisons, use `compare_paths` for two paths or `path_batch_facts` for multiple explicit paths. Do not model filesystem metadata such as size, modified time, path type, or content equality as `extract_field` / `extract_fields` document fields.
 
 ## Config Entry Points (from interface)
 - No dedicated config entry points declared.
@@ -184,7 +187,7 @@ Response:
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en
@@ -192,9 +195,8 @@ Use subheadings such as:
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
 ### zh-CN
-- Chinese colloquial requests such as `帮我看下`、`瞄一眼`、`顺手查一下`、`帮我确认下` should still be interpreted by capability semantics rather than downgraded to pure chat.
-- Chinese delivery wording such as `发我`、`甩给我`、`直接给我`、`别贴正文` usually indicates file/result delivery intent instead of inline pasted content.
-- Chinese brevity/format wording such as `只回数字`、`只给结果`、`只回路径`、`一句话说完` should constrain the planner's final expected output shape when that skill can support it.
-- Chinese style wording such as `用人话说`、`通俗点`、`给新手讲` means keep the eventual explanation low-jargon and user-friendly.
-- Chinese deictic wording such as `那个`、`它`、`上面那个` should rely on immediate concrete context only; do not guess unsupported targets or invent missing args just to force a skill call.
-
+- Interpret Chinese colloquial phrasing by capability semantics and requested task shape, not by a fixed phrase list.
+- Judge Chinese delivery intent semantically: if the user asks to receive a file/result rather than inline body text, plan toward delivery without depending on fixed wording.
+- Preserve Chinese brevity and format constraints as final output contracts when the skill can support them; do not convert those constraints into token-level matching rules.
+- Treat Chinese style constraints as audience/tone constraints for the eventual explanation, not as skill-selection shortcuts.
+- Resolve Chinese deictic references only from immediate, concrete, type-compatible context; do not guess unsupported targets or invent missing args just to force a skill call.

@@ -114,6 +114,8 @@ def render_prompt(vendor: str, logical_path: str, manifest: dict[str, dict]) -> 
     parts: list[str] = []
     for part in entry.get("base", []):
         parts.append(read_required(REPO_ROOT / part))
+    for part in entry.get("overlay", []):
+        parts.append(read_required(REPO_ROOT / part))
     patch_rel = entry.get("vendor_patch")
     if patch_rel:
         for candidate in vendor_patch_candidates(vendor, patch_rel):
@@ -121,8 +123,6 @@ def render_prompt(vendor: str, logical_path: str, manifest: dict[str, dict]) -> 
             if patch:
                 parts.append(patch)
                 break
-    for part in entry.get("overlay", []):
-        parts.append(read_required(REPO_ROOT / part))
     return "\n\n".join(part.strip() for part in parts if part.strip())
 
 

@@ -269,7 +269,7 @@ def build_rows(
         "rows_expect_dropped": 0,
         "rows_skipped_risky": 0,
         "rows_emitted": 0,
-    "rows_deduped": 0,
+        "rows_deduped": 0,
     }
     seen: set[tuple[str, str]] = set()
     files = sorted(cases_dir.rglob("*.txt"))
@@ -309,14 +309,13 @@ def canonical_prompt_key(prompt: str) -> str:
     return re.sub(r"\s+", " ", prompt).strip()
 
 
-def write_aggregate(out_path: Path, rows: list[CaseRow], stats: dict[str, int], include_risky: bool) -> None:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+def render_aggregate(out_path: Path, rows: list[CaseRow], stats: dict[str, int], include_risky: bool) -> str:
     lines = [
         "# Generated client-like continuous NL aggregate.",
         "# Do not edit by hand; regenerate with scripts/nl_tests/build_client_like_case_aggregate.py.",
         "# Deduplication: global prompt text, after whitespace normalization.",
         "# Run:",
-        f"#   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file {out_path.as_posix()} --prompt-reply-only",
+        f"#   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file {out_path.as_posix()} --prompt-reply-only --quality-guard",
         f"# include_risky={include_risky}",
         "# stats="
         + " ".join(f"{key}={value}" for key, value in sorted(stats.items())),
@@ -329,7 +328,12 @@ def write_aggregate(out_path: Path, rows: list[CaseRow], stats: dict[str, int], 
             current_source = row.source
             lines.append(f"# source: {current_source}")
         lines.append(row.line())
-    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return "\n".join(lines) + "\n"
+
+
+def write_aggregate(out_path: Path, rows: list[CaseRow], stats: dict[str, int], include_risky: bool) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(render_aggregate(out_path, rows, stats, include_risky), encoding="utf-8")
 
 
 def main() -> int:
@@ -363,6 +367,11 @@ def main() -> int:
             "single-shot expects conflict with exact-output contracts."
         ),
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Exit non-zero if the aggregate file is missing or not up to date.",
+    )
     args = parser.parse_args()
 
     cases_dir = Path(args.cases_dir)
@@ -373,6 +382,23 @@ def main() -> int:
         include_temp=args.include_temp,
         preserve_expects=args.preserve_expects,
     )
+    if args.check:
+        expected = render_aggregate(out_path, rows, stats, include_risky=args.include_risky)
+        actual = out_path.read_text(encoding="utf-8") if out_path.exists() else ""
+        if actual != expected:
+            print(
+                "CLIENT_LIKE_AGGREGATE_OUTDATED "
+                f"out={out_path} "
+                + " ".join(f"{key}={value}" for key, value in sorted(stats.items()))
+            )
+            return 1
+        print(
+            "CLIENT_LIKE_AGGREGATE_OK "
+            f"out={out_path} "
+            + " ".join(f"{key}={value}" for key, value in sorted(stats.items()))
+        )
+        return 0
+
     write_aggregate(out_path, rows, stats, include_risky=args.include_risky)
     print(
         "CLIENT_LIKE_AGGREGATE_BUILT "

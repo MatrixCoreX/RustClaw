@@ -1,6 +1,5 @@
 use anyhow::Result;
 use serde_json::Value;
-use std::collections::{HashSet, VecDeque};
 use tracing::info;
 
 use super::*;
@@ -43,10 +42,6 @@ fn clarify_fallback_source_or_default(
     source.unwrap_or(crate::fallback::ClarifyFallbackSource::IntentUnresolved)
 }
 
-fn normalize_brief_route_text(input: &str) -> String {
-    input.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 fn clarify_reason_allows_route_question_reuse(
     clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
 ) -> bool {
@@ -54,15 +49,6 @@ fn clarify_reason_allows_route_question_reuse(
         clarify_reason_kind,
         crate::post_route_policy::ClarifyReasonKind::RouteReasonText
     )
-}
-
-fn resolved_intent_inherits_prior_operation(prompt: &str, resolved_prompt: &str) -> bool {
-    let prompt_norm = normalize_brief_route_text(prompt.trim());
-    let resolved_norm = normalize_brief_route_text(resolved_prompt.trim());
-    !prompt_norm.is_empty()
-        && !resolved_norm.is_empty()
-        && prompt_norm != resolved_norm
-        && resolved_norm.len() > prompt_norm.len()
 }
 
 fn should_preserve_original_inline_structured_input(
@@ -123,7 +109,6 @@ fn build_locator_fuzzy_clarify_context(
 }
 
 fn should_suppress_recent_execution_in_clarify_context(
-    prompt: &str,
     route_result: &crate::RouteResult,
     fuzzy_locator_suggestions: &[String],
 ) -> bool {
@@ -135,20 +120,16 @@ fn should_suppress_recent_execution_in_clarify_context(
                 | crate::OutputLocatorKind::Filename
                 | crate::OutputLocatorKind::Url
         )
-        && !super::has_concrete_locator_hint(prompt)
+        && route_result.output_contract.locator_hint.trim().is_empty()
 }
 
 fn should_reuse_route_clarify_question(
-    prompt: &str,
     route_result: &crate::RouteResult,
     clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
     fuzzy_locator_suggestions: &[String],
 ) -> bool {
-    !should_suppress_recent_execution_in_clarify_context(
-        prompt,
-        route_result,
-        fuzzy_locator_suggestions,
-    ) && fuzzy_locator_suggestions.is_empty()
+    !should_suppress_recent_execution_in_clarify_context(route_result, fuzzy_locator_suggestions)
+        && fuzzy_locator_suggestions.is_empty()
         && clarify_reason_allows_route_question_reuse(clarify_reason_kind)
 }
 
@@ -246,249 +227,38 @@ fn structured_missing_locator_clarify_context(
     Some(lines.join("\n"))
 }
 
-fn structured_doc_filename_scalar_locator_resolution(
-    workspace_root: &std::path::Path,
-    route_result: &crate::RouteResult,
-    max_depth: usize,
-    _max_files: usize,
-) -> Option<crate::post_route_policy::LocatorResolution> {
-    if route_result.output_contract.locator_kind != crate::OutputLocatorKind::Filename
-        || !route_result.output_contract.requires_content_evidence
-        || route_result.output_contract.response_shape != crate::OutputResponseShape::Scalar
-    {
-        return None;
-    }
-    let locator_hint = route_result.output_contract.locator_hint.trim();
-    let (file_name, field_path, format) = if locator_hint.eq_ignore_ascii_case("Cargo.toml") {
-        ("Cargo.toml", "package.name", "toml")
-    } else if locator_hint.eq_ignore_ascii_case("package.json") {
-        ("package.json", "name", "json")
-    } else {
-        return None;
-    };
-
-    let candidates =
-        find_exact_filename_matches_with_depth(workspace_root, file_name, max_depth, 16);
-    choose_structured_doc_scalar_candidate(workspace_root, candidates, field_path, format)
-}
-
-fn find_exact_filename_matches_with_depth(
-    root: &std::path::Path,
-    file_name: &str,
-    max_depth: usize,
-    max_matches: usize,
-) -> Vec<std::path::PathBuf> {
-    if !root.is_dir() || file_name.trim().is_empty() || max_matches == 0 {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    let mut queue = VecDeque::from([(root.to_path_buf(), 0usize)]);
-    while let Some((dir, depth)) = queue.pop_front() {
-        let Ok(read_dir) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        let mut entries = read_dir
-            .filter_map(std::result::Result::ok)
-            .collect::<Vec<_>>();
-        entries.sort_by_key(|entry| entry.path());
-        for entry in entries {
-            let path = entry.path();
-            let Ok(meta) = entry.file_type() else {
-                continue;
-            };
-            if meta.is_dir() {
-                if depth < max_depth
-                    && !should_skip_structured_doc_dir(
-                        path.file_name()
-                            .and_then(|value| value.to_str())
-                            .unwrap_or(""),
-                    )
-                {
-                    queue.push_back((path, depth + 1));
-                }
-                continue;
-            }
-            if !meta.is_file() {
-                continue;
-            }
-            let Some(current_name) = path.file_name().and_then(|value| value.to_str()) else {
-                continue;
-            };
-            if current_name.eq_ignore_ascii_case(file_name) {
-                out.push(path);
-                if out.len() >= max_matches {
-                    return out;
-                }
-            }
-        }
-    }
-    out
-}
-
-fn should_skip_structured_doc_dir(name: &str) -> bool {
-    matches!(
-        name,
-        "node_modules" | "target" | ".git" | "dist" | "build" | ".next"
-    )
-}
-
-fn choose_structured_doc_scalar_candidate(
-    workspace_root: &std::path::Path,
-    candidates: Vec<std::path::PathBuf>,
-    field_path: &str,
-    format: &str,
-) -> Option<crate::post_route_policy::LocatorResolution> {
-    if candidates.is_empty() {
-        return None;
-    }
-    let field_bearing = candidates
-        .iter()
-        .filter(|path| structured_doc_has_field(path, field_path, format))
-        .cloned()
-        .collect::<Vec<_>>();
-
-    if field_bearing.is_empty() {
-        return if candidates.len() == 1 {
-            Some(crate::post_route_policy::LocatorResolution::Direct(
-                candidates[0].display().to_string(),
-            ))
-        } else {
-            Some(crate::post_route_policy::LocatorResolution::Fuzzy(
-                candidates
-                    .into_iter()
-                    .take(3)
-                    .map(|path| path.display().to_string())
-                    .collect(),
-            ))
-        };
-    }
-
-    let Some(min_depth) = field_bearing
-        .iter()
-        .map(|path| relative_depth(workspace_root, path))
-        .min()
-    else {
-        return None;
-    };
-    let best = field_bearing
-        .into_iter()
-        .filter(|path| relative_depth(workspace_root, path) == min_depth)
-        .collect::<Vec<_>>();
-
-    if best.len() == 1 {
-        Some(crate::post_route_policy::LocatorResolution::Direct(
-            best[0].display().to_string(),
-        ))
-    } else {
-        Some(crate::post_route_policy::LocatorResolution::Fuzzy(
-            best.into_iter()
-                .take(3)
-                .map(|path| path.display().to_string())
-                .collect(),
-        ))
-    }
-}
-
-fn relative_depth(workspace_root: &std::path::Path, path: &std::path::Path) -> usize {
-    path.strip_prefix(workspace_root)
-        .ok()
-        .map(|relative| relative.components().count())
-        .unwrap_or_else(|| path.components().count())
-}
-
-fn structured_doc_has_field(path: &std::path::Path, field_path: &str, format: &str) -> bool {
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return false;
-    };
-    let root = match format {
-        "json" => serde_json::from_str::<serde_json::Value>(&raw).ok(),
-        "toml" => toml::from_str::<toml::Value>(&raw)
-            .ok()
-            .and_then(|value| serde_json::to_value(value).ok()),
-        _ => None,
-    };
-    root.as_ref()
-        .and_then(|value| lookup_scalar_field_value(value, field_path))
-        .is_some()
-}
-
-fn lookup_scalar_field_value<'a>(
-    value: &'a serde_json::Value,
-    field_path: &str,
-) -> Option<&'a serde_json::Value> {
-    let mut current = value;
-    for seg in field_path.split('.') {
-        current = match current {
-            serde_json::Value::Object(map) => map.get(seg)?,
-            serde_json::Value::Array(items) => items.get(seg.parse::<usize>().ok()?)?,
-            _ => return None,
-        };
-    }
-    (!current.is_null()).then_some(current)
-}
-
 fn apply_ask_post_route(
     state: &AppState,
     task: &crate::ClaimedTask,
     prompt: &str,
     resolved_prompt: &str,
     recent_execution_context: &str,
-    immediate_prior_turn_was_clarify: bool,
     route_result: crate::RouteResult,
     mut resolved_prompt_for_execution: String,
     mut prompt_with_memory_for_execution: String,
 ) -> AppliedAskPostRoute {
-    let locator_resolution = if should_attempt_auto_locator(&route_result)
-        && !has_multiple_locator_targets(prompt, resolved_prompt)
-    {
+    let locator_resolution = if should_attempt_auto_locator(&route_result) {
         current_workspace_locator_resolution(&state.skill_rt.workspace_root, &route_result)
-            .or_else(|| {
-                structured_doc_filename_scalar_locator_resolution(
-                    &state.skill_rt.workspace_root,
-                    &route_result,
-                    state.skill_rt.locator_scan_max_depth,
-                    state.skill_rt.locator_scan_max_files,
-                )
-            })
             .unwrap_or_else(|| {
-                let locator_from_hint =
-                    if route_result.output_contract.locator_hint.trim().is_empty() {
-                        None
-                    } else {
-                        super::try_resolve_implicit_locator_path(
-                            state,
-                            route_result.output_contract.locator_hint.trim(),
-                            route_result.output_contract.locator_hint.trim(),
-                            route_result.output_contract.locator_kind,
-                            Some(recent_execution_context),
-                        )
-                    };
-                match locator_from_hint
-                    .map(|resolution| match resolution {
-                        super::LocatorAutoResolution::Direct(path) => {
-                            crate::post_route_policy::LocatorResolution::Direct(path)
-                        }
-                        super::LocatorAutoResolution::Fuzzy(candidates) => {
-                            crate::post_route_policy::LocatorResolution::Fuzzy(candidates)
-                        }
-                    })
-                    .or_else(|| {
-                        super::try_resolve_implicit_locator_path(
-                            state,
-                            prompt,
-                            resolved_prompt,
-                            route_result.output_contract.locator_kind,
-                            Some(recent_execution_context),
-                        )
-                        .map(|resolution| match resolution {
-                            super::LocatorAutoResolution::Direct(path) => {
-                                crate::post_route_policy::LocatorResolution::Direct(path)
-                            }
-                            super::LocatorAutoResolution::Fuzzy(candidates) => {
-                                crate::post_route_policy::LocatorResolution::Fuzzy(candidates)
-                            }
-                        })
-                    }) {
+                let locator_hint = route_result.output_contract.locator_hint.trim();
+                if locator_hint.is_empty() {
+                    return crate::post_route_policy::LocatorResolution::None;
+                }
+                match super::try_resolve_implicit_locator_path(
+                    state,
+                    locator_hint,
+                    locator_hint,
+                    route_result.output_contract.locator_kind,
+                    Some(recent_execution_context),
+                )
+                .map(|resolution| match resolution {
+                    super::LocatorAutoResolution::Direct(path) => {
+                        crate::post_route_policy::LocatorResolution::Direct(path)
+                    }
+                    super::LocatorAutoResolution::Fuzzy(candidates) => {
+                        crate::post_route_policy::LocatorResolution::Fuzzy(candidates)
+                    }
+                }) {
                     Some(resolution) => resolution,
                     None => crate::post_route_policy::LocatorResolution::None,
                 }
@@ -496,16 +266,8 @@ fn apply_ask_post_route(
     } else {
         crate::post_route_policy::LocatorResolution::None
     };
-    let post_route = crate::post_route_policy::apply_post_route_policy(
-        route_result.clone(),
-        super::has_concrete_locator_hint(prompt),
-        super::has_concrete_locator_hint(resolved_prompt),
-        super::has_explicit_path_or_url_locator_hint(prompt),
-        super::has_explicit_path_or_url_locator_hint(resolved_prompt),
-        resolved_intent_inherits_prior_operation(prompt, resolved_prompt),
-        immediate_prior_turn_was_clarify,
-        locator_resolution,
-    );
+    let post_route =
+        crate::post_route_policy::apply_post_route_policy(route_result.clone(), locator_resolution);
     if let Some(hint) = post_route.auto_locator_hint.as_deref() {
         resolved_prompt_for_execution.push_str(hint);
         prompt_with_memory_for_execution.push_str(hint);
@@ -590,66 +352,6 @@ fn should_attempt_auto_locator(route_result: &crate::RouteResult) -> bool {
     )
 }
 
-fn has_multiple_locator_targets(prompt: &str, resolved_prompt: &str) -> bool {
-    fn filtered_filename_candidates(text: &str) -> Vec<String> {
-        crate::intent::surface_signals::analyze_prompt_surface(text)
-            .filename_candidates_excluding_field_selectors()
-    }
-
-    fn explicit_locator_candidates(text: &str) -> Vec<String> {
-        let mut out = Vec::new();
-        let mut seen = HashSet::new();
-        for token in text.split_whitespace() {
-            let trimmed = token
-                .trim_matches(|ch: char| {
-                    matches!(
-                        ch,
-                        '"' | '\''
-                            | '`'
-                            | ','
-                            | '，'
-                            | '。'
-                            | ':'
-                            | '：'
-                            | ';'
-                            | '；'
-                            | '('
-                            | ')'
-                            | '（'
-                            | '）'
-                            | '['
-                            | ']'
-                            | '{'
-                            | '}'
-                            | '<'
-                            | '>'
-                            | '《'
-                            | '》'
-                    )
-                })
-                .split(|ch: char| matches!(ch, ',' | '，' | '。' | ';' | '；' | ')' | '）'))
-                .next()
-                .unwrap_or_default()
-                .trim();
-            if trimmed.is_empty() || !super::has_explicit_path_or_url_locator_hint(trimmed) {
-                continue;
-            }
-            if seen.insert(trimmed.to_string()) {
-                out.push(trimmed.to_string());
-            }
-        }
-        out
-    }
-
-    let mut candidates = explicit_locator_candidates(prompt);
-    candidates.extend(explicit_locator_candidates(resolved_prompt));
-    candidates.extend(filtered_filename_candidates(prompt));
-    candidates.extend(filtered_filename_candidates(resolved_prompt));
-    candidates.sort();
-    candidates.dedup();
-    candidates.len() >= 2
-}
-
 pub(super) async fn prepare_ask_flow(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -672,7 +374,6 @@ pub(super) async fn prepare_ask_flow(
         prompt,
         &prepared_routing.resolved_prompt,
         &prepared_execution.recent_execution_context,
-        prepared_routing.immediate_prior_turn_was_clarify,
         prepared_routing.route_result,
         prepared_execution.resolved_prompt_for_execution,
         prepared_execution.prompt_with_memory_for_execution,
@@ -732,7 +433,6 @@ pub(super) async fn execute_ask_dispatch(
             None,
         );
         let suppress_recent_execution_context = should_suppress_recent_execution_in_clarify_context(
-            prompt,
             route_result,
             fuzzy_locator_suggestions,
         );
@@ -755,7 +455,6 @@ pub(super) async fn execute_ask_dispatch(
             None => clarify_context,
         };
         let preferred_clarify_question = if should_reuse_route_clarify_question(
-            prompt,
             route_result,
             clarify_reason_kind,
             fuzzy_locator_suggestions,
@@ -934,11 +633,9 @@ pub(super) async fn execute_ask_dispatch(
 #[cfg(test)]
 mod tests {
     use super::{
-        clarify_fallback_source_or_default, execution_user_request, has_multiple_locator_targets,
-        resolved_intent_inherits_prior_operation, should_attempt_auto_locator,
+        clarify_fallback_source_or_default, execution_user_request, should_attempt_auto_locator,
         should_preserve_original_inline_structured_input, should_reuse_route_clarify_question,
         should_suppress_recent_execution_in_clarify_context,
-        structured_doc_filename_scalar_locator_resolution,
         structured_missing_locator_clarify_context,
     };
     use std::{
@@ -1178,330 +875,6 @@ mod tests {
     }
 
     #[test]
-    fn multi_locator_prompt_is_detected_before_auto_locator() {
-        assert!(has_multiple_locator_targets(
-            "读一下乙的开头，然后顺手说甲是干什么的",
-            "读取 /tmp/service_notes.md 的开头部分，然后解释 /tmp/README.md 的用途",
-        ));
-    }
-
-    #[test]
-    fn dotted_field_selector_does_not_count_as_second_locator_target() {
-        assert!(!has_multiple_locator_targets(
-            "读取 Cargo.toml 的 package.name，只输出值",
-            "读取 Cargo.toml 的 package.name，只输出值",
-        ));
-    }
-
-    #[test]
-    fn cargo_filename_scalar_locator_resolution_prefers_clarify_when_multiple_manifests_exist() {
-        let root = make_temp_root("cargo_manifest_multi");
-        std::fs::write(root.join("Cargo.toml"), "[workspace]\n").expect("root manifest");
-        std::fs::create_dir_all(root.join("crates/clawd")).expect("crate dir");
-        std::fs::create_dir_all(root.join("crates/claw-core")).expect("second crate dir");
-        std::fs::write(
-            root.join("crates/clawd/Cargo.toml"),
-            "[package]\nname = \"clawd\"\n",
-        )
-        .expect("crate manifest");
-        std::fs::write(
-            root.join("crates/claw-core/Cargo.toml"),
-            "[package]\nname = \"claw-core\"\n",
-        )
-        .expect("second crate manifest");
-
-        let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
-            resolved_intent: "读取 Cargo.toml 的 package.name，只输出值".to_string(),
-            needs_clarify: false,
-            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
-            route_confidence: Some(0.98),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            clarify_question: String::new(),
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract {
-                locator_kind: crate::OutputLocatorKind::Filename,
-                locator_hint: "Cargo.toml".to_string(),
-                requires_content_evidence: true,
-                response_shape: crate::OutputResponseShape::Scalar,
-                ..Default::default()
-            },
-        };
-
-        let resolution = structured_doc_filename_scalar_locator_resolution(&root, &route, 4, 1000);
-        assert!(matches!(
-            resolution,
-            Some(crate::post_route_policy::LocatorResolution::Fuzzy(candidates))
-                if candidates.len() >= 2
-        ));
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn cargo_filename_scalar_locator_resolution_keeps_unique_manifest_direct() {
-        let root = make_temp_root("cargo_manifest_single");
-        std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"single\"\n")
-            .expect("single manifest");
-
-        let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
-            resolved_intent: "读取 Cargo.toml 的 package.name，只输出值".to_string(),
-            needs_clarify: false,
-            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
-            route_confidence: Some(0.98),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            clarify_question: String::new(),
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract {
-                locator_kind: crate::OutputLocatorKind::Filename,
-                locator_hint: "Cargo.toml".to_string(),
-                requires_content_evidence: true,
-                response_shape: crate::OutputResponseShape::Scalar,
-                ..Default::default()
-            },
-        };
-
-        let resolution = structured_doc_filename_scalar_locator_resolution(&root, &route, 4, 1000);
-        assert!(matches!(
-            resolution,
-            Some(crate::post_route_policy::LocatorResolution::Direct(path))
-                if path.ends_with("Cargo.toml")
-        ));
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn cargo_filename_scalar_locator_resolution_uses_contract_not_route_reason() {
-        let root = make_temp_root("cargo_manifest_single_contract");
-        std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"single\"\n")
-            .expect("single manifest");
-
-        let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
-            resolved_intent: "读取 Cargo.toml 的 package.name，只输出值".to_string(),
-            needs_clarify: false,
-            route_reason: String::new(),
-            route_confidence: Some(0.98),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            clarify_question: String::new(),
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract {
-                locator_kind: crate::OutputLocatorKind::Filename,
-                locator_hint: "Cargo.toml".to_string(),
-                requires_content_evidence: true,
-                response_shape: crate::OutputResponseShape::Scalar,
-                ..Default::default()
-            },
-        };
-
-        let resolution = structured_doc_filename_scalar_locator_resolution(&root, &route, 4, 1000);
-        assert!(matches!(
-            resolution,
-            Some(crate::post_route_policy::LocatorResolution::Direct(path))
-                if path.ends_with("Cargo.toml")
-        ));
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn package_json_filename_scalar_resolution_prefers_unique_shallow_name_bearing_candidate() {
-        let root = make_temp_root("package_json_prefer_ui");
-        std::fs::write(
-            root.join("package.json"),
-            "{\"dependencies\":{\"x\":\"1.0.0\"}}",
-        )
-        .expect("root package");
-        std::fs::create_dir_all(root.join("UI")).expect("ui dir");
-        std::fs::write(
-            root.join("UI/package.json"),
-            "{\"name\":\"react-example\",\"version\":\"0.0.0\"}",
-        )
-        .expect("ui package");
-        std::fs::create_dir_all(root.join("services/wa-web-bridge")).expect("service dir");
-        std::fs::write(
-            root.join("services/wa-web-bridge/package.json"),
-            "{\"name\":\"wa-web-bridge\",\"version\":\"0.1.0\"}",
-        )
-        .expect("service package");
-        std::fs::create_dir_all(root.join("node_modules/pkg")).expect("vendor dir");
-        std::fs::write(
-            root.join("node_modules/pkg/package.json"),
-            "{\"name\":\"ignored-vendor\"}",
-        )
-        .expect("vendor package");
-
-        let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
-            resolved_intent: "读取 package.json 里的 name 字段，只输出值".to_string(),
-            needs_clarify: false,
-            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
-            route_confidence: Some(0.98),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            clarify_question: String::new(),
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract {
-                locator_kind: crate::OutputLocatorKind::Filename,
-                locator_hint: "package.json".to_string(),
-                requires_content_evidence: true,
-                response_shape: crate::OutputResponseShape::Scalar,
-                ..Default::default()
-            },
-        };
-
-        let resolution = structured_doc_filename_scalar_locator_resolution(&root, &route, 4, 1000);
-        assert!(matches!(
-            resolution,
-            Some(crate::post_route_policy::LocatorResolution::Direct(path))
-                if path.ends_with("UI/package.json")
-        ));
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn package_json_filename_scalar_resolution_uses_contract_not_route_reason() {
-        let root = make_temp_root("package_json_prefer_ui_contract");
-        std::fs::write(
-            root.join("package.json"),
-            "{\"dependencies\":{\"x\":\"1.0.0\"}}",
-        )
-        .expect("root package");
-        std::fs::create_dir_all(root.join("UI")).expect("ui dir");
-        std::fs::write(
-            root.join("UI/package.json"),
-            "{\"name\":\"react-example\",\"version\":\"0.0.0\"}",
-        )
-        .expect("ui package");
-
-        let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
-            resolved_intent: "去 package.json 里找 name，只把值给我".to_string(),
-            needs_clarify: false,
-            route_reason: String::new(),
-            route_confidence: Some(0.98),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            clarify_question: String::new(),
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract {
-                locator_kind: crate::OutputLocatorKind::Filename,
-                locator_hint: "package.json".to_string(),
-                requires_content_evidence: true,
-                response_shape: crate::OutputResponseShape::Scalar,
-                ..Default::default()
-            },
-        };
-
-        let resolution = structured_doc_filename_scalar_locator_resolution(&root, &route, 4, 1000);
-        assert!(matches!(
-            resolution,
-            Some(crate::post_route_policy::LocatorResolution::Direct(path))
-                if path.ends_with("UI/package.json")
-        ));
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn package_json_filename_scalar_resolution_clarifies_when_shallow_name_bearing_candidates_tie()
-    {
-        let root = make_temp_root("package_json_tie");
-        std::fs::create_dir_all(root.join("UI")).expect("ui dir");
-        std::fs::create_dir_all(root.join("web")).expect("web dir");
-        std::fs::write(
-            root.join("UI/package.json"),
-            "{\"name\":\"react-example\",\"version\":\"0.0.0\"}",
-        )
-        .expect("ui package");
-        std::fs::write(
-            root.join("web/package.json"),
-            "{\"name\":\"web-console\",\"version\":\"0.1.0\"}",
-        )
-        .expect("web package");
-
-        let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
-            resolved_intent: "读取 package.json 里的 name 字段，只输出值".to_string(),
-            needs_clarify: false,
-            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
-            route_confidence: Some(0.98),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            clarify_question: String::new(),
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract {
-                locator_kind: crate::OutputLocatorKind::Filename,
-                locator_hint: "package.json".to_string(),
-                requires_content_evidence: true,
-                response_shape: crate::OutputResponseShape::Scalar,
-                ..Default::default()
-            },
-        };
-
-        let resolution = structured_doc_filename_scalar_locator_resolution(&root, &route, 4, 1000);
-        assert!(matches!(
-            resolution,
-            Some(crate::post_route_policy::LocatorResolution::Fuzzy(candidates))
-                if candidates.len() >= 2
-        ));
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn inherited_operation_detects_locator_handoff_rewrite() {
-        assert!(resolved_intent_inherits_prior_operation(
-            "document",
-            "list the contents of the directory named 'document'"
-        ));
-    }
-
-    #[test]
-    fn inherited_operation_ignores_equivalent_prompt() {
-        assert!(!resolved_intent_inherits_prior_operation(
-            "读取 README 前 20 行",
-            "读取 README 前 20 行"
-        ));
-    }
-
-    #[test]
     fn inline_json_payload_prefers_original_user_request_for_execution() {
         let prompt = r#"把这个 JSON 数组按 score 从高到低排一下，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]"#;
         let resolved =
@@ -1560,7 +933,7 @@ mod tests {
     #[test]
     fn structured_missing_locator_records_explicit_route_question_as_context() {
         let mut route = clarify_route(crate::OutputLocatorKind::Filename);
-        route.clarify_question = "请提供具体要查看的目录名或路径。".to_string();
+        route.clarify_question = "LOCATOR_CLARIFY_PROMPT".to_string();
         route.output_contract.delivery_intent = crate::OutputDeliveryIntent::DirectoryLookup;
         let context = structured_missing_locator_clarify_context(&route, &[])
             .expect("structured clarify context");
@@ -1633,7 +1006,6 @@ mod tests {
     fn path_scoped_clarify_without_locator_suppresses_recent_execution_context() {
         let route = clarify_route(crate::OutputLocatorKind::Path);
         assert!(should_suppress_recent_execution_in_clarify_context(
-            "把那个配置文件发给我",
             &route,
             &[],
         ));
@@ -1643,7 +1015,6 @@ mod tests {
     fn filename_clarify_without_locator_does_not_reuse_router_question() {
         let route = clarify_route(crate::OutputLocatorKind::Filename);
         assert!(!should_reuse_route_clarify_question(
-            "读一下那个文件里的名字字段，只输出值",
             &route,
             crate::post_route_policy::ClarifyReasonKind::MissingPathScopedLocator,
             &[],
@@ -1651,10 +1022,10 @@ mod tests {
     }
 
     #[test]
-    fn route_reason_text_can_reuse_router_question_when_no_structured_override_exists() {
-        let route = clarify_route(crate::OutputLocatorKind::Filename);
+    fn route_reason_text_can_reuse_router_question_when_structured_locator_exists() {
+        let mut route = clarify_route(crate::OutputLocatorKind::Filename);
+        route.output_contract.locator_hint = "README.md".to_string();
         assert!(should_reuse_route_clarify_question(
-            "README.md",
             &route,
             crate::post_route_policy::ClarifyReasonKind::RouteReasonText,
             &[],
@@ -1665,7 +1036,6 @@ mod tests {
     fn clarify_with_fuzzy_candidates_keeps_recent_context_available() {
         let route = clarify_route(crate::OutputLocatorKind::Filename);
         assert!(!should_suppress_recent_execution_in_clarify_context(
-            "读一下那个文件里的名字字段，只输出值",
             &route,
             &["/tmp/a".to_string()],
         ));

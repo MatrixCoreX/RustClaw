@@ -10,7 +10,7 @@
 - 当前已显式支持 `macOS` 与 `Linux` 的挂载点发现与路径提示；其他平台仍可手动传入绝对路径使用。
 - 默认安全模式是 `plan`，只做预览，不直接改动文件。
 - 整理层级默认是：`品牌 / 机型 / 镜头 / 焦段 / 年月`。
-- 支持按需求动态改变目录层级：例如只按品牌分开、先按镜头再按年月等。
+- 支持按需求动态改变目录层级，由 planner 将用户语义归一到 `group_by` 顺序。
 - 支持轻量自然语言解析：可以从 `args` 字符串，或 object 里的 `text|prompt|input|instruction|query` 中推断 `source_dir`、`mode`、`group_by`、`capture_month`、`include_subdirs`、`preview_limit`。
 - 输出语言由 `configs/photo_organize.toml` 和 `configs/i18n/photo_organize.<locale>.toml` 控制，也可被 `args.locale/lang` 或 `context.locale/lang` 覆盖。
 
@@ -27,12 +27,12 @@
 | `organize` | `output_dir` | no | string(path) | `<source_dir>/_organized_by_camera` | 整理后的输出目录。相对路径按 `source_dir` 解析。 |
 | `organize` | `group_by` | no | string/string[] | `["brand","model","lens","focal_length","year_month"]` | 目录层级顺序。支持 `brand`、`model`、`lens`、`focal_length`、`year_month`。 |
 | `organize` | `capture_month` | no | string | - | 仅整理指定月份拍摄的照片，格式建议 `YYYY-MM`。 |
-| `organize` | `selected_brands` / `brands` | no | string/string[] | - | 仅整理指定品牌的照片，例如 `["Canon","Sony"]`。其他品牌不动。 |
+| `organize` | `selected_brands` / `brands` | no | string/string[] | - | 仅整理指定品牌的照片；接受品牌名字符串或品牌名数组，其他品牌不动。 |
 | `organize` | `include_subdirs` | no | bool | `true` | 是否递归扫描子目录。 |
 | `organize` | `preview_limit` | no | integer | `12` | 返回的预览条目上限。 |
 | all | `locale` / `lang` / `language` | no | string | config default | 输出语言，如 `zh-CN`、`en-US`。 |
 | `organize` | `text` / `prompt` / `input` / `instruction` / `query` | no | string | - | 自然语言请求，可推断路径、模式、是否递归和预览上限。 |
-| all | raw string `args` | no | string | - | 纯字符串请求也可直接解析，例如 `整理 /Volumes/SDCARD/DCIM 里的照片，先预览`。 |
+| all | raw string `args` | no | string | - | 纯字符串请求也可直接解析；planner 应按语义抽取路径、模式和约束。 |
 
 ## Success `extra` (`status=ok`)
 - `prepare`:

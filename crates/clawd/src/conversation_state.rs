@@ -1,9 +1,7 @@
 use anyhow::Result;
-use regex::Regex;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::OnceLock;
 
 use crate::{AppState, ClaimedTask};
 
@@ -86,89 +84,36 @@ fn normalize_alias_target(raw_target: &str) -> Option<String> {
         .or_else(|| Some(trimmed.to_string()))
 }
 
-fn alias_binding_prefix_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r#"(?i)(?:先记一下|再记一下|记一下|记住|remember this|remember that|note that)"#)
-            .expect("valid alias binding prefix regex")
-    })
-}
-
-fn quoted_alias_binding_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(
-            r#"[\"“'`](?P<alias>[^\"”'`]+)[\"”'`]\s*(?:就是|指向|指|是|改成|means|is|becomes)\s*(?P<target>[^，,；;。]+)"#,
-        )
-        .expect("valid quoted alias binding regex")
-    })
-}
-
-fn bare_alias_binding_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(
-            r#"(?i)(?P<alias>that [a-z0-9][a-z0-9 _/\-]*|那个[^，,；;。 ]+|这(?:个|份)[^，,；;。 ]+)\s*(?:就是|指向|指|是|改成)\s*(?P<target>[^，,；;。]+)"#,
-        )
-        .expect("valid bare alias binding regex")
-    })
-}
-
-fn parse_session_alias_bindings(prompt: &str) -> Vec<SessionAliasBinding> {
-    let trimmed = prompt.trim();
-    if trimmed.is_empty() || !alias_binding_prefix_re().is_match(trimmed) {
+fn parse_session_alias_bindings_from_state_patch(
+    state_patch: Option<&Value>,
+) -> Vec<SessionAliasBinding> {
+    let Some(alias_bindings) = state_patch
+        .and_then(|value| value.get("alias_bindings"))
+        .and_then(|value| value.as_array())
+    else {
         return Vec::new();
-    }
+    };
     let now_ts = crate::now_ts_u64();
     let mut out = Vec::new();
-    let mut occupied_ranges = Vec::new();
-    for captures in quoted_alias_binding_re().captures_iter(trimmed) {
-        let Some(alias) = captures.name("alias") else {
+    for item in alias_bindings {
+        let Some(alias) = item
+            .get("alias")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
             continue;
         };
-        let Some(target) = captures.name("target") else {
+        let Some(target) = item
+            .get("target")
+            .and_then(|value| value.as_str())
+            .and_then(normalize_alias_target)
+        else {
             continue;
         };
-        if let Some(full_match) = captures.get(0) {
-            occupied_ranges.push(full_match.range());
-        }
-        let alias = alias.as_str().trim();
-        let Some(target) = normalize_alias_target(target.as_str()) else {
-            continue;
-        };
-        if alias.is_empty() {
-            continue;
-        }
-        out.push(SessionAliasBinding {
-            alias: alias.to_string(),
-            target,
-            updated_at_ts: now_ts,
-        });
-    }
-    for captures in bare_alias_binding_re().captures_iter(trimmed) {
-        let Some(full_match) = captures.get(0) else {
-            continue;
-        };
-        if occupied_ranges
+        if out
             .iter()
-            .any(|occupied| full_match.start() < occupied.end && occupied.start < full_match.end())
-        {
-            continue;
-        }
-        let Some(alias) = captures.name("alias") else {
-            continue;
-        };
-        let Some(target) = captures.name("target") else {
-            continue;
-        };
-        let alias = alias.as_str().trim();
-        let Some(target) = normalize_alias_target(target.as_str()) else {
-            continue;
-        };
-        if alias.is_empty()
-            || out
-                .iter()
-                .any(|existing| existing.alias.eq_ignore_ascii_case(alias))
+            .any(|existing: &SessionAliasBinding| existing.alias.eq_ignore_ascii_case(alias))
         {
             continue;
         }
@@ -177,51 +122,23 @@ fn parse_session_alias_bindings(prompt: &str) -> Vec<SessionAliasBinding> {
             target,
             updated_at_ts: now_ts,
         });
+        if out.len() >= MAX_SESSION_ALIAS_BINDINGS {
+            break;
+        }
     }
-    out.truncate(MAX_SESSION_ALIAS_BINDINGS);
     out
-}
-
-fn binding_only_prompt_tail(prompt: &str) -> String {
-    let mut tail = quoted_alias_binding_re()
-        .replace_all(prompt, "")
-        .to_string();
-    tail = bare_alias_binding_re().replace_all(&tail, "").to_string();
-    tail = alias_binding_prefix_re().replace_all(&tail, "").to_string();
-    for marker in ["后面我说", "后面说", "以后我说", "以后说"] {
-        tail = tail.replace(marker, "");
-    }
-    tail.trim_matches(|ch: char| {
-        ch.is_whitespace()
-            || matches!(
-                ch,
-                ',' | '，' | '.' | '。' | ';' | '；' | ':' | '：' | '、' | '(' | ')' | '（' | '）'
-            )
-    })
-    .to_string()
-}
-
-pub(crate) fn prompt_is_binding_only_session_alias_definition(prompt: &str) -> bool {
-    let bindings = parse_session_alias_bindings(prompt);
-    if bindings.is_empty() {
-        return false;
-    }
-    let tail = binding_only_prompt_tail(prompt);
-    tail.is_empty()
-        || matches!(
-            tail.as_str(),
-            "," | "，" | "." | "。" | ";" | "；" | ":" | "："
-        )
 }
 
 fn merge_alias_bindings(
     prior_state: Option<&ConversationState>,
-    prompt: &str,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> Vec<SessionAliasBinding> {
     let mut alias_bindings = prior_state
         .map(|state| state.alias_bindings.clone())
         .unwrap_or_default();
-    let parsed = parse_session_alias_bindings(prompt);
+    let parsed = parse_session_alias_bindings_from_state_patch(
+        turn_analysis.and_then(|analysis| analysis.state_patch.as_ref()),
+    );
     if parsed.is_empty() {
         return alias_bindings;
     }
@@ -240,21 +157,118 @@ fn next_last_primary_task_prompt(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    prompt: &str,
     resolved_prompt_for_execution: &str,
 ) -> Option<String> {
     if should_preserve_active_session_pointers(turn_analysis) {
         return prior_state.and_then(|state| state.last_primary_task_prompt.clone());
     }
-    let trimmed = resolved_prompt_for_execution.trim();
-    if trimmed.is_empty() {
-        return prior_state.and_then(|state| state.last_primary_task_prompt.clone());
+    let prior_prompt = prior_state.and_then(|state| state.last_primary_task_prompt.clone());
+    let user_prompt = prompt.trim();
+    let resolved_prompt = resolved_prompt_for_execution.trim();
+    let current_prompt = if user_prompt.is_empty() {
+        resolved_prompt
+    } else {
+        user_prompt
+    };
+    if current_prompt.is_empty() {
+        return prior_prompt;
+    }
+    let Some(turn_type) = turn_analysis.and_then(|analysis| analysis.turn_type) else {
+        if route_result.is_clarify_gate() && prior_prompt.is_none() {
+            return Some(current_prompt.to_string());
+        }
+        return prior_prompt;
+    };
+    if !is_primary_task_turn_type(turn_type) {
+        return prior_prompt;
     }
     if route_result.is_clarify_gate()
         && !should_persist_clarify_primary_task_prompt(route_result, turn_analysis)
     {
-        return prior_state.and_then(|state| state.last_primary_task_prompt.clone());
+        return prior_prompt;
     }
-    Some(trimmed.to_string())
+    match turn_type {
+        crate::intent_router::TurnType::TaskRequest => Some(current_prompt.to_string()),
+        crate::intent_router::TurnType::TaskReplace => Some(current_prompt.to_string()),
+        crate::intent_router::TurnType::TaskAppend
+        | crate::intent_router::TurnType::TaskCorrect
+        | crate::intent_router::TurnType::TaskScopeUpdate => Some(merge_primary_task_prompt(
+            prior_prompt.as_deref(),
+            current_prompt,
+            turn_type,
+            turn_analysis.and_then(|analysis| analysis.state_patch.as_ref()),
+        )),
+        _ => prior_prompt,
+    }
+}
+
+fn merge_primary_task_prompt(
+    prior_prompt: Option<&str>,
+    current_prompt: &str,
+    turn_type: crate::intent_router::TurnType,
+    state_patch: Option<&Value>,
+) -> String {
+    let prior = prior_prompt
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let Some(prior) = prior else {
+        return current_prompt.to_string();
+    };
+    if prior == current_prompt {
+        return prior.to_string();
+    }
+    let label = match turn_type {
+        crate::intent_router::TurnType::TaskCorrect => "Correction",
+        crate::intent_router::TurnType::TaskScopeUpdate => "Scope update",
+        _ => "Additional instruction",
+    };
+    let patch = state_patch
+        .and_then(render_primary_task_state_patch)
+        .map(|patch| format!("\nStructured update: {patch}"))
+        .unwrap_or_default();
+    if prior.starts_with("Task so far:\n") {
+        format!("{prior}\n\n{label}: {current_prompt}{patch}")
+    } else {
+        format!("Task so far:\n{prior}\n\n{label}: {current_prompt}{patch}")
+    }
+}
+
+fn render_primary_task_state_patch(state_patch: &Value) -> Option<String> {
+    match state_patch {
+        Value::Null => None,
+        Value::Object(map) if map.is_empty() => None,
+        Value::Array(items) if items.is_empty() => None,
+        Value::String(text) => {
+            let trimmed = text.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        }
+        other => serde_json::to_string(other).ok(),
+    }
+}
+
+fn is_primary_task_turn_type(turn_type: crate::intent_router::TurnType) -> bool {
+    matches!(
+        turn_type,
+        crate::intent_router::TurnType::TaskRequest
+            | crate::intent_router::TurnType::TaskAppend
+            | crate::intent_router::TurnType::TaskReplace
+            | crate::intent_router::TurnType::TaskCorrect
+            | crate::intent_router::TurnType::TaskScopeUpdate
+    )
+}
+
+fn should_track_primary_task_output(
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    let Some(turn_type) = turn_analysis.and_then(|analysis| analysis.turn_type) else {
+        return false;
+    };
+    is_primary_task_turn_type(turn_type)
+}
+
+fn prior_last_primary_task_output(prior_state: Option<&ConversationState>) -> Option<String> {
+    prior_state.and_then(|state| state.last_primary_task_output.clone())
 }
 
 fn next_last_primary_task_output(
@@ -264,8 +278,11 @@ fn next_last_primary_task_output(
     answer_text: &str,
     answer_messages: &[String],
 ) -> Option<String> {
-    if should_preserve_active_session_pointers(turn_analysis) || route_result.is_clarify_gate() {
-        return prior_state.and_then(|state| state.last_primary_task_output.clone());
+    if should_preserve_active_session_pointers(turn_analysis)
+        || route_result.is_clarify_gate()
+        || !should_track_primary_task_output(turn_analysis)
+    {
+        return prior_last_primary_task_output(prior_state);
     }
     let latest_output = answer_text
         .trim()
@@ -282,7 +299,7 @@ fn next_last_primary_task_output(
             let trimmed = answer_text.trim();
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         });
-    latest_output.or_else(|| prior_state.and_then(|state| state.last_primary_task_output.clone()))
+    latest_output.or_else(|| prior_last_primary_task_output(prior_state))
 }
 
 fn should_persist_clarify_primary_task_prompt(
@@ -314,59 +331,6 @@ fn should_persist_clarify_primary_task_prompt(
             route_result.output_contract.semantic_kind,
             crate::OutputSemanticKind::None
         )
-}
-
-pub(crate) fn session_alias_target_for_prompt(
-    prompt: &str,
-    session_snapshot: Option<&ActiveSessionSnapshot>,
-) -> Option<String> {
-    if prompt.trim().is_empty() || prompt_is_binding_only_session_alias_definition(prompt) {
-        return None;
-    }
-    let bindings = session_snapshot
-        .and_then(|snapshot| snapshot.conversation_state.as_ref())
-        .map(|state| state.alias_bindings.as_slice())
-        .unwrap_or(&[]);
-    let mut sorted = bindings.iter().collect::<Vec<_>>();
-    sorted.sort_by(|a, b| b.alias.chars().count().cmp(&a.alias.chars().count()));
-    sorted
-        .into_iter()
-        .find(|binding| prompt.contains(&binding.alias))
-        .map(|binding| binding.target.clone())
-}
-
-pub(crate) fn rewrite_prompt_with_alias_bindings(
-    prompt: &str,
-    session_snapshot: Option<&ActiveSessionSnapshot>,
-) -> Option<String> {
-    if prompt.trim().is_empty() || prompt_is_binding_only_session_alias_definition(prompt) {
-        return None;
-    }
-    let bindings = session_snapshot
-        .and_then(|snapshot| snapshot.conversation_state.as_ref())
-        .map(|state| state.alias_bindings.as_slice())
-        .unwrap_or(&[]);
-    if bindings.is_empty() {
-        return None;
-    }
-    let mut rewritten = prompt.to_string();
-    let mut matched = false;
-    let mut sorted = bindings.iter().collect::<Vec<_>>();
-    sorted.sort_by(|a, b| b.alias.chars().count().cmp(&a.alias.chars().count()));
-    for binding in sorted {
-        if rewritten.contains(&binding.alias) {
-            rewritten = rewritten.replace(
-                &binding.alias,
-                &spaced_alias_target_substitution(&binding.target),
-            );
-            matched = true;
-        }
-    }
-    matched.then_some(rewritten.split_whitespace().collect::<Vec<_>>().join(" "))
-}
-
-fn spaced_alias_target_substitution(target: &str) -> String {
-    format!(" {target} ")
 }
 
 fn effective_locale_hint(
@@ -643,11 +607,12 @@ pub(crate) fn update_active_session_from_ask_outcome(
             active_followup_task_id,
             active_clarify_task_id,
             active_observed_facts_task_id,
-            alias_bindings: merge_alias_bindings(prior_state.as_ref(), prompt),
+            alias_bindings: merge_alias_bindings(prior_state.as_ref(), turn_analysis),
             last_primary_task_prompt: next_last_primary_task_prompt(
                 prior_state.as_ref(),
                 route_result,
                 turn_analysis,
+                prompt,
                 resolved_prompt_for_execution,
             ),
             last_primary_task_output: next_last_primary_task_output(
@@ -773,9 +738,8 @@ pub(crate) fn load_active_session_snapshot(
 mod tests {
     use super::{
         effective_locale_hint, load_active_session_snapshot, next_last_primary_task_prompt,
-        normalized_locale_hint, prompt_is_binding_only_session_alias_definition,
-        rewrite_prompt_with_alias_bindings, session_alias_target_for_prompt, ActiveSessionPointers,
-        ActiveSessionSnapshot, ConversationState, SessionAliasBinding,
+        normalized_locale_hint, ActiveSessionPointers, ActiveSessionSnapshot, ConversationState,
+        SessionAliasBinding,
     };
     use crate::runtime::AppState;
     use crate::ClaimedTask;
@@ -838,6 +802,97 @@ mod tests {
         assert!(snapshot.active_followup_frame.is_none());
         assert!(snapshot.active_clarify_state.is_none());
         assert!(snapshot.active_observed_facts.is_none());
+    }
+
+    fn route_result_for_test(
+        routed_mode: crate::RoutedMode,
+        needs_clarify: bool,
+    ) -> crate::RouteResult {
+        crate::RouteResult {
+            routed_mode,
+            ask_mode: crate::AskMode::from_routed_mode(routed_mode),
+            resolved_intent: String::new(),
+            needs_clarify,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(0.8),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        }
+    }
+
+    #[test]
+    fn plain_chat_without_task_turn_does_not_promote_primary_task() {
+        let route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let promoted = next_last_primary_task_prompt(
+            None,
+            &route_result,
+            None,
+            "刚才记住的编号是什么？",
+            "RC-CONT-CN-0428-A",
+        );
+        assert!(promoted.is_none());
+
+        let prior_state = ConversationState {
+            last_primary_task_prompt: Some("帮我写个方案".to_string()),
+            ..ConversationState::default()
+        };
+        let preserved = next_last_primary_task_prompt(
+            Some(&prior_state),
+            &route_result,
+            None,
+            "刚才记住的编号是什么？",
+            "RC-CONT-CN-0428-A",
+        );
+        assert_eq!(preserved.as_deref(), Some("帮我写个方案"));
+    }
+
+    #[test]
+    fn task_append_persists_compact_primary_without_runtime_envelope() {
+        let route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let prior_state = ConversationState {
+            last_primary_task_prompt: Some("帮我写个方案".to_string()),
+            ..ConversationState::default()
+        };
+        let persisted = next_last_primary_task_prompt(
+            Some(&prior_state),
+            &route_result,
+            Some(&crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::TaskAppend),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+                should_interrupt_active_run: false,
+                state_patch: Some(json!({"audience":"boss"})),
+                attachment_processing_required: false,
+            }),
+            "面向老板",
+            "Current task:\n帮我写个方案\n\nKeep the same task...",
+        )
+        .expect("primary prompt");
+        assert!(persisted.contains("帮我写个方案"));
+        assert!(persisted.contains("面向老板"));
+        assert!(persisted.contains("\"audience\":\"boss\""));
+        assert!(!persisted.contains("Continuity rules"));
+        assert!(!persisted.contains("Current task:"));
+    }
+
+    #[test]
+    fn repeated_task_append_keeps_single_task_so_far_header() {
+        let persisted = super::merge_primary_task_prompt(
+            Some("Task so far:\n帮我写个方案\n\nAdditional instruction: 面向老板"),
+            "不要太技术",
+            crate::intent_router::TurnType::TaskAppend,
+            None,
+        );
+        assert_eq!(persisted.matches("Task so far:").count(), 1);
+        assert!(persisted.contains("Additional instruction: 面向老板"));
+        assert!(persisted.contains("Additional instruction: 不要太技术"));
     }
 
     #[test]
@@ -944,66 +999,59 @@ mod tests {
     }
 
     #[test]
-    fn binding_only_session_alias_definition_is_detected() {
-        assert!(prompt_is_binding_only_session_alias_definition(
-            "先记一下，后面我说“那个文件”就是 /tmp/README.md"
-        ));
-        assert!(!prompt_is_binding_only_session_alias_definition(
-            "先记一下，后面我说“那个文件”就是 /tmp/README.md，然后读一下它开头"
-        ));
+    fn merge_alias_bindings_prefers_structured_state_patch() {
+        let prior = ConversationState {
+            alias_bindings: vec![SessionAliasBinding {
+                alias: "那个文件".to_string(),
+                target: "/tmp/old.md".to_string(),
+                updated_at_ts: 1,
+            }],
+            ..ConversationState::default()
+        };
+        let turn_analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+            target_task_policy: None,
+            should_interrupt_active_run: false,
+            state_patch: Some(json!({
+                "alias_bindings": [
+                    {"alias": "那个文件", "target": "/tmp/new.md"},
+                    {"alias": "那个日志", "target": "/tmp/app.log"}
+                ]
+            })),
+            attachment_processing_required: false,
+        };
+        let merged = super::merge_alias_bindings(Some(&prior), Some(&turn_analysis));
+        assert_eq!(merged.len(), 2);
+        assert!(merged
+            .iter()
+            .any(|binding| binding.alias == "那个文件" && binding.target == "/tmp/new.md"));
+        assert!(merged.iter().any(|binding| {
+            binding.alias == "那个日志" && binding.target == "/tmp/app.log"
+        }));
+        assert!(!merged
+            .iter()
+            .any(|binding| binding.target == "/tmp/regex.md"));
     }
 
     #[test]
-    fn rewrite_prompt_with_alias_bindings_rewrites_bound_aliases() {
-        let snapshot = ActiveSessionSnapshot {
-            conversation_state: Some(ConversationState {
-                alias_bindings: vec![
-                    SessionAliasBinding {
-                        alias: "那个文件".to_string(),
-                        target: "/tmp/README.md".to_string(),
-                        updated_at_ts: 1,
-                    },
-                    SessionAliasBinding {
-                        alias: "甲".to_string(),
-                        target: "/tmp/a.md".to_string(),
-                        updated_at_ts: 2,
-                    },
-                ],
-                ..ConversationState::default()
-            }),
-            active_followup_frame: None,
-            active_clarify_state: None,
-            active_observed_facts: None,
+    fn merge_alias_bindings_ignores_prompt_text_without_structured_patch() {
+        let prior = ConversationState {
+            alias_bindings: vec![SessionAliasBinding {
+                alias: "那个文件".to_string(),
+                target: "/tmp/old.md".to_string(),
+                updated_at_ts: 1,
+            }],
+            ..ConversationState::default()
         };
-        let rewritten = rewrite_prompt_with_alias_bindings(
-            "把那个文件开头读 10 行，然后顺手说甲是干什么的",
-            Some(&snapshot),
-        )
-        .expect("rewrite");
-        assert!(rewritten.contains("/tmp/README.md"));
-        assert!(rewritten.contains("/tmp/a.md"));
-        assert!(rewritten.contains("把 /tmp/README.md 开头读 10 行"));
-    }
-
-    #[test]
-    fn session_alias_target_for_prompt_finds_matching_binding() {
-        let snapshot = ActiveSessionSnapshot {
-            conversation_state: Some(ConversationState {
-                alias_bindings: vec![SessionAliasBinding {
-                    alias: "那个日志".to_string(),
-                    target: "/tmp/app.log".to_string(),
-                    updated_at_ts: 1,
-                }],
-                ..ConversationState::default()
-            }),
-            active_followup_frame: None,
-            active_clarify_state: None,
-            active_observed_facts: None,
+        let turn_analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+            target_task_policy: None,
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
         };
-        assert_eq!(
-            session_alias_target_for_prompt("看一下那个日志最近 20 行", Some(&snapshot)),
-            Some("/tmp/app.log".to_string())
-        );
+        let merged = super::merge_alias_bindings(Some(&prior), Some(&turn_analysis));
+        assert_eq!(merged, prior.alias_bindings);
     }
 
     #[test]
@@ -1067,6 +1115,7 @@ mod tests {
                 attachment_processing_required: false,
             }),
             "帮我写个方案",
+            "帮我写个方案",
         );
         assert_eq!(persisted.as_deref(), Some("帮我写个方案"));
     }
@@ -1091,8 +1140,13 @@ mod tests {
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract::default(),
         };
-        let persisted =
-            next_last_primary_task_prompt(None, &route_result, None, "Help me write a proposal");
+        let persisted = next_last_primary_task_prompt(
+            None,
+            &route_result,
+            None,
+            "Help me write a proposal",
+            "Help me write a proposal",
+        );
         assert_eq!(persisted.as_deref(), Some("Help me write a proposal"));
     }
 }

@@ -265,6 +265,42 @@ fn sync_output_payload_collapses_one_sentence_contract_to_single_message() {
 }
 
 #[test]
+fn sync_output_payload_collapses_strict_contract_to_single_message() {
+    let contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        ..IntentOutputContract::default()
+    };
+    let mut text = "alpha\nbeta".to_string();
+    let mut messages = vec!["旧消息".to_string(), "alpha\nbeta".to_string()];
+
+    sync_output_payload(&contract, &mut text, &mut messages);
+
+    assert_eq!(text, "alpha\nbeta");
+    assert_eq!(messages, vec!["alpha\nbeta".to_string()]);
+}
+
+#[test]
+fn sync_output_payload_strict_contract_drops_execution_summary_message() {
+    let contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        ..IntentOutputContract::default()
+    };
+    let mut text = "有。例如：.git/、.gitignore、.codex".to_string();
+    let mut messages = vec![
+        format!(
+            "{}\n1. 调用技能 `list_dir`\n   输出：\n```text\n.git\n.gitignore\n.codex\n```",
+            crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX
+        ),
+        text.clone(),
+    ];
+
+    sync_output_payload(&contract, &mut text, &mut messages);
+
+    assert_eq!(text, "有。例如：.git/、.gitignore、.codex");
+    assert_eq!(messages, vec!["有。例如：.git/、.gitignore、.codex"]);
+}
+
+#[test]
 fn directory_purpose_summary_one_sentence_contract_preserves_multiline_listing() {
     let contract = IntentOutputContract {
         response_shape: OutputResponseShape::OneSentence,
@@ -303,6 +339,76 @@ fn sync_output_payload_strips_preamble_before_markdown_table() {
 }
 
 #[test]
+fn directory_lookup_contract_does_not_replace_synthesized_answer() {
+    let mut state = test_state_with_i18n(&[]);
+    let isolated = TempDirGuard::new("directory_lookup_preserve_answer");
+    state.skill_rt.workspace_root = isolated.path().to_path_buf();
+    state.skill_rt.default_locator_search_dir = isolated.path().to_path_buf();
+    write_text_file(&isolated.path().join("clawd.run.log"));
+    write_text_file(&isolated.path().join("model_io.log"));
+
+    let contract = IntentOutputContract {
+        delivery_intent: OutputDeliveryIntent::DirectoryLookup,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        locator_hint: "logs".to_string(),
+        response_shape: OutputResponseShape::OneSentence,
+        semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    };
+    let answer =
+        "The two newest files are clawd.run.log and model_io.log, and they look like runtime logs."
+            .to_string();
+
+    let (text, messages) = intercept_response_payload_for_delivery(
+        &state,
+        "List the two newest files in logs, then answer in one English sentence.",
+        false,
+        &contract,
+        answer.clone(),
+        vec![answer.clone()],
+    );
+
+    assert_eq!(text, answer);
+    assert_eq!(messages, vec![answer]);
+}
+
+#[test]
+fn file_names_contract_does_not_reexpand_single_filename_answer_as_directory_lookup() {
+    let mut state = test_state_with_i18n(&[]);
+    let isolated = TempDirGuard::new("file_names_preserve_single_answer");
+    let document = isolated.path().join("document");
+    std::fs::create_dir_all(&document).expect("create document dir");
+    write_text_file(&document.join("README.md"));
+    write_text_file(&document.join("report.md"));
+    write_text_file(&document.join("notes.txt"));
+    state.skill_rt.workspace_root = isolated.path().to_path_buf();
+    state.skill_rt.default_locator_search_dir = isolated.path().to_path_buf();
+
+    let contract = IntentOutputContract {
+        delivery_intent: OutputDeliveryIntent::DirectoryLookup,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: document.display().to_string(),
+        semantic_kind: OutputSemanticKind::FileNames,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    };
+    let answer = "report.md".to_string();
+
+    let (text, messages) = intercept_response_payload_for_delivery(
+        &state,
+        "List markdown files in document except README.",
+        false,
+        &contract,
+        answer.clone(),
+        vec![answer.clone()],
+    );
+
+    assert_eq!(text, answer);
+    assert_eq!(messages, vec![answer]);
+}
+
+#[test]
 fn intercept_response_payload_localizes_missing_file_message_to_english_request() {
     let state = test_state_with_i18n(&[(
         "clawd.msg.delivery.rule1_both_roots_miss",
@@ -311,12 +417,13 @@ fn intercept_response_payload_localizes_missing_file_message_to_english_request(
     let contract = IntentOutputContract {
         delivery_required: true,
         response_shape: OutputResponseShape::FileToken,
+        locator_hint: "document/definitely_missing_runtime_case_002.txt".to_string(),
         ..IntentOutputContract::default()
     };
 
     let (text, messages) = intercept_response_payload_for_delivery(
         &state,
-        "send me document/definitely_missing_runtime_case_002.txt and do not paste the content",
+        "send me that file and do not paste the content",
         true,
         &contract,
         String::new(),
@@ -397,6 +504,91 @@ fn intercept_response_payload_preserves_existing_file_token_before_re_resolving_
 
     assert_eq!(text, existing);
     assert_eq!(messages, vec![text]);
+}
+
+#[test]
+fn file_delivery_contract_does_not_reparse_request_filename_without_hint() {
+    let mut state = test_state_with_i18n(&[]);
+    let isolated = TempDirGuard::new("file_delivery_no_raw_filename_reparse");
+    state.skill_rt.workspace_root = isolated.path().to_path_buf();
+    state.skill_rt.default_locator_search_dir = isolated.path().to_path_buf();
+    write_text_file(&isolated.path().join("README.md"));
+
+    let contract = IntentOutputContract {
+        delivery_required: true,
+        response_shape: OutputResponseShape::FileToken,
+        ..IntentOutputContract::default()
+    };
+
+    let (text, messages) = intercept_response_payload_for_delivery(
+        &state,
+        "把 README.md 发给我",
+        true,
+        &contract,
+        String::new(),
+        Vec::new(),
+    );
+
+    assert_eq!(text, "");
+    assert!(messages.is_empty());
+}
+
+#[test]
+fn file_delivery_contract_does_not_reparse_request_explicit_path_without_hint() {
+    let mut state = test_state_with_i18n(&[]);
+    let isolated = TempDirGuard::new("file_delivery_no_raw_path_reparse");
+    state.skill_rt.workspace_root = isolated.path().to_path_buf();
+    state.skill_rt.default_locator_search_dir = isolated.path().to_path_buf();
+    write_text_file(&isolated.path().join("docs/report.md"));
+
+    let contract = IntentOutputContract {
+        delivery_required: true,
+        response_shape: OutputResponseShape::FileToken,
+        ..IntentOutputContract::default()
+    };
+
+    let (text, messages) = intercept_response_payload_for_delivery(
+        &state,
+        "send docs/report.md to me",
+        true,
+        &contract,
+        String::new(),
+        Vec::new(),
+    );
+
+    assert_eq!(text, "");
+    assert!(messages.is_empty());
+}
+
+#[test]
+fn intercept_file_delivery_contract_uses_planner_locator_hint_for_filename_scan() {
+    let mut state = test_state_with_i18n(&[]);
+    let isolated = TempDirGuard::new("file_delivery_uses_locator_hint");
+    state.skill_rt.workspace_root = isolated.path().to_path_buf();
+    state.skill_rt.default_locator_search_dir = isolated.path().to_path_buf();
+    let target = isolated.path().join("README.md");
+    write_text_file(&target);
+    let canonical = target.canonicalize().expect("canonical target");
+
+    let contract = IntentOutputContract {
+        delivery_required: true,
+        response_shape: OutputResponseShape::FileToken,
+        locator_hint: "readme".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let (text, messages) = intercept_response_payload_for_delivery(
+        &state,
+        "please do it",
+        true,
+        &contract,
+        String::new(),
+        Vec::new(),
+    );
+
+    let expected = format!("FILE:{}", canonical.display());
+    assert_eq!(text, expected);
+    assert_eq!(messages, vec![expected]);
 }
 
 // Single-file delivery resolution rules.

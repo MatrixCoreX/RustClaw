@@ -2,8 +2,10 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use super::directory_lookup::{resolve_directory_locator_input, resolve_directory_target};
+#[cfg(test)]
+use super::locator::classify_file_delivery_locator_input_for_tests;
 use super::locator::{
-    classify_file_delivery_locator_input, extract_explicit_file_path_candidates,
+    classify_file_delivery_locator_from_hint, extract_explicit_file_path_candidates,
     normalize_locator_text,
 };
 use super::types::localize_delivery_message_for_request;
@@ -286,52 +288,90 @@ fn canonical_existing_file_delivery_token(
 }
 
 pub(super) fn resolve_file_delivery_target_with_hint(
-    user_request: &str,
+    _user_request: &str,
     system_root: &Path,
     project_root: &Path,
     scan_max_depth: usize,
     scan_max_files: usize,
     locator_hint: Option<&str>,
 ) -> Option<FileDeliveryTargetResolution> {
+    let locator_hint = normalized_locator_hint(locator_hint);
     if let Some(resolved) =
-        resolve_explicit_file_path_candidate(locator_hint, user_request, system_root, project_root)
+        resolve_explicit_file_path_candidate(locator_hint, None, system_root, project_root)
     {
         return Some(resolved);
     }
-    let locator = classify_file_delivery_locator_input(user_request, locator_hint)?;
+    let locator = locator_hint.and_then(classify_file_delivery_locator_from_hint)?;
+    Some(resolve_file_delivery_locator(
+        locator,
+        system_root,
+        project_root,
+        scan_max_depth,
+        scan_max_files,
+    ))
+}
+
+#[cfg(test)]
+pub(super) fn resolve_file_delivery_target_from_request_for_tests(
+    user_request: &str,
+    system_root: &Path,
+    project_root: &Path,
+    scan_max_depth: usize,
+    scan_max_files: usize,
+) -> Option<FileDeliveryTargetResolution> {
+    if let Some(resolved) =
+        resolve_explicit_file_path_candidate(None, Some(user_request), system_root, project_root)
+    {
+        return Some(resolved);
+    }
+    let locator = classify_file_delivery_locator_input_for_tests(user_request, None)?;
+    Some(resolve_file_delivery_locator(
+        locator,
+        system_root,
+        project_root,
+        scan_max_depth,
+        scan_max_files,
+    ))
+}
+
+fn normalized_locator_hint(locator_hint: Option<&str>) -> Option<&str> {
+    locator_hint
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn resolve_file_delivery_locator(
+    locator: FileDeliveryLocatorInput,
+    system_root: &Path,
+    project_root: &Path,
+    scan_max_depth: usize,
+    scan_max_files: usize,
+) -> FileDeliveryTargetResolution {
     match locator {
-        FileDeliveryLocatorInput::ExplicitFilePath { file_path } => Some(
-            resolve_explicit_file_path(system_root, project_root, &file_path),
-        ),
+        FileDeliveryLocatorInput::ExplicitFilePath { file_path } => {
+            resolve_explicit_file_path(system_root, project_root, &file_path)
+        }
         FileDeliveryLocatorInput::DirectoryAndFilename {
             directory_path,
             file_name,
-        } => Some(resolve_directory_and_file(
-            system_root,
-            project_root,
-            &directory_path,
-            &file_name,
-        )),
-        FileDeliveryLocatorInput::FilenameOnly { file_name } => Some(scan_filename_under_roots(
+        } => resolve_directory_and_file(system_root, project_root, &directory_path, &file_name),
+        FileDeliveryLocatorInput::FilenameOnly { file_name } => scan_filename_under_roots(
             project_root,
             system_root,
             &file_name,
             scan_max_depth,
             scan_max_files,
-        )),
+        ),
     }
 }
 
 fn resolve_explicit_file_path_candidate(
     locator_hint: Option<&str>,
-    user_request: &str,
+    user_request: Option<&str>,
     system_root: &Path,
     project_root: &Path,
 ) -> Option<FileDeliveryTargetResolution> {
-    for source in locator_hint
-        .into_iter()
-        .chain(std::iter::once(user_request))
-    {
+    for source in locator_hint.into_iter().chain(user_request.into_iter()) {
         for token in extract_explicit_file_path_candidates(source) {
             let resolved = resolve_existing_file_under_root(system_root, &token)
                 .or_else(|| resolve_existing_file_under_root(project_root, &token));

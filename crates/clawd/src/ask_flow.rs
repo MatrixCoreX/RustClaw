@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use std::path::Path;
 
 use crate::{AppState, AskReply, ClaimedTask, RoutedMode};
 
@@ -50,6 +51,96 @@ fn build_resume_continue_execute_prompt_from_parts(
             ),
         ],
     ))
+}
+
+fn normalizer_answer_candidate_from_resolved_prompt(resolved_prompt: &str) -> Option<String> {
+    let (_intent, candidate) = resolved_prompt.rsplit_once("\nanswer_candidate:")?;
+    let candidate = candidate.trim();
+    if candidate.is_empty() {
+        None
+    } else {
+        Some(candidate.to_string())
+    }
+}
+
+fn paths_refer_to_same_existing_location(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn normalizer_answer_candidate_matches_runtime_fact(state: &AppState, candidate: &str) -> bool {
+    let candidate = candidate.trim();
+    if candidate.is_empty() || candidate.contains('\n') {
+        return false;
+    }
+    let candidate_path = Path::new(candidate);
+    if !candidate_path.is_absolute() {
+        return false;
+    }
+    if paths_refer_to_same_existing_location(candidate_path, &state.skill_rt.workspace_root) {
+        return true;
+    }
+    std::env::current_dir()
+        .ok()
+        .is_some_and(|cwd| paths_refer_to_same_existing_location(candidate_path, &cwd))
+}
+
+fn normalizer_chat_direct_answer_candidate(
+    state: &AppState,
+    resolved_prompt: &str,
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+    allow_budget_fallback: bool,
+) -> Option<String> {
+    let route = agent_run_context?.route_result.as_ref()?;
+    if route.needs_clarify || route.is_execute_gate() {
+        return None;
+    }
+    let contract = &route.output_contract;
+    if contract.requires_content_evidence
+        || contract.delivery_required
+        || !matches!(contract.locator_kind, crate::OutputLocatorKind::None)
+        || !matches!(contract.delivery_intent, crate::OutputDeliveryIntent::None)
+    {
+        return None;
+    }
+    let candidate = normalizer_answer_candidate_from_resolved_prompt(resolved_prompt)?;
+    if normalizer_answer_candidate_matches_runtime_fact(state, &candidate) {
+        return Some(candidate);
+    }
+    allow_budget_fallback.then_some(candidate)
+}
+
+fn runtime_scalar_path_direct_answer_candidate(
+    state: &AppState,
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> Option<String> {
+    let route = agent_run_context?.route_result.as_ref()?;
+    if route.needs_clarify || !route.is_execute_gate() {
+        return None;
+    }
+    let contract = &route.output_contract;
+    if !matches!(contract.response_shape, crate::OutputResponseShape::Scalar)
+        || !matches!(
+            contract.semantic_kind,
+            crate::OutputSemanticKind::ScalarPathOnly
+        )
+        || !matches!(
+            contract.locator_kind,
+            crate::OutputLocatorKind::CurrentWorkspace
+        )
+        || contract.delivery_required
+        || !matches!(contract.delivery_intent, crate::OutputDeliveryIntent::None)
+    {
+        return None;
+    }
+    let candidate = contract.locator_hint.trim();
+    normalizer_answer_candidate_matches_runtime_fact(state, candidate)
+        .then(|| candidate.to_string())
 }
 
 pub(crate) fn build_resume_continue_execute_prompt(
@@ -389,10 +480,37 @@ pub(crate) async fn execute_ask_routed(
     {
         return Ok(reply);
     }
+    if let Some(candidate) =
+        runtime_scalar_path_direct_answer_candidate(state, agent_run_context.as_ref())
+    {
+        tracing::info!(
+            "{} worker_once: ask runtime_scalar_path_direct_answer task_id={} len={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            candidate.len()
+        );
+        return Ok(AskReply::llm(candidate));
+    }
     match &ask_mode {
         crate::AskMode::ClarifyOrChat {
             entry: crate::ChatEntryStrategy::NormalizerThenChat,
         } => {
+            let allow_candidate_budget_fallback =
+                state.task_llm_budget_exceeded(&task.task_id).is_some();
+            if let Some(candidate) = normalizer_chat_direct_answer_candidate(
+                state,
+                resolved_prompt,
+                agent_run_context.as_ref(),
+                allow_candidate_budget_fallback,
+            ) {
+                tracing::info!(
+                    "{} worker_once: ask normalizer_answer_candidate_budget_fallback task_id={} len={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    candidate.len()
+                );
+                return Ok(AskReply::llm(candidate));
+            }
             let chat_prompt_context = chat_prompt_context_with_route_resolution(
                 chat_prompt_context,
                 agent_run_context.as_ref(),
@@ -563,7 +681,9 @@ pub(crate) async fn analyze_attached_images_for_ask(
 mod tests {
     use super::{
         chat_prompt_context_with_route_resolution, chat_request_for_prompt, chat_user_request,
-        preferred_route_clarify_question, route_structured_clarify_context, task_payload_text,
+        normalizer_chat_direct_answer_candidate, preferred_route_clarify_question,
+        route_structured_clarify_context, runtime_scalar_path_direct_answer_candidate,
+        task_payload_text,
     };
 
     #[test]
@@ -696,13 +816,227 @@ mod tests {
     }
 
     #[test]
+    fn normalizer_chat_direct_answer_uses_candidate_only_without_evidence_contract() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Chat,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            resolved_intent:
+                "写一首两句的打工人短诗\nanswer_candidate: 早出晚归血汗钱\n苦中作乐笑开颜"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "normalizer supplied candidate".to_string(),
+            route_confidence: Some(0.95),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            normalizer_chat_direct_answer_candidate(
+                &state,
+                "写一首两句的打工人短诗\nanswer_candidate: 早出晚归血汗钱\n苦中作乐笑开颜",
+                Some(&ctx),
+                true,
+            )
+            .as_deref(),
+            Some("早出晚归血汗钱\n苦中作乐笑开颜")
+        );
+
+        assert_eq!(
+            normalizer_chat_direct_answer_candidate(
+                &state,
+                "写一首两句的打工人短诗\nanswer_candidate: 早出晚归血汗钱\n苦中作乐笑开颜",
+                Some(&ctx),
+                false,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn normalizer_chat_direct_answer_does_not_bypass_evidence_contract() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Chat,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            resolved_intent:
+                "检查当前目录是否有隐藏文件\nanswer_candidate: 有，例如 .git、.gitignore、.pids"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "needs local evidence".to_string(),
+            route_confidence: Some(0.95),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Medium,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                semantic_kind: crate::OutputSemanticKind::HiddenEntriesCheck,
+                ..Default::default()
+            },
+        };
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            normalizer_chat_direct_answer_candidate(
+                &state,
+                "检查当前目录是否有隐藏文件\nanswer_candidate: 有，例如 .git、.gitignore、.pids",
+                Some(&ctx),
+                true,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn normalizer_chat_direct_answer_uses_runtime_fact_candidate_without_budget_fallback() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let runtime_path = state.skill_rt.workspace_root.to_string_lossy().to_string();
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Chat,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            resolved_intent: format!(
+                "User request: output absolute path of current working directory\nanswer_candidate: {runtime_path}"
+            ),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "normalizer supplied runtime fact".to_string(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            normalizer_chat_direct_answer_candidate(
+                &state,
+                &format!(
+                    "User request: output absolute path of current working directory\nanswer_candidate: {runtime_path}"
+                ),
+                Some(&ctx),
+                false,
+            )
+            .as_deref(),
+            Some(runtime_path.as_str())
+        );
+    }
+
+    #[test]
+    fn runtime_scalar_path_direct_answer_uses_verified_contract_locator() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let runtime_path = state.skill_rt.workspace_root.to_string_lossy().to_string();
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "Output the current workspace path".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "runtime scalar path".to_string(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::Scalar,
+                semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                locator_hint: runtime_path.clone(),
+                ..Default::default()
+            },
+        };
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            runtime_scalar_path_direct_answer_candidate(&state, Some(&ctx)).as_deref(),
+            Some(runtime_path.as_str())
+        );
+    }
+
+    #[test]
+    fn runtime_scalar_path_direct_answer_rejects_unverified_locator() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "Output the current workspace path".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "runtime scalar path".to_string(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::Scalar,
+                semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                locator_hint: "/tmp/not-the-rustclaw-workspace".to_string(),
+                ..Default::default()
+            },
+        };
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            runtime_scalar_path_direct_answer_candidate(&state, Some(&ctx)),
+            None
+        );
+    }
+
+    #[test]
     fn preferred_route_clarify_question_respects_explicit_route_question_before_generic_fallback() {
         let mut route = crate::RouteResult {
             routed_mode: crate::RoutedMode::AskClarify,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
             resolved_intent: "看看那个目录下面都有什么".to_string(),
             needs_clarify: true,
-            clarify_question: "请提供具体要查看的目录名或路径。".to_string(),
+            clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
             route_reason: "fresh_deictic_missing_locator:directory_lookup".to_string(),
             route_confidence: Some(0.95),
             visible_skill_candidates: Vec::new(),
@@ -726,7 +1060,7 @@ mod tests {
         };
         assert_eq!(
             preferred_route_clarify_question(Some(&ctx)).as_deref(),
-            Some("请提供具体要查看的目录名或路径。")
+            Some("LOCATOR_CLARIFY_PROMPT")
         );
 
         route.clarify_question.clear();
@@ -749,7 +1083,7 @@ mod tests {
             resolved_intent: "读取 Cargo.toml 的 package.name，只输出值".to_string(),
             needs_clarify: true,
             clarify_question: String::new(),
-            route_reason: "route_contract:generic_filename_scalar_extract".to_string(),
+            route_reason: "llm_contract:generic_filename_scalar_extract".to_string(),
             route_confidence: Some(0.95),
             visible_skill_candidates: Vec::new(),
             risk_ceiling: crate::RiskCeiling::Unknown,

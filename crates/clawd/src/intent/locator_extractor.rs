@@ -92,7 +92,7 @@ fn classify_explicit_locator_candidate(candidate: &str) -> Option<ExtractedLocat
     })
 }
 
-fn candidate_looks_like_dotted_version_number(candidate: &str) -> bool {
+pub(crate) fn candidate_looks_like_dotted_version_number(candidate: &str) -> bool {
     let trimmed = candidate.trim();
     if trimmed.contains('/') || trimmed.contains('\\') {
         return false;

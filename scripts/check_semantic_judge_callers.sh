@@ -3,7 +3,7 @@
 # is_publishable_raw) 只允许 finalize 层调用。
 #
 # 白名单：
-#   - crates/clawd/src/agent_engine/loop_finalize.rs
+#   - crates/clawd/src/finalize/loop_reply.rs
 #   - crates/clawd/src/agent_engine/observed_output.rs (observed_answer_fallback 兜底)
 #
 # 用法：
@@ -18,7 +18,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 WHITELIST=(
-    "crates/clawd/src/agent_engine/loop_finalize.rs"
+    "crates/clawd/src/finalize/loop_reply.rs"
     "crates/clawd/src/agent_engine/observed_output.rs"
 )
 
@@ -71,9 +71,8 @@ for f in "${VIOLATIONS[@]}"; do
 done
 echo ""
 echo "Per Phase 3 §3.4: these functions may only be called from the finalize"
-echo "tier. Other layers should use the local heuristics:"
-echo "  - semantic_judge::looks_like_meta_respond_directive_local"
-echo "  - semantic_judge::is_publishable_raw_local"
+echo "tier. Other layers should rely on planner contracts, observed facts,"
+echo "and structured runtime guards rather than calling this LLM classifier."
 echo ""
 echo "If you genuinely need to extend the whitelist, edit this script and"
 echo "document the rationale in docs/ or the calling site comment."

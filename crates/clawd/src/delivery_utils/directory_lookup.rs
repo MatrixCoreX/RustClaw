@@ -1,8 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::locator::{
-    directory_lookup_input_from_hint, normalize_locator_text, parse_directory_lookup_input,
-};
+use super::locator::{directory_lookup_input_from_hint, normalize_locator_text};
 use super::types::localize_delivery_message_for_request;
 use super::{
     dedup_and_sort_paths, resolve_existing_dir_under_root, DeliveryMessageKind,
@@ -86,7 +84,7 @@ pub(super) fn try_handle_directory_lookup_request(
 
 pub(super) fn resolve_directory_locator_input(
     output_contract: &IntentOutputContract,
-    user_request: &str,
+    _user_request: &str,
     workspace_root: &Path,
 ) -> Option<DirectoryLookupInput> {
     if matches!(
@@ -104,7 +102,7 @@ pub(super) fn resolve_directory_locator_input(
     if let Some(from_hint) = directory_lookup_input_from_hint(&output_contract.locator_hint) {
         return Some(from_hint);
     }
-    parse_directory_lookup_input(user_request.trim())
+    None
 }
 
 pub(super) fn resolve_directory_target(

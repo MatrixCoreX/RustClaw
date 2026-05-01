@@ -15,7 +15,7 @@ Independent base skill for listing directory entries. Use `{"type":"call_skill",
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en

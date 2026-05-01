@@ -7,6 +7,7 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
     pub server: ServerConfig,
+    #[serde(default)]
     pub telegram: TelegramConfig,
     #[serde(default)]
     pub telegram_bot: TelegramBotConfig,
@@ -201,6 +202,35 @@ impl Default for AgentConfig {
             preferred_vendor: None,
             preferred_model: None,
             allowed_skills: Vec::new(),
+        }
+    }
+}
+
+impl Default for TelegramConfig {
+    fn default() -> Self {
+        Self {
+            bot_token: String::new(),
+            agent_id: default_agent_id(),
+            allowlist: Vec::new(),
+            access_mode: default_telegram_access_mode(),
+            allowed_usernames: Vec::new(),
+            bots: Vec::new(),
+            bindings: Vec::new(),
+            language: default_telegram_language(),
+            i18n_path: default_telegram_i18n_path(),
+            quick_result_wait_seconds: default_telegram_quick_result_wait_seconds(),
+            task_delivery_timeout_seconds: default_telegram_task_delivery_timeout_seconds(),
+            auto_vision_on_image_only: default_telegram_auto_vision_on_image_only(),
+            image_inbox_dir: default_telegram_image_inbox_dir(),
+            video_inbox_dir: default_telegram_video_inbox_dir(),
+            file_inbox_dir: default_telegram_file_inbox_dir(),
+            audio_inbox_dir: default_telegram_audio_inbox_dir(),
+            voice_reply_mode: default_telegram_voice_reply_mode(),
+            voice_mode_nl_intent_enabled: default_telegram_voice_mode_nl_intent_enabled(),
+            voice_reply_mode_by_chat: HashMap::new(),
+            max_audio_input_bytes: default_telegram_max_audio_input_bytes(),
+            ephemeral_image_saved_seconds: default_telegram_ephemeral_image_saved_seconds(),
+            sendfile: SendfileConfig::default(),
         }
     }
 }
@@ -1632,7 +1662,17 @@ fn default_memory_rule_injection_markers() -> Vec<String> {
 }
 
 fn default_memory_rule_salience_boost_markers() -> Vec<String> {
-    vec!["以后".to_string(), "always".to_string(), "默认".to_string()]
+    vec![
+        "以后".to_string(),
+        "下次".to_string(),
+        "记住".to_string(),
+        "长期".to_string(),
+        "always".to_string(),
+        "default".to_string(),
+        "remember".to_string(),
+        "from now on".to_string(),
+        "going forward".to_string(),
+    ]
 }
 
 fn default_memory_rule_pref_language_zh() -> Vec<String> {
@@ -2237,4 +2277,54 @@ fn unique_telegram_bot_name(
 
 fn default_agent_id() -> String {
     "main".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppConfig;
+    use std::fs;
+
+    fn unique_temp_config_dir(name: &str) -> std::path::PathBuf {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "rustclaw-claw-core-config-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock should be after unix epoch")
+                .as_nanos()
+        ));
+        dir
+    }
+
+    #[test]
+    fn app_config_load_allows_missing_telegram_split_config() {
+        let dir = unique_temp_config_dir("missing-telegram");
+        fs::create_dir_all(&dir).expect("create temp config dir");
+        let config_path = dir.join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[server]
+listen = "127.0.0.1:0"
+request_timeout_seconds = 30
+
+[database]
+sqlite_path = "data/test.db"
+busy_timeout_ms = 2000
+
+[worker]
+"#,
+        )
+        .expect("write temp config");
+
+        let cfg = AppConfig::load(config_path.to_str().expect("utf-8 temp path"))
+            .expect("config without telegram split file should load");
+
+        assert!(cfg.telegram.bot_token.is_empty());
+        assert_eq!(cfg.telegram.agent_id, "main");
+        assert!(cfg.telegram_runtime_bots().is_empty());
+
+        fs::remove_dir_all(dir).expect("remove temp config dir");
+    }
 }

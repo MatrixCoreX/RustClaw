@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::{AppState, IntentOutputContract, OutputResponseShape};
+use crate::{AppState, IntentOutputContract, OutputResponseShape, OutputSemanticKind};
 
 // Facade for delivery interception. Locator parsing, directory lookup, and
 // file-resolution flows live in sibling submodules.
@@ -16,15 +16,13 @@ mod types;
 use self::directory_lookup::try_handle_directory_lookup_request;
 use self::file_delivery::enforce_file_delivery_locator_contract;
 pub(crate) use self::file_delivery::scan_filename_matches_with_limit;
-pub(crate) use self::locator::extract_bare_filename_stem_candidates;
-pub(crate) use self::locator::extract_directory_and_file_pair;
 pub(crate) use self::locator::extract_filename_candidates;
 pub(crate) use self::message_media::{
     collect_recent_image_candidates, extract_file_path_from_delivery_token,
     normalize_delivery_message, trim_path_token,
 };
-use self::output_contract::enforce_output_contract;
 pub(super) use self::output_contract::response_has_same_file_token;
+use self::output_contract::{enforce_output_contract, looks_like_delivery_locator_literal};
 pub(crate) use self::path_helpers::{
     dedup_and_sort_paths, resolve_existing_dir_under_root, resolve_existing_file_under_root,
     resolve_existing_path_under_root_case_insensitive,
@@ -57,13 +55,6 @@ pub(crate) fn intercept_response_text_for_delivery(text: &str) -> String {
     text.trim().to_string()
 }
 
-pub(crate) fn has_concrete_locator_input(user_request: &str) -> bool {
-    let text = user_request.trim();
-    !text.is_empty()
-        && (locator::classify_file_delivery_locator_input(text, None).is_some()
-            || locator::parse_directory_lookup_input(text).is_some())
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DirectoryLocatorExecutionResolution {
     Resolved(PathBuf),
@@ -77,8 +68,7 @@ pub(crate) fn resolve_directory_locator_for_execution(
     max_depth: usize,
     max_scan_entries: usize,
 ) -> Option<DirectoryLocatorExecutionResolution> {
-    let request = locator::directory_lookup_input_from_hint(raw_hint)
-        .or_else(|| locator::parse_directory_lookup_input(raw_hint.trim()))?;
+    let request = locator::directory_lookup_input_from_hint(raw_hint)?;
     match directory_lookup::resolve_directory_target(
         request,
         Path::new("/"),
@@ -122,13 +112,22 @@ pub(crate) fn intercept_response_payload_for_delivery(
             output_contract.response_shape,
             OutputResponseShape::FileToken
         );
-    if let Some(directory_lookup_text) = try_handle_directory_lookup_request(
-        state,
-        user_request,
-        output_contract,
-        file_delivery_contract,
-    ) {
-        return (directory_lookup_text.clone(), vec![directory_lookup_text]);
+    let directory_lookup_candidate = normalized_text.trim();
+    let may_replace_with_directory_lookup = directory_lookup_candidate.is_empty()
+        || (!matches!(output_contract.semantic_kind, OutputSemanticKind::FileNames)
+            && looks_like_delivery_locator_literal(
+                directory_lookup_candidate,
+                &output_contract.locator_hint,
+            ));
+    if may_replace_with_directory_lookup {
+        if let Some(directory_lookup_text) = try_handle_directory_lookup_request(
+            state,
+            user_request,
+            output_contract,
+            file_delivery_contract,
+        ) {
+            return (directory_lookup_text.clone(), vec![directory_lookup_text]);
+        }
     }
     enforce_file_delivery_locator_contract(
         state,
@@ -154,7 +153,7 @@ fn classify_directory_lookup_input(user_request: &str) -> Option<DirectoryLookup
     if text.is_empty() {
         return None;
     }
-    locator::parse_directory_lookup_input(text)
+    locator::parse_directory_lookup_input_for_tests(text)
 }
 
 #[cfg(test)]
@@ -163,7 +162,7 @@ fn classify_batch_directory_delivery_input(user_request: &str) -> Option<Directo
     if text.is_empty() || locator::extract_directory_and_file_pair(text).is_some() {
         return None;
     }
-    locator::parse_directory_lookup_input(text)
+    locator::parse_directory_lookup_input_for_tests(text)
 }
 #[cfg(test)]
 fn resolve_file_delivery_target(
@@ -173,13 +172,12 @@ fn resolve_file_delivery_target(
     scan_max_depth: usize,
     scan_max_files: usize,
 ) -> Option<FileDeliveryTargetResolution> {
-    file_delivery::resolve_file_delivery_target_with_hint(
+    file_delivery::resolve_file_delivery_target_from_request_for_tests(
         user_request,
         system_root,
         project_root,
         scan_max_depth,
         scan_max_files,
-        None,
     )
 }
 

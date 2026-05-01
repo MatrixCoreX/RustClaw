@@ -55,7 +55,17 @@ injection_markers = [
     "忽略之前所有规则",
     "忽略系统规则",
 ]
-salience_boost_markers = ["以后", "always", "默认"]
+salience_boost_markers = [
+    "以后",
+    "下次",
+    "记住",
+    "长期",
+    "always",
+    "default",
+    "remember",
+    "from now on",
+    "going forward",
+]
 
 [rules.preferences]
 language_zh = ["以后都用中文", "请用中文", "中文回复", "默认中文", "都说中文"]

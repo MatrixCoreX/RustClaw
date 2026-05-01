@@ -5,7 +5,11 @@ use regex::Regex;
 use super::{trim_path_token, DirectoryLookupInput, FileDeliveryLocatorInput};
 
 // Pure locator parsing helpers shared by directory lookup and file delivery.
-pub(super) fn parse_directory_lookup_input(text: &str) -> Option<DirectoryLookupInput> {
+// Production callers must start from a structured locator hint or current-workspace
+// contract. Whole-request parsing is kept behind test-only helpers to avoid
+// reintroducing a semantic fast path after the normalizer/planner.
+#[cfg(test)]
+pub(super) fn parse_directory_lookup_input_for_tests(text: &str) -> Option<DirectoryLookupInput> {
     let trimmed = text.trim();
     if trimmed.is_empty()
         || looks_like_directory_batch_file_request(trimmed)
@@ -27,6 +31,7 @@ pub(super) fn parse_directory_lookup_input(text: &str) -> Option<DirectoryLookup
     None
 }
 
+#[cfg(test)]
 fn looks_like_directory_batch_file_request(text: &str) -> bool {
     let normalized = normalize_locator_text(text);
     let mentions_directory = normalized.contains("目录")
@@ -79,6 +84,7 @@ pub(super) fn extract_directory_path_candidate_from_request(text: &str) -> Optio
     None
 }
 
+#[cfg(test)]
 pub(super) fn extract_directory_name_hint(text: &str) -> Option<String> {
     static QUOTED_RE: OnceLock<Regex> = OnceLock::new();
     static BARE_DIR_RE: OnceLock<Regex> = OnceLock::new();
@@ -115,6 +121,7 @@ pub(super) fn extract_directory_name_hint(text: &str) -> Option<String> {
     None
 }
 
+#[cfg(test)]
 fn directory_hint_from_structured_token(raw: &str) -> Option<String> {
     let token = trim_path_token(raw);
     if token.is_empty() || looks_like_filename_token(&token) {
@@ -126,7 +133,8 @@ fn directory_hint_from_structured_token(raw: &str) -> Option<String> {
     None
 }
 
-pub(super) fn classify_file_delivery_locator_input(
+#[cfg(test)]
+pub(super) fn classify_file_delivery_locator_input_for_tests(
     user_request: &str,
     locator_hint: Option<&str>,
 ) -> Option<FileDeliveryLocatorInput> {
@@ -171,7 +179,8 @@ pub(super) fn classify_file_delivery_locator_from_hint(
     if let Some(path) = extract_definite_file_path_candidate(&raw) {
         return Some(FileDeliveryLocatorInput::ExplicitFilePath { file_path: path });
     }
-    if let Some((directory_path, file_name)) = extract_directory_and_file_pair(&raw) {
+    if let Some((directory_path, file_name)) = extract_structural_directory_and_file_pair_hint(&raw)
+    {
         return Some(FileDeliveryLocatorInput::DirectoryAndFilename {
             directory_path,
             file_name,
@@ -180,7 +189,19 @@ pub(super) fn classify_file_delivery_locator_from_hint(
     if looks_like_filename_token(&raw) {
         return Some(FileDeliveryLocatorInput::FilenameOnly { file_name: raw });
     }
+    if looks_like_bare_filename_stem_token(&raw) {
+        return Some(FileDeliveryLocatorInput::FilenameOnly { file_name: raw });
+    }
     None
+}
+
+fn extract_structural_directory_and_file_pair_hint(text: &str) -> Option<(String, String)> {
+    let filename_tokens = extract_filename_candidates(text);
+    if filename_tokens.len() != 1 {
+        return None;
+    }
+    extract_directory_path_candidate_for_file_pair(text)
+        .map(|directory_path| (directory_path, filename_tokens[0].clone()))
 }
 
 pub(super) fn extract_explicit_file_path_candidates(text: &str) -> Vec<String> {
@@ -225,6 +246,7 @@ pub(crate) fn extract_filename_candidates(text: &str) -> Vec<String> {
     out
 }
 
+#[cfg(test)]
 fn split_bare_stem_candidate_tokens<'a>(text: &'a str) -> impl Iterator<Item = &'a str> + 'a {
     text.split_whitespace().flat_map(|token| {
         token.split(|ch: char| {
@@ -257,6 +279,7 @@ fn split_bare_stem_candidate_tokens<'a>(text: &'a str) -> impl Iterator<Item = &
     })
 }
 
+#[cfg(test)]
 pub(crate) fn extract_bare_filename_stem_candidates(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for raw in split_bare_stem_candidate_tokens(text) {
@@ -269,6 +292,7 @@ pub(crate) fn extract_bare_filename_stem_candidates(text: &str) -> Vec<String> {
     out
 }
 
+#[cfg(test)]
 pub(crate) fn extract_directory_and_file_pair(text: &str) -> Option<(String, String)> {
     let filename_tokens = extract_filename_candidates(text);
     let file = if filename_tokens.len() == 1 {
@@ -332,6 +356,7 @@ pub(crate) fn extract_directory_and_file_pair(text: &str) -> Option<(String, Str
     None
 }
 
+#[cfg(test)]
 fn is_locator_context_stopword(token: &str) -> bool {
     matches!(
         token.trim().to_ascii_lowercase().as_str(),

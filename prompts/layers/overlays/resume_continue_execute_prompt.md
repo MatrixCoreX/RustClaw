@@ -36,7 +36,7 @@ Decision rules:
 7. If the remaining work is only a final `respond`/summary step, produce only that remaining reply and do not rerun earlier commands just to rebuild context.
 
 Interpretation hints:
-- "continue / go on / keep going" usually means resume unfinished steps.
+- A follow-up that semantically asks to continue should resume unfinished steps.
 - "stop / cancel / never mind / forget it" means do not continue.
 - "change step 4 to ..." means continue, but only with the updated constraint applied to unfinished steps.
 - "why did step 3 fail?" is a question about the failure, not an automatic resume command.
@@ -50,7 +50,7 @@ Primary goal:
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en
@@ -58,8 +58,8 @@ Use subheadings such as:
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
 ### zh-CN
-- Chinese continuation commands such as `继续`、`往下做`、`接着跑`、`按刚才那个继续` should usually resume unfinished steps only, not restart the whole task.
-- Chinese stop phrases such as `先别继续`、`等一下`、`先改一下再说` mean do not auto-resume yet.
+- Chinese continuation wording that semantically means "continue the unfinished work" should resume unfinished steps only, not restart the whole task.
+- Chinese stop/hold wording that semantically means "do not continue yet" should prevent auto-resume.
 - If the user gives new Chinese constraints during continuation, apply them only to unfinished steps unless the user explicitly asks to redo completed work.
 - When the only remaining work is a final Chinese-facing summary/answer step, produce that remaining answer directly instead of rerunning earlier actions.
 - Keep continuation progress text in Chinese concise and progress-oriented when Chinese is the configured response language.

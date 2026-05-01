@@ -266,6 +266,13 @@ fn load_layered_prompt_template_for_vendor_with_meta(
         }
         parts.push(normalize_prompt_part_body(&raw));
     }
+    for part in &entry.overlay {
+        let raw = read_prompt_part_raw(workspace_root, part)?;
+        if version.is_none() {
+            version = extract_prompt_version(&raw);
+        }
+        parts.push(normalize_prompt_part_body(&raw));
+    }
     if let Some(patch_rel) = entry.vendor_patch.as_deref() {
         for candidate in vendor_patch_candidates(vendor, patch_rel) {
             if let Some(raw) = read_optional_prompt_part_raw(workspace_root, &candidate) {
@@ -276,13 +283,6 @@ fn load_layered_prompt_template_for_vendor_with_meta(
                 break;
             }
         }
-    }
-    for part in &entry.overlay {
-        let raw = read_prompt_part_raw(workspace_root, part)?;
-        if version.is_none() {
-            version = extract_prompt_version(&raw);
-        }
-        parts.push(normalize_prompt_part_body(&raw));
     }
     let parts_filtered: Vec<String> = parts.into_iter().filter(|s| !s.is_empty()).collect();
     let rendered = compose_prompt_parts(parts_filtered)?;
@@ -485,6 +485,15 @@ mod tests {
     }
 
     #[test]
+    fn prompt_vendor_normalization_groups_openai_compatible_models() {
+        assert_eq!(normalize_prompt_vendor_name("openai"), "openai");
+        assert_eq!(normalize_prompt_vendor_name("mimo"), "openai");
+        assert_eq!(normalize_prompt_vendor_name("xiaomi"), "openai");
+        assert_eq!(normalize_prompt_vendor_name("custom"), "openai");
+        assert_eq!(normalize_prompt_vendor_name("minimax"), "minimax");
+    }
+
+    #[test]
     fn test_skill_prompt_layering_supports_logical_and_legacy_vendor_paths() {
         let root = temp_workspace("skill_paths");
         write_file(
@@ -555,6 +564,36 @@ overlay = ["prompts/layers/overlays/second.md"]
         let second =
             load_prompt_template_for_vendor(&root, "openai", "prompts/test_prompt.md", "").0;
         assert_eq!(second, "base\n\nsecond");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn test_layered_prompt_appends_vendor_patch_after_overlay() {
+        let root = temp_workspace("vendor_patch_order");
+        write_file(
+            &root,
+            "prompts/layers/manifest.toml",
+            r#"
+[[prompts]]
+logical_path = "prompts/test_prompt.md"
+base = ["prompts/layers/base/test.md"]
+overlay = ["prompts/layers/overlays/test.md"]
+vendor_patch = "routing/common.md"
+"#,
+        );
+        write_file(&root, "prompts/layers/base/test.md", "base");
+        write_file(&root, "prompts/layers/overlays/test.md", "overlay");
+        write_file(
+            &root,
+            "prompts/layers/vendor_patches/minimax/routing/common.md",
+            "vendor patch",
+        );
+
+        let rendered =
+            load_prompt_template_for_vendor(&root, "minimax", "prompts/test_prompt.md", "").0;
+
+        assert_eq!(rendered, "base\n\noverlay\n\nvendor patch");
 
         let _ = fs::remove_dir_all(root);
     }

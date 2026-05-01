@@ -560,10 +560,11 @@ async fn compose_permanent_extension_failure_reply(
         return default_text.to_string();
     };
     let language_hint = crate::language_policy::task_response_language_hint(state, task, request);
-    let mut observed_facts = vec![
-        format!("skill_path: external_skills/{skill_name}"),
-        format!("failure_phase: {phase}"),
-    ];
+    let mut observed_facts = Vec::new();
+    if !skill_name.trim().is_empty() {
+        observed_facts.push(format!("skill_path: external_skills/{skill_name}"));
+    }
+    observed_facts.push(format!("failure_phase: {phase}"));
     if !detail.trim().is_empty() {
         observed_facts.push(format!("failure_detail: {}", detail.trim()));
     }
@@ -694,17 +695,20 @@ where
         return Ok(AskReply::non_llm(reply));
     }
     let Some(plan) = plan_from_skill_output(&plan_value) else {
-        let fallback = plan_value
-            .get("text")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        return Ok(AskReply::non_llm(if fallback.is_empty() {
-            localized_extension_failure(state, language, "")
-        } else {
-            fallback
-        }));
+        let detail = "missing temporary fix plan";
+        let default_text = localized_extension_failure(state, language, detail);
+        let reply = compose_temporary_extension_failure_reply(
+            state,
+            task,
+            language,
+            "self_extension_temporary_plan_missing",
+            request,
+            "temporary_fix_plan",
+            detail,
+            &default_text,
+        )
+        .await;
+        return Ok(AskReply::non_llm(reply));
     };
 
     let plan_requires_install = plan
@@ -809,19 +813,43 @@ where
     });
     let plan_value = run(plan_args).await?;
     if !skill_status_ok(&plan_value) {
-        return Ok(AskReply::non_llm(localized_extension_failure(
+        let detail = skill_error_text(&plan_value);
+        let default_text = localized_extension_failure(state, language, &detail);
+        let reply = compose_permanent_extension_failure_reply(
             state,
+            task,
             language,
-            &skill_error_text(&plan_value),
-        )));
+            "self_extension_permanent_plan_failure",
+            request,
+            "",
+            "permanent_extension_plan",
+            &detail,
+            &default_text,
+        )
+        .await;
+        return Ok(AskReply::non_llm(reply));
     }
     let Some(plan) = plan_from_skill_output(&plan_value) else {
-        return Ok(AskReply::non_llm(localized_extension_failure(
+        let detail = "missing permanent extension plan";
+        let default_text = localized_extension_failure(state, language, detail);
+        let reply = compose_permanent_extension_failure_reply(
             state,
+            task,
             language,
-            "missing permanent extension plan",
-        )));
+            "self_extension_permanent_plan_missing",
+            request,
+            "",
+            "permanent_extension_plan",
+            detail,
+            &default_text,
+        )
+        .await;
+        return Ok(AskReply::non_llm(reply));
     };
+    let skill_name = plan
+        .get("skill_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("generated_extension");
     if !(execute_now && runtime.allow_permanent_extension) {
         return Ok(AskReply::non_llm(localized_permanent_plan_reply(
             state, language, &plan, false,
@@ -836,17 +864,24 @@ where
     });
     let scaffold_value = run(scaffold_args).await?;
     if !skill_status_ok(&scaffold_value) {
-        return Ok(AskReply::non_llm(localized_extension_failure(
+        let detail = skill_error_text(&scaffold_value);
+        let default_text =
+            localized_permanent_materialization_failure(state, language, skill_name, &detail);
+        let reply = compose_permanent_extension_failure_reply(
             state,
+            task,
             language,
-            &skill_error_text(&scaffold_value),
-        )));
+            "self_extension_scaffold_failure",
+            request,
+            skill_name,
+            "scaffold_external_skill",
+            &detail,
+            &default_text,
+        )
+        .await;
+        return Ok(AskReply::non_llm(reply));
     }
 
-    let skill_name = plan
-        .get("skill_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("generated_extension");
     let implement_args = json!({
         "action": "implement_external_skill",
         "request": request,
@@ -1259,6 +1294,43 @@ mod tests {
         .expect("temporary plan should succeed");
 
         assert_eq!(reply.text.contains("did not execute it yet"), true);
+        assert_eq!(seen_actions.borrow().as_slice(), ["temporary_fix_plan"]);
+    }
+
+    #[test]
+    fn temporary_fix_missing_plan_uses_failure_contract_fallback() {
+        let runtime = SelfExtensionConfig {
+            enabled: true,
+            allow_execute: true,
+            ..Default::default()
+        };
+        let seen_actions: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let seen_actions_closure = seen_actions.clone();
+        let reply = run_async(handle_temporary_fix_with(
+            None,
+            None,
+            &runtime,
+            "Use a temporary script to parse the input.",
+            true,
+            ReplyLanguage::En,
+            move |args| {
+                seen_actions_closure.borrow_mut().push(
+                    args.get("action")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                );
+                std::future::ready(Ok(json!({
+                    "status": "ok",
+                    "text": "plan ready",
+                    "extra": {}
+                })))
+            },
+        ))
+        .expect("temporary missing-plan failure should be user-visible");
+
+        assert!(reply.text.contains("controlled self-extension path"));
+        assert!(reply.text.contains("missing temporary fix plan"));
         assert_eq!(seen_actions.borrow().as_slice(), ["temporary_fix_plan"]);
     }
 

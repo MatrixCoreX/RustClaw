@@ -194,13 +194,19 @@ pub(crate) fn synthesize_locator_reply_resolved_intent(
     frame: &FollowupFrame,
     locator_reply: &str,
 ) -> Option<String> {
-    frame.can_accept_locator_reply().then(|| {
+    let locator_reply = locator_reply.trim();
+    if !frame.can_accept_locator_reply()
+        || !crate::clarify_followup::prompt_is_structural_locator_only(locator_reply)
+    {
+        return None;
+    }
+    Some(
         format!(
             "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target/content: {}",
             frame.source_request.trim(),
-            locator_reply.trim()
-        )
-    })
+            locator_reply
+        ),
+    )
 }
 
 fn sanitize_ordered_entry_text(entry: &str) -> String {
@@ -235,6 +241,39 @@ fn sanitize_ordered_entry_text(entry: &str) -> String {
         }
     }
     current.to_string()
+}
+
+fn compact_listing_payload(line: &str) -> Option<&str> {
+    if let Some((_, rest)) = line.split_once('：') {
+        return Some(rest);
+    }
+    if let Some((_, rest)) = line.split_once(':') {
+        return Some(rest);
+    }
+    is_bare_compact_entry_list(line).then_some(line)
+}
+
+fn is_bare_compact_entry_list(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.contains(char::is_whitespace) {
+        return false;
+    }
+    let mut saw_separator = false;
+    for ch in trimmed.chars() {
+        if matches!(ch, '、' | '，' | ',') {
+            saw_separator = true;
+            continue;
+        }
+        if !(ch.is_ascii_alphanumeric()
+            || matches!(
+                ch,
+                '.' | '_' | '-' | '/' | '\\' | '~' | '@' | '+' | '=' | '[' | ']' | '(' | ')'
+            ))
+        {
+            return false;
+        }
+    }
+    saw_separator
 }
 
 fn resolve_ordered_entry_target(frame: &FollowupFrame, entry: &str) -> String {
@@ -328,7 +367,7 @@ fn op_kind_from_route(
     if route_result.wants_file_delivery || route_result.output_contract.delivery_required {
         return FollowupOpKind::Delivery;
     }
-    if route_contract_prefers_listing_followup(route_result)
+    if output_contract_prefers_listing_followup(route_result)
         || journal_has_listing_observation(journal)
     {
         return FollowupOpKind::List;
@@ -352,7 +391,7 @@ fn op_kind_from_route(
     FollowupOpKind::Generic
 }
 
-fn route_contract_prefers_listing_followup(route_result: &crate::RouteResult) -> bool {
+fn output_contract_prefers_listing_followup(route_result: &crate::RouteResult) -> bool {
     matches!(
         route_result.output_contract.semantic_kind,
         crate::OutputSemanticKind::FileNames
@@ -427,18 +466,15 @@ pub(crate) fn extract_ordered_entries_from_text(text: &str) -> Vec<String> {
         if trimmed.is_empty() {
             continue;
         }
-        let compact = trimmed
-            .split_once('：')
-            .map(|(_, rest)| rest)
-            .or_else(|| trimmed.split_once(':').map(|(_, rest)| rest))
-            .unwrap_or(trimmed);
+        let Some(compact) = compact_listing_payload(trimmed) else {
+            continue;
+        };
         let compact_entries = compact
             .split(['、', '，', ','])
             .map(sanitize_ordered_entry_text)
             .map(|token| token.trim_end_matches(['。', '.']).to_string())
             .filter(|token| !token.is_empty())
             .filter(|token| !token.contains(char::is_whitespace))
-            .filter(|token| !token.contains("文件为"))
             .take(MAX_ORDERED_ENTRIES)
             .collect::<Vec<_>>();
         if compact_entries.len() >= 2 {
@@ -828,9 +864,20 @@ mod tests {
     }
 
     #[test]
+    fn locator_reply_resolved_intent_rejects_non_locator_new_request() {
+        let frame = FollowupFrame {
+            source_request: "看一下那个 model io log 最后 4 行，再一句话说有什么现象".to_string(),
+            op_kind: FollowupOpKind::ClarifyPending,
+            unresolved_slot: Some(FollowupUnresolvedSlot::Locator),
+            ..FollowupFrame::default()
+        };
+        assert!(synthesize_locator_reply_resolved_intent(&frame, "今天天气怎么样").is_none());
+    }
+
+    #[test]
     fn extracts_ordered_entries_from_compact_listing_sentence() {
         let entries = extract_ordered_entries_from_text(
-            "前5个文件为：act_plan.log、clawd.log、clawd.run.log、feishud.log、install_ops.log。",
+            "列表：act_plan.log、clawd.log、clawd.run.log、feishud.log、install_ops.log。",
         );
         assert_eq!(
             entries,
@@ -841,6 +888,34 @@ mod tests {
                 "feishud.log",
                 "install_ops.log"
             ]
+        );
+    }
+
+    #[test]
+    fn extracts_ordered_entries_from_bare_compact_listing() {
+        let entries = extract_ordered_entries_from_text(
+            "act_plan.log,clawd.log,clawd.run.log,feishud.log,install_ops.log",
+        );
+        assert_eq!(
+            entries,
+            vec![
+                "act_plan.log",
+                "clawd.log",
+                "clawd.run.log",
+                "feishud.log",
+                "install_ops.log"
+            ]
+        );
+    }
+
+    #[test]
+    fn ignores_prose_prefixed_compact_listing_without_delimiter() {
+        let entries = extract_ordered_entries_from_text(
+            "前5个条目act_plan.log、clawd.log、clawd.run.log、feishud.log、install_ops.log",
+        );
+        assert!(
+            entries.is_empty(),
+            "compact follow-up extraction should not depend on language-specific prefix filters"
         );
     }
 
@@ -1012,7 +1087,7 @@ mod tests {
             &task,
             "先列出 logs 目录下前 5 个文件名",
             &route_result,
-            "前5个文件为：act_plan.log、clawd.log、clawd.run.log、feishud.log、install_ops.log。",
+            "列表：act_plan.log、clawd.log、clawd.run.log、feishud.log、install_ops.log。",
             &[],
             false,
             &journal,
@@ -1460,8 +1535,8 @@ mod tests {
             &task,
             "看看那个模型日志最后 5 行",
             &route_result,
-            "请提供具体要读取的文件名或路径。",
-            &["请提供具体要读取的文件名或路径。".to_string()],
+            "LOCATOR_CLARIFY_PROMPT",
+            &["LOCATOR_CLARIFY_PROMPT".to_string()],
             true,
             &journal,
         );

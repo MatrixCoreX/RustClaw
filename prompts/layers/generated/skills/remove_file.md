@@ -15,7 +15,7 @@ Independent base skill for removing a file. Use `{"type":"call_skill","skill":"r
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en

@@ -26,7 +26,7 @@ Independent base skill for running shell commands. Use `{"type":"call_skill","sk
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en

@@ -44,6 +44,18 @@ Runner output prints each user instruction and assistant answer as `PROMPT` / `R
 blocks by default. Use `--prompt-reply-only` when you want to suppress most
 diagnostic output and keep only those dialog blocks.
 
+Client-like continuous regression:
+
+- Regenerate the safe aggregate case file:
+  `python3 scripts/nl_tests/build_client_like_case_aggregate.py`
+- Check the aggregate is up to date without rewriting it:
+  `python3 scripts/nl_tests/build_client_like_case_aggregate.py --check`
+- Run a small slice through the real client-like path:
+  `bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt --case-limit 20 --prompt-reply-only --quality-guard`
+- Run the full safe aggregate when provider capacity is available:
+  `bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt --prompt-reply-only --quality-guard`
+- Resume after a provider interruption by reusing the printed `RESUME_HINT`.
+
 Self-extension regressions:
 
 - `bash scripts/nl_tests/run_suite.sh self_extension`

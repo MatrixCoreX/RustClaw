@@ -56,6 +56,11 @@ fn observed_t_with_vars(
     }
 }
 
+fn is_internal_missing_scalar_sentinel(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed == "<missing>" || trimmed.ends_with(": <missing>")
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct GenericObservedOutput {
     pub(crate) skill: String,
@@ -126,7 +131,10 @@ pub(crate) fn extract_latest_generic_successful_output(
     loop_state: &LoopState,
 ) -> Option<GenericObservedOutput> {
     let idx = latest_successful_step_index(loop_state, |step| {
-        if matches!(step.skill.as_str(), "read_file" | "list_dir") {
+        if matches!(
+            step.skill.as_str(),
+            "read_file" | "list_dir" | "respond" | "synthesize_answer" | "think"
+        ) {
             return false;
         }
         let body = step.output.as_deref().map(str::trim).unwrap_or_default();
@@ -166,7 +174,6 @@ pub(crate) fn extract_latest_generic_successful_output(
 fn latest_successful_list_dir_answer_candidate(
     loop_state: &LoopState,
     response_shape: Option<crate::OutputResponseShape>,
-    max_entries: Option<usize>,
     auto_locator_path: Option<&str>,
     prefer_full_path: bool,
 ) -> Option<String> {
@@ -181,8 +188,7 @@ fn latest_successful_list_dir_answer_candidate(
     if !step.is_ok() || step.skill != "list_dir" {
         return None;
     }
-    let listing =
-        normalized_observed_listing(step.output.as_deref().unwrap_or_default(), max_entries)?;
+    let listing = normalized_observed_listing(step.output.as_deref().unwrap_or_default())?;
     if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
         let mut lines = listing
             .lines()
@@ -254,16 +260,13 @@ fn normalized_listing_entry_count(listing: &str) -> usize {
         .count()
 }
 
-fn trim_listing_to_max_entries(listing: &str, max_entries: Option<usize>) -> Option<String> {
-    let mut lines = listing
+fn normalized_listing_text(listing: &str) -> Option<String> {
+    let lines = listing
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .map(ToString::to_string)
         .collect::<Vec<_>>();
-    if let Some(limit) = max_entries.filter(|limit| *limit > 0) {
-        lines.truncate(limit);
-    }
     if lines.is_empty() {
         None
     } else {
@@ -288,7 +291,13 @@ fn current_turn_request_text<'a>(
     agent_run_context: Option<&'a AgentRunContext>,
 ) -> Option<&'a str> {
     agent_run_context
-        .and_then(|ctx| ctx.user_request.as_deref())
+        .and_then(|ctx| ctx.original_user_request.as_deref())
+        .filter(|text| !text.trim().is_empty())
+        .or_else(|| {
+            agent_run_context
+                .and_then(|ctx| ctx.user_request.as_deref())
+                .filter(|text| !text.trim().is_empty())
+        })
         .filter(|text| !text.trim().is_empty())
         .or_else(|| {
             route
@@ -345,7 +354,7 @@ fn latest_list_dir_listing(loop_state: &LoopState) -> Option<String> {
     if !step.is_ok() || step.skill != "list_dir" {
         return None;
     }
-    normalized_observed_listing(step.output.as_deref().unwrap_or_default(), None)
+    normalized_observed_listing(step.output.as_deref().unwrap_or_default())
 }
 
 fn hidden_entries_from_listing(listing: &str) -> Vec<String> {
@@ -353,7 +362,7 @@ fn hidden_entries_from_listing(listing: &str) -> Vec<String> {
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .filter(|line| line.starts_with('.'))
+        .filter(|line| is_user_hidden_entry(line))
         .map(ToString::to_string)
         .collect()
 }
@@ -363,9 +372,14 @@ fn hidden_entries_from_entries(entries: &[String]) -> Vec<String> {
         .iter()
         .map(|entry| entry.trim())
         .filter(|entry| !entry.is_empty())
-        .filter(|entry| entry.starts_with('.'))
+        .filter(|entry| is_user_hidden_entry(entry))
         .map(ToString::to_string)
         .collect()
+}
+
+fn is_user_hidden_entry(entry: &str) -> bool {
+    let normalized = entry.trim().trim_end_matches('/');
+    normalized.starts_with('.') && normalized != "." && normalized != ".."
 }
 
 fn hidden_entries_direct_answer(
@@ -377,7 +391,10 @@ fn hidden_entries_direct_answer(
     if !route_requests_hidden_entries_check(route) {
         return None;
     }
-    let hidden_entries = latest_directory_listing_entries(loop_state, None, None)
+    if route.output_contract.response_shape != crate::OutputResponseShape::Scalar {
+        return None;
+    }
+    let hidden_entries = latest_directory_listing_entries(loop_state, None)
         .map(|entries| hidden_entries_from_entries(&entries))
         .or_else(|| {
             latest_list_dir_listing(loop_state).map(|listing| hidden_entries_from_listing(&listing))
@@ -388,31 +405,23 @@ fn hidden_entries_direct_answer(
         .cloned()
         .collect::<Vec<_>>()
         .join(", ");
-    if route.ask_mode.is_plain_act()
-        || matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::Scalar
-        )
-    {
-        if hidden_entries.is_empty() {
-            return Some(observed_t(
-                state,
-                "clawd.msg.hidden_entries_none_scalar",
-                "没有",
-                "No",
-                prefer_english,
-            ));
-        }
-        return Some(observed_t_with_vars(
+    if hidden_entries.is_empty() {
+        return Some(observed_t(
             state,
-            "clawd.msg.hidden_entries_found_scalar_examples",
-            "有。示例：{examples}",
-            "Yes: {examples}",
+            "clawd.msg.hidden_entries_none_scalar",
+            "没有",
+            "No",
             prefer_english,
-            &[("examples", examples.as_str())],
         ));
     }
-    None
+    Some(observed_t_with_vars(
+        state,
+        "clawd.msg.hidden_entries_found_scalar_examples",
+        "有。示例：{examples}",
+        "Yes: {examples}",
+        prefer_english,
+        &[("examples", examples.as_str())],
+    ))
 }
 
 fn listing_entries(listing: &str) -> Vec<String> {
@@ -427,35 +436,27 @@ fn listing_entries(listing: &str) -> Vec<String> {
 fn latest_directory_listing_entries(
     loop_state: &LoopState,
     auto_locator_path: Option<&str>,
-    max_entries: Option<usize>,
 ) -> Option<Vec<String>> {
     let idx = latest_successful_step_index(loop_state, |_| true)?;
     let step = &loop_state.executed_step_results[idx];
-    directory_listing_entries_from_step(step, auto_locator_path, max_entries)
+    directory_listing_entries_from_step(step, auto_locator_path)
 }
 
 fn directory_listing_entries_from_step(
     step: &crate::executor::StepExecutionResult,
     auto_locator_path: Option<&str>,
-    max_entries: Option<usize>,
 ) -> Option<Vec<String>> {
     if !step.is_ok() {
         return None;
     }
     let body = step.output.as_deref().unwrap_or_default();
     match step.skill.as_str() {
-        "list_dir" => {
-            normalized_observed_listing(body, max_entries).map(|listing| listing_entries(&listing))
-        }
-        "run_cmd" => run_cmd_listing_text_candidate(body, auto_locator_path, max_entries)
+        "list_dir" => normalized_observed_listing(body).map(|listing| listing_entries(&listing)),
+        "run_cmd" => run_cmd_listing_text_candidate(body, auto_locator_path)
             .map(|listing| listing_entries(&listing)),
         "system_basic" => {
             let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
-            let mut entries = inventory_dir_names(&value)?;
-            if let Some(limit) = max_entries.filter(|limit| *limit > 0) {
-                entries.truncate(limit);
-            }
-            Some(entries)
+            inventory_dir_names(&value)
         }
         _ => None,
     }
@@ -615,7 +616,7 @@ fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> 
             "Return exactly the format requested by the user. Do not add execution traces, headings, prefixes, suffixes, or extra explanation."
         }
         Some(crate::OutputResponseShape::Free) => {
-            "Return a short direct answer, usually one short paragraph or compact listing plus one concise conclusion."
+            "Return a short direct answer: one short paragraph or compact listing plus one concise conclusion."
         }
         None => "Return the shortest grounded answer that directly satisfies the user request.",
     }
@@ -850,25 +851,102 @@ fn inventory_dir_names(value: &serde_json::Value) -> Option<Vec<String>> {
         .filter(|items| !items.is_empty())
 }
 
-fn inventory_dir_direct_answer_candidate(
-    value: &serde_json::Value,
-    max_entries: Option<usize>,
-) -> Option<String> {
+fn inventory_dir_direct_answer_candidate(value: &serde_json::Value) -> Option<String> {
+    if value
+        .get("names_only")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        let names = inventory_dir_names(value)?;
+        return normalized_listing_text(&names.join("\n"));
+    }
+    if let Some(entries) = value.get("entries").and_then(|v| v.as_array()) {
+        let lines = entries
+            .iter()
+            .filter_map(|entry| {
+                let name = entry
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())?;
+                let size = entry.get("size_bytes").and_then(|v| v.as_u64())?;
+                Some(format!("{name} {size}"))
+            })
+            .collect::<Vec<_>>();
+        if !lines.is_empty() {
+            return normalized_listing_text(&lines.join("\n"));
+        }
+    }
     let names = inventory_dir_names(value)?;
-    trim_listing_to_max_entries(&names.join("\n"), max_entries)
+    normalized_listing_text(&names.join("\n"))
 }
 
 fn inventory_dir_observed_candidate(value: &serde_json::Value) -> Option<String> {
-    let names = inventory_dir_names(value)?;
     let path = value
         .get("resolved_path")
         .or_else(|| value.get("path"))
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|v| !v.is_empty())?;
+    let mut header = format!("inventory_dir path={path}");
+    if let Some(sort_by) = value
+        .get("sort_by")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        header.push_str(&format!(" sort_by={sort_by}"));
+    }
+    if let Some(counts) = value.get("counts").and_then(|v| v.as_object()) {
+        for key in ["total", "files", "dirs", "hidden"] {
+            if let Some(count) = counts.get(key).and_then(value_scalar_text) {
+                header.push_str(&format!(" {key}={count}"));
+            }
+        }
+    }
+    if let Some(entries) = value.get("entries").and_then(|v| v.as_array()) {
+        let lines = entries
+            .iter()
+            .filter_map(|entry| {
+                let entry = entry.as_object()?;
+                let name = entry
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())?;
+                let kind = entry
+                    .get("kind")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or("-");
+                let size = entry
+                    .get("size_bytes")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                let modified = entry
+                    .get("modified_ts")
+                    .and_then(|v| v.as_i64())
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                Some(format!(
+                    "entry name={name} kind={kind} size_bytes={size} modified_ts={modified}"
+                ))
+            })
+            .collect::<Vec<_>>();
+        if !lines.is_empty() {
+            return Some(format!("{header}\n{}", lines.join("\n")));
+        }
+    }
+    let names = inventory_dir_names(value)?;
     Some(format!(
-        "inventory_dir path={path}\n- {}",
-        names.join("\n- ")
+        "{header}\n{}",
+        names
+            .into_iter()
+            .map(|name| format!("entry name={name}"))
+            .collect::<Vec<_>>()
+            .join("\n")
     ))
 }
 
@@ -881,7 +959,6 @@ fn is_ignorable_shell_warning(line: &str) -> bool {
 fn run_cmd_directory_entry_list_candidate(
     body: &str,
     auto_locator_path: Option<&str>,
-    max_entries: Option<usize>,
 ) -> Option<String> {
     let auto_locator_path = auto_locator_path
         .map(str::trim)
@@ -915,24 +992,17 @@ fn run_cmd_directory_entry_list_candidate(
             && serde_json::from_str::<serde_json::Value>(candidate).is_err()
     });
     all_direct_entries
-        .then(|| trim_listing_to_max_entries(&lines.join("\n"), max_entries))
+        .then(|| normalized_listing_text(&lines.join("\n")))
         .flatten()
 }
 
-fn run_cmd_listing_text_candidate(
-    body: &str,
-    auto_locator_path: Option<&str>,
-    max_entries: Option<usize>,
-) -> Option<String> {
-    run_cmd_shell_listing_entry_names(body, max_entries)
+fn run_cmd_listing_text_candidate(body: &str, auto_locator_path: Option<&str>) -> Option<String> {
+    run_cmd_shell_listing_entry_names(body)
         .map(|names| names.join("\n"))
-        .or_else(|| run_cmd_directory_entry_list_candidate(body, auto_locator_path, max_entries))
+        .or_else(|| run_cmd_directory_entry_list_candidate(body, auto_locator_path))
 }
 
-fn run_cmd_shell_listing_entry_names(
-    body: &str,
-    max_entries: Option<usize>,
-) -> Option<Vec<String>> {
+fn run_cmd_shell_listing_entry_names(body: &str) -> Option<Vec<String>> {
     let mut names = Vec::new();
     for line in body
         .lines()
@@ -965,9 +1035,6 @@ fn run_cmd_shell_listing_entry_names(
     }
     if names.is_empty() {
         return None;
-    }
-    if let Some(limit) = max_entries.filter(|limit| *limit > 0) {
-        names.truncate(limit);
     }
     Some(names)
 }
@@ -1547,12 +1614,6 @@ fn structured_scalar_candidate(
             }
         }
         "extract_field" => {
-            let field_path = value
-                .get("field_path")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .unwrap_or("requested field");
             if value
                 .get("exists")
                 .and_then(|v| v.as_bool())
@@ -1574,11 +1635,17 @@ fn structured_scalar_candidate(
                     _ => None,
                 });
             }
+            let field_path = value
+                .get("field_path")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .unwrap_or("requested field");
             Some(observed_t_with_vars(
                 state,
-                "clawd.msg.field_not_found",
-                "{field_path} 字段不存在",
-                "Field `{field_path}` does not exist.",
+                "clawd.msg.extract_field_missing",
+                "未找到 {field_path} 字段",
+                "field not found: {field_path}",
                 prefer_english,
                 &[("field_path", field_path)],
             ))
@@ -1849,6 +1916,64 @@ fn compare_paths_observed_candidate(body: &str) -> Option<String> {
     ))
 }
 
+fn observed_path_label(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn path_batch_facts_observed_candidate(value: &serde_json::Value) -> Option<String> {
+    if value.get("action").and_then(|v| v.as_str()) != Some("path_batch_facts") {
+        return None;
+    }
+    let facts = value.get("facts")?.as_array()?;
+    if facts.is_empty() {
+        return None;
+    }
+    let lines = facts
+        .iter()
+        .filter_map(|entry| {
+            let entry = entry.as_object()?;
+            let exists = entry
+                .get("exists")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            let fact = entry.get("fact").and_then(|value| value.as_object());
+            let path = fact
+                .and_then(|item| item.get("resolved_path"))
+                .or_else(|| fact.and_then(|item| item.get("path")))
+                .or_else(|| entry.get("path"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("-");
+            let label = observed_path_label(path);
+            let kind = fact
+                .and_then(|item| item.get("kind"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("-");
+            let size = fact
+                .and_then(|item| item.get("size_bytes"))
+                .and_then(|value| value.as_u64())
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string());
+            let modified = fact
+                .and_then(|item| item.get("modified_ts"))
+                .and_then(|value| value.as_i64())
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string());
+            Some(format!(
+                "path_fact name={label} path={path} exists={exists} kind={kind} size_bytes={size} modified_ts={modified}"
+            ))
+        })
+        .collect::<Vec<_>>();
+    (!lines.is_empty()).then(|| format!("path_batch_facts\n{}", lines.join("\n")))
+}
+
 fn read_range_observed_candidate(value: &serde_json::Value) -> Option<String> {
     let excerpt = value
         .get("excerpt")
@@ -1960,6 +2085,7 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
                 "read_range" => read_range_observed_candidate(&value),
                 "inventory_dir" => inventory_dir_observed_candidate(&value),
                 "compare_paths" => compare_paths_observed_candidate(body),
+                "path_batch_facts" => path_batch_facts_observed_candidate(&value),
                 _ => None,
             }
         }
@@ -1987,7 +2113,6 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     if let Some(answer) = latest_successful_list_dir_answer_candidate(
         loop_state,
         Some(crate::OutputResponseShape::Scalar),
-        None,
         auto_locator_path,
         prefer_full_path,
     ) {
@@ -2130,7 +2255,6 @@ fn extract_direct_answer_from_generic_output_impl(
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     let response_shape = route.map(|route| route.output_contract.response_shape);
     let is_plain_act = route.is_some_and(|route| route.ask_mode.is_plain_act());
-    let allow_raw_listing_direct_answer = route_allows_raw_listing_direct_answer(route);
     let locator_hint = route
         .map(|route| route.output_contract.locator_hint.as_str())
         .filter(|hint| !hint.trim().is_empty());
@@ -2145,6 +2269,14 @@ fn extract_direct_answer_from_generic_output_impl(
         route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
             && prefers_english_free_text
     });
+    let existence_with_path_should_use_llm_synthesis = false;
+    let hidden_entries_should_use_llm_synthesis = route.is_some_and(|route| {
+        route_requests_hidden_entries_check(route)
+            && route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+    });
+    let allow_raw_listing_direct_answer = route_allows_raw_listing_direct_answer(route)
+        && !existence_with_path_should_use_llm_synthesis
+        && !hidden_entries_should_use_llm_synthesis;
     let health_check_prefers_raw_payload = is_plain_act
         && !matches!(
             response_shape,
@@ -2174,7 +2306,6 @@ fn extract_direct_answer_from_generic_output_impl(
             latest_successful_list_dir_answer_candidate(
                 loop_state,
                 response_shape,
-                None,
                 auto_locator_path,
                 prefer_full_path,
             )
@@ -2183,24 +2314,28 @@ fn extract_direct_answer_from_generic_output_impl(
         .or_else(|| {
             let observed_output = extract_latest_generic_successful_output(loop_state)?;
             if observed_output.skill == "run_cmd" {
-                run_cmd_presence_with_path_candidate(
-                    state,
-                    &observed_output.body,
-                    locator_hint,
-                    auto_locator_path,
-                    prefers_english_presence_answer,
-                )
-                .or_else(|| {
-                    allow_raw_listing_direct_answer
-                        .then(|| {
-                            run_cmd_listing_text_candidate(
-                                &observed_output.body,
-                                auto_locator_path,
-                                None,
-                            )
-                        })
-                        .flatten()
-                })
+                (!existence_with_path_should_use_llm_synthesis)
+                    .then(|| {
+                        run_cmd_presence_with_path_candidate(
+                            state,
+                            &observed_output.body,
+                            locator_hint,
+                            auto_locator_path,
+                            prefers_english_presence_answer,
+                        )
+                    })
+                    .flatten()
+                    .or_else(|| {
+                        (allow_raw_listing_direct_answer
+                            && !existence_with_path_should_use_llm_synthesis)
+                            .then(|| {
+                                run_cmd_listing_text_candidate(
+                                    &observed_output.body,
+                                    auto_locator_path,
+                                )
+                            })
+                            .flatten()
+                    })
             } else {
                 None
             }
@@ -2259,7 +2394,7 @@ fn extract_direct_answer_from_generic_output_impl(
                         && is_plain_act
                         && allow_raw_listing_direct_answer
                     {
-                        inventory_dir_direct_answer_candidate(&value, None)
+                        inventory_dir_direct_answer_candidate(&value)
                     } else if action == Some("extract_fields") {
                         extract_fields_direct_answer_candidate(
                             &value,
@@ -2281,10 +2416,12 @@ fn extract_direct_answer_from_generic_output_impl(
                         } else {
                             None
                         }
-                    } else if route.is_some_and(|route| {
-                        route.output_contract.semantic_kind
-                            == crate::OutputSemanticKind::ExistenceWithPath
-                    }) {
+                    } else if !existence_with_path_should_use_llm_synthesis
+                        && route.is_some_and(|route| {
+                            route.output_contract.semantic_kind
+                                == crate::OutputSemanticKind::ExistenceWithPath
+                        })
+                    {
                         system_basic_existence_with_path_candidate(
                             state,
                             &value,
@@ -2311,9 +2448,13 @@ fn extract_direct_answer_from_generic_output_impl(
                 )
             })
             .or_else(|| {
-                allows_normalized_scalar_direct_fallback(&observed_output.skill, response_shape)
-                    .then(|| normalized_scalar_candidate(&observed_output.body))
-                    .flatten()
+                (!existence_with_path_should_use_llm_synthesis
+                    && allows_normalized_scalar_direct_fallback(
+                        &observed_output.skill,
+                        response_shape,
+                    ))
+                .then(|| normalized_scalar_candidate(&observed_output.body))
+                .flatten()
             })
         })?;
     if crate::finalize::looks_like_planner_artifact(&answer)
@@ -2352,6 +2493,24 @@ pub(crate) fn extract_direct_answer_from_generic_output_i18n(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
     extract_direct_answer_from_generic_output_impl(Some(state), loop_state, agent_run_context)
+}
+
+fn replace_internal_missing_sentinel_with_structured_observation(
+    answer: &str,
+    state: &AppState,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    if !is_internal_missing_scalar_sentinel(answer) {
+        return None;
+    }
+    extract_direct_answer_from_generic_output_i18n(loop_state, state, agent_run_context)
+        .or_else(|| {
+            extract_direct_scalar_from_generic_output_i18n(loop_state, state, agent_run_context)
+        })
+        .map(|replacement| replacement.trim().to_string())
+        .filter(|replacement| !replacement.is_empty())
+        .filter(|replacement| !is_internal_missing_scalar_sentinel(replacement))
 }
 
 fn observed_step_body(step: &crate::executor::StepExecutionResult) -> Option<String> {
@@ -2477,6 +2636,8 @@ pub(crate) async fn synthesize_answer_from_observed_output(
     let resolved_intent = resolved_user_intent(agent_run_context, user_text);
     let request_language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_text);
+    let user_request_for_prompt = crate::language_policy::task_original_user_text(task)
+        .unwrap_or_else(|| user_text.trim().to_string());
     let (prompt_template, prompt_source) =
         match crate::bootstrap::load_required_prompt_template_for_state(
             state,
@@ -2496,7 +2657,7 @@ pub(crate) async fn synthesize_answer_from_observed_output(
     let prompt = crate::render_prompt_template(
         &prompt_template,
         &[
-            ("__USER_REQUEST__", user_text.trim()),
+            ("__USER_REQUEST__", &user_request_for_prompt),
             ("__RESOLVED_USER_INTENT__", &resolved_intent),
             (
                 "__OUTPUT_CONTRACT__",
@@ -2547,7 +2708,7 @@ pub(crate) async fn synthesize_answer_from_observed_output(
     }
     .or_else(|| {
             // F14: minimax 等 vendor 偶发不遵守 prompt 的 "Output JSON only" 契约，
-            // 直接吐 markdown 文本（典型例：被多步 read 喂饱后给一段中文综述但没包成
+            // 直接吐 markdown 文本（常见表现：被多步 read 喂饱后给一段中文综述但没包成
             // JSON envelope）。原先 ObservedAnswerFallbackOut 解析失败 → 整个 fallback
             // 返回 None → finalize 落到 clarify_question_fallback，把已经合成好的真实
             // 答案丢掉，变成"假需要确认"。这里把 trim 后的整段文本视作 answer 兜底，
@@ -2571,7 +2732,20 @@ pub(crate) async fn synthesize_answer_from_observed_output(
                 _reason: String::from("non_json_text_fallback"),
             })
         })?;
-    let answer = parsed.answer.trim().to_string();
+    let mut answer = parsed.answer.trim().to_string();
+    if let Some(replacement) = replace_internal_missing_sentinel_with_structured_observation(
+        &answer,
+        state,
+        loop_state,
+        agent_run_context,
+    ) {
+        tracing::info!(
+            "observed_answer_fallback_replace_internal_missing_sentinel task_id={} replacement={}",
+            task.task_id,
+            crate::truncate_for_log(&replacement)
+        );
+        answer = replacement;
+    }
     // §3.4 finalize-tier: 这里属于 observed_answer_fallback 兜底路径（finalize 层
     // 的 fallback 分支），是 semantic_judge LLM 入口的允许调用方之一。
     // Phase 0.2: 复用同一次 LLM 调用已经返回的 `publishable` + `is_meta_instruction`，
@@ -2616,11 +2790,8 @@ pub(crate) async fn synthesize_answer_from_observed_output(
     ))
 }
 
-pub(crate) fn normalized_observed_listing(
-    observed: &str,
-    max_entries: Option<usize>,
-) -> Option<String> {
-    trim_listing_to_max_entries(observed, max_entries)
+pub(crate) fn normalized_observed_listing(observed: &str) -> Option<String> {
+    normalized_listing_text(observed)
 }
 
 #[cfg(test)]
@@ -2632,7 +2803,8 @@ mod tests {
         extract_direct_scalar_from_generic_output_with_locator_hint,
         has_observed_answer_candidates, normalized_observed_listing, observed_contract_json,
         observed_output_entries, observed_request_language_hint, observed_response_style_hint,
-        structured_observed_body, AgentRunContext, OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
+        replace_internal_missing_sentinel_with_structured_observation, structured_observed_body,
+        AgentRunContext, OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
     };
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
@@ -2734,7 +2906,7 @@ mod tests {
                     .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:compare_targets".to_string(),
+            route_reason: "llm_contract:compare_targets".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -2784,7 +2956,7 @@ mod tests {
             resolved_intent: "Are those two names the same? Answer same or different".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:same_or_different".to_string(),
+            route_reason: "llm_contract:same_or_different".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -2841,7 +3013,7 @@ version.workspace = true
                     .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:same_or_different".to_string(),
+            route_reason: "llm_contract:same_or_different".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -2873,7 +3045,7 @@ version.workspace = true
     }
 
     #[test]
-    fn direct_scalar_reports_missing_extract_field_as_field_absent() {
+    fn direct_scalar_reports_missing_extract_field_as_readable_message() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -2882,7 +3054,94 @@ version.workspace = true
         ));
         assert_eq!(
             extract_direct_scalar_from_generic_output(&loop_state, None).as_deref(),
-            Some("name 字段不存在")
+            Some("未找到 name 字段")
+        );
+    }
+
+    #[test]
+    fn internal_missing_sentinel_uses_structured_extract_field_evidence() {
+        let state = AppState::test_default_with_fixture_provider();
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"extract_field","exists":false,"field_path":"package.name","value_text":"","value":null,"value_type":"null"}"#,
+        ));
+
+        assert_eq!(
+            replace_internal_missing_sentinel_with_structured_observation(
+                "<missing>",
+                &state,
+                &loop_state,
+                None
+            )
+            .as_deref(),
+            Some("未找到 package.name 字段")
+        );
+        assert_eq!(
+            replace_internal_missing_sentinel_with_structured_observation(
+                "package.name: <missing>",
+                &state,
+                &loop_state,
+                None
+            )
+            .as_deref(),
+            Some("未找到 package.name 字段")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_missing_field_language_uses_original_request_before_resolved_prompt() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"extract_field","exists":false,"field_path":"name","value_text":"","value":null,"value_type":"null"}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "Read the name field from package.json and output only its value."
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "llm_contract:field_extract".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: "package.json".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            original_user_request: Some("读取 package.json 里的 name 字段，只输出值".to_string()),
+            user_request: Some(
+                "Read the name field from package.json and output only its value.".to_string(),
+            ),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_scalar_from_generic_output_i18n(
+                &loop_state,
+                &AppState::test_default_with_fixture_provider(),
+                Some(&agent_run_context),
+            )
+            .as_deref(),
+            Some("未找到 name 字段")
         );
     }
 
@@ -3048,16 +3307,8 @@ version.workspace = true
     #[test]
     fn normalized_listing_trims_blank_lines() {
         assert_eq!(
-            normalized_observed_listing("\nfoo\n\nbar\n", None).as_deref(),
+            normalized_observed_listing("\nfoo\n\nbar\n").as_deref(),
             Some("foo\nbar")
-        );
-    }
-
-    #[test]
-    fn normalized_listing_honors_requested_entry_limit() {
-        assert_eq!(
-            normalized_observed_listing("a\nb\nc\n", Some(2)).as_deref(),
-            Some("a\nb")
         );
     }
 
@@ -3360,7 +3611,7 @@ version.workspace = true
             resolved_intent: "先读一下 README.md 前 4 行，再用三句话总结".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:generic_filename_read_range".to_string(),
+            route_reason: "llm_contract:generic_filename_read_range".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -3407,7 +3658,7 @@ version.workspace = true
             resolved_intent: "先读一下 README.md 前 4 行".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:generic_filename_read_range".to_string(),
+            route_reason: "llm_contract:generic_filename_read_range".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -3455,7 +3706,7 @@ version.workspace = true
             resolved_intent: "读 /tmp/package.json，告诉我 scripts 字段下都有哪些子键".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:generic_explicit_path_structured_keys".to_string(),
+            route_reason: "llm_contract:generic_explicit_path_structured_keys".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -3502,7 +3753,7 @@ version.workspace = true
                 .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:generic_explicit_path_structured_keys".to_string(),
+            route_reason: "llm_contract:generic_explicit_path_structured_keys".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -3549,7 +3800,7 @@ version.workspace = true
                     .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:generic_explicit_path_extract_fields"
+            route_reason: "llm_contract:generic_explicit_path_extract_fields"
                 .to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
@@ -3629,7 +3880,53 @@ version.workspace = true
     }
 
     #[test]
-    fn direct_answer_preserves_inventory_dir_names_without_request_text_limit() {
+    fn direct_answer_uses_inventory_dir_entry_sizes_when_names_only_is_false() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"inventory_dir","path":"/tmp/logs","resolved_path":"/tmp/logs","names_only":false,"entries":[{"name":"act_plan.log","kind":"file","size_bytes":2467002},{"name":"clawd.run.log","kind":"file","size_bytes":397321},{"name":"clawd.log","kind":"file","size_bytes":2035}],"names":["act_plan.log","clawd.run.log","clawd.log"]}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "列出 logs 目录下最大的 3 个文件，输出文件名和大小".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::FileNames,
+                locator_hint: "logs".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("act_plan.log 2467002\nclawd.run.log 397321\nclawd.log 2035")
+        );
+    }
+
+    #[test]
+    fn direct_answer_does_not_apply_listing_limit_from_resolved_intent_text() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -3675,7 +3972,7 @@ version.workspace = true
     }
 
     #[test]
-    fn direct_answer_does_not_use_current_turn_request_text_to_truncate_inventory_dir() {
+    fn direct_answer_does_not_apply_listing_limit_from_current_turn_request_text() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -3907,7 +4204,7 @@ version.workspace = true
     }
 
     #[test]
-    fn hidden_entries_explanation_requests_defer_to_synthesis() {
+    fn direct_answer_defers_hidden_entries_explanation_shape_to_synthesis() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -4000,7 +4297,53 @@ version.workspace = true
     }
 
     #[test]
-    fn direct_answer_formats_hidden_entries_check_act_free_from_listing() {
+    fn direct_answer_defers_hidden_entries_check_strict_shape_to_synthesis() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "list_dir",
+            ".\n..\n.codex\n.git/\n.gitignore\nREADME.md\n",
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子"
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
+                locator_hint: ".".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn direct_answer_defers_hidden_entries_check_free_shape_to_synthesis() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -4039,15 +4382,14 @@ version.workspace = true
             route_result: Some(route_result),
             ..AgentRunContext::default()
         };
-        assert_eq!(
+        assert!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("有。示例：.cargo/, .dockerignore, .env.example")
+                .is_none()
         );
     }
 
     #[test]
-    fn direct_answer_formats_hidden_entries_check_from_system_basic_inventory_dir() {
+    fn direct_answer_defers_hidden_entries_check_one_sentence_from_system_basic_inventory_dir() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -4086,16 +4428,14 @@ version.workspace = true
             route_result: Some(route_result),
             ..AgentRunContext::default()
         };
-        assert_eq!(
+        assert!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some("有。示例：.cargo, .dockerignore, .env.example")
+                .is_none()
         );
     }
 
     #[test]
-    fn direct_answer_formats_existence_with_path_from_system_basic_path_batch_facts_even_when_free()
-    {
+    fn direct_answer_formats_existence_with_path_from_system_basic_path_batch_facts() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -4151,11 +4491,13 @@ version.workspace = true
         std::fs::create_dir_all(&temp_dir).expect("create temp dir");
         let target = temp_dir.join("rustclaw.service");
         std::fs::write(&target, "ok").expect("write target");
-        let resolved = target
-            .canonicalize()
-            .unwrap_or(target.clone())
-            .to_string_lossy()
-            .to_string();
+        let expected = format!(
+            "有，路径：{}",
+            target
+                .canonicalize()
+                .unwrap_or(target.clone())
+                .to_string_lossy()
+        );
 
         let mut loop_state = LoopState::new(2);
         loop_state
@@ -4194,7 +4536,6 @@ version.workspace = true
             auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
             ..AgentRunContext::default()
         };
-        let expected = format!("有，路径：{resolved}");
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
@@ -4213,11 +4554,13 @@ version.workspace = true
         std::fs::create_dir_all(&temp_dir).expect("create temp dir");
         let target = temp_dir.join("rustclaw.service");
         std::fs::write(&target, "ok").expect("write target");
-        let resolved = target
-            .canonicalize()
-            .unwrap_or(target.clone())
-            .to_string_lossy()
-            .to_string();
+        let expected = format!(
+            "有，路径：{}",
+            target
+                .canonicalize()
+                .unwrap_or(target.clone())
+                .to_string_lossy()
+        );
 
         let mut loop_state = LoopState::new(2);
         loop_state
@@ -4256,7 +4599,6 @@ version.workspace = true
             auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
             ..AgentRunContext::default()
         };
-        let expected = format!("有，路径：{resolved}");
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
@@ -5109,7 +5451,7 @@ version.workspace = true
             resolved_intent: "数一下 scripts 目录直接子项有多少个，只输出数字".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:current_workspace_scalar_count".to_string(),
+            route_reason: "llm_contract:current_workspace_scalar_count".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5155,7 +5497,7 @@ version.workspace = true
             resolved_intent: "数一下当前目录里以点开头的隐藏文件有几个，只输出数字".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:current_workspace_hidden_entries_count".to_string(),
+            route_reason: "llm_contract:current_workspace_hidden_entries_count".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5202,7 +5544,7 @@ version.workspace = true
                 .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:package_manager_detect_summary".to_string(),
+            route_reason: "llm_contract:package_manager_detect_summary".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5248,7 +5590,7 @@ version.workspace = true
             resolved_intent: "只输出当前机器识别到的包管理器名称".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:package_manager_detect_scalar".to_string(),
+            route_reason: "llm_contract:package_manager_detect_scalar".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5435,6 +5777,28 @@ version.workspace = true
     }
 
     #[test]
+    fn structured_observed_body_includes_path_batch_metadata_for_synthesis() {
+        let body = r#"{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","modified_ts":1777345844,"path":"Cargo.lock","resolved_path":"/tmp/repo/Cargo.lock","size_bytes":121657},"path":"/tmp/repo/Cargo.lock"},{"exists":true,"fact":{"kind":"file","modified_ts":1777357772,"path":"Cargo.toml","resolved_path":"/tmp/repo/Cargo.toml","size_bytes":2606},"path":"/tmp/repo/Cargo.toml"}],"include_missing":true}"#;
+        assert_eq!(
+            structured_observed_body("system_basic", body).as_deref(),
+            Some(
+                "path_batch_facts\npath_fact name=Cargo.lock path=/tmp/repo/Cargo.lock exists=true kind=file size_bytes=121657 modified_ts=1777345844\npath_fact name=Cargo.toml path=/tmp/repo/Cargo.toml exists=true kind=file size_bytes=2606 modified_ts=1777357772"
+            )
+        );
+    }
+
+    #[test]
+    fn structured_observed_body_includes_inventory_dir_entry_metadata_for_synthesis() {
+        let body = r#"{"action":"inventory_dir","counts":{"dirs":0,"files":2,"hidden":0,"total":2},"entries":[{"hidden":false,"kind":"file","modified_ts":1777513843,"name":"intent_normalizer.schema.json","path":"prompts/schemas/intent_normalizer.schema.json","size_bytes":9402},{"hidden":false,"kind":"file","modified_ts":1777526917,"name":"plan_result.schema.json","path":"prompts/schemas/plan_result.schema.json","size_bytes":4187}],"names":["intent_normalizer.schema.json","plan_result.schema.json"],"path":"prompts/schemas","resolved_path":"/tmp/repo/prompts/schemas","sort_by":"size_desc"}"#;
+        assert_eq!(
+            structured_observed_body("system_basic", body).as_deref(),
+            Some(
+                "inventory_dir path=/tmp/repo/prompts/schemas sort_by=size_desc total=2 files=2 dirs=0 hidden=0\nentry name=intent_normalizer.schema.json kind=file size_bytes=9402 modified_ts=1777513843\nentry name=plan_result.schema.json kind=file size_bytes=4187 modified_ts=1777526917"
+            )
+        );
+    }
+
+    #[test]
     fn sqlite_table_listing_summary_defers_to_synthesis() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -5541,7 +5905,7 @@ version.workspace = true
                 .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:compare_targets".to_string(),
+            route_reason: "llm_contract:compare_targets".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5584,7 +5948,7 @@ version.workspace = true
             resolved_intent: "比较 Cargo.toml 和 Cargo.lock 哪个更大".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "route_contract:compare_targets".to_string(),
+            route_reason: "llm_contract:compare_targets".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,

@@ -17,7 +17,7 @@ DB_PATH_VALUE="${RUSTCLAW_DB_PATH:-}"
 WAIT_SECONDS_VALUE="${MAX_WAIT_SECONDS:-240}"
 POLL_SECONDS_VALUE="${POLL_INTERVAL_SECONDS:-1}"
 LOG_ROOT="${ROOT_DIR}/scripts/nl_suite_logs/client_like_continuous"
-PROMPT_REPLY_ONLY=0
+PROMPT_REPLY_ONLY=1
 QUALITY_GUARD=0
 CASE_FILE_VALUE=""
 CASE_LIMIT_VALUE=""
@@ -54,7 +54,8 @@ Options:
   --case-start N             start from the Nth appended case. Use with --skip-smoke and the same
                              --external-chat-id/--external-user-id to resume after provider failure.
   --skip-smoke               run only the case file prompts, without the built-in 5-turn memory smoke
-  --prompt-reply-only        print only prompt and reply snippets
+  --prompt-reply-only        print only prompt and reply snippets. Default: on
+  --verbose-turn-output      print compact turn status/reply fields instead of prompt/reply blocks
   --quality-guard            fail on common soft failures, not only terminal task status
   -h, --help                 show this help
 EOF
@@ -135,6 +136,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --prompt-reply-only)
       PROMPT_REPLY_ONLY=1
+      shift
+      ;;
+    --verbose-turn-output)
+      PROMPT_REPLY_ONLY=0
       shift
       ;;
     --quality-guard)
@@ -227,10 +232,21 @@ elif field == "text":
         if messages:
             text = messages[-1]
     print(text.replace("\n", "\\n"))
+elif field == "text_raw":
+    text = str(result.get("text") or "").strip()
+    if not text:
+        messages = message_texts()
+        if messages:
+            text = messages[-1]
+    print(text)
 elif field == "messages":
     print("\\n---\\n".join(message.replace("\n", "\\n") for message in message_texts()))
+elif field == "messages_raw":
+    print("\n---\n".join(message_texts()))
 elif field == "error":
     print(str(data.get("error_text") or "").strip().replace("\n", "\\n"))
+elif field == "error_raw":
+    print(str(data.get("error_text") or "").strip())
 else:
     raise SystemExit(f"unknown field: {field}")
 PY
@@ -248,6 +264,10 @@ obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 expected = sys.argv[2]
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
+journal = result.get("task_journal") or {}
+summary = journal.get("summary") or {}
+route_result = summary.get("route_result") or {}
+needs_clarify = bool(route_result.get("needs_clarify"))
 texts = [str(data.get("error_text") or ""), str(result.get("text") or "")]
 for item in result.get("messages") or []:
     if isinstance(item, str):
@@ -290,6 +310,10 @@ hard_markers = [
 soft_markers = [
     "模型暂时不可用",
     "当前大模型服务暂时不可用",
+    "model is temporarily unavailable",
+    "temporarily unavailable (auth/network/circuit",
+    "auth/network/circuit",
+    "please retry later or switch to an available model",
     "我没看出这条消息要做什么",
     "没有足够的上下文",
     "没有足够上下文",
@@ -307,7 +331,8 @@ PY
 quality_violation_reason() {
   local file="$1"
   local prompt="${2:-}"
-  python3 - "$file" "$prompt" <<'PY'
+  local expected="${3:-}"
+  python3 - "$file" "$prompt" "$expected" <<'PY'
 import json
 import re
 import sys
@@ -315,6 +340,7 @@ from pathlib import Path
 
 obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 prompt = sys.argv[2]
+expected = sys.argv[3] if len(sys.argv) > 3 else ""
 prompt_l = prompt.lower()
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
@@ -326,6 +352,18 @@ for item in result.get("messages") or []:
         texts.append(str(item.get("text") or ""))
 text = "\n".join(part for part in texts if part).strip()
 text_l = text.lower()
+
+if (
+    "client-like-continuous-" in text
+    and "client-like-continuous-" not in prompt
+    and not (expected and expected in text)
+):
+    print("reply_leaked_unrequested_test_id")
+    raise SystemExit(0)
+
+if "<missing>" in text and "<missing>" not in prompt:
+    print("reply_contains_internal_missing_sentinel")
+    raise SystemExit(0)
 
 strict_prompt_markers = [
     "只输出",
@@ -379,7 +417,7 @@ missing_or_clarify = any(
         "provide the full path",
     ]
 )
-if delivery_requested and not missing_or_clarify and "file:" not in text_l and "image_file:" not in text_l:
+if delivery_requested and not needs_clarify and not missing_or_clarify and "file:" not in text_l and "image_file:" not in text_l:
     print("delivery_request_without_file_token")
     raise SystemExit(0)
 
@@ -579,7 +617,47 @@ submit_turn() {
     printf '%s\n' "$prompt"
   fi
 
-  wait_task_until_terminal_with_limit "$task_id" "$MAX_WAIT_SECONDS" > "$out_file"
+  if ! wait_task_until_terminal_with_limit "$task_id" "$MAX_WAIT_SECONDS" > "$out_file"; then
+    local final_raw final_status
+    final_raw="$(query_task "$task_id" || true)"
+    final_status="$(python3 - "${final_raw:-}" <<'PY'
+import json
+import sys
+
+raw = (sys.argv[1] if len(sys.argv) > 1 else "").strip()
+try:
+    obj = json.loads(raw)
+except Exception:
+    print("")
+    raise SystemExit(0)
+data = obj.get("data") or {}
+print(str(data.get("status") or "").strip())
+PY
+)"
+    case "$final_status" in
+      succeeded|failed|canceled|timeout)
+        printf '%s\n' "$final_raw" > "$out_file"
+        ;;
+      *)
+        python3 - "$task_id" > "$out_file" <<'PY'
+import json
+import sys
+
+task_id = sys.argv[1]
+print(json.dumps({
+    "ok": True,
+    "data": {
+        "task_id": task_id,
+        "status": "timeout",
+        "result_json": {"text": "", "messages": []},
+        "error_text": "poll timeout waiting for terminal task status",
+    },
+    "error": None,
+}, ensure_ascii=False))
+PY
+        ;;
+    esac
+  fi
   status="$(extract_json_field "$out_file" status)"
   text="$(extract_json_field "$out_file" text)"
   messages="$(extract_json_field "$out_file" messages)"
@@ -587,10 +665,14 @@ submit_turn() {
   echo "[TURN ${turn}] status=${status}"
   if [[ "$PROMPT_REPLY_ONLY" -eq 1 ]]; then
     echo "[REPLY]"
-    if [[ -n "${messages:-}" ]]; then
-      printf '%s\n' "$messages"
+    local raw_messages raw_text raw_error
+    raw_messages="$(extract_json_field "$out_file" messages_raw)"
+    raw_text="$(extract_json_field "$out_file" text_raw)"
+    raw_error="$(extract_json_field "$out_file" error_raw)"
+    if [[ -n "${raw_messages:-}" ]]; then
+      printf '%s\n' "$raw_messages"
     else
-      printf '%s\n' "${text:-${error:-<empty>}}"
+      printf '%s\n' "${raw_text:-${raw_error:-<empty>}}"
     fi
   else
     echo "[TURN ${turn}] reply=${text:-${error:-<empty>}}"
@@ -611,7 +693,7 @@ submit_turn() {
   fi
   if [[ "$QUALITY_GUARD" -eq 1 ]]; then
     local quality_reason
-    quality_reason="$(quality_violation_reason "$out_file" "$prompt" || true)"
+    quality_reason="$(quality_violation_reason "$out_file" "$prompt" "$expected_marker" || true)"
     if [[ -n "$quality_reason" ]]; then
       echo "Turn ${turn} failed quality guard: ${quality_reason}" >&2
       echo "  reply=${text:-${error:-<empty>}}" >&2
@@ -673,14 +755,16 @@ PY
 }
 
 verify_db_state() {
-  python3 - "$DB_PATH_VALUE" "$TEST_ID" "${TASK_IDS[@]}" <<'PY'
+  local require_test_id_memory="${1:-1}"
+  python3 - "$DB_PATH_VALUE" "$TEST_ID" "$require_test_id_memory" "${TASK_IDS[@]}" <<'PY'
 import sqlite3
 import sys
 from pathlib import Path
 
 db_path = Path(sys.argv[1])
 test_id = sys.argv[2]
-task_ids = sys.argv[3:]
+require_test_id_memory = sys.argv[3] == "1"
+task_ids = sys.argv[4:]
 if not db_path.exists():
     raise SystemExit(f"database not found: {db_path}")
 if not task_ids:
@@ -730,12 +814,14 @@ if memories_count <= 0:
 if conversation_states_count <= 0:
     raise SystemExit("expected conversation_states to be written for client-like continuous conversation")
 
-test_id_memory_count = count(
-    "SELECT COUNT(*) FROM memories WHERE chat_id = ? AND user_id = ? AND content LIKE ?",
-    (chat_id, user_id, f"%{test_id}%"),
-)
-if test_id_memory_count <= 0:
-    raise SystemExit("expected short-term memory to contain the suite test id")
+test_id_memory_count = 0
+if require_test_id_memory:
+    test_id_memory_count = count(
+        "SELECT COUNT(*) FROM memories WHERE chat_id = ? AND user_id = ? AND content LIKE ?",
+        (chat_id, user_id, f"%{test_id}%"),
+    )
+    if test_id_memory_count <= 0:
+        raise SystemExit("expected short-term memory to contain the suite test id")
 execution_summary_leak_count = count(
     "SELECT COUNT(*) FROM memories WHERE chat_id = ? AND user_id = ? AND content LIKE ?",
     (chat_id, user_id, "%**执行过程**%"),
@@ -747,7 +833,8 @@ print(
     "DB_VERIFY_OK "
     f"effective_user_id={user_id} effective_chat_id={chat_id} user_key_present={bool(user_key)} "
     f"tasks={tasks_count} memories={memories_count} conversation_states={conversation_states_count} "
-    f"retrieval_index={retrieval_count} long_term={long_term_count} preferences={preference_count}"
+    f"retrieval_index={retrieval_count} long_term={long_term_count} preferences={preference_count} "
+    f"test_id_memory_checked={require_test_id_memory} test_id_memory_count={test_id_memory_count}"
 )
 PY
 }
@@ -864,11 +951,9 @@ if [[ "$turn" -eq 0 ]]; then
 fi
 
 if [[ "$RUN_BUILTIN_SMOKE" -eq 1 ]]; then
-  verify_db_state
+  verify_db_state 1
 else
-  if [[ "${#TASK_IDS[@]}" -gt 0 ]]; then
-    echo "DB_VERIFY_SKIPPED reason=skip_smoke_without_test_id_memory_assertion tasks=${#TASK_IDS[@]}"
-  fi
+  verify_db_state 0
 fi
 
 echo "CLIENT_LIKE_CONTINUOUS_SUITE_OK turns=${turn} log_dir=${RUN_DIR}"

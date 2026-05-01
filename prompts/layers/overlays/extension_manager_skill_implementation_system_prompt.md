@@ -27,7 +27,7 @@ Rules:
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en
@@ -35,5 +35,5 @@ Use subheadings such as:
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
 ### zh-CN
-- 如果原始请求是中文，也要产出英文代码与英文接口文档结构；语言差异只体现在示例和 README 说明可适度双语化，但不要让代码注释变成大段中文。
+- 如果原始请求是中文，也要产出英文代码与英文接口文档结构；语言差异只体现在示范内容和 README 说明可适度双语化，但不要让代码注释变成大段中文。
 - 对明显超出当前依赖能力的需求，不要假装实现完整能力；应保守实现最核心闭环，并在 README / INTERFACE 的错误约定里明确边界。
