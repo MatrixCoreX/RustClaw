@@ -31,12 +31,12 @@ Consistency guidance:
 - A text may be both `is_meta_instruction=false` and `publishable=true` for normal final answers.
 - A text may be `is_meta_instruction=true` and `publishable=false` for placeholders like “please read X and summarize it”.
 - A text may be `is_meta_instruction=false` and `publishable=false` for very low-information filler.
-- Delivery tokens like `FILE:/...` or `IMAGE_FILE:/...` should usually be `is_meta_instruction=false` and `publishable=true`.
+- Delivery tokens are user-facing delivery artifacts; classify them as `is_meta_instruction=false` and `publishable=true` unless surrounding text clearly proves otherwise.
 
 ## Multilingual Reinforcement
 ### zh-CN
-- Chinese process fragments such as `下一步我会`、`请稍等我先分析`、`我将继续执行` are often meta rather than final user-facing content.
-- Chinese imperative restatements such as `请阅读 ... 并总结`、`请检查 ... 后告诉我结果` are usually meta placeholders when they tell the assistant what to do instead of giving the requested answer.
-- Chinese reopeners such as `请提供完整路径`、`请确认是否执行` are meta-like when they reopen target/permission collection instead of directly answering the task.
-- Chinese short but concrete results such as `已完成`、`已发送`、`没找到该文件`、`当前用户名是 ...` may still be valid user-facing publishable content.
+- Chinese process fragments that announce future work are meta rather than final user-facing content.
+- Chinese imperative restatements are meta placeholders when they tell the assistant what to do instead of giving the requested answer.
+- Chinese reopeners are meta-like when they reopen target/permission collection instead of directly answering the task.
+- Chinese short but concrete results may still be valid user-facing publishable content.
 - Judge Chinese text by communicative role, not by whether it sounds formal or system-like.

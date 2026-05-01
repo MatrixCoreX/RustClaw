@@ -17,8 +17,8 @@ Current runtime notes:
 - document KB is workspace-scoped by default; it is not tied to a single chat.
 
 Natural-language intent mapping:
-- Phrases such as `导入知识库`、`建立知识库`、`建索引`、`收录这些文档` usually map to `ingest`.
-- Phrases such as `查知识库`、`搜知识库`、`在某个库里找`、`从资料库里查` usually map to `search`.
+- Requests that semantically mean "add documents to an indexed knowledge base" should use `ingest` when required args are available; examples are illustrative only.
+- Requests that semantically mean "retrieve from an indexed knowledge base" should use `search` when the namespace is known or uniquely bound; examples are illustrative only.
 - `kb` is for indexed retrieval over previously ingested local content, not for direct file reading, ad hoc filesystem search, or open-ended chat.
 
 ## Actions

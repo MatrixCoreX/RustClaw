@@ -474,13 +474,13 @@ pub(crate) fn validation_satisfies_recipe_profile(
 pub(crate) fn validation_detail_for_recipe(recipe: ExecutionRecipeRuntimeState) -> &'static str {
     match recipe.profile {
         ExecutionRecipeProfile::ConfigChange => {
-            "config_change requires post-change validation such as parse/check/reload or effective-state verification"
+            "config_change requires post-change validation through parsing, checking, reloading, or effective-state verification"
         }
         ExecutionRecipeProfile::CodeChange => {
             "code_change requires compile/test/build or runtime verification after mutation"
         }
         ExecutionRecipeProfile::SkillAuthoring => {
-            "skill_authoring requires integration validation after mutation (for example cargo check/test or extension registration verification)"
+            "skill_authoring requires integration validation after mutation through build/test checks or extension registration verification"
         }
         _ => "ops_closed_loop requires a machine-verifiable validation step after mutation",
     }

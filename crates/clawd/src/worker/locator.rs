@@ -3,9 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::AppState;
 
 pub(crate) fn has_concrete_locator_hint(text: &str) -> bool {
-    if has_explicit_path_or_url_locator(text)
-        || crate::delivery_utils::has_concrete_locator_input(text)
-    {
+    if has_explicit_path_or_url_locator(text) {
         return true;
     }
     text.split_whitespace()
@@ -831,7 +829,7 @@ mod tests {
     }
 
     #[test]
-    fn concrete_locator_hint_detects_explicit_path_and_filename() {
+    fn concrete_locator_hint_detects_explicit_path_and_filename_not_directory_scope_words() {
         assert!(super::has_concrete_locator_hint(
             "read /home/guagua/test/README.md and summarize"
         ));
@@ -842,10 +840,10 @@ mod tests {
         assert!(super::has_concrete_locator_hint(
             "open https://example.com/file.txt"
         ));
-        assert!(super::has_concrete_locator_hint(
+        assert!(!super::has_concrete_locator_hint(
             "发 document 目录下最后一个"
         ));
-        assert!(super::has_concrete_locator_hint(
+        assert!(!super::has_concrete_locator_hint(
             "列出 logs 目录下前 5 个文件名"
         ));
     }

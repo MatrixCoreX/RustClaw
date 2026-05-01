@@ -9,6 +9,9 @@
 - It is intended for complex composed queries where builtin primitives alone are too low-level for stable planning.
 - For directory inventory with filename or extension filtering, use `inventory_dir` with `files_only=true` and `ext_filter`; do not use `extract_field` / `extract_fields` unless the user explicitly asks for fields, keys, or values inside a specific structured document.
 - When the user asks to list files and then briefly explain their purpose, first collect the file names with `inventory_dir`; the final explanation should be synthesized from the names and known project conventions, not from missing structured fields.
+- For recent/latest/last-modified directory inventory, use `inventory_dir` with `sort_by="mtime_desc"` exactly. If the request asks for files, set `files_only=true`; use `max_entries` for the requested count. Do not emit unsupported values such as `mtime`.
+- `extract_field` and `extract_fields` operate on exactly one structured file per call: use `path` plus `field_path`/`field_paths`. Do not pass `paths`, `targets`, or other multi-file arrays to these actions; for multiple files, call the action once per file.
+- For file metadata checks or comparisons, use `compare_paths` for two paths or `path_batch_facts` for multiple explicit paths. Do not model filesystem metadata such as size, modified time, path type, or content equality as `extract_field` / `extract_fields` document fields.
 
 ## Actions
 - `info`

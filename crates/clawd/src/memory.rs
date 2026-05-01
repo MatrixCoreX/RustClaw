@@ -453,11 +453,13 @@ pub(crate) fn select_relevant_memories_for_prompt(
     if memories.is_empty() {
         return memories;
     }
-    let keywords = extract_recall_keywords(prompt);
+    // Memory recall uses lightweight lexical terms only to rank already-stored memories.
+    // It must not become an intent router, planner shortcut, or response-shaping rule.
+    let recall_terms = extract_recall_terms(prompt);
     let source = memories;
     let mut out = Vec::new();
     for (role, content) in &source {
-        let score = score_memory_relevance(role, content, &keywords);
+        let score = score_memory_relevance(role, content, &recall_terms);
         if score >= min_score {
             out.push((role.clone(), content.clone()));
         }
@@ -1553,7 +1555,13 @@ fn is_duplicate_recent_memory(
 
 fn detect_instructional_text(text: &str, cfg: &MemoryConfig) -> bool {
     let norm = text.to_ascii_lowercase();
-    contains_any_marker(&norm, &cfg.rules.instruction_markers)
+    contains_any_marker(&norm, &cfg.rules.salience_boost_markers)
+        && (contains_any_marker(&norm, &cfg.rules.instruction_markers)
+            || contains_any_marker(&norm, &cfg.rules.preferences.language_zh)
+            || contains_any_marker(&norm, &cfg.rules.preferences.language_en)
+            || contains_any_marker(&norm, &cfg.rules.preferences.style_concise)
+            || contains_any_marker(&norm, &cfg.rules.preferences.style_detailed)
+            || contains_any_marker(&norm, &cfg.rules.preferences.format_plain_text))
 }
 
 fn classify_memory_safety_flag(text: &str, cfg: &MemoryConfig) -> String {
@@ -1619,6 +1627,9 @@ fn extract_user_preferences(
 ) -> Vec<(String, String, f32, String)> {
     let mut out = Vec::new();
     let norm = content.to_ascii_lowercase();
+    if !contains_any_marker(&norm, &cfg.rules.salience_boost_markers) {
+        return out;
+    }
     let pref = &cfg.rules.preferences;
     if contains_any_marker(&norm, &pref.language_zh) {
         out.push((
@@ -1770,7 +1781,7 @@ pub(crate) fn upsert_user_preferences_from_route_hint(
     )
 }
 
-fn extract_recall_keywords(prompt: &str) -> Vec<String> {
+fn extract_recall_terms(prompt: &str) -> Vec<String> {
     let lower = prompt.to_ascii_lowercase();
     let mut out = lower
         .split(|c: char| !c.is_alphanumeric() && c != '_')
@@ -1790,15 +1801,15 @@ fn extract_recall_keywords(prompt: &str) -> Vec<String> {
     out
 }
 
-fn score_memory_relevance(role: &str, content: &str, keywords: &[String]) -> f32 {
+fn score_memory_relevance(role: &str, content: &str, recall_terms: &[String]) -> f32 {
     let mut score = if role == MEMORY_ROLE_USER { 0.1 } else { 0.05 };
     let text = content.to_ascii_lowercase();
     let mut hits = 0usize;
-    for kw in keywords {
-        if kw.len() <= 1 {
+    for term in recall_terms {
+        if term.len() <= 1 {
             continue;
         }
-        if text.contains(kw) || content.contains(kw) {
+        if text.contains(term) || content.contains(term) {
             hits += 1;
         }
     }
@@ -1831,8 +1842,9 @@ mod tests {
         recall_memories_since_id, recall_user_preferences, retrieval_source_ref_for_kb_chunk,
         retrieval_source_ref_for_memory, retrieval_source_ref_for_preference,
         upsert_user_preferences_from_route_hint, AssistantContextReplyKind, MemoryWriteKind,
-        MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_SYSTEM, MEMORY_ROLE_USER, RETRIEVAL_PRODUCER_KB,
-        RETRIEVAL_PRODUCER_MEMORY_PIPELINE, RETRIEVAL_SOURCE_MEMORY,
+        MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_SYSTEM, MEMORY_ROLE_USER, MEMORY_TYPE_GENERIC,
+        MEMORY_TYPE_USER_INSTRUCTION, RETRIEVAL_PRODUCER_KB, RETRIEVAL_PRODUCER_MEMORY_PIPELINE,
+        RETRIEVAL_SOURCE_MEMORY,
     };
     use serde_json::json;
 
@@ -1929,7 +1941,7 @@ mod tests {
     #[test]
     fn clarify_task_reply_is_replaced_with_placeholder_for_recent_turn_context() {
         let parsed = json!({
-            "text": "请问你指的是哪个文件？例如 logs/act_plan.log",
+            "text": "LOCATOR_CLARIFY_PROMPT",
             "task_journal": {
                 "summary": {
                     "final_status": "clarify",
@@ -1948,7 +1960,7 @@ mod tests {
         assert_eq!(
             classify_assistant_context_reply_kind(
                 Some(&parsed),
-                "请问你指的是哪个文件？例如 logs/act_plan.log",
+                "LOCATOR_CLARIFY_PROMPT",
                 never_fallback,
             ),
             AssistantContextReplyKind::ClarifyPlaceholder
@@ -2215,6 +2227,91 @@ mod tests {
         assert!(!recalled
             .iter()
             .any(|(_, _, content, _)| content.contains("执行过程")));
+    }
+
+    #[test]
+    fn current_turn_constraints_do_not_become_persistent_preferences() {
+        let state = test_state();
+        {
+            let db = state.core.db.get().expect("db");
+            create_memories_table(&db);
+            create_user_preferences_table(&db);
+        }
+
+        insert_memory(
+            &state,
+            1,
+            2,
+            Some("test-user"),
+            "local",
+            None,
+            MEMORY_ROLE_USER,
+            "do not run anything, just tell me a very short joke",
+            2000,
+            MemoryWriteKind::Default,
+        )
+        .expect("insert user memory");
+
+        let db = state.core.db.get().expect("db");
+        let (memory_type, is_instructional): (String, i64) = db
+            .query_row(
+                "SELECT memory_type, is_instructional FROM memories ORDER BY id DESC LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("latest memory");
+        assert_eq!(memory_type, MEMORY_TYPE_GENERIC);
+        assert_eq!(is_instructional, 0);
+        drop(db);
+
+        let prefs =
+            recall_user_preferences(&state, Some("test-user"), 1, 2, 8).expect("recall prefs");
+        assert!(prefs.is_empty());
+    }
+
+    #[test]
+    fn explicit_long_term_preferences_are_persisted() {
+        let state = test_state();
+        {
+            let db = state.core.db.get().expect("db");
+            create_memories_table(&db);
+            create_user_preferences_table(&db);
+        }
+
+        insert_memory(
+            &state,
+            1,
+            2,
+            Some("test-user"),
+            "local",
+            None,
+            MEMORY_ROLE_USER,
+            "以后默认中文回复，并且记住要简短。",
+            2000,
+            MemoryWriteKind::Default,
+        )
+        .expect("insert user memory");
+
+        let db = state.core.db.get().expect("db");
+        let (memory_type, is_instructional): (String, i64) = db
+            .query_row(
+                "SELECT memory_type, is_instructional FROM memories ORDER BY id DESC LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("latest memory");
+        assert_eq!(memory_type, MEMORY_TYPE_USER_INSTRUCTION);
+        assert_eq!(is_instructional, 1);
+        drop(db);
+
+        let prefs =
+            recall_user_preferences(&state, Some("test-user"), 1, 2, 8).expect("recall prefs");
+        assert!(prefs
+            .iter()
+            .any(|(key, value)| key == "response_language" && value == "zh-CN"));
+        assert!(prefs
+            .iter()
+            .any(|(key, value)| key == "response_style" && value == "concise"));
     }
 
     #[test]

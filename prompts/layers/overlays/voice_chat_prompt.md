@@ -21,7 +21,7 @@ __TRANSCRIPT__
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en
@@ -31,5 +31,5 @@ Keep only language-specific nuances here; keep general rules in the main prompt 
 ### zh-CN
 - Chinese ASR transcripts often omit subjects, punctuation, or function words; infer conservatively and prefer one short clarification over aggressive correction when intent is not stable.
 - Do not treat scattered English commands, filenames, paths, or code tokens inside a Chinese transcript as language-switch evidence by themselves.
-- Chinese speech-style fillers such as `那个`、`然后`、`就是`、`你帮我` are common spoken disfluencies and should not automatically be interpreted as missing-target errors.
+- Chinese speech-style fillers are common spoken disfluencies and should not automatically be interpreted as missing-target errors.
 - If the transcript clearly sounds like a short Chinese executable request, keep the reply natural and concise instead of sounding like a transcription-debug message.

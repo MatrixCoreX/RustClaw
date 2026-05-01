@@ -40,9 +40,6 @@ pub(crate) fn enforce_content_evidence_execution_mode(
     if needs_clarify || !mode.eq(&RoutedMode::Chat) || !contract.requires_content_evidence {
         return mode;
     }
-    if matches!(contract.locator_kind, OutputLocatorKind::None) {
-        return mode;
-    }
     if matches!(
         contract.response_shape,
         OutputResponseShape::Scalar | OutputResponseShape::FileToken
@@ -72,37 +69,6 @@ fn semantic_locator_hint_satisfies_non_path_binding(route_result: &RouteResult) 
 fn path_is_existing_directory(path: &str) -> bool {
     let trimmed = path.trim();
     !trimmed.is_empty() && Path::new(trimmed).is_dir()
-}
-
-/// 检查 normalizer 给的 `locator_hint` 字段里是否含有任意一个**真实存在**的绝对路径。
-/// 用于支持别名/多目标场景：normalizer 把"甲/乙"等别名解析后写成
-/// `"乙对应/abs/foo.md；甲对应/abs/bar.md"`，此时 raw_prompt 里只有别名、
-/// `has_concrete_locator_hint(prompt)` 会返回 false，但 normalizer 自己已经
-/// 给出了具体可执行的 path，post_route_policy 不应再强行触发 clarify。
-fn locator_hint_contains_existing_absolute_path(locator_hint: &str) -> bool {
-    let trimmed = locator_hint.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    // locator_hint 可能是单个 path（简单形式），也可能是包含中英文标签的多 path 拼接，如：
-    //   "/home/.../README.md"
-    //   "乙对应/home/.../service_notes.md；甲对应/home/.../README.md"
-    //   "乙: /home/.../foo.md, 甲: /home/.../bar.md"
-    // 用一个宽松的拆分：按空白 / 逗号 / 分号 / 中文分号 / 冒号 / 中文冒号 切，
-    // 然后挑出以 '/' 开头的 token，去掉首尾标点，逐个测 exists。
-    let separators: &[char] = &[
-        ' ', '\t', '\n', '\r', ',', '，', ';', '；', ':', '：', '"', '“', '”', '\'', '‘', '’', '(',
-        ')', '（', '）', '[', ']', '【', '】',
-    ];
-    for token in trimmed.split(separators) {
-        let token = token.trim_matches(|c: char| {
-            !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-'
-        });
-        if token.starts_with('/') && Path::new(token).exists() {
-            return true;
-        }
-    }
-    false
 }
 
 fn should_force_content_evidence_for_path_bound_chat_act(
@@ -144,20 +110,6 @@ fn should_clear_scalar_path_only_without_locator_binding(route_result: &RouteRes
         && route_result.output_contract.locator_hint.trim().is_empty()
 }
 
-fn should_clear_scalar_path_only_for_workspace_scope_without_locator(
-    route_result: &RouteResult,
-) -> bool {
-    if route_result.output_contract.semantic_kind != OutputSemanticKind::ScalarPathOnly
-        || route_result.output_contract.response_shape != OutputResponseShape::Scalar
-        || route_result.output_contract.delivery_required
-        || route_result.output_contract.requires_content_evidence
-    {
-        return false;
-    }
-    route_result.output_contract.locator_kind == OutputLocatorKind::CurrentWorkspace
-        && route_result.output_contract.locator_hint.trim().is_empty()
-}
-
 fn should_clear_raw_command_output_for_contract_mismatch(route_result: &RouteResult) -> bool {
     if route_result.output_contract.semantic_kind != OutputSemanticKind::RawCommandOutput
         || route_result.output_contract.delivery_required
@@ -172,12 +124,6 @@ fn should_clear_raw_command_output_for_contract_mismatch(route_result: &RouteRes
 
 pub(crate) fn apply_post_route_policy(
     route_result: RouteResult,
-    raw_has_concrete_locator_hint: bool,
-    resolved_has_concrete_locator_hint: bool,
-    raw_has_explicit_path_locator_hint: bool,
-    resolved_has_explicit_path_locator_hint: bool,
-    resolved_intent_inherits_prior_operation: bool,
-    immediate_prior_turn_was_clarify: bool,
     locator_resolution: LocatorResolution,
 ) -> PostRoutePolicyResult {
     let mut execution_route_result = route_result.clone();
@@ -188,13 +134,11 @@ pub(crate) fn apply_post_route_policy(
     let mut auto_locator_hint = None;
     let mut auto_locator_resolved_direct = false;
     let mut fuzzy_locator_suggestions = Vec::new();
-    let normalizer_locator_hint_has_existing_path =
-        locator_hint_contains_existing_absolute_path(&route_result.output_contract.locator_hint);
+    let normalizer_locator_hint_present =
+        !route_result.output_contract.locator_hint.trim().is_empty();
     let mut missing_locator_for_path_scoped_content = path_scoped_content_request
         && !locator_kind_is_current_workspace(route_result.output_contract.locator_kind)
-        && !raw_has_concrete_locator_hint
-        && !resolved_has_concrete_locator_hint
-        && !normalizer_locator_hint_has_existing_path;
+        && !normalizer_locator_hint_present;
 
     match locator_resolution {
         LocatorResolution::Direct(path) => {
@@ -221,13 +165,14 @@ pub(crate) fn apply_post_route_policy(
         }
         LocatorResolution::None => {}
     }
+    if !fuzzy_locator_suggestions.is_empty() {
+        missing_locator_for_path_scoped_content = false;
+    }
 
     if should_clear_scalar_count_for_non_scalar_contract(&execution_route_result) {
         execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
     }
-    if should_clear_scalar_path_only_for_workspace_scope_without_locator(&execution_route_result) {
-        execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
-    } else if should_clear_scalar_path_only_without_locator_binding(&execution_route_result) {
+    if should_clear_scalar_path_only_without_locator_binding(&execution_route_result) {
         execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
     }
     if should_clear_raw_command_output_for_contract_mismatch(&execution_route_result) {
@@ -260,66 +205,6 @@ pub(crate) fn apply_post_route_policy(
                 },
             );
         }
-    }
-
-    let inherited_operation_with_direct_locator = auto_locator_resolved_direct
-        && resolved_intent_inherits_prior_operation
-        && immediate_prior_turn_was_clarify
-        && execution_route_result.is_clarify_gate()
-        && execution_route_result.needs_clarify;
-    if inherited_operation_with_direct_locator {
-        execution_route_result.needs_clarify = false;
-        execution_route_result.set_routed_mode(
-            if matches!(
-                execution_route_result.output_contract.response_shape,
-                OutputResponseShape::Scalar | OutputResponseShape::FileToken
-            ) || execution_route_result.output_contract.delivery_required
-            {
-                RoutedMode::Act
-            } else if execution_route_result
-                .output_contract
-                .requires_content_evidence
-            {
-                RoutedMode::ChatAct
-            } else {
-                RoutedMode::Act
-            },
-        );
-    }
-
-    let explicit_path_requires_execution = execution_route_result.is_clarify_gate()
-        && execution_route_result.needs_clarify
-        && !auto_locator_resolved_direct
-        && locator_kind_requires_path_binding(execution_route_result.output_contract.locator_kind)
-        && (raw_has_explicit_path_locator_hint || resolved_has_explicit_path_locator_hint)
-        && (resolved_intent_inherits_prior_operation
-            || execution_route_result
-                .output_contract
-                .requires_content_evidence
-            || execution_route_result.output_contract.delivery_required
-            || matches!(
-                execution_route_result.output_contract.response_shape,
-                OutputResponseShape::Scalar
-            ));
-    if explicit_path_requires_execution {
-        execution_route_result.needs_clarify = false;
-        execution_route_result.set_routed_mode(
-            if execution_route_result.output_contract.delivery_required
-                || matches!(
-                    execution_route_result.output_contract.response_shape,
-                    OutputResponseShape::Scalar | OutputResponseShape::FileToken
-                )
-            {
-                RoutedMode::Act
-            } else if execution_route_result
-                .output_contract
-                .requires_content_evidence
-            {
-                RoutedMode::ChatAct
-            } else {
-                RoutedMode::Act
-            },
-        );
     }
 
     let fuzzy_locator_requires_clarify = !fuzzy_locator_suggestions.is_empty()
@@ -419,12 +304,6 @@ mod tests {
     fn fuzzy_candidates_force_clarify_for_locator_requests() {
         let result = apply_post_route_policy(
             route_result(),
-            true,
-            true,
-            false,
-            false,
-            false,
-            false,
             LocatorResolution::Fuzzy(vec!["/tmp/a".to_string(), "/tmp/b".to_string()]),
         );
         assert!(matches!(
@@ -436,16 +315,7 @@ mod tests {
 
     #[test]
     fn missing_locator_still_forces_clarify() {
-        let result = apply_post_route_policy(
-            route_result(),
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            LocatorResolution::None,
-        );
+        let result = apply_post_route_policy(route_result(), LocatorResolution::None);
         assert!(matches!(
             result.execution_route_result.routed_mode,
             RoutedMode::AskClarify
@@ -459,12 +329,6 @@ mod tests {
         route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
         let result = apply_post_route_policy(
             route,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
             LocatorResolution::Direct("/tmp/workspace".to_string()),
         );
         assert!(!matches!(
@@ -484,16 +348,7 @@ mod tests {
         route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
         route.output_contract.locator_hint = "telegramd".to_string();
-        let result = apply_post_route_policy(
-            route,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            LocatorResolution::None,
-        );
+        let result = apply_post_route_policy(route, LocatorResolution::None);
         assert!(matches!(
             result.execution_route_result.routed_mode,
             RoutedMode::ChatAct
@@ -510,12 +365,6 @@ mod tests {
         route.output_contract.locator_kind = OutputLocatorKind::Filename;
         let result = apply_post_route_policy(
             route,
-            true,
-            true,
-            false,
-            false,
-            false,
-            false,
             LocatorResolution::Direct("/tmp/README.md".to_string()),
         );
         assert!(matches!(
@@ -536,12 +385,6 @@ mod tests {
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         let result = apply_post_route_policy(
             route,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
             LocatorResolution::Direct("/tmp/workspace".to_string()),
         );
         assert!(matches!(
@@ -553,7 +396,7 @@ mod tests {
     }
 
     #[test]
-    fn inherited_operation_with_direct_locator_rescues_from_second_clarify() {
+    fn inherited_operation_with_direct_locator_no_longer_rescues_from_second_clarify() {
         let mut route = route_result();
         route.routed_mode = RoutedMode::AskClarify;
         route.needs_clarify = true;
@@ -561,76 +404,52 @@ mod tests {
         route.output_contract.requires_content_evidence = false;
         let result = apply_post_route_policy(
             route,
-            false,
-            false,
-            false,
-            false,
-            true,
-            true,
             LocatorResolution::Direct("/tmp/document".to_string()),
         );
         assert!(matches!(
             result.execution_route_result.routed_mode,
-            RoutedMode::Act
+            RoutedMode::AskClarify
         ));
-        assert!(!result.execution_route_result.needs_clarify);
+        assert!(result.execution_route_result.needs_clarify);
         assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/document"));
     }
 
     #[test]
-    fn explicit_relative_path_can_rescue_ask_clarify_back_to_execution() {
+    fn explicit_relative_path_without_locator_hint_does_not_rescue_clarify_back_to_execution() {
         let mut route = route_result();
         route.routed_mode = RoutedMode::AskClarify;
         route.needs_clarify = true;
         route.output_contract.requires_content_evidence = true;
         route.output_contract.response_shape = OutputResponseShape::Free;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
-        let result = apply_post_route_policy(
-            route,
-            true,
-            true,
-            true,
-            true,
-            false,
-            false,
-            LocatorResolution::None,
-        );
-        assert!(!result.execution_route_result.needs_clarify);
+        let result = apply_post_route_policy(route, LocatorResolution::None);
+        assert!(result.execution_route_result.needs_clarify);
         assert!(matches!(
             result.execution_route_result.routed_mode,
-            RoutedMode::ChatAct
+            RoutedMode::AskClarify
         ));
         assert_eq!(
             result.execution_route_result.ask_mode,
-            crate::AskMode::from_routed_mode(RoutedMode::ChatAct)
+            crate::AskMode::from_routed_mode(RoutedMode::AskClarify)
         );
     }
 
     #[test]
-    fn explicit_relative_path_followup_rescues_scalar_binding_execution() {
+    fn explicit_relative_path_followup_without_locator_hint_stays_clarify() {
         let mut route = route_result();
         route.routed_mode = RoutedMode::AskClarify;
         route.needs_clarify = true;
         route.output_contract.response_shape = OutputResponseShape::Scalar;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
-        let result = apply_post_route_policy(
-            route,
-            true,
-            true,
-            true,
-            true,
-            true,
-            false,
-            LocatorResolution::None,
-        );
-        assert!(!result.execution_route_result.needs_clarify);
+        let result = apply_post_route_policy(route, LocatorResolution::None);
+        assert!(result.execution_route_result.needs_clarify);
         assert!(matches!(
             result.execution_route_result.routed_mode,
-            RoutedMode::Act
+            RoutedMode::AskClarify
         ));
         assert_eq!(
             result.execution_route_result.ask_mode,
-            crate::AskMode::from_routed_mode(RoutedMode::Act)
+            crate::AskMode::from_routed_mode(RoutedMode::AskClarify)
         );
     }
 
@@ -643,12 +462,6 @@ mod tests {
         route.output_contract.requires_content_evidence = false;
         let result = apply_post_route_policy(
             route,
-            false,
-            false,
-            false,
-            false,
-            true,
-            false,
             LocatorResolution::Direct("/tmp/restart_clawd_latest.sh".to_string()),
         );
         assert!(result.execution_route_result.needs_clarify);
@@ -666,12 +479,6 @@ mod tests {
         route.output_contract.locator_hint = "README.md".to_string();
         let result = apply_post_route_policy(
             route,
-            true,
-            true,
-            false,
-            false,
-            false,
-            false,
             LocatorResolution::Direct("/tmp/README.md".to_string()),
         );
         assert_eq!(
@@ -694,12 +501,6 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
         let result = apply_post_route_policy(
             route,
-            true,
-            true,
-            false,
-            false,
-            false,
-            false,
             LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
         );
         assert_eq!(
@@ -727,12 +528,6 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
         let result = apply_post_route_policy(
             route,
-            true,
-            true,
-            false,
-            false,
-            false,
-            false,
             LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
         );
         assert_eq!(
@@ -765,12 +560,6 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
         let result = apply_post_route_policy(
             route,
-            true,
-            true,
-            false,
-            false,
-            false,
-            false,
             LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
         );
         assert_eq!(
@@ -801,12 +590,6 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
         let result = apply_post_route_policy(
             route,
-            true,
-            true,
-            false,
-            false,
-            false,
-            false,
             LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
         );
         assert_eq!(
@@ -823,16 +606,7 @@ mod tests {
         route.output_contract.response_shape = OutputResponseShape::Free;
         route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
         route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
-        let result = apply_post_route_policy(
-            route,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            LocatorResolution::None,
-        );
+        let result = apply_post_route_policy(route, LocatorResolution::None);
         assert_eq!(
             result.execution_route_result.output_contract.semantic_kind,
             OutputSemanticKind::None
@@ -854,12 +628,6 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
         let result = apply_post_route_policy(
             route,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
             LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
         );
         assert_eq!(
@@ -885,12 +653,6 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
         let result = apply_post_route_policy(
             route,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
             LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
         );
         assert_eq!(
@@ -915,12 +677,6 @@ mod tests {
         route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
         let result = apply_post_route_policy(
             route,
-            true,
-            true,
-            true,
-            true,
-            false,
-            false,
             LocatorResolution::Direct("/tmp/config.toml".to_string()),
         );
         assert_eq!(
@@ -945,12 +701,6 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
         let result = apply_post_route_policy(
             route,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
             LocatorResolution::Direct(temp_dir.to_string_lossy().to_string()),
         );
         assert_eq!(
@@ -970,12 +720,6 @@ mod tests {
         route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
         let result = apply_post_route_policy(
             route,
-            true,
-            true,
-            true,
-            true,
-            false,
-            false,
             LocatorResolution::Direct("/tmp/config.toml".to_string()),
         );
         assert_eq!(
@@ -993,16 +737,7 @@ mod tests {
         route.output_contract.locator_kind = OutputLocatorKind::None;
         route.output_contract.locator_hint.clear();
         route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
-        let result = apply_post_route_policy(
-            route,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            LocatorResolution::None,
-        );
+        let result = apply_post_route_policy(route, LocatorResolution::None);
         assert_eq!(
             result.execution_route_result.output_contract.semantic_kind,
             OutputSemanticKind::None
@@ -1010,26 +745,17 @@ mod tests {
     }
 
     #[test]
-    fn scalar_path_only_contract_is_cleared_for_workspace_scope_without_locator() {
+    fn scalar_path_only_contract_stays_for_workspace_scope_without_locator() {
         let mut route = route_result();
         route.resolved_intent = "output only the current workspace scalar value".to_string();
         route.output_contract.response_shape = OutputResponseShape::Scalar;
         route.output_contract.requires_content_evidence = false;
         route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
         route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
-        let result = apply_post_route_policy(
-            route,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            LocatorResolution::None,
-        );
+        let result = apply_post_route_policy(route, LocatorResolution::None);
         assert_eq!(
             result.execution_route_result.output_contract.semantic_kind,
-            OutputSemanticKind::None
+            OutputSemanticKind::ScalarPathOnly
         );
     }
 
@@ -1045,16 +771,7 @@ mod tests {
         route.output_contract.requires_content_evidence = true;
         route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
         route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-        let result = apply_post_route_policy(
-            route,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            LocatorResolution::None,
-        );
+        let result = apply_post_route_policy(route, LocatorResolution::None);
         assert_eq!(
             result.execution_route_result.output_contract.semantic_kind,
             OutputSemanticKind::None
@@ -1072,16 +789,7 @@ mod tests {
         route.output_contract.requires_content_evidence = true;
         route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
         route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-        let result = apply_post_route_policy(
-            route,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            LocatorResolution::None,
-        );
+        let result = apply_post_route_policy(route, LocatorResolution::None);
         assert_eq!(
             result.execution_route_result.output_contract.semantic_kind,
             OutputSemanticKind::RawCommandOutput
@@ -1098,16 +806,7 @@ mod tests {
         route.output_contract.requires_content_evidence = true;
         route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
         route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
-        let result = apply_post_route_policy(
-            route,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            LocatorResolution::None,
-        );
+        let result = apply_post_route_policy(route, LocatorResolution::None);
         assert_eq!(
             result.execution_route_result.output_contract.semantic_kind,
             OutputSemanticKind::RawCommandOutput
@@ -1121,16 +820,7 @@ mod tests {
         route.output_contract.locator_kind = OutputLocatorKind::Path;
         route.output_contract.locator_hint =
             "/tmp/device_local/docs/release_checklist.md".to_string();
-        let result = apply_post_route_policy(
-            route,
-            true,
-            true,
-            true,
-            true,
-            false,
-            false,
-            LocatorResolution::None,
-        );
+        let result = apply_post_route_policy(route, LocatorResolution::None);
         assert_eq!(
             result.execution_route_result.output_contract.semantic_kind,
             OutputSemanticKind::None
@@ -1158,16 +848,7 @@ mod tests {
             .display()
             .to_string();
 
-        let result = apply_post_route_policy(
-            route,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            LocatorResolution::Direct(resolved),
-        );
+        let result = apply_post_route_policy(route, LocatorResolution::Direct(resolved));
         assert_eq!(
             result.execution_route_result.output_contract.semantic_kind,
             OutputSemanticKind::None
@@ -1177,16 +858,7 @@ mod tests {
 
     #[test]
     fn missing_path_scoped_locator_sets_structured_clarify_reason_kind() {
-        let result = apply_post_route_policy(
-            route_result(),
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            LocatorResolution::None,
-        );
+        let result = apply_post_route_policy(route_result(), LocatorResolution::None);
         assert_eq!(
             result.clarify_reason_kind,
             ClarifyReasonKind::MissingPathScopedLocator
@@ -1197,12 +869,6 @@ mod tests {
     fn fuzzy_locator_candidates_set_structured_clarify_reason_kind() {
         let result = apply_post_route_policy(
             route_result(),
-            true,
-            true,
-            false,
-            false,
-            false,
-            false,
             LocatorResolution::Fuzzy(vec!["/tmp/a".to_string(), "/tmp/b".to_string()]),
         );
         assert_eq!(

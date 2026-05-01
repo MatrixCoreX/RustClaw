@@ -21,7 +21,7 @@ fn existing_file_path_literal(text: &str) -> Option<PathBuf> {
     Some(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()))
 }
 
-fn looks_like_delivery_locator_literal(text: &str, locator_hint: &str) -> bool {
+pub(super) fn looks_like_delivery_locator_literal(text: &str, locator_hint: &str) -> bool {
     let trimmed = text.trim();
     if trimmed.is_empty()
         || trimmed.contains('\n')
@@ -121,12 +121,15 @@ pub(super) fn enforce_output_contract(
             // QuantityComparison 的回答天然由"较大方 + 双方数值"组成（如 "docs 更多：docs 有 3 个，logs 有 2 个"），
             // 强行 extract_scalar_literal 会把整句压成首个 ASCII 数字 "3"，把已经合规的对比答案破坏成
             // 单孤立数字——典型"假成功"。Comparison 类保留 LLM 的完整短句即可，下游 chat 渲染器
-            // 已经按 chat_response_prompt 的硬规则保证了简洁度。
+            // 已经按 chat_response_prompt 的输出契约保证了简洁度。
             if !matches!(
                 output_contract.semantic_kind,
                 crate::OutputSemanticKind::QuantityComparison
-            ) {
-                if let Some(scalar) = extract_scalar_literal(normalized_text) {
+            ) && !contains_missing_scalar_sentinel(normalized_text)
+            {
+                if let Some(scalar) =
+                    extract_scalar_literal_for_contract(normalized_text, output_contract)
+                {
                     *normalized_text = scalar;
                 }
             }
@@ -237,6 +240,7 @@ fn should_collapse_to_single_output(
     matches!(
         output_contract.response_shape,
         OutputResponseShape::OneSentence
+            | OutputResponseShape::Strict
             | OutputResponseShape::Scalar
             | OutputResponseShape::FileToken
     ) || response_has_any_delivery_token(text, messages)
@@ -392,7 +396,9 @@ pub(crate) fn take_first_sentence(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::looks_like_delivery_locator_literal;
+    use crate::{IntentOutputContract, OutputResponseShape, OutputSemanticKind};
+
+    use super::{enforce_output_contract, looks_like_delivery_locator_literal};
 
     #[test]
     fn delivery_locator_literal_accepts_hint_and_path_shapes() {
@@ -418,23 +424,220 @@ mod tests {
             "definitely_missing_named_file_rustclaw_001.txt"
         ));
         assert!(!looks_like_delivery_locator_literal(
-            "请提供具体的文件名或路径。",
+            "LOCATOR_CLARIFY_PROMPT",
             "README.md"
         ));
     }
+
+    #[test]
+    fn scalar_contract_extracts_single_machine_token_from_sentence() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Scalar,
+            ..Default::default()
+        };
+        let mut text = "测试编号是 **minimax-small-20260429_201348**。".to_string();
+        let mut messages = Vec::new();
+
+        enforce_output_contract(&state, "只回答编号", &contract, &mut text, &mut messages);
+
+        assert_eq!(text, "minimax-small-20260429_201348");
+    }
+
+    #[test]
+    fn scalar_contract_preserves_natural_language_summary_with_single_ascii_token() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Scalar,
+            semantic_kind: OutputSemanticKind::None,
+            ..Default::default()
+        };
+        let expected = "该测试验证 RustClaw 在连续会话下能否稳定保持上下文、记忆和状态。";
+        let mut text = expected.to_string();
+        let mut messages = Vec::new();
+
+        enforce_output_contract(
+            &state,
+            "请用一句话总结这个连续会话测试主要验证什么。",
+            &contract,
+            &mut text,
+            &mut messages,
+        );
+
+        assert_eq!(text, expected);
+        assert_eq!(messages, vec![expected.to_string()]);
+    }
+
+    #[test]
+    fn scalar_count_contract_still_extracts_count_from_sentence() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Scalar,
+            semantic_kind: OutputSemanticKind::ScalarCount,
+            ..Default::default()
+        };
+        let mut text = "共有 3 个文件。".to_string();
+        let mut messages = Vec::new();
+
+        enforce_output_contract(&state, "只回答数量", &contract, &mut text, &mut messages);
+
+        assert_eq!(text, "3");
+        assert_eq!(messages, vec!["3".to_string()]);
+    }
+
+    #[test]
+    fn scalar_contract_preserves_missing_sentinel() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Scalar,
+            ..Default::default()
+        };
+        let mut text = "<missing>".to_string();
+        let mut messages = Vec::new();
+
+        enforce_output_contract(&state, "只回答字段值", &contract, &mut text, &mut messages);
+
+        assert_eq!(text, "<missing>");
+    }
+
+    #[test]
+    fn scalar_contract_preserves_structured_missing_field_line() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Scalar,
+            ..Default::default()
+        };
+        let mut text = "package.name: <missing>".to_string();
+        let mut messages = Vec::new();
+
+        enforce_output_contract(&state, "只回答字段值", &contract, &mut text, &mut messages);
+
+        assert_eq!(text, "package.name: <missing>");
+    }
 }
 
-fn extract_scalar_literal(text: &str) -> Option<String> {
+fn extract_scalar_literal_for_contract(
+    text: &str,
+    output_contract: &IntentOutputContract,
+) -> Option<String> {
+    if allows_loose_scalar_token_extraction(output_contract.semantic_kind) {
+        extract_scalar_literal_loose(text)
+    } else {
+        extract_scalar_literal_explicit(text)
+    }
+}
+
+fn allows_loose_scalar_token_extraction(kind: crate::OutputSemanticKind) -> bool {
+    matches!(
+        kind,
+        crate::OutputSemanticKind::ScalarCount
+            | crate::OutputSemanticKind::ScalarPathOnly
+            | crate::OutputSemanticKind::SqliteTableNamesOnly
+            | crate::OutputSemanticKind::SqliteDatabaseKindJudgment
+    )
+}
+
+fn extract_scalar_literal_explicit(text: &str) -> Option<String> {
     let trimmed = text.trim();
+    if trimmed == "<missing>" {
+        return Some(trimmed.to_string());
+    }
     if is_scalar_literal(trimmed) {
         return Some(trimmed.to_string());
     }
-    for token in trimmed.split_whitespace() {
-        if is_scalar_literal(token) {
-            return Some(token.to_string());
-        }
+
+    if let Some(scalar) = extract_single_delimited_scalar(trimmed, "`") {
+        return Some(scalar);
+    }
+    if let Some(scalar) = extract_single_delimited_scalar(trimmed, "**") {
+        return Some(scalar);
     }
     None
+}
+
+fn extract_scalar_literal_loose(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if let Some(scalar) = extract_scalar_literal_explicit(trimmed) {
+        return Some(scalar);
+    }
+
+    let mut candidates = Vec::new();
+    for token in trimmed.split_whitespace() {
+        let token = trim_scalar_token_punctuation(token);
+        if is_scalar_literal(&token) && !candidates.iter().any(|existing| existing == &token) {
+            candidates.push(token);
+        }
+    }
+    if candidates.len() == 1 {
+        candidates.pop()
+    } else {
+        None
+    }
+}
+
+fn contains_missing_scalar_sentinel(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed == "<missing>" || trimmed.ends_with(": <missing>")
+}
+
+fn extract_single_delimited_scalar(text: &str, delimiter: &str) -> Option<String> {
+    let mut candidates = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(delimiter) {
+        let after_start = &rest[start + delimiter.len()..];
+        let Some(end) = after_start.find(delimiter) else {
+            break;
+        };
+        let candidate = trim_scalar_token_punctuation(&after_start[..end]);
+        if is_scalar_literal(&candidate)
+            && !candidates.iter().any(|existing| existing == &candidate)
+        {
+            candidates.push(candidate);
+        }
+        rest = &after_start[end + delimiter.len()..];
+    }
+    if candidates.len() == 1 {
+        candidates.pop()
+    } else {
+        None
+    }
+}
+
+fn trim_scalar_token_punctuation(token: &str) -> String {
+    let mut current = token.trim();
+    loop {
+        let next = current
+            .trim_matches(|ch: char| {
+                ch.is_ascii_punctuation()
+                    && !matches!(
+                        ch,
+                        '-' | '_' | '.' | ':' | '/' | '\\' | '@' | '=' | '+' | '#'
+                    )
+            })
+            .trim_matches(|ch: char| {
+                matches!(
+                    ch,
+                    '。' | '，'
+                        | '、'
+                        | '；'
+                        | '：'
+                        | '！'
+                        | '？'
+                        | '“'
+                        | '”'
+                        | '‘'
+                        | '’'
+                        | '（'
+                        | '）'
+                        | '《'
+                        | '》'
+                )
+            });
+        if next == current {
+            return current.to_string();
+        }
+        current = next;
+    }
 }
 
 fn is_scalar_literal(s: &str) -> bool {
@@ -445,7 +648,19 @@ fn is_scalar_literal(s: &str) -> bool {
     if s.chars().all(|c| c.is_ascii_digit()) {
         return true;
     }
-    s.parse::<f64>().is_ok()
+    if s.parse::<f64>().is_ok() {
+        return true;
+    }
+    let char_count = s.chars().count();
+    char_count <= 200
+        && s.chars().any(|c| c.is_ascii_alphanumeric())
+        && s.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(
+                    c,
+                    '-' | '_' | '.' | ':' | '/' | '\\' | '@' | '=' | '+' | '#'
+                )
+        })
 }
 
 pub(crate) fn response_has_same_file_token(

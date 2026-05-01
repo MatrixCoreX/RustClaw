@@ -5,7 +5,7 @@ If a field is not visibly supported, leave it empty/null according to schema exp
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en

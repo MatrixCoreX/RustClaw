@@ -145,7 +145,7 @@ pub(crate) struct LoadedCase {
 ///   * `expected_final_answer_contains`：所有列出的子串都必须出现在 final
 ///     answer 文本里（顺序无关，大小写敏感）。最常用的轻量断言。
 ///   * `expected_final_answer_not_contains`：禁止出现的子串集合。用来卡住
-///     "幻觉文案"或老版本的固定坏话术（如：旧 chat skill 把"有没有"答成
+///     "幻觉文案"或老版本的固定坏话术（如：旧回复链把"有没有"答成
 ///     "这是 systemd 文件…"段落式描述）。
 ///   * `expected_llm_call_count`：精确等于。仅当此 case 的 LLM 调用数稳定
 ///     时才设；不稳定时用 `expected_min_llm_call_count` /
@@ -166,7 +166,7 @@ pub(crate) struct LoadedCase {
 ///     `None` / 缺字段 = 不断言。
 ///   * `expected_verifier_verdict`：**当前未落 journal**，[`OutputContractVerdict`]
 ///     只走 tracing event，没有结构化字段可断言。schema 保留字段名，但
-///     [`diff_outcome_against_expected`] 会把它当成"未实现的硬约束"
+///     [`diff_outcome_against_expected`] 会把它当成"未实现的预期断言"
 ///     `panic!`，避免 case 文件设了字段而被静默跳过。后续在 `task_journal`
 ///     里加 `output_contract_verdict: Option<...>` 之后再启用。
 ///
@@ -509,7 +509,7 @@ pub(crate) fn extract_outcome_from_state(
 }
 
 /// §7.5 Step 4.b.2.6：纯函数比对器。返回 `Vec<String>` 失败说明（每条对应
-/// 一个未达预期的硬约束）；空 Vec 表示所有断言通过。
+/// 一个未达预期的断言）；空 Vec 表示所有断言通过。
 ///
 /// **失败模式分组**（与 [`ExpectedCase`] 字段一一对应）：
 ///   * `expected_final_answer_contains` 子串缺失 → 一条失败/缺项；
@@ -632,7 +632,7 @@ pub(crate) fn diff_outcome_against_expected(
 ///   * fixture 文件缺失（`calls.jsonl` 或 `expected.json`）→ `Err(说明)`；
 ///   * `process_ask_task` 自己返 `Err` → `Err(说明)`；
 ///   * 抽取 outcome 失败（DB 读失败 / result_json 非法）→ `Err(说明)`；
-///   * 比对失败（断言不通过）→ `Ok(Vec<String>)`，每条对应一个未达硬约束；
+///   * 比对失败（断言不通过）→ `Ok(Vec<String>)`，每条对应一个未达预期断言；
 ///   * 全部通过 → `Ok(空 Vec)`。
 pub(crate) async fn run_replay_case(case_name: &str) -> Result<Vec<String>, String> {
     let root = fixture_workspace_root();

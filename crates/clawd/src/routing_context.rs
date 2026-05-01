@@ -213,7 +213,7 @@ fn render_recent_execution_anchor_context(rows: &[(String, String, String, Strin
         truncate_snippet(&anchor.result, 220)
     ));
     lines.push(
-        "- anchor_rule=Use this anchor only as supporting evidence for genuinely short follow-up requests. Reuse it only when the current request or recent context already binds exactly one concrete target of the correct type. Do not let this anchor override a needed clarification, and do not treat an artifact type word alone (for example README / config / log) as a concrete target.".to_string(),
+        "- anchor_rule=Use this anchor only as supporting evidence for genuinely short follow-up requests. Reuse it only when the current request or recent context already binds exactly one concrete target of the correct type. Do not let this anchor override a needed clarification, and do not treat an artifact-type noun alone as a concrete target.".to_string(),
     );
     format!("### RECENT_EXECUTION_ANCHOR\n{}", lines.join("\n"))
 }

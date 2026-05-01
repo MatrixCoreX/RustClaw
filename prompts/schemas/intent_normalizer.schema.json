@@ -18,6 +18,11 @@
       "type": "string",
       "description": "Single-sentence resolved intent. Empty string allowed only when needs_clarify=true."
     },
+    "answer_candidate": {
+      "type": "string",
+      "description": "Optional exact scalar answer candidate recovered from recent turns or memory. Use empty string when no direct answer is available.",
+      "default": ""
+    },
     "resume_behavior": {
       "type": "string",
       "description": "Whether the message resumes a paused task. `parse_resume_behavior` accepts these tokens (case-insensitive); anything else maps to `none`.",
@@ -249,7 +254,7 @@
       "default": false
     },
     "state_patch": {
-      "description": "Optional structured state/task patch payload for corrections, appended constraints, approvals, and similar turn-level updates.",
+      "description": "Optional structured state/task patch payload for corrections, appended constraints, approvals, temporary alias_bindings, and similar turn-level updates.",
       "type": ["object", "null"],
       "default": null
     },

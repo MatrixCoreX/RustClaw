@@ -4,7 +4,7 @@
   "title": "PlanResult",
   "description": "Schema for the JSON object returned by single-plan / loop-incremental-plan / plan-repair prompts (prompts/single_plan_execution_prompt.md, prompts/loop_incremental_plan_prompt.md, prompts/plan_repair_prompt.md). Mirrors `SinglePlanEnvelope` (crates/clawd/src/agent_engine.rs) and the `AgentAction` enum (crates/clawd/src/runtime/types.rs) and is enforced by the `plan_result_schema_drift` unit test in `crates/clawd/src/agent_engine/planning.rs`.\n\n§D2 (schema-driven prompt I/O 第二份样板, after intent_normalizer): the planner returns either an envelope `{steps: [...]}` or a bare action array. Each step is an `AgentAction` discriminated by `type`. `args` is intentionally `Value` (free-form) — per-skill arg shape is governed downstream by `skills_registry.toml` rather than this schema. As of §7.4, the plan grammar also allows `{\"type\":\"synthesize_answer\"}` as a runtime-owned evidence-to-answer node so the planner no longer has to hand-write fragile `call_skill(chat, text=...)` transform prompts.",
   "type": "object",
-  "additionalProperties": true,
+  "additionalProperties": false,
   "required": ["steps"],
   "properties": {
     "steps": {
@@ -35,7 +35,7 @@
         "type": {"const": "think"},
         "content": {"type": "string"}
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "ActionCallSkill": {
       "type": "object",
@@ -50,7 +50,7 @@
           "description": "Free-form per-skill argument bag. Shape is enforced by skill manifest, not by this schema."
         }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "ActionCallTool": {
       "type": "object",
@@ -65,7 +65,7 @@
           "description": "Free-form per-tool argument bag."
         }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "ActionSynthesizeAnswer": {
       "type": "object",
@@ -79,7 +79,7 @@
           "default": []
         }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "ActionRespond": {
       "type": "object",
@@ -88,10 +88,10 @@
         "type": {"const": "respond"},
         "content": {
           "type": "string",
-          "description": "User-visible message body. After §3.4, planner-stage Respond steps without preceding actions are filtered locally to avoid passthrough; meta-respond markers are also rejected by `looks_like_meta_respond_directive_local`."
+          "description": "User-visible message body. Planner-stage Respond steps are still checked by runtime delivery classifiers and output contracts before publication; placeholder or pre-observation content must be grounded by prior observed evidence or a synthesize_answer step."
         }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     }
   }
 }

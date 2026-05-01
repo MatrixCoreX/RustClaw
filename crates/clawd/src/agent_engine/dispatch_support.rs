@@ -62,24 +62,6 @@ fn rewrite_response_with_written_aliases(text: &str, loop_state: &LoopState) -> 
             return effective.clone();
         }
     }
-    if let Some(saved_path) = loop_state.last_written_file_path.as_deref() {
-        let trimmed = out.trim();
-        let lower = trimmed.to_ascii_lowercase();
-        if lower.starts_with("saved path:") && !trimmed.contains(saved_path) {
-            return format!("Saved path: {saved_path}");
-        }
-        if (trimmed.starts_with("保存路径") || trimmed.starts_with("文件路径"))
-            && !trimmed.contains(saved_path)
-        {
-            return format!("保存路径：{saved_path}");
-        }
-        if lower.contains("saved path to ")
-            && lower.contains(": written ")
-            && !trimmed.contains(saved_path)
-        {
-            return format!("Saved path: {saved_path}");
-        }
-    }
     out
 }
 
@@ -797,6 +779,16 @@ pub(super) async fn handle_synthesize_answer_action(
                 .map(|(answer, _summary)| answer)
                 .filter(|answer| !answer.trim().is_empty());
             if let Some(answer) = synthesized {
+                return Ok(answer);
+            }
+            if let Some(answer) =
+                crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
+                    loop_state,
+                    state,
+                    agent_run_context,
+                )
+                .filter(|answer| !answer.trim().is_empty())
+            {
                 return Ok(answer);
             }
             Err(synthesize_failure_user_message(

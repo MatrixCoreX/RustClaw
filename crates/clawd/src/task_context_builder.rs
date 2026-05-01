@@ -24,6 +24,7 @@ pub(crate) struct PlannerContextView {
 pub(crate) struct RouteContextView {
     pub(crate) budget_tier: RouteContextBudgetTier,
     pub(crate) active_task_context: String,
+    pub(crate) session_alias_context: String,
     pub(crate) request_surface_hints: String,
     pub(crate) recent_execution_context: String,
     pub(crate) capability_map: String,
@@ -193,27 +194,36 @@ fn build_active_task_context(
     lines.join("\n")
 }
 
+fn build_session_alias_context(
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> String {
+    let Some(conversation_state) = session_snapshot.conversation_state.as_ref() else {
+        return "<none>".to_string();
+    };
+    if conversation_state.alias_bindings.is_empty() {
+        return "<none>".to_string();
+    }
+
+    let mut lines = vec![
+        "### SESSION_ALIAS_BINDINGS".to_string(),
+        "Temporary user-defined references for this session. Use them only when the current message explicitly mentions one of these aliases or updates a mapping. They are not durable memory and not execution evidence by themselves.".to_string(),
+    ];
+    for binding in conversation_state.alias_bindings.iter().rev().take(8).rev() {
+        lines.push(format!(
+            "- alias: {}\n  target: {}",
+            truncate_context_snippet(&binding.alias, 80),
+            truncate_context_snippet(&binding.target, 180)
+        ));
+    }
+    lines.join("\n")
+}
+
 fn build_request_surface_hints(
     surface: &crate::intent::surface_signals::PromptSurfaceSignals,
 ) -> String {
     let mut lines = Vec::new();
-    if let Some(count) = surface.requested_sentence_count {
-        lines.push(format!("requested_sentence_count: {count}"));
-    }
-    if let Some(range) = surface.requested_read_range {
-        lines.push(format!(
-            "requested_read_range: {}",
-            render_requested_read_range(range)
-        ));
-    }
-    if let Some((left, right)) = surface.compare_target_pair.as_ref() {
-        lines.push(format!("compare_target_pair: {left} | {right}"));
-    }
-    if let Some(dir_hint) = surface.workspace_child_directory_hint.as_deref() {
-        lines.push(format!("workspace_child_directory_hint: {dir_hint}"));
-    }
-    if let Some(limit) = surface.requested_listing_limit {
-        lines.push(format!("requested_listing_limit: {limit}"));
+    if let Some((left, right)) = surface.locator_target_pair.as_ref() {
+        lines.push(format!("locator_target_pair: {left} | {right}"));
     }
     if lines.is_empty() {
         "<none>".to_string()
@@ -227,47 +237,12 @@ fn build_request_surface_hints(
     }
 }
 
-fn render_requested_read_range(range: crate::read_range_request::RequestedReadRange) -> String {
-    match range {
-        crate::read_range_request::RequestedReadRange::Head { n } => format!("head:{n}"),
-        crate::read_range_request::RequestedReadRange::Tail { n } => format!("tail:{n}"),
-        crate::read_range_request::RequestedReadRange::Range {
-            start_line,
-            end_line,
-        } => format!("range:{start_line}-{end_line}"),
-    }
-}
-
-fn request_looks_like_fresh_deictic_reference(
-    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-) -> bool {
-    surface.token_count > 0 && surface.has_fresh_or_object_deictic_reference()
-}
-
-fn should_suppress_route_memory_context(
-    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    last_turn_full: &str,
-    recent_assistant_replies: &str,
-    active_followup_frame: Option<&crate::followup_frame::FollowupFrame>,
-    active_observed_facts: Option<&crate::observed_facts::ObservedFacts>,
-) -> bool {
-    request_looks_like_fresh_deictic_reference(surface)
-        && !crate::intent::continuation_resolver::context_contains_immediate_locator_anchor(
-            last_turn_full,
-        )
-        && !crate::intent::continuation_resolver::context_contains_immediate_locator_anchor(
-            recent_assistant_replies,
-        )
-        && !followup_frame_provides_immediate_anchor(active_followup_frame)
-        && !observed_facts_provide_immediate_anchor(active_observed_facts)
-}
-
-fn request_looks_like_active_clarify_reply(
+fn request_can_fill_active_clarify_target(
     user_request: &str,
     surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     active_clarify_state: Option<&crate::clarify_state::ClarifyState>,
 ) -> bool {
-    crate::intent::continuation_resolver::prompt_looks_like_active_clarify_reply_with_surface(
+    crate::intent::continuation_resolver::surface_can_fill_active_clarify_target(
         user_request,
         active_clarify_state,
         surface,
@@ -301,20 +276,11 @@ fn needs_text_anchor_probe_for_route(
     surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
 ) -> bool {
-    request_looks_like_fresh_deictic_reference(surface)
-        && crate::conversation_state::session_alias_target_for_prompt(
-            user_request,
-            Some(session_snapshot),
-        )
-        .is_none()
-        && !request_looks_like_active_clarify_reply(
-            user_request,
-            surface,
-            session_snapshot.active_clarify_state.as_ref(),
-        )
-        && !crate::intent::continuation_resolver::session_contains_immediate_locator_anchor(Some(
-            session_snapshot,
-        ))
+    let _ = (user_request, surface, session_snapshot);
+    // Planner-first: do not run a local deictic/pronoun detector before the normalizer.
+    // Immediate anchors are still passed through structured session state; semantic
+    // reference resolution belongs to the LLM normalizer/planner.
+    false
 }
 
 fn session_snapshot_provides_execution_state_anchor(
@@ -330,43 +296,31 @@ fn request_qualifies_for_anchor_only_route_context(
     signals: &crate::intent::surface_signals::PromptSurfaceSignals,
 ) -> bool {
     let trimmed = user_request.trim();
-    if trimmed.is_empty() || request_looks_like_fresh_deictic_reference(signals) {
+    if trimmed.is_empty() {
         return false;
     }
-    let has_structured_local_read_signal =
-        signals.has_structured_target_refinement() || signals.has_workspace_single_token_hint();
+    let has_structured_local_read_signal = signals.has_structured_target_refinement();
     signals.has_explicit_path_or_url()
-        || signals.looks_like_locator_only_reply()
+        || signals.is_structural_locator_only_reply()
         || (!signals.has_explicit_path_or_url() && signals.has_single_filename_candidate())
-        || signals.compare_target_pair.is_some()
+        || signals.locator_target_pair.is_some()
         || has_structured_local_read_signal
 }
 
 fn classify_route_context_budget(
     user_request: &str,
     surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    last_turn_full: &str,
-    recent_assistant_replies: &str,
+    _last_turn_full: &str,
+    _recent_assistant_replies: &str,
     active_followup_frame: Option<&crate::followup_frame::FollowupFrame>,
     active_clarify_state: Option<&crate::clarify_state::ClarifyState>,
     active_observed_facts: Option<&crate::observed_facts::ObservedFacts>,
 ) -> RouteContextBudgetTier {
-    if request_looks_like_active_clarify_reply(user_request, surface, active_clarify_state) {
+    let _ = (active_followup_frame, active_observed_facts);
+    if request_can_fill_active_clarify_target(user_request, surface, active_clarify_state) {
         return RouteContextBudgetTier::None;
     }
-    if request_looks_like_fresh_deictic_reference(surface) {
-        if should_suppress_route_memory_context(
-            surface,
-            last_turn_full,
-            recent_assistant_replies,
-            active_followup_frame,
-            active_observed_facts,
-        ) {
-            RouteContextBudgetTier::None
-        } else {
-            RouteContextBudgetTier::AnchorOnly
-        }
-    } else if request_qualifies_for_anchor_only_route_context(user_request, surface) {
+    if request_qualifies_for_anchor_only_route_context(user_request, surface) {
         RouteContextBudgetTier::AnchorOnly
     } else {
         RouteContextBudgetTier::Full
@@ -604,6 +558,7 @@ pub(crate) fn build_route_task_context_bundle(
     let route_view = RouteContextView {
         budget_tier: route_budget,
         active_task_context: build_active_task_context(session_snapshot),
+        session_alias_context: build_session_alias_context(session_snapshot),
         request_surface_hints: build_request_surface_hints(&user_request_surface),
         recent_execution_context: match route_budget {
             RouteContextBudgetTier::Full => {
@@ -820,7 +775,7 @@ pub(crate) fn apply_execution_context_to_prompts(
     if execution_view.recent_execution_anchor != "<none>" {
         prompt_with_memory_for_execution.push_str(
             "\n\n### RECENT_EXECUTION_CONTEXT\n\
-Use this block only as supporting evidence for genuinely short follow-up requests. Reuse a previous target only when the current request or recent context already binds exactly one concrete target of the correct type. Do not let this block override a needed clarification, and do not treat an artifact type word alone (for example README / config / log) as a concrete target.\n",
+Use this block only as supporting evidence for genuinely short follow-up requests. Reuse a previous target only when the current request or recent context already binds exactly one concrete target of the correct type. Do not let this block override a needed clarification, and do not treat an artifact-type noun alone as a concrete target.\n",
         );
         prompt_with_memory_for_execution.push_str(&execution_view.recent_execution_anchor);
     }
@@ -841,15 +796,14 @@ Use this block only as supporting evidence for genuinely short follow-up request
 mod tests {
     use super::{
         apply_execution_context_to_prompts, build_active_task_context, build_request_surface_hints,
-        classify_route_context_budget, needs_text_anchor_probe_for_route,
-        observed_facts_provide_immediate_anchor, request_looks_like_active_clarify_reply,
-        request_looks_like_fresh_deictic_reference,
-        request_qualifies_for_anchor_only_route_context,
+        build_session_alias_context, classify_route_context_budget,
+        needs_text_anchor_probe_for_route, observed_facts_provide_immediate_anchor,
+        request_can_fill_active_clarify_target, request_qualifies_for_anchor_only_route_context,
         session_snapshot_provides_execution_state_anchor,
         should_prefer_light_execution_memory_from_session,
-        should_suppress_execution_anchor_context, should_suppress_route_memory_context,
-        uses_light_execution_context_budget, ExecutionContextView, PlannerContextView,
-        RouteContextBudgetTier, TaskContextBundle, TaskContextRawSources,
+        should_suppress_execution_anchor_context, uses_light_execution_context_budget,
+        ExecutionContextView, PlannerContextView, RouteContextBudgetTier, TaskContextBundle,
+        TaskContextRawSources,
     };
 
     #[test]
@@ -906,11 +860,25 @@ mod tests {
     }
 
     #[test]
-    fn request_surface_hints_include_workspace_child_directory_hint() {
-        let surface = crate::intent::surface_signals::analyze_prompt_surface("看看 docs 目录");
-        let rendered = build_request_surface_hints(&surface);
-        assert!(rendered.contains("### REQUEST_SURFACE_HINTS"));
-        assert!(rendered.contains("workspace_child_directory_hint: docs"));
+    fn session_alias_context_exports_temporary_bindings() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                alias_bindings: vec![crate::conversation_state::SessionAliasBinding {
+                    alias: "那个日志".to_string(),
+                    target: "/tmp/app.log".to_string(),
+                    updated_at_ts: 1,
+                }],
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let context = build_session_alias_context(&snapshot);
+        assert!(context.contains("### SESSION_ALIAS_BINDINGS"));
+        assert!(context.contains("那个日志"));
+        assert!(context.contains("/tmp/app.log"));
+        assert!(context.contains("not execution evidence"));
     }
 
     #[test]
@@ -921,11 +889,16 @@ mod tests {
         let rendered = build_request_surface_hints(&surface);
         assert_eq!(rendered, "<none>");
 
+        let surface = crate::intent::surface_signals::analyze_prompt_surface("看看 docs 目录");
+        let rendered = build_request_surface_hints(&surface);
+        assert_eq!(rendered, "<none>");
+        assert!(!rendered.contains("workspace_child_directory_hint"));
+
         let surface = crate::intent::surface_signals::analyze_prompt_surface(
             "用一句话说当前机器的包管理器是什么",
         );
         let rendered = build_request_surface_hints(&surface);
-        assert!(rendered.contains("requested_sentence_count: 1"));
+        assert_eq!(rendered, "<none>");
         assert!(!rendered.contains("workspace_root_request_shape"));
         assert!(!rendered.contains("semantic_request_shape"));
         assert!(!rendered.contains("table_request_shape"));
@@ -934,99 +907,24 @@ mod tests {
     }
 
     #[test]
-    fn request_surface_hints_include_requested_sentence_count() {
-        let surface = crate::intent::surface_signals::analyze_prompt_surface(
-            "读一下 README.md，然后用三句话总结",
-        );
-        let rendered = build_request_surface_hints(&surface);
-        assert!(rendered.contains("### REQUEST_SURFACE_HINTS"));
-        assert!(rendered.contains("requested_sentence_count: 3"));
-    }
-
-    #[test]
-    fn request_surface_hints_include_requested_read_range() {
+    fn request_surface_hints_do_not_export_read_range_phrases() {
         let surface = crate::intent::surface_signals::analyze_prompt_surface(
             "先读一下 README.md 前 4 行，再用一句话说重点",
         );
         let rendered = build_request_surface_hints(&surface);
-        assert!(rendered.contains("### REQUEST_SURFACE_HINTS"));
-        assert!(rendered.contains("requested_read_range: head:4"));
+        assert_eq!(rendered, "<none>");
     }
 
     #[test]
-    fn request_surface_hints_include_compare_target_pair() {
+    fn request_surface_hints_include_locator_target_pair() {
         let surface = crate::intent::surface_signals::analyze_prompt_surface(
             "比较 README.md 和 AGENTS.md 哪个更大",
         );
         let rendered = build_request_surface_hints(&surface);
         assert!(rendered.contains("### REQUEST_SURFACE_HINTS"));
-        assert!(rendered.contains("compare_target_pair:"));
+        assert!(rendered.contains("locator_target_pair:"));
         assert!(rendered.contains("README.md"));
         assert!(rendered.contains("AGENTS.md"));
-    }
-
-    #[test]
-    fn detects_fresh_deictic_reference_without_explicit_path() {
-        assert!(request_looks_like_fresh_deictic_reference(
-            &crate::intent::surface_signals::analyze_prompt_surface(
-                "看一下那个 model io log 最后 4 行，再一句话说有什么现象",
-            ),
-        ));
-        assert!(request_looks_like_fresh_deictic_reference(
-            &crate::intent::surface_signals::analyze_prompt_surface("把那个文件发给我"),
-        ));
-        assert!(request_looks_like_fresh_deictic_reference(
-            &crate::intent::surface_signals::analyze_prompt_surface(
-                "Use THIS log and summarize briefly",
-            ),
-        ));
-        assert!(!request_looks_like_fresh_deictic_reference(
-            &crate::intent::surface_signals::analyze_prompt_surface(
-                "/home/guagua/rustclaw/README.md",
-            ),
-        ));
-        assert!(!request_looks_like_fresh_deictic_reference(
-            &crate::intent::surface_signals::analyze_prompt_surface(
-                "thisness should not count as a deictic reference",
-            ),
-        ));
-    }
-
-    #[test]
-    fn suppresses_route_memory_for_fresh_deictic_filename_wrapper_without_anchor() {
-        assert!(should_suppress_route_memory_context(
-            &crate::intent::surface_signals::analyze_prompt_surface(
-                "看一下那个 model io log 最后 4 行，再一句话说有什么现象",
-            ),
-            "<none>",
-            "<none>",
-            None,
-            None,
-        ));
-    }
-
-    #[test]
-    fn keeps_route_memory_for_deictic_filename_wrapper_with_immediate_anchor() {
-        assert!(!should_suppress_route_memory_context(
-            &crate::intent::surface_signals::analyze_prompt_surface("读一下那个 README 开头"),
-            "### LAST_TURN_FULL\n[TURN -1]\nAssistant: FILE:/home/guagua/rustclaw/README.md\n[/TURN]",
-            "<none>",
-            None,
-            None,
-        ));
-    }
-
-    #[test]
-    fn keeps_route_memory_for_explicit_path_request() {
-        assert!(!should_suppress_route_memory_context(
-            &crate::intent::surface_signals::analyze_prompt_surface(
-                "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/logs/model_io.log",
-            ),
-            "<none>",
-            "<none>",
-            None,
-            None,
-        ));
     }
 
     #[test]
@@ -1098,7 +996,7 @@ mod tests {
     }
 
     #[test]
-    fn route_budget_uses_none_for_fresh_deictic_without_immediate_anchor() {
+    fn route_budget_keeps_full_context_for_ambiguous_followup_language() {
         assert_eq!(
             classify_route_context_budget(
                 "看一下那个日志最后 4 行",
@@ -1109,12 +1007,12 @@ mod tests {
                 None,
                 None
             ),
-            RouteContextBudgetTier::None
+            RouteContextBudgetTier::Full
         );
     }
 
     #[test]
-    fn route_budget_uses_anchor_only_for_fresh_deictic_with_immediate_anchor() {
+    fn route_budget_keeps_full_context_for_followup_language_with_immediate_anchor() {
         let last_turn_full = "### LAST_TURN_FULL\n[TURN -1]\nAssistant: FILE:/home/guagua/rustclaw/logs/model_io.log\n[/TURN]";
         assert_eq!(
             classify_route_context_budget(
@@ -1126,15 +1024,15 @@ mod tests {
                 None,
                 None
             ),
-            RouteContextBudgetTier::AnchorOnly
+            RouteContextBudgetTier::Full
         );
     }
 
     #[test]
-    fn route_budget_uses_none_for_active_locator_clarify_reply() {
+    fn route_budget_leaves_weak_active_locator_clarify_reply_to_normalizer() {
         let clarify_state = crate::clarify_state::ClarifyState {
             missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
-            pending_question: "请提供具体要读取的文件名或路径。".to_string(),
+            pending_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
             candidate_targets: Vec::new(),
             delivery_required: false,
             output_shape: None,
@@ -1144,7 +1042,7 @@ mod tests {
             updated_at_ts: 1,
             expires_at_ts: 2,
         };
-        assert!(request_looks_like_active_clarify_reply(
+        assert!(!request_can_fill_active_clarify_target(
             "/tmp/device_local/logs/model_io.log",
             &crate::intent::surface_signals::analyze_prompt_surface(
                 "/tmp/device_local/logs/model_io.log",
@@ -1163,7 +1061,7 @@ mod tests {
                 Some(&clarify_state),
                 None
             ),
-            RouteContextBudgetTier::None
+            RouteContextBudgetTier::AnchorOnly
         );
     }
 
@@ -1171,7 +1069,7 @@ mod tests {
     fn route_budget_leaves_active_clarify_candidate_selection_to_normalizer() {
         let clarify_state = crate::clarify_state::ClarifyState {
             missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
-            pending_question: "请提供具体的文件名或路径。".to_string(),
+            pending_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
             candidate_targets: vec!["act_plan.log".to_string(), "clawd.log".to_string()],
             delivery_required: true,
             output_shape: Some(crate::OutputResponseShape::FileToken.as_str().to_string()),
@@ -1181,7 +1079,7 @@ mod tests {
             updated_at_ts: 1,
             expires_at_ts: 2,
         };
-        assert!(!request_looks_like_active_clarify_reply(
+        assert!(!request_can_fill_active_clarify_target(
             "第二个",
             &crate::intent::surface_signals::analyze_prompt_surface("第二个"),
             Some(&clarify_state)
@@ -1201,19 +1099,12 @@ mod tests {
     }
 
     #[test]
-    fn observed_facts_anchor_promotes_fresh_deictic_to_anchor_only() {
+    fn observed_facts_anchor_is_preserved_without_local_followup_word_budgeting() {
         let facts = crate::observed_facts::ObservedFacts {
             bound_target: Some("/tmp/device_local/logs/model_io.log".to_string()),
             ..crate::observed_facts::ObservedFacts::default()
         };
         assert!(observed_facts_provide_immediate_anchor(Some(&facts)));
-        assert!(!should_suppress_route_memory_context(
-            &crate::intent::surface_signals::analyze_prompt_surface("看一下那个日志最后 4 行",),
-            "<none>",
-            "<none>",
-            None,
-            Some(&facts),
-        ));
         assert_eq!(
             classify_route_context_budget(
                 "看一下那个日志最后 4 行",
@@ -1224,23 +1115,16 @@ mod tests {
                 None,
                 Some(&facts)
             ),
-            RouteContextBudgetTier::AnchorOnly
+            RouteContextBudgetTier::Full
         );
     }
 
     #[test]
-    fn followup_frame_anchor_promotes_fresh_deictic_to_anchor_only() {
+    fn followup_frame_anchor_is_preserved_without_local_followup_word_budgeting() {
         let frame = crate::followup_frame::FollowupFrame {
             bound_target: Some("/tmp/device_local/logs/model_io.log".to_string()),
             ..crate::followup_frame::FollowupFrame::default()
         };
-        assert!(!should_suppress_route_memory_context(
-            &crate::intent::surface_signals::analyze_prompt_surface("看一下那个日志最后 4 行",),
-            "<none>",
-            "<none>",
-            Some(&frame),
-            None,
-        ));
         assert_eq!(
             classify_route_context_budget(
                 "看一下那个日志最后 4 行",
@@ -1251,7 +1135,7 @@ mod tests {
                 None,
                 None
             ),
-            RouteContextBudgetTier::AnchorOnly
+            RouteContextBudgetTier::Full
         );
     }
 
@@ -1274,14 +1158,14 @@ mod tests {
     }
 
     #[test]
-    fn text_anchor_probe_is_used_for_fresh_deictic_without_session_anchor() {
+    fn text_anchor_probe_is_not_used_for_followup_word_matching() {
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: None,
             active_followup_frame: None,
             active_clarify_state: None,
             active_observed_facts: None,
         };
-        assert!(needs_text_anchor_probe_for_route(
+        assert!(!needs_text_anchor_probe_for_route(
             "看一下那个日志最后 4 行",
             &crate::intent::surface_signals::analyze_prompt_surface("看一下那个日志最后 4 行",),
             &snapshot
@@ -1319,7 +1203,7 @@ mod tests {
             active_followup_frame: None,
             active_clarify_state: Some(crate::clarify_state::ClarifyState {
                 missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
-                pending_question: "请提供路径".to_string(),
+                pending_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
                 candidate_targets: vec![],
                 delivery_required: false,
                 output_shape: None,
@@ -1438,7 +1322,7 @@ mod tests {
             active_followup_frame: None,
             active_clarify_state: Some(crate::clarify_state::ClarifyState {
                 missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
-                pending_question: "请提供具体的文件名或路径。".to_string(),
+                pending_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
                 candidate_targets: Vec::new(),
                 delivery_required: true,
                 output_shape: Some("file_token".to_string()),
@@ -1468,7 +1352,7 @@ mod tests {
             active_followup_frame: None,
             active_clarify_state: Some(crate::clarify_state::ClarifyState {
                 missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
-                pending_question: "请提供具体的文件名或路径。".to_string(),
+                pending_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
                 candidate_targets: Vec::new(),
                 delivery_required: true,
                 output_shape: Some("file_token".to_string()),

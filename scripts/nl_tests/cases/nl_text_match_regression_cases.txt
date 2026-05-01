@@ -1,5 +1,5 @@
 # suite|name|tags|prompt
-# Focus: regressions for removing code-side natural-language hard matching.
+# Focus: regressions for removing code-side natural-language wording rules.
 # Goals:
 # 1. run_cmd result tails should be handled semantically, not by string stripping
 # 2. local file/dir execution requests should still route and complete correctly

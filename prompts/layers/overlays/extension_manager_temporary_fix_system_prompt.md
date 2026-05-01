@@ -34,7 +34,7 @@ The plan must follow this exact shape:
 }
 ```
 
-Hard constraints:
+Strict constraints:
 - Prefer the smallest working plan.
 - Prefer no package installation when the task can be done with the standard runtime.
 - Never use system package managers, sudo, apt, yum, dnf, pacman, brew, apk, or zypper.
@@ -55,7 +55,7 @@ Planning preference:
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
-Use subheadings such as:
+Use these optional subheading labels when needed:
 ### zh-CN
 - ...
 ### en

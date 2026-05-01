@@ -350,9 +350,9 @@ mod tests {
 
     #[test]
     fn locator_question_prefers_matching_answer_text() {
-        let question = clarify_question_from_answer("请提供具体要读取的文件名或路径。", &[])
+        let question = clarify_question_from_answer("LOCATOR_CLARIFY_PROMPT", &[])
             .expect("question should be extracted");
-        assert_eq!(question, "请提供具体要读取的文件名或路径。");
+        assert_eq!(question, "LOCATOR_CLARIFY_PROMPT");
     }
 
     #[test]
@@ -362,7 +362,7 @@ mod tests {
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
             resolved_intent: "看一下那个日志最后 5 行".to_string(),
             needs_clarify: true,
-            clarify_question: "请提供具体要读取的文件名或路径。".to_string(),
+            clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
             route_reason: "clarify".to_string(),
             route_confidence: Some(0.9),
             visible_skill_candidates: Vec::new(),
@@ -383,7 +383,7 @@ mod tests {
             "task-1",
             "看一下那个日志最后 5 行",
             &route,
-            "请提供具体要读取的文件名或路径。",
+            "LOCATOR_CLARIFY_PROMPT",
             &[],
             true,
             &[],
@@ -404,7 +404,7 @@ mod tests {
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
             resolved_intent: "看一下那个日志".to_string(),
             needs_clarify: true,
-            clarify_question: "请提供具体要读取的文件名或路径。".to_string(),
+            clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
             route_reason: "clarify".to_string(),
             route_confidence: Some(0.9),
             visible_skill_candidates: Vec::new(),
@@ -426,7 +426,7 @@ mod tests {
             "task-2",
             "看一下那个日志",
             &route,
-            "请提供具体要读取的文件名或路径。",
+            "LOCATOR_CLARIFY_PROMPT",
             &[],
             true,
             &[],
@@ -509,7 +509,7 @@ mod tests {
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
             resolved_intent: "把那个文件发给我".to_string(),
             needs_clarify: true,
-            clarify_question: "请提供具体的文件名或路径。".to_string(),
+            clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
             route_reason: "clarify".to_string(),
             route_confidence: Some(0.9),
             visible_skill_candidates: Vec::new(),
@@ -540,7 +540,7 @@ mod tests {
             "task-3",
             "把那个文件发给我",
             &route,
-            "请提供具体的文件名或路径。",
+            "LOCATOR_CLARIFY_PROMPT",
             &[],
             true,
             &[],

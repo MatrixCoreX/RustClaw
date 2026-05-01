@@ -350,6 +350,7 @@ pub(crate) struct AgentRunContext {
     pub(crate) context_bundle_summary: Option<String>,
     pub(crate) auto_locator_path: Option<String>,
     pub(crate) fuzzy_locator_suggestions: Vec<String>,
+    pub(crate) original_user_request: Option<String>,
     pub(crate) user_request: Option<String>,
     /// Cross-turn recent execution context (rendered by routing_context::build_recent_execution_context).
     /// Used by runtime synthesis/planning so the LLM can see prior turns' outputs (file content,
@@ -1111,7 +1112,7 @@ mod tests {
     #[test]
     fn test_normalized_observed_listing_trims_blank_lines() {
         let observed = "\n file1.txt \n\n subdir/ \n";
-        let out = super::observed_output::normalized_observed_listing(observed, None);
+        let out = super::observed_output::normalized_observed_listing(observed);
         assert_eq!(out.as_deref(), Some("file1.txt\nsubdir/"));
     }
 
