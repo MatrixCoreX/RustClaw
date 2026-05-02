@@ -4791,12 +4791,7 @@ async fn start_workspace_update(
     };
 
     let workspace_root = state.skill_rt.workspace_root.clone();
-    let current_pid = std::process::id();
-    tokio::spawn(run_workspace_update_job(
-        workspace_root,
-        current_pid,
-        shared,
-    ));
+    tokio::spawn(run_workspace_update_job(workspace_root, shared));
 
     (
         StatusCode::ACCEPTED,
@@ -4810,7 +4805,6 @@ async fn start_workspace_update(
 
 async fn run_workspace_update_job(
     workspace_root: PathBuf,
-    current_pid: u32,
     shared: Arc<Mutex<WorkspaceUpdateStatus>>,
 ) {
     set_workspace_update_step(&shared, "checking_current_version");
@@ -4995,7 +4989,7 @@ async fn run_workspace_update_job(
     set_workspace_update_step(&shared, "restarting_clawd");
     let workspace = workspace_root.to_string_lossy();
     let script = format!(
-        "sleep 2; kill {current_pid} 2>/dev/null; sleep 1; cd {} && ./start-clawd.sh",
+        "sleep 2; cd {} && ./start-all-bin.sh release",
         shell_escape_arg(workspace.as_ref())
     );
     let spawn_result = StdCommand::new("nohup")
