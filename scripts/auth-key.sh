@@ -36,6 +36,7 @@ fi
 
 python3 - "$ROOT_DIR" "$CONFIG_PATH" "$@" <<'PY'
 import os
+import json
 import sqlite3
 import sys
 import secrets
@@ -57,10 +58,12 @@ cfg = tomllib.loads(config_path.read_text(encoding="utf-8"))
 db_rel = cfg.get("database", {}).get("sqlite_path", "data/rustclaw.db")
 db_path = (root / db_rel).resolve()
 db_path.parent.mkdir(parents=True, exist_ok=True)
-pi_key_path = root / "pi_app" / ".rustclaw_small_screen_key"
+pi_settings_path = root / "pi_app" / ".rustclaw_small_screen_config.json"
 pi_key = ""
 try:
-    pi_key = pi_key_path.read_text(encoding="utf-8").strip()
+    pi_settings = json.loads(pi_settings_path.read_text(encoding="utf-8"))
+    if isinstance(pi_settings, dict):
+        pi_key = str(pi_settings.get("user_key") or "").strip()
 except Exception:
     pi_key = ""
 
