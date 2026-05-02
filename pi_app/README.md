@@ -28,7 +28,7 @@ pi_app/
 | **开机自启动** | 运行 `./enable-autostart.sh` 后写入 XDG `~/.config/autostart/` 与树莓派 LXDE `~/.config/lxsession/LXDE-pi/autostart`，登录后自动启动 |
 | **自启动取消** | 运行 `./disable-autostart.sh` 会同时移除上述两处 |
 | **启动日志** | 启动失败时错误信息写入 `~/.rustclaw-small-screen.log` |
-| **用户配置** | 语言/主题/小程序专用 key 保存在 pi_app 目录下 `.rustclaw_small_screen_lang`、`.rustclaw_small_screen_theme`、`.rustclaw_small_screen_key` |
+| **用户配置** | 语言、主题、页面显示开关和小程序专用 key 统一保存在 pi_app 目录下 `.rustclaw_small_screen_config.json` |
 
 ## 使用方式
 
@@ -52,7 +52,7 @@ pi_app/
 - Python 3 + tkinter
 - 图形环境（DISPLAY，桌面或 `export DISPLAY=:0`）
 - 小屏程序请求 `http://127.0.0.1:8787/v1/health`，需先启动 clawd
-- 首次启动时，Python 小程序会自动生成并写入一把本机专用 `user` key 到数据库，同时保存到 `pi_app/.rustclaw_small_screen_key`
+- 首次启动时，Python 小程序会自动生成并写入一把本机专用 `user` key 到数据库，同时保存到 `pi_app/.rustclaw_small_screen_config.json`
 
 ## 自启动后进程在但窗口不出现
 
