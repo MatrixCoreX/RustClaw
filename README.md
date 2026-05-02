@@ -134,7 +134,7 @@ Notes:
 - `install-rustclaw-cmd.sh` installs the `rustclaw` launcher
 - if `clawcli` was built, it is installed too
 - by default the installer deploys `UI/dist` to nginx, writes nginx config, and reloads nginx when needed; pass `--no-deploy-ui` if you only want the launcher
-- it also supports `--target <triple>`, `--dir <path>`, `--deploy-ui-nginx [path]`, and `--pi-app`
+- it also supports `--target <triple>`, `--dir <path>`, `--deploy-ui-nginx [path]`, and `--pi-app`; `--pi-app` only configures the small-screen desktop app on Raspberry Pi and is skipped on regular computers
 - without `--build`, the script prefers existing binaries and only asks you to build/sync `release-bin` when they are missing
 
 Verify:
