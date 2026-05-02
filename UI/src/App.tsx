@@ -4189,25 +4189,40 @@ export default function App() {
                     </p>
                   </div>
                   {isAdminIdentity ? (
-                    <button
-                      type="button"
-                      onClick={() => void startWorkspaceUpdate()}
-                      disabled={workspaceUpdateLoading || workspaceUpdateRunning || !workspaceUpdateHasRemoteDiff}
-                      className="theme-accent-btn"
-                    >
-                      {workspaceUpdateLoading || workspaceUpdateRunning ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4" />
-                      )}
-                      {workspaceUpdateRunning
-                        ? t("更新进行中", "Updating")
-                        : workspaceUpdateHasRemoteDiff
-                          ? t("开始更新", "Start Update")
-                          : workspaceUpdateStatus?.old_commit && workspaceUpdateStatus?.remote_commit
-                            ? t("已是最新", "Up to date")
-                            : t("等待版本检查", "Checking version")}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void fetchWorkspaceUpdateStatus(false)}
+                        disabled={workspaceUpdateLoading || workspaceUpdateRunning}
+                        className="theme-topbar-btn px-3 py-2 text-sm"
+                      >
+                        {workspaceUpdateLoading && !workspaceUpdateRunning ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        {t("刷新最新版本", "Refresh latest")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void startWorkspaceUpdate()}
+                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || !workspaceUpdateHasRemoteDiff}
+                        className="theme-accent-btn"
+                      >
+                        {workspaceUpdateRunning ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        {workspaceUpdateRunning
+                          ? t("更新进行中", "Updating")
+                          : workspaceUpdateHasRemoteDiff
+                            ? t("开始更新", "Start Update")
+                            : workspaceUpdateStatus?.old_commit && workspaceUpdateStatus?.remote_commit
+                              ? t("已是最新", "Up to date")
+                              : t("等待版本检查", "Checking version")}
+                      </button>
+                    </div>
                   ) : (
                     <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/55">
                       {t("仅管理员可更新", "Admin only")}
