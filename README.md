@@ -4,8 +4,6 @@
 
 Chinese version: `README.zh-CN.md`
 
-Temporary update-flow test marker: 2026-05-03.
-
 RustClaw is a local Rust agent runtime centered on `clawd`. It combines multi-channel chat access, task execution, tool and skill routing, memory, scheduling, browser UI, and `user_key` based identity into one deployable stack.
 
 ## Overview
