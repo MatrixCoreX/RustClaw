@@ -134,7 +134,7 @@ bash install-rustclaw-cmd.sh --build --user
 - `install-rustclaw-cmd.sh` 会安装 `rustclaw` 启动器
 - 如果仓库里已经构建出 `clawcli`，安装脚本也会一并安装它
 - 默认情况下，安装脚本会部署 `UI/dist` 到 nginx、写入 nginx 配置并尝试重载 nginx；如果只想装命令，不想碰 UI/nginx，请显式传 `--no-deploy-ui`
-- 支持 `--target <triple>`、`--dir <path>`、`--deploy-ui-nginx [path]`、`--pi-app`
+- 支持 `--target <triple>`、`--dir <path>`、`--deploy-ui-nginx [path]`、`--pi-app`；其中 `--pi-app` 只会在树莓派上配置小屏桌面程序和登录自启动，普通电脑会自动跳过
 - 如果未传 `--build`，脚本会优先复用现有二进制；找不到时才提示你构建或同步 `release-bin`
 
 安装后检查：
@@ -185,6 +185,12 @@ rustclaw -status
 # 指定主 target
 ./build-all.sh --target aarch64-unknown-linux-gnu
 
+# 树莓派交叉编译：默认 64 位 Raspberry Pi OS
+./cross-build-pi.sh
+
+# 32 位 Raspberry Pi OS
+./cross-build-pi.sh --target pi32
+
 # 一次构建多个 target
 ./build-all.sh --target host --extra-target aarch64-unknown-linux-gnu
 ```
@@ -195,6 +201,7 @@ rustclaw -status
 - 默认构建 `release`，并自动发现工作区里的二进制目标后校验产物是否齐全
 - 若存在 `UI/` 且未传 `no-ui`，会调用 `build-ui-nginx.sh`，也就是走“构建 UI + 部署到 nginx”的默认流程
 - `--target host` 输出到 `target/release`，交叉编译输出到 `target/<triple>/release`
+- `cross-build-pi.sh` 会先准备 Raspberry Pi 目标的 linker / `cc` / bindgen 参数，再调用现有构建流程；默认跳过 UI 构建，避免交叉编译时被前端构建阻塞
 
 如果你只想临时本地编译某个 Rust 目标，仍然可以直接用 `cargo build --workspace --release`，但它不会覆盖 `build-all.sh` 里的同步、UI 构建和产物校验逻辑。
 

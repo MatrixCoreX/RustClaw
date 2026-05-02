@@ -81,6 +81,18 @@ bash uninstall-rustclaw-cmd.sh --user
 ./build-all.sh no-ui
 ```
 
+树莓派交叉编译（默认 64 位系统）：
+
+```bash
+./cross-build-pi.sh
+
+# 32 位 Raspberry Pi OS
+./cross-build-pi.sh --target pi32
+
+# 只编译单个包，便于快速验证
+./cross-build-pi.sh --package clawd
+```
+
 或直接使用 Cargo：
 
 ```bash
@@ -92,6 +104,7 @@ cargo build --workspace --release
 - `build-all.sh` 会先同步技能文档
 - 默认构建 release
 - 如果 `UI/dist` 已存在且可复用，会尽量跳过 UI 重建
+- `cross-build-pi.sh` 会设置 Raspberry Pi 目标的 linker、`cc`、bindgen 头文件参数，并调用现有构建流程；64 位产物在 `target/aarch64-unknown-linux-gnu/release/`，32 位产物在 `target/armv7-unknown-linux-gnueabihf/release/`
 
 ## 4. 启动方式
 
@@ -261,6 +274,7 @@ npm run build
 ## 11. Pi App 小屏程序
 
 小屏桌面程序位于 `pi_app/`。
+`install-rustclaw-cmd.sh --pi-app` 只会在检测到树莓派时配置桌面快捷方式和登录自启动；普通电脑会自动跳过。
 
 ```bash
 cd pi_app

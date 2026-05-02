@@ -95,6 +95,34 @@ nginx_site_link_path() {
   fi
 }
 
+is_raspberry_pi() {
+  if [[ "${RUSTCLAW_FORCE_PI_APP:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  if [[ "$HOST_OS" != "linux" ]]; then
+    return 1
+  fi
+
+  local model_file model_text
+  for model_file in \
+    /proc/device-tree/model \
+    /sys/firmware/devicetree/base/model; do
+    if [[ -r "$model_file" ]]; then
+      model_text="$(tr -d '\0' < "$model_file" 2>/dev/null || true)"
+      if [[ "$model_text" == *"Raspberry Pi"* ]]; then
+        return 0
+      fi
+    fi
+  done
+
+  if [[ -r /proc/cpuinfo ]] && grep -qiE 'Raspberry Pi|BCM27|BCM28' /proc/cpuinfo; then
+    return 0
+  fi
+
+  return 1
+}
+
 NGINX_CONF="$(nginx_conf_path)"
 NGINX_CONF_DIR="$(dirname "$NGINX_CONF")"
 NGINX_MAIN_CONF="$(nginx_main_conf_path)"
@@ -113,7 +141,7 @@ Options:
   --dir <path>     Install to custom directory
   --deploy-ui-nginx [path]   Deploy UI to path (default: auto-detect per OS), configure nginx, reload nginx
   --no-deploy-ui   Skip nginx config and UI deploy (launcher only)
-  --pi-app         Configure Pi App: desktop shortcut + autostart on login (RustClaw small screen)
+  --pi-app         Configure Pi App on Raspberry Pi only: desktop shortcut + autostart on login
   -h, --help       Show this help
 
 Default: install launcher and deploy UI to nginx (config nginx, copy UI, reload nginx). Default path is auto-detected per OS. Use --no-deploy-ui to skip UI/nginx.
@@ -927,7 +955,11 @@ echo "Uninstall (removes command only, does not touch configs):"
 echo "  bash uninstall-rustclaw-cmd.sh [--user|--dir <path>]"
 if [[ "$CONFIGURE_PI_APP" == "1" ]]; then
   PI_APP_DIR="$SCRIPT_DIR/pi_app"
-  if [[ -d "$PI_APP_DIR" && -x "$PI_APP_DIR/install-desktop.sh" && -x "$PI_APP_DIR/enable-autostart.sh" ]]; then
+  if ! is_raspberry_pi; then
+    # zh: 小屏桌面程序只面向树莓派；普通电脑安装时不要写桌面自启动。
+    echo "Skip Pi App: current device is not detected as Raspberry Pi."
+    echo "Set RUSTCLAW_FORCE_PI_APP=1 to override this check."
+  elif [[ -d "$PI_APP_DIR" && -x "$PI_APP_DIR/install-desktop.sh" && -x "$PI_APP_DIR/enable-autostart.sh" ]]; then
     # zh: 可选安装树莓派小屏桌面入口和开机自启。
     echo
     echo "Configuring Pi App: desktop shortcut + autostart..."
