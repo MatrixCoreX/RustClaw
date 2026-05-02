@@ -10,19 +10,28 @@ source "${SCRIPT_DIR}/scripts/shell_compat.sh"
 # ----- Ensure Cargo (Rust) is installed -----
 # zh: 确保本机已有 Rust/Cargo；缺失时尝试自动安装 rustup。
 ensure_cargo() {
-	if command -v cargo >/dev/null 2>&1; then
-		return 0
+	if ! command -v cargo >/dev/null 2>&1; then
+		echo "cargo not found. Installing Rust toolchain (rustup)..."
+		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 	fi
-	echo "cargo not found. Installing Rust toolchain (rustup)..."
-	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 	if [[ -f "$HOME/.cargo/env" ]]; then
 		. "$HOME/.cargo/env"
 	fi
-	if ! command -v cargo >/dev/null 2>&1; then
+
+	if command -v cargo >/dev/null 2>&1 && cargo --version >/dev/null 2>&1; then
+		return 0
+	fi
+
+	if command -v rustup >/dev/null 2>&1; then
+		echo "Cargo is installed, but no default Rust toolchain is configured. Installing/selecting stable..."
+		rustup default stable
+	fi
+
+	if ! command -v cargo >/dev/null 2>&1 || ! cargo --version >/dev/null 2>&1; then
 		echo "Rust install failed or cargo not in PATH. Please run: source \"\$HOME/.cargo/env\""
 		exit 1
 	fi
-	echo "Rust toolchain installed."
+	echo "Rust toolchain ready."
 }
 
 # zh: 确保 protobuf 编译器可用，供依赖生成代码。
