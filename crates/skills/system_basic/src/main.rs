@@ -126,10 +126,7 @@ fn system_info(workspace_root: &Path) -> Result<String, String> {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let uptime = std::fs::read_to_string("/proc/uptime")
-        .ok()
-        .and_then(|s| s.split_whitespace().next().map(|v| v.to_string()))
-        .unwrap_or_else(|| "-".to_string());
+    let uptime = uptime_seconds_platform().unwrap_or_else(|| "-".to_string());
     let mem = memory_rss_bytes().unwrap_or(0);
     let cwd = std::env::current_dir()
         .map(|p| p.display().to_string())
@@ -156,6 +153,28 @@ fn system_info(workspace_root: &Path) -> Result<String, String> {
 
 fn memory_rss_bytes() -> Option<u64> {
     memory_rss_bytes_platform()
+}
+
+#[cfg(target_os = "linux")]
+fn uptime_seconds_platform() -> Option<String> {
+    std::fs::read_to_string("/proc/uptime")
+        .ok()
+        .and_then(|s| s.split_whitespace().next().map(|v| v.to_string()))
+}
+
+#[cfg(target_os = "macos")]
+fn uptime_seconds_platform() -> Option<String> {
+    let boot_ts = run_command_lines("sysctl", &["-n", "kern.boottime"], 1)
+        .and_then(|lines| lines.into_iter().next())
+        .as_deref()
+        .and_then(parse_macos_boot_time_seconds)?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+    now.checked_sub(boot_ts).map(|seconds| seconds.to_string())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn uptime_seconds_platform() -> Option<String> {
+    None
 }
 
 fn inventory_dir(
@@ -1135,6 +1154,17 @@ fn summarize_meminfo_from_sysctl() -> Value {
         }),
         None => Value::Null,
     }
+}
+
+#[cfg(target_os = "macos")]
+fn parse_macos_boot_time_seconds(raw: &str) -> Option<u64> {
+    let (_, after_sec) = raw.split_once("sec =")?;
+    after_sec
+        .split([',', '}'])
+        .next()?
+        .trim()
+        .parse::<u64>()
+        .ok()
 }
 
 fn top_process_snapshot(limit: usize) -> Option<Vec<String>> {
