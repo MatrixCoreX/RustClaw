@@ -798,6 +798,7 @@ do_release_build() {
     (cd "$SCRIPT_DIR/UI" && npm run build)
   fi
   echo "Building workspace (release, target=$INSTALL_TARGET, output=$BUILD_RELEASE_DIR)..."
+  configure_cargo_build_jobs_for_small_host
   if [[ "$INSTALL_TARGET" == "$HOST_RUST_TARGET" ]]; then
     (cd "$SCRIPT_DIR" && cargo build --workspace --release)
   else
