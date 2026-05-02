@@ -31,6 +31,10 @@ Untitled
 /UI/.vite/
 /pi_app/dist/
 /pi_app/build/
+/pi_app/.rustclaw_small_screen_key
+/pi_app/.rustclaw_small_screen_lang
+/pi_app/.rustclaw_small_screen_theme
+/pi_app/.rustclaw_small_screen_show_*
 
 # =============================================================================
 # Editor / OS
