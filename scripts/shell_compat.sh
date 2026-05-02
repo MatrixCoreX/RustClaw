@@ -129,6 +129,55 @@ host_rust_target() {
   rust_target_for_platform "$host_os" "$host_arch"
 }
 
+cargo_jobs_for_small_host() {
+  local host_os host_arch mem_kb cpu_count
+  host_os="$(detect_host_os 2>/dev/null || printf '%s' "unknown")"
+  host_arch="$(detect_host_arch 2>/dev/null || printf '%s' "unknown")"
+  mem_kb="$(awk '/MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || printf '%s' "0")"
+  cpu_count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '%s' "1")"
+
+  case "$cpu_count" in
+    ''|*[!0-9]*) cpu_count=1 ;;
+  esac
+  case "$mem_kb" in
+    ''|*[!0-9]*) mem_kb=0 ;;
+  esac
+
+  if [[ "$host_os" != "linux" ]]; then
+    return 1
+  fi
+
+  if [[ "$host_arch" == "aarch64" || "$host_arch" == "armv7" || ( "$mem_kb" -gt 0 && "$mem_kb" -le 4194304 ) ]]; then
+    if [[ "$mem_kb" -gt 0 && "$mem_kb" -le 3145728 ]]; then
+      printf '%s\n' "1"
+      return 0
+    fi
+    if [[ "$cpu_count" -le 1 ]]; then
+      printf '%s\n' "1"
+    else
+      printf '%s\n' "2"
+    fi
+    return 0
+  fi
+
+  return 1
+}
+
+configure_cargo_build_jobs_for_small_host() {
+  if [[ -n "${CARGO_BUILD_JOBS:-}" ]]; then
+    return 0
+  fi
+
+  local jobs
+  jobs="$(cargo_jobs_for_small_host 2>/dev/null || true)"
+  if [[ -z "$jobs" ]]; then
+    return 0
+  fi
+
+  export CARGO_BUILD_JOBS="$jobs"
+  echo "CARGO_BUILD_JOBS not set; using $CARGO_BUILD_JOBS on this small/ARM host to reduce build memory pressure."
+}
+
 package_flavor_for_target() {
   local target="${1:-}"
   case "$target" in

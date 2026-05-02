@@ -331,6 +331,7 @@ echo "Host platform: ${HOST_OS:-unknown}/${HOST_ARCH:-unknown}"
 echo "Primary target: $PRIMARY_TARGET"
 echo "Primary output: $(preferred_release_dir_for_target "$SCRIPT_DIR" "$PRIMARY_TARGET")"
 echo "Flavor tag: $PACKAGE_FLAVOR"
+configure_cargo_build_jobs_for_small_host
 if [[ "${#TARGETS_TO_BUILD[@]}" -gt 1 ]]; then
 	echo "Extra targets: ${TARGETS_TO_BUILD[*]:1}"
 fi
