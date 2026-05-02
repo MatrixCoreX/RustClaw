@@ -199,15 +199,16 @@ fn collect_system_health() -> SystemHealthSnapshot {
     let (load_avg_1m, load_avg_5m, load_avg_15m) = current_load_average(&os_family);
     let (memory_total_bytes, memory_available_bytes) = current_memory_bytes(&os_family);
     let (disk_root_total_bytes, disk_root_available_bytes) = disk_root_bytes();
+    let service_manager = default_service_manager(&os_family);
 
     let mut snapshot = SystemHealthSnapshot {
-        os_family,
+        os_family: os_family.clone(),
         arch: std::env::consts::ARCH.to_string(),
         kernel_release: read_command_output("uname", &["-r"]),
         hostname: current_hostname(),
-        service_manager: default_service_manager(runtime_os_family()).to_string(),
+        service_manager,
         cpu_count,
-        uptime_seconds: current_uptime_seconds(runtime_os_family()),
+        uptime_seconds: current_uptime_seconds(&os_family),
         load_avg_1m,
         load_avg_5m,
         load_avg_15m,
@@ -229,11 +230,17 @@ fn runtime_os_family() -> &'static str {
     }
 }
 
-fn default_service_manager(os_family: &str) -> &'static str {
+fn default_service_manager(os_family: &str) -> String {
     match os_family {
-        "macos" => "launchd",
-        "linux" => "systemd",
-        _ => "unknown",
+        "macos" => {
+            if read_command_output("brew", &["services", "list"]).is_some() {
+                "brew_services".to_string()
+            } else {
+                "launchd".to_string()
+            }
+        }
+        "linux" => "systemd".to_string(),
+        _ => "unknown".to_string(),
     }
 }
 

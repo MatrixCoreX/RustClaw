@@ -5,16 +5,16 @@
 ## Capability Summary
 
 - `service_control` performs service lifecycle operations and diagnosis with **structured input/output**.
-- **Managers implemented**: `rustclaw` (HTTP to clawd), `systemd`, `service`. Others return "not implemented".
+- **Managers implemented**: `rustclaw` (HTTP to clawd), `systemd`, `service`, `brew_services`, `launchd`.
 - **Behavior**: Read-only first; high-risk (stop/restart) blocked for ambiguous targets; auto-verify after start/restart/reload; auto logs on failure.
 - **Status questions**: Runtime status must come from `status` / `verify` (or another real runtime check), not from binary-file existence.
-- **Security**: Target validation; no arbitrary shell; RustClaw whitelist for HTTP path; safe unit names for systemd/service.
+- **Security**: Target validation; no arbitrary shell; RustClaw whitelist for HTTP path; safe unit names for systemd/service/brew services/launchd.
 
 ## Actions
 
 - `status` — Get running state (one or all for rustclaw).
 - `start`, `stop`, `restart`, `reload` — Lifecycle (reload → restart for rustclaw).
-- `logs` — Bounded recent logs (rustclaw: fixed log files; systemd: journalctl).
+- `logs` — Bounded recent logs (rustclaw: fixed log files; systemd: journalctl; macOS managers provide bounded diagnostic guidance/evidence).
 - `verify` — Explicit post-check (running/stopped/unknown).
 - `diagnose_start_failure`, `diagnose_unhealthy_state` — status + logs + evidence summary.
 
@@ -23,6 +23,8 @@
 - **rustclaw** — Auto when target is in whitelist: `clawd`, `telegramd`, `whatsappd`, `whatsapp_webd`, `feishud`, `larkd`. Uses `/v1/health` and `/v1/services/{service}/{action}`.
 - **systemd** — Explicit `manager_type: "systemd"`; target = unit name; uses `systemctl` / `journalctl`.
 - **service** — Explicit `manager_type: "service"`; target = service name; uses `service <name> status/start/stop/restart/reload`.
+- **brew_services** — Explicit or auto-discovered on macOS/Homebrew; target = Homebrew service name; uses `brew services list` and `brew services start/stop/restart`.
+- **launchd** — Explicit or auto-discovered on macOS; target = launchd label; status/verify supported via `launchctl list`; lifecycle control is intentionally limited, with guidance to prefer `brew_services` when applicable.
 - **docker_compose**, **docker_container**, **supervisor**, **process_only**, **unknown** — Recognized in input; status/logs may return "not implemented" for lifecycle.
 
 ## Parameter Contract
@@ -32,7 +34,7 @@
 | `action`      | yes      | string | -       | One of: `status`, `start`, `stop`, `restart`, `reload`, `logs`, `verify`, `diagnose_start_failure`, `diagnose_unhealthy_state`. |
 | `target`      | yes*     | string | -       | Service/unit name. *Optional for `status` (all services when manager is rustclaw). |
 | `service`     | no       | string | -       | Alias for `target` (backward compatible). |
-| `manager_type`| no       | string | -       | One of: `systemd`, `service`, `docker_compose`, `docker_container`, `supervisor`, `process_only`, `rustclaw`, `unknown`. Auto when target in rustclaw whitelist. |
+| `manager_type`| no       | string | -       | One of: `brew_services`, `launchd`, `systemd`, `service`, `docker_compose`, `docker_container`, `supervisor`, `process_only`, `rustclaw`, `unknown`. Auto when target in rustclaw whitelist or resolved through service discovery. |
 | `tail_lines`  | no       | number | 100     | Max 500. For `logs` and for auto-logs on failure. |
 | `lines`       | no       | number | 100     | Alias for `tail_lines`. |
 | `verify`      | no       | bool   | true    | After start/restart/reload, run verify step. |
@@ -40,7 +42,7 @@
 
 - **Target missing**: Required for all actions except `status` without target; returns structured error with `failure_reason` and `next_step`.
 - **Target aliases (skill-internal)**: The skill normalizes common names before discovery: e.g. `mysql`/`mysqld` → `mysql`, `redis`/`redis-server` → `redis`, `postgres`/`postgresql` → `postgresql`, `docker`/`dockerd` → `docker`, `ssh`/`sshd` → `sshd`, `cron`/`crond` → `cron`, `nginx` → `nginx`, `caddy` → `caddy`. Trailing "服务" / " service" suffix is stripped for lookup. Only the target name is affected; `action` is unchanged.
-- **Service discovery**: Before executing control (when manager is not explicitly set), the skill discovers candidates via systemd and `service --status-all`. Exact match > prefix > contains; candidate count is limited. If **0 candidates**: returns error with `next_step` suggesting "请提供更具体服务名" (do not invent a service name). If **>1 candidates**: returns error with `failure_reason` "ambiguous: multiple matching services" and `next_step` listing the candidates so the user can pick one. Only when exactly **1 candidate** is the control command executed. When `manager_type` is explicitly set, discovery is skipped and the normalized target is used as given.
+- **Service discovery**: Before executing control (when manager is not explicitly set), the skill discovers candidates via Homebrew services, launchd, systemd, and `service --status-all` where those tools are available. Exact match > prefix > contains; candidate count is limited. If **0 candidates**: returns error with `next_step` suggesting "请提供更具体服务名" (do not invent a service name). If **>1 candidates**: returns error with `failure_reason` "ambiguous: multiple matching services" and `next_step` listing the candidates so the user can pick one. Only when exactly **1 candidate** is the control command executed. When `manager_type` is explicitly set, discovery is skipped and the normalized target is used as given.
 - **Ambiguous target (vague wording)**: Values like "后端", "服务们", "all", "*" block high-risk actions unless `allow_risky` is true.
 
 ## Output Contract (structured JSON in `text`)
@@ -118,6 +120,6 @@ Response (concept): skill returns `{"request_id":"...","status":"ok","text":"{..
 - `service_control` reads suggestion target from `suggested_params.target` / `service` / `service_name` / `candidate_target`.
 - Legacy `llm_suggested_target` is still accepted for compatibility.
 - Suggestions are advisory only: the skill still requires discovery to resolve exactly one candidate before execution.
-- Permission handling for `systemd`/`service`: first try normal command; on permission-like failure, retry with `sudo`.
+- Permission handling for `systemd`/`service`/`brew_services`: first try normal command; on permission-like failure, retry with `sudo` where the manager supports it.
 - If `sudo` succeeds, return success and do not emit sudo-failure messages.
 - If `sudo` fails, return failure with clear privileged-account guidance in `next_step`.
