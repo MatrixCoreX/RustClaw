@@ -11,7 +11,7 @@ use std::fs;
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio as StdProcessStdio};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
@@ -47,6 +47,8 @@ const FEISHU_BIND_SESSION_DEFAULT_TTL_SECONDS: u64 = 600;
 const FEISHU_BIND_SESSION_MIN_TTL_SECONDS: u64 = 60;
 const FEISHU_BIND_SESSION_MAX_TTL_SECONDS: u64 = 1800;
 const FEISHU_OFFICIAL_ACCOUNTS_BASE_URL: &str = "https://accounts.feishu.cn";
+const WORKSPACE_UPDATE_TIMEOUT_SECONDS: u64 = 3600;
+const WORKSPACE_UPDATE_LOG_MAX_CHARS: usize = 12000;
 const FEISHU_CONFIG_TEMPLATE: &str = r#"# Feishu（中国站）应用机器人通道配置 - 与 lark.toml（国际版）独立，勿混用
 # 飞书中国站使用 open.feishu.cn；国际版 Lark 使用 open.larksuite.com，由 lark.toml 配置
 # 支持文本与入站媒体（图片/文件/音视频）落盘后再提交 clawd ask
@@ -90,6 +92,56 @@ task_delivery_timeout_seconds = 600
 text_chunk_chars = 4000
 "#;
 const LLM_CONNECTIVITY_TEST_PROMPT: &str = "Reply with OK only.";
+
+#[derive(Debug, Clone, Serialize)]
+struct WorkspaceUpdateStatus {
+    status: String,
+    step: String,
+    started_ts: Option<i64>,
+    finished_ts: Option<i64>,
+    old_commit: Option<String>,
+    new_commit: Option<String>,
+    remote_commit: Option<String>,
+    exit_code: Option<i32>,
+    stdout_tail: String,
+    stderr_tail: String,
+    error: Option<String>,
+    next_step: Option<String>,
+}
+
+impl Default for WorkspaceUpdateStatus {
+    fn default() -> Self {
+        Self {
+            status: "idle".to_string(),
+            step: "idle".to_string(),
+            started_ts: None,
+            finished_ts: None,
+            old_commit: None,
+            new_commit: None,
+            remote_commit: None,
+            exit_code: None,
+            stdout_tail: String::new(),
+            stderr_tail: String::new(),
+            error: None,
+            next_step: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct WorkspaceUpdateCommandOutput {
+    exit_code: Option<i32>,
+    stdout_tail: String,
+    stderr_tail: String,
+}
+
+static WORKSPACE_UPDATE_STATE: OnceLock<Arc<Mutex<WorkspaceUpdateStatus>>> = OnceLock::new();
+
+fn workspace_update_state() -> Arc<Mutex<WorkspaceUpdateStatus>> {
+    WORKSPACE_UPDATE_STATE
+        .get_or_init(|| Arc::new(Mutex::new(WorkspaceUpdateStatus::default())))
+        .clone()
+}
 
 fn hide_skill_in_ui(_state: &AppState, _name: &str) -> bool {
     false
@@ -676,6 +728,10 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/whatsapp-web/logout", post(whatsapp_web_logout))
         .route("/services/:service/:action", post(control_service))
         .route("/system/restart", post(restart_system))
+        .route(
+            "/admin/workspace-update",
+            get(get_workspace_update).post(start_workspace_update),
+        )
         .route("/local/interaction-context", get(local_interaction_context))
         .route(
             "/admin/model-config",
@@ -4591,6 +4647,462 @@ async fn restart_system(
             error: None,
         }),
     )
+}
+
+async fn get_workspace_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can view update status".to_string()),
+            }),
+        );
+    }
+
+    let shared = workspace_update_state();
+    let status = refresh_workspace_update_versions(&state.skill_rt.workspace_root, shared).await;
+    (
+        StatusCode::OK,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(status),
+            error: None,
+        }),
+    )
+}
+
+async fn refresh_workspace_update_versions(
+    workspace_root: &Path,
+    shared: Arc<Mutex<WorkspaceUpdateStatus>>,
+) -> WorkspaceUpdateStatus {
+    let snapshot = shared.lock().unwrap().clone();
+    if matches!(snapshot.status.as_str(), "running" | "restarting") {
+        return snapshot;
+    }
+
+    let local_commit =
+        run_workspace_update_command("git", &["rev-parse", "--short", "HEAD"], workspace_root, 10)
+            .await
+            .ok()
+            .filter(|out| out.exit_code == Some(0))
+            .and_then(|out| first_output_line(&out.stdout_tail));
+
+    let fetch_output =
+        run_workspace_update_command("git", &["fetch", "--quiet"], workspace_root, 30)
+            .await
+            .ok();
+
+    let remote_commit = run_workspace_update_command(
+        "git",
+        &["rev-parse", "--short", "@{upstream}"],
+        workspace_root,
+        10,
+    )
+    .await
+    .ok()
+    .filter(|out| out.exit_code == Some(0))
+    .and_then(|out| first_output_line(&out.stdout_tail));
+
+    let mut guard = shared.lock().unwrap();
+    if let Some(local_commit) = local_commit {
+        guard.old_commit = Some(local_commit.clone());
+        if guard.status == "idle" {
+            guard.new_commit = Some(local_commit);
+        }
+    }
+    if let Some(remote_commit) = remote_commit {
+        guard.remote_commit = Some(remote_commit);
+    }
+    if let Some(out) = fetch_output {
+        if out.exit_code != Some(0) && guard.status == "idle" {
+            guard.stderr_tail = out.stderr_tail;
+            guard.stdout_tail = out.stdout_tail;
+        }
+    }
+    guard.clone()
+}
+
+async fn start_workspace_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<WorkspaceUpdateStatus>>) {
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err((status, Json(resp))) => {
+            return (
+                status,
+                Json(ApiResponse {
+                    ok: resp.ok,
+                    data: None,
+                    error: resp.error,
+                }),
+            );
+        }
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can update RustClaw".to_string()),
+            }),
+        );
+    }
+
+    let shared = workspace_update_state();
+    let status = {
+        let mut guard = shared.lock().unwrap();
+        if matches!(guard.status.as_str(), "running" | "restarting") {
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse {
+                    ok: false,
+                    data: Some(guard.clone()),
+                    error: Some("workspace update is already running".to_string()),
+                }),
+            );
+        }
+        *guard = WorkspaceUpdateStatus {
+            status: "running".to_string(),
+            step: "starting".to_string(),
+            started_ts: Some(current_unix_ts()),
+            ..WorkspaceUpdateStatus::default()
+        };
+        guard.clone()
+    };
+
+    let workspace_root = state.skill_rt.workspace_root.clone();
+    let current_pid = std::process::id();
+    tokio::spawn(run_workspace_update_job(
+        workspace_root,
+        current_pid,
+        shared,
+    ));
+
+    (
+        StatusCode::ACCEPTED,
+        Json(ApiResponse {
+            ok: true,
+            data: Some(status),
+            error: None,
+        }),
+    )
+}
+
+async fn run_workspace_update_job(
+    workspace_root: PathBuf,
+    current_pid: u32,
+    shared: Arc<Mutex<WorkspaceUpdateStatus>>,
+) {
+    set_workspace_update_step(&shared, "checking_current_version");
+    let old_commit = match run_workspace_update_command(
+        "git",
+        &["rev-parse", "--short", "HEAD"],
+        &workspace_root,
+        30,
+    )
+    .await
+    {
+        Ok(out) if out.exit_code == Some(0) => first_output_line(&out.stdout_tail),
+        Ok(out) => {
+            fail_workspace_update(
+                &shared,
+                "git rev-parse failed",
+                "请确认 RustClaw 目录是有效 Git 仓库。",
+                out,
+            );
+            return;
+        }
+        Err(err) => {
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "请确认当前用户可以在 RustClaw 目录中运行 git。",
+            );
+            return;
+        }
+    };
+    {
+        let mut guard = shared.lock().unwrap();
+        guard.old_commit = old_commit.clone();
+    }
+
+    set_workspace_update_step(&shared, "checking_remote_version");
+    match run_workspace_update_command("git", &["fetch", "--quiet"], &workspace_root, 600).await {
+        Ok(out) if out.exit_code == Some(0) => {
+            let mut guard = shared.lock().unwrap();
+            guard.exit_code = out.exit_code;
+            guard.stdout_tail = out.stdout_tail;
+            guard.stderr_tail = out.stderr_tail;
+        }
+        Ok(out) => {
+            fail_workspace_update(
+                &shared,
+                "git fetch failed",
+                "请确认服务器能访问远端 Git 仓库，然后再重试。",
+                out,
+            );
+            return;
+        }
+        Err(err) => {
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "请稍后重试，或在服务器上手动运行 git fetch 查看原因。",
+            );
+            return;
+        }
+    }
+
+    let remote_commit = match run_workspace_update_command(
+        "git",
+        &["rev-parse", "--short", "@{upstream}"],
+        &workspace_root,
+        30,
+    )
+    .await
+    {
+        Ok(out) if out.exit_code == Some(0) => first_output_line(&out.stdout_tail),
+        Ok(out) => {
+            fail_workspace_update(
+                &shared,
+                "git upstream check failed",
+                "请确认当前分支已经设置上游远端分支。",
+                out,
+            );
+            return;
+        }
+        Err(err) => {
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "请在服务器上确认当前分支有可用的 upstream。",
+            );
+            return;
+        }
+    };
+    {
+        let mut guard = shared.lock().unwrap();
+        guard.remote_commit = remote_commit.clone();
+    }
+
+    if old_commit.is_some() && old_commit == remote_commit {
+        let mut guard = shared.lock().unwrap();
+        guard.status = "up_to_date".to_string();
+        guard.step = "already_latest".to_string();
+        guard.finished_ts = Some(current_unix_ts());
+        guard.new_commit = old_commit;
+        guard.error = None;
+        guard.next_step = Some("当前已经是最新版本，无需编译或重启。".to_string());
+        return;
+    }
+
+    set_workspace_update_step(&shared, "pulling_latest_code");
+    match run_workspace_update_command("git", &["pull", "--ff-only"], &workspace_root, 600).await {
+        Ok(out) if out.exit_code == Some(0) => {
+            let mut guard = shared.lock().unwrap();
+            guard.exit_code = out.exit_code;
+            guard.stdout_tail = out.stdout_tail;
+            guard.stderr_tail = out.stderr_tail;
+        }
+        Ok(out) => {
+            fail_workspace_update(
+                &shared,
+                "git pull --ff-only failed",
+                "请确认当前工作区没有本地未提交改动，且远端分支可以快进更新。",
+                out,
+            );
+            return;
+        }
+        Err(err) => {
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "请稍后重试，或在服务器上手动运行 git pull 查看原因。",
+            );
+            return;
+        }
+    }
+
+    set_workspace_update_step(&shared, "checking_new_version");
+    if let Ok(out) = run_workspace_update_command(
+        "git",
+        &["rev-parse", "--short", "HEAD"],
+        &workspace_root,
+        30,
+    )
+    .await
+    {
+        if out.exit_code == Some(0) {
+            let mut guard = shared.lock().unwrap();
+            guard.new_commit = first_output_line(&out.stdout_tail);
+        }
+    }
+
+    set_workspace_update_step(&shared, "building_workspace");
+    match run_workspace_update_command(
+        "bash",
+        &["./build-all.sh"],
+        &workspace_root,
+        WORKSPACE_UPDATE_TIMEOUT_SECONDS,
+    )
+    .await
+    {
+        Ok(out) if out.exit_code == Some(0) => {
+            let mut guard = shared.lock().unwrap();
+            guard.exit_code = out.exit_code;
+            guard.stdout_tail = out.stdout_tail;
+            guard.stderr_tail = out.stderr_tail;
+        }
+        Ok(out) => {
+            fail_workspace_update(
+                &shared,
+                "./build-all.sh failed",
+                "请查看构建日志摘要；修复依赖或编译错误后再重试。",
+                out,
+            );
+            return;
+        }
+        Err(err) => {
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "请确认服务器依赖完整，并查看构建日志。",
+            );
+            return;
+        }
+    }
+
+    set_workspace_update_step(&shared, "restarting_clawd");
+    let workspace = workspace_root.to_string_lossy();
+    let script = format!(
+        "sleep 2; kill {current_pid} 2>/dev/null; sleep 1; cd {} && ./start-clawd.sh",
+        shell_escape_arg(workspace.as_ref())
+    );
+    let spawn_result = StdCommand::new("nohup")
+        .arg("bash")
+        .arg("-c")
+        .arg(&script)
+        .current_dir(&workspace_root)
+        .stdin(StdProcessStdio::null())
+        .stdout(StdProcessStdio::null())
+        .stderr(StdProcessStdio::null())
+        .spawn();
+
+    match spawn_result {
+        Ok(_) => {
+            let mut guard = shared.lock().unwrap();
+            guard.status = "restarting".to_string();
+            guard.step = "restart_scheduled".to_string();
+            guard.finished_ts = Some(current_unix_ts());
+            guard.error = None;
+            guard.next_step = Some("RustClaw 正在重启，请等待 10-20 秒后刷新页面。".to_string());
+        }
+        Err(err) => {
+            fail_workspace_update_with_error(
+                &shared,
+                format!("failed to schedule clawd restart: {err}"),
+                "构建已完成，但自动重启失败。请在服务器上手动重启 clawd。",
+            );
+        }
+    }
+}
+
+fn set_workspace_update_step(shared: &Arc<Mutex<WorkspaceUpdateStatus>>, step: &str) {
+    let mut guard = shared.lock().unwrap();
+    guard.status = "running".to_string();
+    guard.step = step.to_string();
+}
+
+fn fail_workspace_update(
+    shared: &Arc<Mutex<WorkspaceUpdateStatus>>,
+    error: &str,
+    next_step: &str,
+    output: WorkspaceUpdateCommandOutput,
+) {
+    let mut guard = shared.lock().unwrap();
+    guard.status = "failed".to_string();
+    guard.finished_ts = Some(current_unix_ts());
+    guard.exit_code = output.exit_code;
+    guard.stdout_tail = output.stdout_tail;
+    guard.stderr_tail = output.stderr_tail;
+    guard.error = Some(error.to_string());
+    guard.next_step = Some(next_step.to_string());
+}
+
+fn fail_workspace_update_with_error(
+    shared: &Arc<Mutex<WorkspaceUpdateStatus>>,
+    error: impl Into<String>,
+    next_step: &str,
+) {
+    let mut guard = shared.lock().unwrap();
+    guard.status = "failed".to_string();
+    guard.finished_ts = Some(current_unix_ts());
+    guard.error = Some(error.into());
+    guard.next_step = Some(next_step.to_string());
+}
+
+async fn run_workspace_update_command(
+    program: &str,
+    args: &[&str],
+    cwd: &Path,
+    timeout_seconds: u64,
+) -> Result<WorkspaceUpdateCommandOutput, String> {
+    let mut cmd = Command::new(program);
+    cmd.args(args)
+        .current_dir(cwd)
+        .stdin(StdProcessStdio::null())
+        .stdout(StdProcessStdio::piped())
+        .stderr(StdProcessStdio::piped());
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_seconds),
+        cmd.output(),
+    )
+    .await
+    .map_err(|_| format!("{program} timed out after {timeout_seconds}s"))?
+    .map_err(|err| format!("failed to run {program}: {err}"))?;
+    Ok(WorkspaceUpdateCommandOutput {
+        exit_code: output.status.code(),
+        stdout_tail: truncate_tail(&String::from_utf8_lossy(&output.stdout)),
+        stderr_tail: truncate_tail(&String::from_utf8_lossy(&output.stderr)),
+    })
+}
+
+fn truncate_tail(raw: &str) -> String {
+    let chars = raw.chars().collect::<Vec<_>>();
+    if chars.len() <= WORKSPACE_UPDATE_LOG_MAX_CHARS {
+        return raw.to_string();
+    }
+    let tail = chars[chars.len() - WORKSPACE_UPDATE_LOG_MAX_CHARS..]
+        .iter()
+        .collect::<String>();
+    format!("... output truncated ...\n{tail}")
+}
+
+fn first_output_line(raw: &str) -> Option<String> {
+    raw.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
 }
 
 async fn health(

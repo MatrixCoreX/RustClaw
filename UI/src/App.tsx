@@ -99,6 +99,21 @@ interface SubmitTaskResponse {
   task_id: string;
 }
 
+interface WorkspaceUpdateStatus {
+  status: "idle" | "running" | "succeeded" | "failed" | "restarting" | "up_to_date" | string;
+  step: string;
+  started_ts?: number | null;
+  finished_ts?: number | null;
+  old_commit?: string | null;
+  new_commit?: string | null;
+  remote_commit?: string | null;
+  exit_code?: number | null;
+  stdout_tail: string;
+  stderr_tail: string;
+  error?: string | null;
+  next_step?: string | null;
+}
+
 interface LocalInteractionContextResponse {
   user_id: number;
   chat_id: number;
@@ -661,6 +676,9 @@ export default function App() {
   const [modelsAdvancedOpen, setModelsAdvancedOpen] = useState(false);
   const [systemRestarting, setSystemRestarting] = useState(false);
   const [systemRestartMessage, setSystemRestartMessage] = useState<string | null>(null);
+  const [workspaceUpdateStatus, setWorkspaceUpdateStatus] = useState<WorkspaceUpdateStatus | null>(null);
+  const [workspaceUpdateLoading, setWorkspaceUpdateLoading] = useState(false);
+  const [workspaceUpdateMessage, setWorkspaceUpdateMessage] = useState<string | null>(null);
 
   const [taskId, setTaskId] = useState("");
   const [taskLoading, setTaskLoading] = useState(false);
@@ -2365,6 +2383,58 @@ export default function App() {
     return false;
   }, [multimodalConfigData, multimodalDraft]);
 
+  const fetchWorkspaceUpdateStatus = async (silent = false): Promise<WorkspaceUpdateStatus | null> => {
+    if (!silent) {
+      setWorkspaceUpdateLoading(true);
+      setWorkspaceUpdateMessage(null);
+    }
+    try {
+      const res = await apiFetch("/v1/admin/workspace-update");
+      const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `更新状态查询失败 (${res.status})`);
+      }
+      setWorkspaceUpdateStatus(body.data);
+      return body.data;
+    } catch (err) {
+      if (!silent) {
+        const message = err instanceof Error ? err.message : "未知错误";
+        setWorkspaceUpdateMessage(`${t("查询更新状态失败", "Failed to query update status")}: ${message}`);
+      }
+      return null;
+    } finally {
+      if (!silent) {
+        setWorkspaceUpdateLoading(false);
+      }
+    }
+  };
+
+  const startWorkspaceUpdate = async () => {
+    const confirmed = window.confirm(
+      t(
+        "更新会自动拉取最新代码、完整编译，并在成功后重启 clawd。重启期间页面会短暂断开。确认现在开始吗？",
+        "This will pull the latest code, run a full build, and restart clawd when successful. The page may disconnect briefly. Start now?",
+      ),
+    );
+    if (!confirmed) return;
+    setWorkspaceUpdateLoading(true);
+    setWorkspaceUpdateMessage(null);
+    try {
+      const res = await apiFetch("/v1/admin/workspace-update", { method: "POST" });
+      const body = (await res.json()) as ApiResponse<WorkspaceUpdateStatus>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `更新启动失败 (${res.status})`);
+      }
+      setWorkspaceUpdateStatus(body.data);
+      setWorkspaceUpdateMessage(t("更新已开始，下面会自动刷新进度。", "Update started. Progress will refresh automatically."));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setWorkspaceUpdateMessage(`${t("启动更新失败", "Failed to start update")}: ${message}`);
+    } finally {
+      setWorkspaceUpdateLoading(false);
+    }
+  };
+
   const restartSystem = async () => {
     setSystemRestarting(true);
     setSystemRestartMessage(null);
@@ -2840,6 +2910,27 @@ export default function App() {
     void fetchLocalInteractionContext();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, uiAuthReady]);
+
+  useEffect(() => {
+    if (!uiAuthReady || !isAdminIdentity) return;
+    void fetchWorkspaceUpdateStatus(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiBase, uiAuthReady, isAdminIdentity]);
+
+  useEffect(() => {
+    if (!uiAuthReady || !isAdminIdentity) return;
+    const status = workspaceUpdateStatus?.status;
+    if (status !== "running" && status !== "restarting") return;
+    const interval = window.setInterval(async () => {
+      const next = await fetchWorkspaceUpdateStatus(true);
+      if (next?.status === "restarting") {
+        await sleep(1800);
+        await fetchHealth();
+      }
+    }, 2500);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiBase, uiAuthReady, isAdminIdentity, workspaceUpdateStatus?.status]);
 
   useEffect(() => {
     if (!uiAuthReady) return;
@@ -3615,6 +3706,43 @@ export default function App() {
       }),
     [health?.memory_rss_bytes, health?.uptime_seconds, isOnline],
   );
+  const workspaceUpdateRunning =
+    workspaceUpdateStatus?.status === "running" || workspaceUpdateStatus?.status === "restarting";
+  const workspaceUpdateHasRemoteDiff =
+    Boolean(workspaceUpdateStatus?.old_commit) &&
+    Boolean(workspaceUpdateStatus?.remote_commit) &&
+    workspaceUpdateStatus?.old_commit !== workspaceUpdateStatus?.remote_commit;
+  const workspaceUpdateStepLabel = (step?: string) => {
+    const labels: Record<string, string> = {
+      idle: t("空闲", "Idle"),
+      starting: t("准备更新", "Preparing update"),
+      checking_current_version: t("检查当前版本", "Checking current version"),
+      checking_remote_version: t("检查远端版本", "Checking remote version"),
+      already_latest: t("已经是最新版本", "Already latest"),
+      pulling_latest_code: t("下载最新代码", "Pulling latest code"),
+      checking_new_version: t("确认新版本", "Checking new version"),
+      building_workspace: t("正在完整编译", "Running full build"),
+      restarting_clawd: t("正在安排重启", "Scheduling restart"),
+      restart_scheduled: t("已安排重启", "Restart scheduled"),
+    };
+    return labels[step || ""] || step || "--";
+  };
+  const workspaceUpdateStatusLabel = (status?: string) => {
+    if (status === "running") return t("更新中", "Updating");
+    if (status === "restarting") return t("重启中", "Restarting");
+    if (status === "up_to_date") return t("已是最新", "Up to date");
+    if (status === "succeeded") return t("已完成", "Completed");
+    if (status === "failed") return t("失败", "Failed");
+    return t("未运行", "Idle");
+  };
+  const workspaceUpdateTimeLabel = (ts?: number | null) => {
+    if (!ts) return "--";
+    return new Date(ts * 1000).toLocaleString(lang === "zh" ? "zh-CN" : "en-US", {
+      hour12: false,
+    });
+  };
+  const workspaceUpdateLogPreview =
+    workspaceUpdateStatus?.stderr_tail?.trim() || workspaceUpdateStatus?.stdout_tail?.trim() || "";
   const isDashboardPage = currentPage === "dashboard";
 
   if (!uiAuthReady) {
@@ -4042,6 +4170,129 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+              </section>
+
+              <section className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="max-w-2xl">
+                    <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">
+                      {t("系统更新", "System Update")}
+                    </p>
+                    <h3 className="mt-2 text-base font-semibold text-white">
+                      {t("一键拉取最新版本并完整编译", "Pull the latest version and run a full build")}
+                    </h3>
+                    <p className="mt-2 text-sm leading-7 text-white/65">
+                      {t(
+                        "管理员可以在这里更新 RustClaw。系统会执行 git pull、完整编译前端和后端，并在成功后自动重启 clawd；重启期间页面可能短暂断开。",
+                        "Admins can update RustClaw here. The system runs git pull, builds the frontend and backend, then restarts clawd when successful; the page may disconnect briefly during restart.",
+                      )}
+                    </p>
+                  </div>
+                  {isAdminIdentity ? (
+                    <button
+                      type="button"
+                      onClick={() => void startWorkspaceUpdate()}
+                      disabled={workspaceUpdateLoading || workspaceUpdateRunning || !workspaceUpdateHasRemoteDiff}
+                      className="theme-accent-btn"
+                    >
+                      {workspaceUpdateLoading || workspaceUpdateRunning ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                      {workspaceUpdateRunning
+                        ? t("更新进行中", "Updating")
+                        : workspaceUpdateHasRemoteDiff
+                          ? t("开始更新", "Start Update")
+                          : workspaceUpdateStatus?.old_commit && workspaceUpdateStatus?.remote_commit
+                            ? t("已是最新", "Up to date")
+                            : t("等待版本检查", "Checking version")}
+                    </button>
+                  ) : (
+                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/55">
+                      {t("仅管理员可更新", "Admin only")}
+                    </span>
+                  )}
+                </div>
+
+                {workspaceUpdateMessage ? (
+                  <p className="mt-4 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-2 text-sm text-sky-100">
+                    {workspaceUpdateMessage}
+                  </p>
+                ) : null}
+
+                <div className="mt-4 grid gap-3 md:grid-cols-4">
+                  <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                    <p className="text-[11px] tracking-[0.14em] text-white/45">{t("状态", "Status")}</p>
+                    <p
+                      className={`mt-2 text-sm font-semibold ${
+                        workspaceUpdateStatus?.status === "failed"
+                          ? "text-red-200"
+                          : workspaceUpdateStatus?.status === "up_to_date"
+                            ? "text-emerald-200"
+                            : workspaceUpdateRunning
+                            ? "text-sky-200"
+                            : "text-white/90"
+                      }`}
+                    >
+                      {workspaceUpdateStatusLabel(workspaceUpdateStatus?.status)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                    <p className="text-[11px] tracking-[0.14em] text-white/45">{t("当前步骤", "Current step")}</p>
+                    <p className="mt-2 text-sm font-semibold text-white/90">
+                      {workspaceUpdateStepLabel(workspaceUpdateStatus?.step)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                    <p className="text-[11px] tracking-[0.14em] text-white/45">{t("本地版本", "Local version")}</p>
+                    <p className="mt-2 text-sm font-semibold text-white/90">
+                      {workspaceUpdateStatus?.old_commit || "--"}
+                      {workspaceUpdateStatus?.new_commit && workspaceUpdateStatus.new_commit !== workspaceUpdateStatus.old_commit
+                        ? ` → ${workspaceUpdateStatus.new_commit}`
+                        : ""}
+                    </p>
+                    <p className="mt-1 text-xs text-white/50">
+                      {t("远端最新", "Remote latest")}: {workspaceUpdateStatus?.remote_commit || "--"}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                    <p className="text-[11px] tracking-[0.14em] text-white/45">{t("开始时间", "Started")}</p>
+                    <p className="mt-2 text-sm font-semibold text-white/90">
+                      {workspaceUpdateTimeLabel(workspaceUpdateStatus?.started_ts)}
+                    </p>
+                  </div>
+                </div>
+
+                {workspaceUpdateStatus?.status === "up_to_date" ? (
+                  <div className="mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-3 text-sm text-emerald-100">
+                    {workspaceUpdateStatus.next_step || t("当前已经是最新版本，无需编译或重启。", "Already on the latest version. No build or restart needed.")}
+                  </div>
+                ) : workspaceUpdateStatus?.error || workspaceUpdateStatus?.next_step ? (
+                  <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-3 text-sm text-red-100">
+                    {workspaceUpdateStatus.error ? (
+                      <p className="font-semibold">{workspaceUpdateStatus.error}</p>
+                    ) : null}
+                    {workspaceUpdateStatus.next_step ? (
+                      <p className="mt-1 text-red-100/80">{workspaceUpdateStatus.next_step}</p>
+                    ) : null}
+                  </div>
+                ) : workspaceUpdateStatus?.status === "restarting" ? (
+                  <div className="mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-3 text-sm text-emerald-100">
+                    {t("构建已完成，RustClaw 正在重启。请等待 10-20 秒后刷新或观察首页状态恢复。", "Build completed and RustClaw is restarting. Wait 10-20 seconds, then refresh or watch Home recover.")}
+                  </div>
+                ) : null}
+
+                {workspaceUpdateLogPreview ? (
+                  <details className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+                    <summary className="cursor-pointer text-sm font-medium text-white/75">
+                      {t("查看最近日志摘要", "View recent log summary")}
+                    </summary>
+                    <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/30 p-3 text-xs leading-5 text-white/65">
+                      {workspaceUpdateLogPreview}
+                    </pre>
+                  </details>
+                ) : null}
               </section>
 
               {dashboardCommunicationRows.length > 0 ? (
