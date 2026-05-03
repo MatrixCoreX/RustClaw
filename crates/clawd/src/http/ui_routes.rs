@@ -7764,6 +7764,11 @@ async fn get_skills_config(
         .iter()
         .map(|s| s.to_string())
         .collect();
+    let core_skill_names: Vec<String> = claw_core::config::core_skills_always_enabled()
+        .iter()
+        .filter(|s| !hide_skill_in_ui(&state, s))
+        .map(|s| s.to_string())
+        .collect();
     let external_skill_names = state
         .get_skills_registry()
         .as_ref()
@@ -7791,6 +7796,7 @@ async fn get_skills_config(
                 "skill_switches": switches,
                 "managed_skills": managed,
                 "base_skill_names": base_skill_names,
+                "core_skill_names": core_skill_names,
                 "external_skill_names": external_skill_names,
                 "effective_enabled_skills_preview": effective,
                 "runtime_enabled_skills": runtime_visible,

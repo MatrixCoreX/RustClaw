@@ -1327,7 +1327,7 @@ fn default_skill_max_concurrency() -> usize {
     1
 }
 
-/// 文件系统基础技能（run_cmd/read_file/write_file/list_dir/make_dir/remove_file）。UI 中归类为「基础技能」，不建议关闭。
+/// UI 中归类为「基础技能」并默认固定开启：文件基础能力 + 系统维护基础能力。
 pub fn base_skill_names() -> &'static [&'static str] {
     &[
         "run_cmd",
@@ -1336,16 +1336,30 @@ pub fn base_skill_names() -> &'static [&'static str] {
         "list_dir",
         "make_dir",
         "remove_file",
-    ]
-}
-
-/// 默认保底启用的技能；显式 skill_switches=false 可覆盖（与「false = 强制关闭」契约一致）。
-/// 不含 run_cmd/read_file/write_file/list_dir/make_dir/remove_file：这六项为可关闭的 builtin skill，遵守 skills_list + skill_switches。
-pub fn core_skills_always_enabled() -> &'static [&'static str] {
-    &[
         "system_basic",
         "process_basic",
         "config_guard",
+        "fs_search",
+        "git_basic",
+        "service_control",
+    ]
+}
+
+/// UI 保存技能开关时强制保持开启的技能；手工编辑 config.toml 仍遵守「false = 强制关闭」契约。
+pub fn core_skills_always_enabled() -> &'static [&'static str] {
+    &[
+        "run_cmd",
+        "read_file",
+        "write_file",
+        "list_dir",
+        "make_dir",
+        "remove_file",
+        "system_basic",
+        "process_basic",
+        "config_guard",
+        "fs_search",
+        "git_basic",
+        "service_control",
         "archive_basic",
     ]
 }
