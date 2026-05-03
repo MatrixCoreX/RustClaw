@@ -738,7 +738,7 @@ fn dispatch_im_incoming_event(state: AppState, body: Value) {
     debug!("larkd: im.message.receive_v1 ignored (unsupported type or missing fields)");
 }
 
-fn lark_task_success_text(task: &TaskQueryResponse, config: &LarkConfig) -> String {
+fn lark_task_success_messages(task: &TaskQueryResponse, config: &LarkConfig) -> Vec<String> {
     if let Some(messages) = task
         .result_json
         .as_ref()
@@ -753,10 +753,11 @@ fn lark_task_success_text(task: &TaskQueryResponse, config: &LarkConfig) -> Stri
             .map(str::to_string)
             .collect();
         if !parts.is_empty() {
-            return parts.join("\n\n");
+            return parts;
         }
     }
-    task.result_json
+    vec![task
+        .result_json
         .as_ref()
         .and_then(|v| v.get("text"))
         .and_then(|v| v.as_str())
@@ -769,7 +770,7 @@ fn lark_task_success_text(task: &TaskQueryResponse, config: &LarkConfig) -> Stri
                 LARK_I18N_TASK_DONE_FALLBACK_TEXT_KEY,
                 LARK_TASK_DONE_FALLBACK_TEXT_FALLBACK,
             )
-        })
+        })]
 }
 
 /// 提交任务并 spawn 轮询与回发。
@@ -994,21 +995,22 @@ fn handle_text_message_to_clawd(
                     continue;
                 }
                 TaskStatus::Succeeded => {
-                    let to_send = lark_task_success_text(task, &config);
-                    for chunk in chunk_text_utf8(to_send.as_str(), chunk_chars) {
-                        if let Err(e) = send_lark_text(
-                            &config,
-                            &client,
-                            &token_cache,
-                            &chat_id_delivery,
-                            &chunk,
-                        )
-                        .await
-                        {
-                            warn!(
-                                "larkd: send success text failed task_id={} err={}",
-                                task_id, e
-                            );
+                    for to_send in lark_task_success_messages(task, &config) {
+                        for chunk in chunk_text_utf8(to_send.as_str(), chunk_chars) {
+                            if let Err(e) = send_lark_text(
+                                &config,
+                                &client,
+                                &token_cache,
+                                &chat_id_delivery,
+                                &chunk,
+                            )
+                            .await
+                            {
+                                warn!(
+                                    "larkd: send success text failed task_id={} err={}",
+                                    task_id, e
+                                );
+                            }
                         }
                     }
                     info!(

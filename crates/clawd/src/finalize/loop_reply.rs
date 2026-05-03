@@ -1418,13 +1418,13 @@ fn structured_observation_suppresses_execution_summary(
     }
 }
 
-fn build_execution_summary_message(
+fn build_execution_summary_messages(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
     user_text: Option<&str>,
-) -> Option<String> {
+) -> Vec<String> {
     if !should_attach_execution_summary(agent_run_context, user_text) {
-        return None;
+        return Vec::new();
     }
     let steps = loop_state
         .executed_step_results
@@ -1438,58 +1438,77 @@ fn build_execution_summary_message(
         })
         .collect::<Vec<_>>();
     if steps.is_empty() {
-        return None;
+        return Vec::new();
     }
 
     let prefer_english = user_text
         .map(prefer_english_for_user_text_without_state)
         .unwrap_or(false);
-    let mut lines = vec![if prefer_english {
+    let prefix = if prefer_english {
         crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN.to_string()
     } else {
         crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX.to_string()
-    }];
-    for (index, step) in steps.iter().take(EXECUTION_SUMMARY_MAX_STEPS).enumerate() {
-        let plan_step = plan_step_for_execution(loop_state, &step.step_id);
-        let output = output_text_from_execution_result(step)?.replace("```", "'''");
-        let output = truncate_with_ellipsis(&output, EXECUTION_SUMMARY_OUTPUT_MAX_CHARS);
-        let status_label = if prefer_english {
-            if step.is_ok() {
-                "Output"
-            } else {
-                "Error"
-            }
-        } else if step.is_ok() {
-            "输出"
-        } else {
-            "错误"
-        };
-        let invocation = execution_summary_invocation_label(step, plan_step, prefer_english);
-        let line = if prefer_english {
-            format!("{}. Called {}", index + 1, invocation)
-        } else {
-            format!("{}. 调用{}", index + 1, invocation)
-        };
-        lines.push(line);
-        if prefer_english {
-            lines.push(format!("   {status_label}:"));
-        } else {
-            lines.push(format!("   {status_label}："));
-        }
-        lines.push("```text".to_string());
-        lines.push(output);
-        lines.push("```".to_string());
-    }
+    };
     let omitted = steps.len().saturating_sub(EXECUTION_SUMMARY_MAX_STEPS);
-    if omitted > 0 {
-        if prefer_english {
-            let suffix = if omitted == 1 { "step" } else { "steps" };
-            lines.push(format!("... ({omitted} more execution {suffix} omitted)"));
-        } else {
-            lines.push(format!("...（还有 {omitted} 个执行步骤已省略）"));
-        }
+    steps
+        .iter()
+        .take(EXECUTION_SUMMARY_MAX_STEPS)
+        .enumerate()
+        .filter_map(|(index, step)| {
+            let plan_step = plan_step_for_execution(loop_state, &step.step_id);
+            let output = output_text_from_execution_result(step)?.replace("```", "'''");
+            let output = truncate_with_ellipsis(&output, EXECUTION_SUMMARY_OUTPUT_MAX_CHARS);
+            let status_label = if prefer_english {
+                if step.is_ok() {
+                    "Output"
+                } else {
+                    "Error"
+                }
+            } else if step.is_ok() {
+                "输出"
+            } else {
+                "错误"
+            };
+            let invocation = execution_summary_invocation_label(step, plan_step, prefer_english);
+            let line = if prefer_english {
+                format!("{}. Called {}", index + 1, invocation)
+            } else {
+                format!("{}. 调用{}", index + 1, invocation)
+            };
+            let mut lines = vec![prefix.clone(), line];
+            if prefer_english {
+                lines.push(format!("   {status_label}:"));
+            } else {
+                lines.push(format!("   {status_label}："));
+            }
+            lines.push("```text".to_string());
+            lines.push(output);
+            lines.push("```".to_string());
+            if omitted > 0 && index + 1 == EXECUTION_SUMMARY_MAX_STEPS {
+                if prefer_english {
+                    let suffix = if omitted == 1 { "step" } else { "steps" };
+                    lines.push(format!("... ({omitted} more execution {suffix} omitted)"));
+                } else {
+                    lines.push(format!("...（还有 {omitted} 个执行步骤已省略）"));
+                }
+            }
+            Some(lines.join("\n"))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+fn build_execution_summary_message(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    user_text: Option<&str>,
+) -> Option<String> {
+    let messages = build_execution_summary_messages(loop_state, agent_run_context, user_text);
+    if messages.is_empty() {
+        None
+    } else {
+        Some(messages.join("\n\n"))
     }
-    Some(lines.join("\n"))
 }
 
 fn delivery_is_exact_observed_passthrough(
@@ -1518,17 +1537,19 @@ fn attach_execution_summary_to_delivery(
     user_text: Option<&str>,
     delivery_messages: &mut Vec<String>,
 ) {
-    let Some(summary) = build_execution_summary_message(loop_state, agent_run_context, user_text)
-    else {
+    let summaries = build_execution_summary_messages(loop_state, agent_run_context, user_text);
+    if summaries.is_empty() {
         return;
     };
-    if delivery_messages.iter().any(|message| message == &summary) {
-        return;
-    }
     if delivery_is_exact_observed_passthrough(loop_state, delivery_messages) {
         return;
     }
-    delivery_messages.insert(0, summary);
+    for summary in summaries.into_iter().rev() {
+        if delivery_messages.iter().any(|message| message == &summary) {
+            continue;
+        }
+        delivery_messages.insert(0, summary);
+    }
 }
 
 fn error_looks_like_os_permission_denied(error: &str) -> bool {
@@ -1892,8 +1913,8 @@ async fn observed_execution_without_publishable_delivery_reply(
     finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary>,
     clarify_reason: &str,
 ) -> Option<AskReply> {
-    let execution_summary =
-        build_execution_summary_message(loop_state, agent_run_context, Some(user_text));
+    let execution_summaries =
+        build_execution_summary_messages(loop_state, agent_run_context, Some(user_text));
     let message = missing_delivery_after_observation_message(
         state,
         task,
@@ -1904,9 +1925,7 @@ async fn observed_execution_without_publishable_delivery_reply(
     )
     .await;
     let mut delivery_messages = Vec::new();
-    if let Some(execution_summary) = execution_summary {
-        delivery_messages.push(execution_summary);
-    }
+    delivery_messages.extend(execution_summaries);
     delivery_messages.push(message.clone());
     let delivery_consistent =
         crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
@@ -2634,6 +2653,62 @@ mod tests {
             "这更像运行日志。",
             &delivery
         ));
+    }
+
+    #[test]
+    fn execution_summary_attaches_each_execution_step_as_separate_delivery() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "tell joke and print pwd".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![
+                    crate::PlanStep {
+                        step_id: "step_1".to_string(),
+                        action_type: "call_tool".to_string(),
+                        skill: "run_cmd".to_string(),
+                        args: serde_json::json!({"command": "pwd"}),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    crate::PlanStep {
+                        step_id: "step_2".to_string(),
+                        action_type: "call_tool".to_string(),
+                        skill: "run_cmd".to_string(),
+                        args: serde_json::json!({"command": "date"}),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                ])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "run_cmd",
+            "/home/guagua/rustclaw\n",
+        ));
+        loop_state
+            .executed_step_results
+            .push(ok_step_result("step_2", "run_cmd", "Sun May 3\n"));
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(free_route_result()),
+            ..Default::default()
+        };
+        let mut delivery = vec!["为什么程序员喜欢黑夜？因为 bug 比较容易显现。".to_string()];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(delivery.len(), 3);
+        assert!(delivery[0].contains("命令 `pwd`"));
+        assert!(delivery[0].contains("/home/guagua/rustclaw"));
+        assert!(delivery[1].contains("命令 `date`"));
+        assert!(delivery[1].contains("Sun May 3"));
+        assert_eq!(
+            delivery.last().map(String::as_str),
+            Some("为什么程序员喜欢黑夜？因为 bug 比较容易显现。")
+        );
     }
 
     #[test]
