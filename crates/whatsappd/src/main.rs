@@ -845,12 +845,45 @@ async fn query_task_status(
     body.data.ok_or_else(|| anyhow!("query task missing data"))
 }
 
+fn task_success_messages(state: &AppState, task: &TaskQueryResponse) -> Vec<String> {
+    if let Some(messages) = task
+        .result_json
+        .as_ref()
+        .and_then(|v| v.get("messages"))
+        .and_then(|v| v.as_array())
+    {
+        let out = messages
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        if !out.is_empty() {
+            return out;
+        }
+    }
+    vec![task
+        .result_json
+        .as_ref()
+        .and_then(|v| v.get("text"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            wa_t(
+                state,
+                WA_I18N_TASK_DONE_FALLBACK_TEXT_KEY,
+                WA_TASK_DONE_FALLBACK_TEXT_FALLBACK,
+            )
+        })]
+}
+
 async fn poll_task_result(
     state: &AppState,
     task_id: &str,
     user_key: Option<&str>,
     wait_override_seconds: Option<u64>,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<Vec<String>> {
     let poll_interval_ms = state.poll_interval_ms.max(1);
     let wait_seconds = wait_override_seconds
         .unwrap_or(state.task_wait_seconds)
@@ -862,22 +895,7 @@ async fn poll_task_result(
             TaskStatus::Queued | TaskStatus::Running => {
                 tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
             }
-            TaskStatus::Succeeded => {
-                let answer = task
-                    .result_json
-                    .as_ref()
-                    .and_then(|v| v.get("text"))
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string)
-                    .unwrap_or_else(|| {
-                        wa_t(
-                            state,
-                            WA_I18N_TASK_DONE_FALLBACK_TEXT_KEY,
-                            WA_TASK_DONE_FALLBACK_TEXT_FALLBACK,
-                        )
-                    });
-                return Ok(answer);
-            }
+            TaskStatus::Succeeded => return Ok(task_success_messages(state, &task)),
             TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
                 let err = task.error_text.unwrap_or_else(|| {
                     wa_t(
@@ -899,7 +917,7 @@ async fn poll_task_result_with_soft_timeout(
     task_id: &str,
     user_key: Option<&str>,
     wait_override_seconds: Option<u64>,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<Vec<String>> {
     let poll_interval_ms = state.poll_interval_ms.max(1);
     let delivery_timeout_secs = wait_override_seconds
         .unwrap_or(state.task_wait_seconds)
@@ -959,22 +977,7 @@ async fn poll_task_result_with_soft_timeout(
                 }
                 tokio::time::sleep(Duration::from_millis(poll_interval_ms)).await;
             }
-            TaskStatus::Succeeded => {
-                let answer = task
-                    .result_json
-                    .as_ref()
-                    .and_then(|v| v.get("text"))
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string)
-                    .unwrap_or_else(|| {
-                        wa_t(
-                            state,
-                            WA_I18N_TASK_DONE_FALLBACK_TEXT_KEY,
-                            WA_TASK_DONE_FALLBACK_TEXT_FALLBACK,
-                        )
-                    });
-                return Ok(answer);
-            }
+            TaskStatus::Succeeded => return Ok(task_success_messages(state, &task)),
             TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
                 let err = task.error_text.unwrap_or_else(|| {
                     wa_t(
@@ -1004,8 +1007,10 @@ async fn try_deliver_quick_result(
     )
     .await
     {
-        Ok(answer) => {
-            send_answer(state, wa_id, &answer).await?;
+        Ok(answers) => {
+            for answer in answers {
+                send_answer(state, wa_id, &answer).await?;
+            }
             Ok(true)
         }
         Err(err) if err.to_string() == "task_result_wait_timeout" => Ok(false),
@@ -1038,8 +1043,10 @@ fn spawn_task_result_delivery(
         )
         .await;
         match out {
-            Ok(answer) => {
-                let _ = send_answer(&state, &wa_id, &answer).await;
+            Ok(answers) => {
+                for answer in answers {
+                    let _ = send_answer(&state, &wa_id, &answer).await;
+                }
             }
             Err(err) => {
                 let msg = wa_t_with(

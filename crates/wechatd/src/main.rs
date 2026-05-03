@@ -1589,7 +1589,7 @@ async fn ensure_bound_before_task(
     None
 }
 
-fn task_success_text(task: &TaskQueryResponse) -> String {
+fn task_success_messages(task: &TaskQueryResponse) -> Vec<String> {
     if let Some(messages) = task
         .result_json
         .as_ref()
@@ -1604,17 +1604,18 @@ fn task_success_text(task: &TaskQueryResponse) -> String {
             .map(str::to_string)
             .collect();
         if !parts.is_empty() {
-            return parts.join("\n\n");
+            return parts;
         }
     }
-    task.result_json
+    vec![task
+        .result_json
         .as_ref()
         .and_then(|v| v.get("text"))
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| "处理完成。".to_string())
+        .unwrap_or_else(|| "处理完成。".to_string())]
 }
 
 /// Refresh `ilink/bot/sendtyping` while clawd runs (`keepaliveIntervalMs` ≈ 5s in OpenClaw weixin).
@@ -2126,14 +2127,15 @@ async fn submit_wechat_task_with_payload(
                 continue;
             }
             TaskStatus::Succeeded => {
-                let reply_text = task_success_text(&task);
-                deliver_wechat_clawd_reply(
-                    &state,
-                    &from_user_id,
-                    context_token.as_deref(),
-                    &reply_text,
-                )
-                .await;
+                for reply_text in task_success_messages(&task) {
+                    deliver_wechat_clawd_reply(
+                        &state,
+                        &from_user_id,
+                        context_token.as_deref(),
+                        &reply_text,
+                    )
+                    .await;
+                }
                 break;
             }
             TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Timeout => {
