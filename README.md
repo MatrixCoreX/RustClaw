@@ -28,11 +28,13 @@ RustClaw's main natural-language path is moving toward a planner-first single-lo
 ```mermaid
 flowchart TD
     A[User input] --> B[Channel / API ingress]
-    B --> C[Session binding]
+    B --> B1[Task queue<br/>POST /v1/tasks]
+    B1 --> B2[worker_once / process task]
+    B2 --> C[Session binding]
     C --> D[Context bundle + local surface hints]
     D --> E[Intent normalizer LLM]
     E --> F{Ask gate}
-    F -->|clarify| G[Clarify question]
+    F -->|AskClarify| G[Clarify question]
     F -->|chat / execute| H[Planner / runtime loop]
     H --> I[Read state]
     H --> J[Build working context]
@@ -40,23 +42,32 @@ flowchart TD
     H --> L{Planner action}
     L -->|respond| M[Respond]
     L -->|synthesize_answer| SS[Grounded synthesis LLM]
-    L -->|tool / skill| N[Tool / skill execution]
+    L -->|tool| N[Tool execution]
+    L -->|call_skill| N1[run_skill_with_runner]
+    N1 --> N2[skill-runner subprocess]
+    N2 --> P
     N --> P[Observed facts]
     SS --> P
     P --> H
     M --> Q[Post-route safety guard]
-    Q --> R[User reply]
-    R --> S[Update session state / task journal]
+    Q --> R[Finalize result<br/>text + messages]
+    R --> S[Channel delivery<br/>single or multi-message]
+    R --> T[Update session state / task journal]
+    R -. background .-> U[Long-term memory refresh]
+    R -. optional .-> V[Memory preference LLM fallback]
 ```
 
 - `Session binding`: attaches each turn to the active conversation instead of treating every message as a standalone task.
 - `Context bundle + local surface hints`: assembles routing context (session, memory, recent turns, etc.) plus lightweight local parsing signals; this is not a separate “taxonomy engine” LLM.
 - `Intent normalizer LLM`: one call that emits `routed_mode`, `needs_clarify`, `output_contract`, and optional `turn_type` / `target_task_policy` style fields—**clarify vs chat vs act is decided here**, not via a `clarify` action inside the planner JSON.
-- `Ask gate`: keeps only a thin `clarify / chat / execute` split (`RoutedMode`: clarify, chat, act, chat_act) and avoids becoming a semantic fast path.
+- `Task queue`: HTTP callers submit `POST /v1/tasks`; channel daemons also hand work to the same queued worker path.
+- `Ask gate`: keeps only a thin `AskClarify / chat / execute` split (`RoutedMode`: `AskClarify`, `Chat`, `Act`, `ChatAct`) and avoids becoming a semantic fast path.
 - `Planner / runtime loop`: for act / chat_act, runs multiple rounds; planner steps are `think`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today—execution steps are traced as subtasks in logs, not a nested child loop).
 - `State`, `Working context`, and `Durable memory`: separate run control, current task context, and long-lived preferences so memory cannot override the latest user instruction.
+- `call_skill`: goes through `run_skill_with_runner`, which launches `skill-runner` and then the concrete skill binary.
 - `Observed facts`: stores tool, skill, and synthesis outputs as grounded evidence for the next planner step.
 - `Post-route safety guard`: validates safety and output contracts without taking over normal semantic routing.
+- `Finalize result`: can emit one `text` field and a `messages` array; channel adapters send each publishable message separately when present.
 
 ### LLM Request Flow
 
@@ -76,14 +87,18 @@ flowchart TD
     Ip --> J[Parse plan steps]
     J --> K{Step type}
     K -->|respond| L[Respond text]
-    K -->|call_tool / call_skill| M[Execute tool or skill]
+    K -->|call_tool| M[Execute tool]
+    K -->|call_skill| Ms[run_skill_with_runner<br/>skill-runner subprocess]
     K -->|synthesize_answer| N[Synthesis LLM from evidence]
     M --> O[Write observed facts]
+    Ms --> O
     N --> O
     O --> P{Need another planner round?}
     P -->|yes| H
     P -->|no| S
     L --> S
+    S -. optional background .-> T[Long-term summary LLM]
+    S -. optional background .-> U[Memory preference extraction LLM]
 ```
 
 - `LLM request 1 / Intent normalizer`: performs structured understanding only; it does not produce the final answer.
@@ -91,6 +106,7 @@ flowchart TD
 - `LLM request 2`: **Chat** mode uses one chat-completion call, then finalize. **Act / chat_act** uses one-or-more **planner** calls per loop round; the planner emits JSON steps in `{think, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types).
 - `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened.
 - `synthesize_answer`: an extra LLM call **scheduled inside the planner loop** when the plan includes that step—**not** always a single fixed “LLM 3 after all planning is done”; rounds can interleave execution, synthesis, and further planning.
+- `Finalize`: may also start background memory work after the user-visible result is saved, including long-term summary refresh and optional preference extraction controlled by `configs/memory.toml`.
 
 ## Main Components
 
