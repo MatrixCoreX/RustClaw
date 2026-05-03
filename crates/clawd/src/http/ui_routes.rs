@@ -4849,21 +4849,18 @@ async fn run_workspace_update_job(
             guard.stderr_tail = out.stderr_tail;
         }
         Ok(out) => {
-            fail_workspace_update(
-                &shared,
-                "git fetch failed",
-                "请确认服务器能访问远端 Git 仓库，然后再重试。",
-                out,
-            );
-            return;
+            let mut guard = shared.lock().unwrap();
+            guard.exit_code = out.exit_code;
+            guard.stdout_tail = out.stdout_tail;
+            guard.stderr_tail = out.stderr_tail;
+            guard.next_step =
+                Some("远端版本检查失败，将跳过拉取并继续执行本地完整编译。".to_string());
         }
         Err(err) => {
-            fail_workspace_update_with_error(
-                &shared,
-                err,
-                "请稍后重试，或在服务器上手动运行 git fetch 查看原因。",
-            );
-            return;
+            let mut guard = shared.lock().unwrap();
+            guard.stderr_tail = err.to_string();
+            guard.next_step =
+                Some("远端版本检查失败，将跳过拉取并继续执行本地完整编译。".to_string());
         }
     }
 
@@ -4877,63 +4874,62 @@ async fn run_workspace_update_job(
     {
         Ok(out) if out.exit_code == Some(0) => first_output_line(&out.stdout_tail),
         Ok(out) => {
-            fail_workspace_update(
-                &shared,
-                "git upstream check failed",
-                "请确认当前分支已经设置上游远端分支。",
-                out,
-            );
-            return;
-        }
-        Err(err) => {
-            fail_workspace_update_with_error(
-                &shared,
-                err,
-                "请在服务器上确认当前分支有可用的 upstream。",
-            );
-            return;
-        }
-    };
-    {
-        let mut guard = shared.lock().unwrap();
-        guard.remote_commit = remote_commit.clone();
-    }
-
-    if old_commit.is_some() && old_commit == remote_commit {
-        let mut guard = shared.lock().unwrap();
-        guard.status = "up_to_date".to_string();
-        guard.step = "already_latest".to_string();
-        guard.finished_ts = Some(current_unix_ts());
-        guard.new_commit = old_commit;
-        guard.error = None;
-        guard.next_step = Some("当前已经是最新版本，无需编译或重启。".to_string());
-        return;
-    }
-
-    set_workspace_update_step(&shared, "pulling_latest_code");
-    match run_workspace_update_command("git", &["pull", "--ff-only"], &workspace_root, 600).await {
-        Ok(out) if out.exit_code == Some(0) => {
             let mut guard = shared.lock().unwrap();
             guard.exit_code = out.exit_code;
             guard.stdout_tail = out.stdout_tail;
             guard.stderr_tail = out.stderr_tail;
-        }
-        Ok(out) => {
-            fail_workspace_update(
-                &shared,
-                "git pull --ff-only failed",
-                "请确认当前工作区没有本地未提交改动，且远端分支可以快进更新。",
-                out,
-            );
-            return;
+            guard.next_step =
+                Some("未能读取 upstream，将跳过拉取并继续执行本地完整编译。".to_string());
+            None
         }
         Err(err) => {
-            fail_workspace_update_with_error(
-                &shared,
-                err,
-                "请稍后重试，或在服务器上手动运行 git pull 查看原因。",
-            );
-            return;
+            let mut guard = shared.lock().unwrap();
+            guard.stderr_tail = err.to_string();
+            guard.next_step =
+                Some("未能读取 upstream，将跳过拉取并继续执行本地完整编译。".to_string());
+            None
+        }
+    };
+    {
+        let mut guard = shared.lock().unwrap();
+        if let Some(remote_commit) = remote_commit.clone() {
+            guard.remote_commit = Some(remote_commit);
+        }
+    }
+
+    let should_pull =
+        old_commit.is_some() && remote_commit.is_some() && old_commit != remote_commit;
+    if should_pull {
+        set_workspace_update_step(&shared, "pulling_latest_code");
+        match run_workspace_update_command("git", &["pull", "--ff-only"], &workspace_root, 600)
+            .await
+        {
+            Ok(out) if out.exit_code == Some(0) => {
+                let mut guard = shared.lock().unwrap();
+                guard.exit_code = out.exit_code;
+                guard.stdout_tail = out.stdout_tail;
+                guard.stderr_tail = out.stderr_tail;
+            }
+            Ok(out) => {
+                let mut guard = shared.lock().unwrap();
+                guard.exit_code = out.exit_code;
+                guard.stdout_tail = out.stdout_tail;
+                guard.stderr_tail = out.stderr_tail;
+                guard.next_step =
+                    Some("拉取最新代码失败，将跳过升级并继续编译当前本地代码。".to_string());
+            }
+            Err(err) => {
+                let mut guard = shared.lock().unwrap();
+                guard.stderr_tail = err.to_string();
+                guard.next_step =
+                    Some("拉取最新代码失败，将跳过升级并继续编译当前本地代码。".to_string());
+            }
+        }
+    } else {
+        let mut guard = shared.lock().unwrap();
+        guard.step = "skipping_pull_latest_code".to_string();
+        if old_commit.is_some() && remote_commit.is_some() {
+            guard.next_step = Some("远端没有新版本，将继续执行本地完整编译。".to_string());
         }
     }
 
