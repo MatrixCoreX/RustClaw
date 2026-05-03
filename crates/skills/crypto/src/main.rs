@@ -794,6 +794,41 @@ fn normalize_crypto_dispatch_action(raw: &str, obj: &serde_json::Map<String, Val
     }
 }
 
+fn action_requires_exchange_credentials(action: &str) -> bool {
+    matches!(
+        action,
+        "trade_preview"
+            | "trade_submit"
+            | "order_status"
+            | "cancel_order"
+            | "cancel_all_orders"
+            | "cancel_open_orders"
+            | "open_orders"
+            | "get_open_orders"
+            | "pending_orders"
+            | "trade_history"
+            | "my_trades"
+            | "recent_trades"
+            | "positions"
+    )
+}
+
+fn ensure_action_exchange_credentials(
+    cfg: &RootConfig,
+    action: &str,
+    obj: &serde_json::Map<String, Value>,
+) -> Result<(), String> {
+    if !action_requires_exchange_credentials(action) {
+        return Ok(());
+    }
+    let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg)?;
+    match exchange.as_str() {
+        "binance" => ensure_binance_config(cfg),
+        "okx" => ensure_okx_config(cfg),
+        _ => Ok(()),
+    }
+}
+
 /// Minimum lookback window for `price_alert_check` (minutes). Values below this are clamped up.
 const PRICE_ALERT_MIN_WINDOW_MINUTES: u64 = 5;
 
@@ -911,6 +946,7 @@ fn execute(
     {
         return Err(tr_with("crypto.err.action_blocked", &[("action", &action)]));
     }
+    ensure_action_exchange_credentials(&cfg, &action, obj)?;
     let timeout_seconds = obj
         .get("timeout_seconds")
         .and_then(|v| v.as_u64())
@@ -5306,6 +5342,46 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("Binance API is not bound"));
+        set_current_lang("zh-CN");
+    }
+
+    #[test]
+    fn private_exchange_action_checks_binding_before_trade_params() {
+        ensure_test_i18n_catalogs();
+        let mut cfg = RootConfig::default();
+        cfg.crypto.default_exchange = Some("binance".to_string());
+        let err = execute(
+            &cfg,
+            json!({
+                "action": "trade_preview"
+            }),
+            Some(json!({
+                "locale": "zh-CN",
+                "exchange_credentials": {}
+            })),
+        )
+        .unwrap_err();
+        assert!(err.contains("还没有绑定 Binance API"));
+        assert!(!err.contains("缺少 symbol"));
+    }
+
+    #[test]
+    fn private_exchange_action_alias_checks_binding_first() {
+        ensure_test_i18n_catalogs();
+        let mut cfg = RootConfig::default();
+        cfg.crypto.default_exchange = Some("okx".to_string());
+        let err = execute(
+            &cfg,
+            json!({
+                "action": "pending_orders"
+            }),
+            Some(json!({
+                "locale": "en-US",
+                "exchange_credentials": {}
+            })),
+        )
+        .unwrap_err();
+        assert!(err.contains("OKX API is not bound"));
         set_current_lang("zh-CN");
     }
 }

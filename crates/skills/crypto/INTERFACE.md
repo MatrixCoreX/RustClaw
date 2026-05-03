@@ -6,7 +6,7 @@
 ## Capability Summary
 - `crypto` provides market data queries, technical indicators, on-chain lookups, and full spot order lifecycle operations.
 - It supports multi-exchange routing via `exchange` (mainly `binance` and `okx`; quote sources also include Gate.io, Coinbase, Kraken, CoinGecko).
-- Trading actions require configured exchange credentials. For explicit place-order intents with complete params, the planner should call `trade_submit` directly and return a clear success/failure result.
+- Private exchange actions (`trade_preview`, `trade_submit`, order status/cancel/open orders/history, `positions`) require bound exchange credentials. The skill checks the target exchange binding before parameter validation or private API calls; if the current `user_key` has no bound API, it returns a clear “API not bound” error.
 - **Symbol / pair**: If the asset or trading pair is ambiguous or could map to multiple symbols, ask one concise clarification before calling trade/order/quote-affecting actions; do not guess `symbol`.
 - **Exchange default**: For exchange-scoped actions, use explicit `exchange` first. If omitted, use configured `crypto.execution_mode` / `crypto.default_exchange`. If neither is configured, ask one concise clarification instead of assuming `binance`.
 - **Execution vs preview**: `trade_preview` is for preview-only user intent. `trade_submit` is only when the **current** user message explicitly requests immediate execution (same turn). There is **no** platform-level second-step pending-confirm chain in `clawd`; do not rely on a later yes/no follow-up flow.
@@ -110,6 +110,8 @@
   - `cancel_all_orders on binance requires symbol`
   - `trade_history on binance requires symbol`
 - Trading safety/policy:
+  - `Binance API is not bound for the current key yet...`
+  - `OKX API is not bound for the current key yet...`
   - `exchange is not allowed: {exchange}`
   - `symbol is not allowed: {symbol}`
   - `notional exceeds max_notional_usd: ...`
