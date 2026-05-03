@@ -839,8 +839,8 @@ fn dispatch_im_incoming_event(state: AppState, body: Value) {
     debug!("feishud: im.message.receive_v1 ignored (unsupported type or missing fields)");
 }
 
-/// 从成功任务的 result_json 取回复正文：优先 messages 数组（与 telegramd 一致），其次 text，否则占位。
-fn feishu_task_success_text(task: &TaskQueryResponse, config: &FeishuConfig) -> String {
+/// 从成功任务的 result_json 取回复正文：优先逐条发送 messages，其次 text，否则占位。
+fn feishu_task_success_messages(task: &TaskQueryResponse, config: &FeishuConfig) -> Vec<String> {
     if let Some(messages) = task
         .result_json
         .as_ref()
@@ -855,10 +855,11 @@ fn feishu_task_success_text(task: &TaskQueryResponse, config: &FeishuConfig) -> 
             .map(str::to_string)
             .collect();
         if !parts.is_empty() {
-            return parts.join("\n\n");
+            return parts;
         }
     }
-    task.result_json
+    vec![task
+        .result_json
         .as_ref()
         .and_then(|v| v.get("text"))
         .and_then(|v| v.as_str())
@@ -871,7 +872,7 @@ fn feishu_task_success_text(task: &TaskQueryResponse, config: &FeishuConfig) -> 
                 FEISHU_I18N_TASK_DONE_FALLBACK_TEXT_KEY,
                 FEISHU_TASK_DONE_FALLBACK_TEXT_FALLBACK,
             )
-        })
+        })]
 }
 
 /// 共享主链：提交任务并 spawn 轮询与回发。供 webhook 与 long_connection 复用。
@@ -1112,21 +1113,22 @@ fn handle_text_message_to_clawd(
                     continue;
                 }
                 TaskStatus::Succeeded => {
-                    let to_send = feishu_task_success_text(task, &config);
-                    for chunk in chunk_text_utf8(to_send.as_str(), chunk_chars) {
-                        if let Err(e) = send_feishu_text(
-                            &config,
-                            &client,
-                            &token_cache,
-                            &chat_id_delivery,
-                            &chunk,
-                        )
-                        .await
-                        {
-                            warn!(
-                                "feishud: send success text failed task_id={} err={}",
-                                task_id, e
-                            );
+                    for to_send in feishu_task_success_messages(task, &config) {
+                        for chunk in chunk_text_utf8(to_send.as_str(), chunk_chars) {
+                            if let Err(e) = send_feishu_text(
+                                &config,
+                                &client,
+                                &token_cache,
+                                &chat_id_delivery,
+                                &chunk,
+                            )
+                            .await
+                            {
+                                warn!(
+                                    "feishud: send success text failed task_id={} err={}",
+                                    task_id, e
+                                );
+                            }
                         }
                     }
                     info!(

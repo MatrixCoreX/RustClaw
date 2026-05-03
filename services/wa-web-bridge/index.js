@@ -180,6 +180,18 @@ async function queryTask(taskId) {
   return parsed.data;
 }
 
+function taskSuccessMessages(task) {
+  const messages = task.result_json?.messages;
+  if (Array.isArray(messages)) {
+    const out = messages
+      .filter((v) => typeof v === "string")
+      .map((v) => v.trim())
+      .filter((v) => v.length > 0);
+    if (out.length > 0) return out;
+  }
+  return [String(task.result_json?.text || "done")];
+}
+
 async function pollTaskResult(taskId, waitSeconds) {
   const pollMs = 500;
   const rounds = Math.max(1, Math.floor((waitSeconds * 1000) / pollMs));
@@ -190,7 +202,7 @@ async function pollTaskResult(taskId, waitSeconds) {
       continue;
     }
     if (task.status === "succeeded") {
-      return String(task.result_json?.text || "done");
+      return taskSuccessMessages(task);
     }
     throw new Error(task.error_text || `task status=${task.status}`);
   }
@@ -257,13 +269,17 @@ async function runTaskFlow(jid, kind, payload, quickWait = cfg.quickResultWaitSe
   const taskId = await submitTask(jid, kind, payload);
   try {
     const out = await pollTaskResult(taskId, quickWait);
-    await sendAnswer(jid, out);
+    for (const answer of out) {
+      await sendAnswer(jid, answer);
+    }
   } catch (err) {
     if (String(err.message || err) === "task_result_wait_timeout") {
       setTimeout(async () => {
         try {
           const finalOut = await pollTaskResult(taskId, 600);
-          await sendAnswer(jid, finalOut);
+          for (const answer of finalOut) {
+            await sendAnswer(jid, answer);
+          }
         } catch (e) {
           await sock.sendMessage(jid, { text: `处理失败: ${String(e.message || e)}` });
         }
