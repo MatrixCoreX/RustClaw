@@ -1342,6 +1342,7 @@ pub fn base_skill_names() -> &'static [&'static str] {
         "fs_search",
         "git_basic",
         "service_control",
+        "archive_basic",
     ]
 }
 

@@ -401,6 +401,7 @@ const FALLBACK_BASE_SKILL_NAMES = [
   "fs_search",
   "git_basic",
   "service_control",
+  "archive_basic",
 ];
 const SKILL_SUMMARY: Record<string, { zh: string; en: string }> = {
   archive_basic: { zh: "压缩、解压和整理归档文件。", en: "Compress, extract, and organize archives." },
@@ -5819,9 +5820,9 @@ export default function App() {
                         </label>
                       </div>
                       <div className="space-y-4">
+                        {renderSkillGroup(t("固定开启的基础技能", "Always-on core skills"), filteredSkillsBase)}
                         {renderSkillGroup(t("图片技能", "Image skills"), filteredSkillsImage)}
                         {renderSkillGroup(t("语音技能", "Voice / Audio skills"), filteredSkillsAudio)}
-                        {renderSkillGroup(t("固定开启的基础技能", "Always-on core skills"), filteredSkillsBase)}
                         {renderSkillGroup(t("其他", "Others"), filteredSkillsOther)}
                       </div>
                       {normalizedSkillsSearchQuery &&
