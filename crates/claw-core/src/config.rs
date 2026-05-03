@@ -865,6 +865,12 @@ pub struct MemoryConfig {
     pub write_min_chars: usize,
     #[serde(default = "default_memory_enable_preference_extraction")]
     pub enable_preference_extraction: bool,
+    #[serde(default = "default_memory_llm_preference_fallback_enabled")]
+    pub llm_preference_fallback_enabled: bool,
+    #[serde(default = "default_memory_llm_preference_min_confidence")]
+    pub llm_preference_min_confidence: f32,
+    #[serde(default = "default_memory_llm_preference_max_chars")]
+    pub llm_preference_max_chars: usize,
     #[serde(default = "default_memory_preference_recall_limit")]
     pub preference_recall_limit: usize,
     #[serde(default = "default_memory_recent_relevance_enabled")]
@@ -945,6 +951,9 @@ impl Default for MemoryConfig {
             write_filter_enabled: default_memory_write_filter_enabled(),
             write_min_chars: default_memory_write_min_chars(),
             enable_preference_extraction: default_memory_enable_preference_extraction(),
+            llm_preference_fallback_enabled: default_memory_llm_preference_fallback_enabled(),
+            llm_preference_min_confidence: default_memory_llm_preference_min_confidence(),
+            llm_preference_max_chars: default_memory_llm_preference_max_chars(),
             preference_recall_limit: default_memory_preference_recall_limit(),
             recent_relevance_enabled: default_memory_recent_relevance_enabled(),
             recent_relevance_min_score: default_memory_recent_relevance_min_score(),
@@ -1491,6 +1500,18 @@ fn default_memory_enable_preference_extraction() -> bool {
     true
 }
 
+fn default_memory_llm_preference_fallback_enabled() -> bool {
+    false
+}
+
+fn default_memory_llm_preference_min_confidence() -> f32 {
+    0.72
+}
+
+fn default_memory_llm_preference_max_chars() -> usize {
+    900
+}
+
 fn default_memory_preference_recall_limit() -> usize {
     8
 }
@@ -1630,99 +1651,39 @@ fn default_worker_running_recovery_check_interval_seconds() -> u64 {
 }
 
 fn default_memory_rule_assistant_ack_skip() -> Vec<String> {
-    vec![
-        "ok".to_string(),
-        "okay".to_string(),
-        "done".to_string(),
-        "received".to_string(),
-        "收到".to_string(),
-        "好的".to_string(),
-        "明白了".to_string(),
-    ]
+    Vec::new()
 }
 
 fn default_memory_rule_instruction_markers() -> Vec<String> {
-    vec![
-        "请".to_string(),
-        "执行".to_string(),
-        "run ".to_string(),
-        "please ".to_string(),
-    ]
+    Vec::new()
 }
 
 fn default_memory_rule_injection_markers() -> Vec<String> {
-    vec![
-        "ignore previous instructions".to_string(),
-        "ignore all previous rules".to_string(),
-        "system prompt".to_string(),
-        "泄露提示词".to_string(),
-        "忽略之前所有规则".to_string(),
-        "忽略系统规则".to_string(),
-    ]
+    Vec::new()
 }
 
 fn default_memory_rule_salience_boost_markers() -> Vec<String> {
-    vec![
-        "以后".to_string(),
-        "下次".to_string(),
-        "记住".to_string(),
-        "长期".to_string(),
-        "always".to_string(),
-        "default".to_string(),
-        "remember".to_string(),
-        "from now on".to_string(),
-        "going forward".to_string(),
-    ]
+    Vec::new()
 }
 
 fn default_memory_rule_pref_language_zh() -> Vec<String> {
-    vec![
-        "以后都用中文".to_string(),
-        "请用中文".to_string(),
-        "中文回复".to_string(),
-        "默认中文".to_string(),
-        "都说中文".to_string(),
-    ]
+    Vec::new()
 }
 
 fn default_memory_rule_pref_language_en() -> Vec<String> {
-    vec![
-        "以后都用英文".to_string(),
-        "请用英文".to_string(),
-        "英文回复".to_string(),
-        "reply in english".to_string(),
-        "speak english".to_string(),
-    ]
+    Vec::new()
 }
 
 fn default_memory_rule_pref_style_concise() -> Vec<String> {
-    vec![
-        "简洁".to_string(),
-        "简短".to_string(),
-        "精简".to_string(),
-        "concise".to_string(),
-        "brief".to_string(),
-    ]
+    Vec::new()
 }
 
 fn default_memory_rule_pref_style_detailed() -> Vec<String> {
-    vec![
-        "详细".to_string(),
-        "展开".to_string(),
-        "细一点".to_string(),
-        "detailed".to_string(),
-        "step by step".to_string(),
-    ]
+    Vec::new()
 }
 
 fn default_memory_rule_pref_format_plain_text() -> Vec<String> {
-    vec![
-        "不要markdown".to_string(),
-        "别用markdown".to_string(),
-        "纯文本".to_string(),
-        "plain text".to_string(),
-        "no markdown".to_string(),
-    ]
+    Vec::new()
 }
 
 fn default_tools_profile() -> String {

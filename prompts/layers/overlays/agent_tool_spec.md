@@ -396,14 +396,17 @@ Skill behavior notes (file/path):
 - Forbid missing audio path or non-workspace path assumptions.
 
 ### config_guard
-- action: read/validate/patch style config operations
-- required: explicit target (`path`), key path, intended value for writes
+- current implementation: read-only RustClaw TOML config risk scan
+- action: no explicit action required; pass only optional `path`
+- optional: `path` (defaults to discovered `configs/config.toml`)
+- output reports `path`, `risk_count`, and `risks`
+- checks known risky config locations such as real-looking bot/LLM keys, `tools.allow_sudo`, `tools.allow_path_outside_workspace`, and `telegram.sendfile.full_access`
 
 #### config_guard JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"config_guard","args":{...}}`
-- Required for writes: target config path + key path + value intent.
+- Args should be `{}` or `{"path":"configs/config.toml"}`.
+- Do not plan patch/write operations through `config_guard`; use the dedicated config APIs/UI or an explicitly confirmed edit workflow outside this skill.
 - Always keep secret values redacted in any final response.
-- Forbid broad whole-file rewrites when only one key change is requested.
 
 ### db_basic
 - action: `sqlite_query|sqlite_execute`
@@ -449,10 +452,12 @@ Skill behavior notes (file/path):
 - Forbid massive unbounded result requests; use bounded `max_results`.
 
 ### git_basic
-- action: `status|log|diff|branch|show|rev_parse`
+- action: `status|log|diff|diff_cached|branch|current_branch|remote|changed_files|show|show_file_at_rev|rev_parse`
 - required:
   - `show`: optional `target` (default `HEAD`)
-  - `log`: optional `n`
+  - `show_file_at_rev`: `path` required, optional `target` (default `HEAD`)
+- optional:
+  - `log`: `n` or `limit`
 
 #### git_basic JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"git_basic","args":{...}}`
@@ -563,13 +568,18 @@ Skill behavior notes (file/path):
 - Forbid broad pattern-based kill without specific target.
 
 ### service_control
-- action: `status|start|stop|restart`
-- required: none (action required)
+- action: `status|start|stop|restart|reload|logs|verify|diagnose_start_failure|diagnose_unhealthy_state`
+- required: `action`; `target` is required except `status` may omit it for all RustClaw services
+- optional: `target` or `service`, `manager_type`, `tail_lines`/`lines`, `verify`, `allow_risky`
+- manager_type: `rustclaw|systemd|service|brew_services|launchd|docker_compose|docker_container|supervisor|process_only|unknown`
+- use `logs` for bounded service logs; use `verify` for explicit post-checks; use diagnose actions for status + logs + evidence summary
 
 #### service_control JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"service_control","args":{...}}`
 - Use only supported service lifecycle actions.
 - Prefer status checks before/after mutating actions when useful.
+- Do not use binary existence as service runtime status; use `status` or `verify`.
+- Do not use `service_control` for Docker container operations when `docker_basic` can target the container directly.
 - Forbid unsupported bulk/global service operations.
 
 ### task_control

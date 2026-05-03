@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde_json::{json, Value};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::{repo, AppState};
 
@@ -122,6 +122,30 @@ async fn missing_file_delivery_reply_text(
     )
 }
 
+fn spawn_memory_preference_llm_extraction(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    prompt: &str,
+) {
+    let state = state.clone();
+    let mut task = task.clone();
+    let parent_task_id = task.task_id.clone();
+    task.task_id = format!("{parent_task_id}:memory_preference");
+    let metrics_task_id = task.task_id.clone();
+    let prompt = prompt.to_string();
+    tokio::spawn(async move {
+        if let Err(err) =
+            crate::memory::maybe_extract_user_preferences_with_llm(&state, &task, &prompt).await
+        {
+            warn!(
+                "memory preference llm extraction failed task_id={} parent_task_id={} err={}",
+                task.task_id, parent_task_id, err
+            );
+        }
+        state.clear_task_llm_call_count(&metrics_task_id);
+    });
+}
+
 fn insert_ask_memory_pair(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -138,6 +162,7 @@ fn insert_ask_memory_pair(
         task.user_key.as_deref(),
         agent_display_name_hint,
     );
+    spawn_memory_preference_llm_extraction(state, task, prompt);
     if should_skip_ask_memory_pair(state, answer_text, answer_messages) {
         return;
     }

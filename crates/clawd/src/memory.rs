@@ -9,7 +9,9 @@ pub(crate) use service::dynamic_chat_memory_budget_chars;
 use anyhow::anyhow;
 use claw_core::config::MemoryConfig;
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::Deserialize;
 use serde_json::Value;
+use tracing::warn;
 
 use super::{extract_delivery_file_tokens, now_ts, now_ts_u64, utf8_safe_prefix, AppState};
 
@@ -106,6 +108,20 @@ pub(crate) enum MemoryWriteKind {
     Default,
     AssistantOutcome,
     UnfinishedGoal,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryPreferenceLlmOut {
+    #[serde(default)]
+    preferences: Vec<MemoryPreferenceLlmItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryPreferenceLlmItem {
+    key: String,
+    value: String,
+    #[serde(default)]
+    confidence: Option<f32>,
 }
 
 fn normalized_user_key_opt(user_key: Option<&str>) -> Option<&str> {
@@ -359,6 +375,68 @@ pub(crate) fn insert_memory(
         );
     }
     Ok(())
+}
+
+pub(crate) async fn maybe_extract_user_preferences_with_llm(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    content: &str,
+) -> anyhow::Result<()> {
+    let cfg = &state.policy.memory;
+    if !cfg.enable_preference_extraction || !cfg.llm_preference_fallback_enabled {
+        return Ok(());
+    }
+    if !extract_user_preferences(content, cfg).is_empty() {
+        return Ok(());
+    }
+    let trimmed = content.trim();
+    if trimmed.chars().count() < cfg.write_min_chars.max(8) {
+        return Ok(());
+    }
+    if !looks_like_memory_preference_llm_candidate(trimmed, cfg) {
+        return Ok(());
+    }
+
+    let prompt_text = utf8_safe_prefix(trimmed, cfg.llm_preference_max_chars.max(128));
+    let prompt = build_memory_preference_llm_prompt(prompt_text);
+    let raw = match crate::llm_gateway::run_with_fallback_with_prompt_source(
+        state,
+        task,
+        &prompt,
+        "memory_preference_extract",
+    )
+    .await
+    {
+        Ok(raw) => raw,
+        Err(err) => {
+            warn!(
+                "memory preference llm fallback failed task_id={} err={}",
+                task.task_id, err
+            );
+            return Ok(());
+        }
+    };
+
+    let extracted =
+        parse_memory_preference_llm_output(&raw, cfg.llm_preference_min_confidence.clamp(0.0, 1.0));
+    if extracted.is_empty() {
+        return Ok(());
+    }
+
+    let user_key = effective_user_key(task.user_key.as_deref(), task.user_id, task.chat_id);
+    let now_text = now_ts();
+    let now_ts_i64 = now_ts_u64() as i64;
+    let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    upsert_user_preferences(
+        state,
+        &db,
+        task.user_id,
+        task.chat_id,
+        &user_key,
+        &extracted,
+        &now_text,
+        now_ts_i64,
+    )
 }
 
 pub(crate) fn count_chat_memory_rounds(
@@ -1677,6 +1755,104 @@ fn extract_user_preferences(
     out
 }
 
+fn build_memory_preference_llm_prompt(content: &str) -> String {
+    let content = content.replace("```", "'''");
+    format!(
+        r#"You are RustClaw's memory preference extractor.
+
+Extract only durable user preferences that should be remembered across future turns.
+Do not extract one-off constraints for the current request unless the user clearly says it should apply later, by meaning such as "以后", "以后都", "默认", "记住", "always", "from now on", or "going forward".
+
+Return JSON only:
+{{"preferences":[{{"key":"response_language|response_style|response_format","value":"...","confidence":0.0}}]}}
+
+Allowed values:
+- response_language: a BCP-47-like language tag, such as zh-CN, en-US, ja-JP.
+- response_style: concise or detailed.
+- response_format: plain_text or markdown.
+
+If there is no durable preference, return {{"preferences":[]}}.
+
+User text:
+```text
+{content}
+```"#
+    )
+}
+
+fn looks_like_memory_preference_llm_candidate(content: &str, cfg: &MemoryConfig) -> bool {
+    let norm = content.to_ascii_lowercase();
+    if contains_any_marker(&norm, &cfg.rules.salience_boost_markers) {
+        return true;
+    }
+    const DURABLE_HINTS: &[&str] = &[
+        "preference",
+        "remember that",
+        "from now on",
+        "going forward",
+        "以后",
+        "下次",
+        "默认",
+        "记住",
+        "偏好",
+        "これから",
+        "今後",
+        "覚えて",
+        "a partir de ahora",
+    ];
+    DURABLE_HINTS.iter().any(|hint| norm.contains(hint))
+}
+
+fn parse_memory_preference_llm_output(
+    raw: &str,
+    min_confidence: f32,
+) -> Vec<(String, String, f32, String)> {
+    let Some(parsed) =
+        crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<MemoryPreferenceLlmOut>(raw)
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for item in parsed.preferences {
+        let confidence = item.confidence.unwrap_or(0.0).clamp(0.0, 1.0);
+        if confidence < min_confidence {
+            continue;
+        }
+        let Some((key, value)) = normalize_llm_preference_item(&item.key, &item.value) else {
+            continue;
+        };
+        out.push((key, value, confidence, "llm_preference_extract".to_string()));
+    }
+    out
+}
+
+fn normalize_llm_preference_item(key: &str, value: &str) -> Option<(String, String)> {
+    let key = key.trim();
+    let value = value.trim();
+    if key.is_empty() || value.is_empty() {
+        return None;
+    }
+    match key {
+        "response_language" => {
+            let normalized = value
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .collect::<String>();
+            let len = normalized.len();
+            ((2..=24).contains(&len)).then_some((key.to_string(), normalized))
+        }
+        "response_style" => match value {
+            "concise" | "detailed" => Some((key.to_string(), value.to_string())),
+            _ => None,
+        },
+        "response_format" => match value {
+            "plain_text" | "markdown" => Some((key.to_string(), value.to_string())),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn normalize_agent_display_name(raw: &str) -> Option<String> {
     let candidate = raw
         .trim()
@@ -1838,7 +2014,8 @@ mod tests {
         build_last_turn_full_context, build_recent_assistant_replies_context,
         clarify_assistant_placeholder, classify_assistant_context_reply_kind,
         extract_result_text_for_recent_turns, insert_memory, legacy_principal_chat_id,
-        ordered_entries_from_assistant_reply, provider_unavailable_assistant_placeholder,
+        looks_like_memory_preference_llm_candidate, ordered_entries_from_assistant_reply,
+        parse_memory_preference_llm_output, provider_unavailable_assistant_placeholder,
         recall_memories_since_id, recall_user_preferences, retrieval_source_ref_for_kb_chunk,
         retrieval_source_ref_for_memory, retrieval_source_ref_for_preference,
         upsert_user_preferences_from_route_hint, AssistantContextReplyKind, MemoryWriteKind,
@@ -1936,6 +2113,71 @@ mod tests {
             );",
         )
         .expect("create user_preferences table");
+    }
+
+    #[test]
+    fn memory_preference_llm_output_accepts_whitelisted_preferences() {
+        let raw = r#"{
+            "preferences": [
+                {"key":"response_language","value":"ja-JP","confidence":0.91},
+                {"key":"response_style","value":"concise","confidence":0.8},
+                {"key":"response_format","value":"plain_text","confidence":0.74}
+            ]
+        }"#;
+        let prefs = parse_memory_preference_llm_output(raw, 0.72);
+        assert_eq!(
+            prefs,
+            vec![
+                (
+                    "response_language".to_string(),
+                    "ja-JP".to_string(),
+                    0.91,
+                    "llm_preference_extract".to_string()
+                ),
+                (
+                    "response_style".to_string(),
+                    "concise".to_string(),
+                    0.8,
+                    "llm_preference_extract".to_string()
+                ),
+                (
+                    "response_format".to_string(),
+                    "plain_text".to_string(),
+                    0.74,
+                    "llm_preference_extract".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn memory_preference_llm_output_rejects_low_confidence_and_unknown_fields() {
+        let raw = r#"{
+            "preferences": [
+                {"key":"response_style","value":"concise","confidence":0.2},
+                {"key":"shell_access","value":"enabled","confidence":0.99},
+                {"key":"response_format","value":"html","confidence":0.99}
+            ]
+        }"#;
+        let prefs = parse_memory_preference_llm_output(raw, 0.72);
+        assert!(prefs.is_empty());
+    }
+
+    #[test]
+    fn memory_preference_llm_candidate_gate_requires_durable_hint() {
+        let cfg = claw_core::config::MemoryConfig::default();
+        assert!(!looks_like_memory_preference_llm_candidate(
+            "tell me a short joke",
+            &cfg
+        ));
+        assert!(looks_like_memory_preference_llm_candidate(
+            "以后默认用日语回复我",
+            &cfg
+        ));
+        assert!(looks_like_memory_preference_llm_candidate(
+            "Going forward, respond in concise English.",
+            &cfg
+        ));
     }
 
     #[test]
@@ -2271,7 +2513,14 @@ mod tests {
 
     #[test]
     fn explicit_long_term_preferences_are_persisted() {
-        let state = test_state();
+        let mut state = test_state();
+        state.policy.memory.rules.instruction_markers = vec!["请".to_string(), "执行".to_string()];
+        state.policy.memory.rules.salience_boost_markers =
+            vec!["以后".to_string(), "默认".to_string(), "记住".to_string()];
+        state.policy.memory.rules.preferences.language_zh =
+            vec!["默认中文".to_string(), "中文回复".to_string()];
+        state.policy.memory.rules.preferences.style_concise =
+            vec!["简短".to_string(), "简洁".to_string()];
         {
             let db = state.core.db.get().expect("db");
             create_memories_table(&db);

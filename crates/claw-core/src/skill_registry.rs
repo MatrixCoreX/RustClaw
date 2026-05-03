@@ -344,6 +344,12 @@ impl SkillsRegistry {
                 continue;
             }
             let canonical = to_canonical_key(&raw);
+            if by_name.contains_key(&canonical) {
+                return Err(format!(
+                    "duplicate skill name `{canonical}` in {}",
+                    path.display()
+                ));
+            }
             entry.name = canonical.clone();
             let aliases: Vec<String> = entry
                 .aliases
@@ -369,9 +375,25 @@ impl SkillsRegistry {
             entry.resolved_capabilities = resolved;
 
             by_name.insert(canonical.clone(), entry);
-            alias_to_name.insert(canonical.clone(), canonical.clone());
+            if let Some(existing) = alias_to_name.get(&canonical) {
+                if existing != &canonical {
+                    return Err(format!(
+                        "duplicate skill alias/name `{canonical}` in {}: `{existing}` and `{canonical}`",
+                        path.display()
+                    ));
+                }
+            } else {
+                alias_to_name.insert(canonical.clone(), canonical.clone());
+            }
             for a in &aliases {
-                if !alias_to_name.contains_key(a) {
+                if let Some(existing) = alias_to_name.get(a) {
+                    if existing != &canonical {
+                        return Err(format!(
+                            "duplicate skill alias `{a}` in {}: `{existing}` and `{canonical}`",
+                            path.display()
+                        ));
+                    }
+                } else {
                     alias_to_name.insert(a.clone(), canonical.clone());
                 }
             }
@@ -782,6 +804,59 @@ kind = "runner"   # 故意写错 kind，应该被 wrong_kind 抓到
         assert!(human.contains("missing builtins"));
         assert!(human.contains("wrong kind"));
 
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn registry_load_rejects_duplicate_aliases_across_skills() {
+        let toml = r#"
+[[skills]]
+name = "system_basic"
+enabled = true
+kind = "runner"
+aliases = ["system"]
+
+[[skills]]
+name = "service_control"
+enabled = true
+kind = "runner"
+aliases = ["system"]
+"#;
+        let path = std::env::temp_dir().join("test_registry_duplicate_alias.toml");
+        std::fs::write(&path, toml).unwrap();
+        let err = SkillsRegistry::load_from_path(&path)
+            .err()
+            .expect("duplicate aliases must fail registry load");
+        assert!(err.contains("duplicate skill alias `system`"), "{err}");
+        assert!(err.contains("system_basic"), "{err}");
+        assert!(err.contains("service_control"), "{err}");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn registry_load_rejects_alias_colliding_with_later_skill_name() {
+        let toml = r#"
+[[skills]]
+name = "system_basic"
+enabled = true
+kind = "runner"
+aliases = ["service_control"]
+
+[[skills]]
+name = "service_control"
+enabled = true
+kind = "runner"
+"#;
+        let path = std::env::temp_dir().join("test_registry_alias_name_collision.toml");
+        std::fs::write(&path, toml).unwrap();
+        let err = SkillsRegistry::load_from_path(&path)
+            .err()
+            .expect("alias/name collisions must fail registry load");
+        assert!(
+            err.contains("duplicate skill alias/name `service_control`"),
+            "{err}"
+        );
+        assert!(err.contains("system_basic"), "{err}");
         let _ = std::fs::remove_file(path);
     }
 

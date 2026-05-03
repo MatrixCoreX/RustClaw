@@ -534,7 +534,6 @@ name = "claw-core"
 version = "0.1.6"
 dependencies = [
  "config",
- "regex",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
