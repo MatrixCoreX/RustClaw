@@ -2412,8 +2412,8 @@ export default function App() {
   const startWorkspaceUpdate = async () => {
     const confirmed = window.confirm(
       t(
-        "更新会自动拉取最新代码、完整编译，并在成功后重启 clawd。重启期间页面会短暂断开。确认现在开始吗？",
-        "This will pull the latest code, run a full build, and restart clawd when successful. The page may disconnect briefly. Start now?",
+        "系统会先独立检查远端版本；如有新版本会拉取，然后无论是否有远端更新都会执行完整编译，并在成功后重启 clawd。重启期间页面会短暂断开。确认现在开始吗？",
+        "The system will check the remote version independently; if a new version exists it will pull it, then run a full build regardless of remote changes and restart clawd when successful. The page may disconnect briefly. Start now?",
       ),
     );
     if (!confirmed) return;
@@ -3720,6 +3720,7 @@ export default function App() {
       checking_remote_version: t("检查远端版本", "Checking remote version"),
       already_latest: t("已经是最新版本", "Already latest"),
       pulling_latest_code: t("下载最新代码", "Pulling latest code"),
+      skipping_pull_latest_code: t("跳过拉取，继续编译", "Skipping pull, building"),
       checking_new_version: t("确认新版本", "Checking new version"),
       building_workspace: t("正在完整编译", "Running full build"),
       restarting_clawd: t("正在安排重启", "Scheduling restart"),
@@ -4179,12 +4180,12 @@ export default function App() {
                       {t("系统更新", "System Update")}
                     </p>
                     <h3 className="mt-2 text-base font-semibold text-white">
-                      {t("一键拉取最新版本并完整编译", "Pull the latest version and run a full build")}
+                      {t("一键检查更新并完整编译", "Check updates and run a full build")}
                     </h3>
                     <p className="mt-2 text-sm leading-7 text-white/65">
                       {t(
-                        "管理员可以在这里更新 RustClaw。系统会执行 git pull、完整编译前端和后端，并在成功后自动重启 clawd；重启期间页面可能短暂断开。",
-                        "Admins can update RustClaw here. The system runs git pull, builds the frontend and backend, then restarts clawd when successful; the page may disconnect briefly during restart.",
+                        "管理员可以在这里更新或重编 RustClaw。系统会单独检查远端版本；有新版本时先执行 git pull，没有新版本也会继续完整编译前端和后端，并在成功后自动重启 clawd。",
+                        "Admins can update or rebuild RustClaw here. The system checks the remote version separately; it pulls when a new version exists, otherwise it still builds the frontend and backend, then restarts clawd when successful.",
                       )}
                     </p>
                   </div>
@@ -4201,12 +4202,12 @@ export default function App() {
                         ) : (
                           <RefreshCw className="h-4 w-4" />
                         )}
-                        {t("刷新最新版本", "Refresh latest")}
+                        {t("检查远端版本", "Check remote")}
                       </button>
                       <button
                         type="button"
                         onClick={() => void startWorkspaceUpdate()}
-                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || !workspaceUpdateHasRemoteDiff}
+                        disabled={workspaceUpdateLoading || workspaceUpdateRunning}
                         className="theme-accent-btn"
                       >
                         {workspaceUpdateRunning ? (
@@ -4215,12 +4216,10 @@ export default function App() {
                           <RefreshCw className="h-4 w-4" />
                         )}
                         {workspaceUpdateRunning
-                          ? t("更新进行中", "Updating")
+                          ? t("编译进行中", "Building")
                           : workspaceUpdateHasRemoteDiff
-                            ? t("开始更新", "Start Update")
-                            : workspaceUpdateStatus?.old_commit && workspaceUpdateStatus?.remote_commit
-                              ? t("已是最新", "Up to date")
-                              : t("等待版本检查", "Checking version")}
+                            ? t("拉取并编译", "Pull and Build")
+                            : t("完整编译", "Build All")}
                       </button>
                     </div>
                   ) : (
@@ -4281,7 +4280,7 @@ export default function App() {
 
                 {workspaceUpdateStatus?.status === "up_to_date" ? (
                   <div className="mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-3 text-sm text-emerald-100">
-                    {workspaceUpdateStatus.next_step || t("当前已经是最新版本，无需编译或重启。", "Already on the latest version. No build or restart needed.")}
+                    {workspaceUpdateStatus.next_step || t("远端已经是最新版本；如需应用本地改动，仍可点击完整编译。", "The remote version is up to date; use Build All if you need to apply local changes.")}
                   </div>
                 ) : workspaceUpdateStatus?.error || workspaceUpdateStatus?.next_step ? (
                   <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-3 text-sm text-red-100">
