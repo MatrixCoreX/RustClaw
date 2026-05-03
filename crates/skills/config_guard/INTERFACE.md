@@ -4,34 +4,38 @@
 > Keep this spec aligned with the config_guard implementation.
 
 ## Capability Summary
-- `config_guard` provides controlled config read/validate/patch operations.
-- It is designed for minimal, key-scoped config changes with safety checks.
+- `config_guard` performs a read-only safety scan of RustClaw TOML configuration.
+- It detects risky settings and likely real secrets in selected known locations, returning a compact JSON summary.
+- It does **not** patch or write configuration in the current implementation.
 
 ## Actions
-- Read/validate/patch style config operations (exact action names depend on implementation runtime).
+- No explicit `action` is required. The current implementation always performs the read-only config risk scan.
 
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| reads | `path` | yes | string(path) | - | Target config file path. |
-| validates | `path` | yes | string(path) | - | Target config file path. |
-| writes/patches | `path` | yes | string(path) | - | Target config file path. |
-| writes/patches | key path field | yes | string | - | Explicit key to patch. |
-| writes/patches | value field | yes | any | - | Intended value for target key. |
+| scan | `path` | no | string(path) | discovered `configs/config.toml` | Target TOML config file path. Relative paths resolve from the skill process working directory / workspace root. |
+
+The skill currently checks:
+- `telegram.bot_token`
+- `llm.openai.api_key`, `llm.google.api_key`, `llm.anthropic.api_key`, `llm.grok.api_key`
+- `tools.allow_sudo`
+- `tools.allow_path_outside_workspace`
+- `telegram.sendfile.full_access`
 
 ## Error Contract
-- Missing target path/key/value for write operations.
-- Invalid path/key/value shape and parse failures.
-- Safety violations (over-broad whole-file rewrite) should return explicit errors.
-- Secret fields in outputs should be redacted.
+- Read failures return `read config failed: ...`.
+- TOML parse failures return `parse toml failed: ...`.
+- The skill does not echo secret values; it only reports that a key appears real.
+- Patch/write requests are outside the current implementation and should not be planned as `config_guard` calls.
 
 ## Request/Response Examples
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{"path":"configs/config.toml","key":"skills.skill_switches.crypto","value":true}}
+{"request_id":"demo-1","args":{"path":"configs/config.toml"}}
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"config patch applied","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"{\"path\":\"configs/config.toml\",\"risk_count\":1,\"risks\":[\"tools.allow_sudo=true\"]}","error_text":null}
 ```
