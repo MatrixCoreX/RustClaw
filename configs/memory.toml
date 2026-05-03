@@ -1,52 +1,214 @@
+# 是否把 LLM 回复写入短期记忆时加上内部标记，便于后续识别助手生成内容。
+# Whether to mark LLM replies in short-term memory so later recall can identify assistant-generated content.
 mark_llm_reply_in_short_term = true
+
+# 是否优先使用 LLM 助手回复作为助手记忆来源；通常保持 false，避免把运行时噪声当作长期事实。
+# Whether to prefer LLM assistant replies as assistant memory sources; usually keep false to avoid storing runtime noise as durable facts.
 prefer_llm_assistant_memory = false
+
+# 注入 prompt 时最多召回多少条短期记忆。
+# Maximum number of short-term memories recalled into prompts.
 prompt_recall_limit = 3
+
+# 常规记忆召回最多返回多少条。
+# Maximum number of memory rows returned by normal recall.
 recall_limit = 6
+
+# 单条记忆保存时的最大字符数，超出会截断。
+# Maximum characters stored for one memory item; longer content is truncated.
 item_max_chars = 1200
+
+# 记忆上下文注入 prompt 的总字符上限。
+# Maximum total characters used for memory context in prompts.
 prompt_max_chars = 4500
+
+# 短期记忆保留天数。
+# Retention days for short-term memories.
 retention_days = 21
+
+# 短期记忆表最多保留行数。
+# Maximum rows retained in the short-term memory table.
 max_rows = 30000
+
+# 是否启用长期记忆摘要。
+# Whether long-term memory summaries are enabled.
 long_term_enabled = true
+
+# 每多少轮对话尝试刷新一次长期记忆摘要。
+# Number of conversation rounds between long-term memory refresh attempts.
 long_term_every_rounds = 8
+
+# 刷新长期记忆时回看多少轮来源记忆。
+# Number of source rounds considered when refreshing long-term memory.
 long_term_source_rounds = 12
+
+# 长期记忆摘要的最大字符数。
+# Maximum characters for a long-term memory summary.
 long_term_summary_max_chars = 1600
+
+# 召回长期记忆摘要时的最大字符数。
+# Maximum characters recalled from the long-term memory summary.
 long_term_recall_max_chars = 700
+
+# 长期记忆保留天数。
+# Retention days for long-term memories.
 long_term_retention_days = 120
+
+# 长期记忆表最多保留行数。
+# Maximum rows retained in the long-term memory table.
 long_term_max_rows = 5000
+
+# 是否启用写入过滤，过滤空内容、太短内容和无信息助手确认。
+# Whether to enable write filtering for empty, too-short, or low-value acknowledgement memories.
 write_filter_enabled = true
+
+# 低于该字符数的普通文本通常不写入记忆；文件交付 token 等特殊内容除外。
+# Ordinary text shorter than this is usually not stored; special content such as file delivery tokens may still be stored.
 write_min_chars = 4
+
+# 是否启用基于规则的用户偏好抽取。
+# Whether to enable rule-based user preference extraction.
 enable_preference_extraction = true
+
+# 是否在规则未抽到偏好时启用 LLM 偏好抽取 fallback。
+# Whether to use LLM-based preference extraction as a fallback when rules extract nothing.
+llm_preference_fallback_enabled = true
+
+# LLM 偏好抽取写入前要求的最低置信度。
+# Minimum confidence required before persisting an LLM-extracted preference.
+llm_preference_min_confidence = 0.72
+
+# 送入 LLM 偏好抽取的用户文本最大字符数。
+# Maximum characters of user text sent to LLM preference extraction.
+llm_preference_max_chars = 900
+
+# 用户偏好召回最多返回多少条。
+# Maximum number of user preferences returned by recall.
 preference_recall_limit = 8
+
+# 是否启用近期相关性过滤/评分。
+# Whether to enable recent-memory relevance scoring/filtering.
 recent_relevance_enabled = true
+
+# 近期记忆相关性最低分，低于该值的候选会被过滤。
+# Minimum relevance score for recent-memory candidates.
 recent_relevance_min_score = 0.16
+
+# 是否在召回时过滤安全风险记忆，例如提示词注入类内容。
+# Whether to filter safety-risk memories during recall, such as prompt-injection-like content.
 safety_filter_enabled = true
+
+# 长期记忆刷新至少需要的新内容字符数，低于该值会跳过刷新。
+# Minimum new-content characters required before refreshing long-term memory.
 long_term_refresh_min_new_chars = 80
+
+# 长期记忆刷新时允许的最大重复比例，高于该值会跳过刷新。
+# Maximum repeat ratio allowed for long-term memory refresh; higher ratios skip refresh.
 long_term_refresh_max_repeat_ratio = 0.72
+
+# 是否在路由阶段注入记忆上下文。
+# Whether memory context is enabled for routing.
 route_memory_enabled = true
+
+# 路由阶段记忆上下文最大字符数。
+# Maximum memory-context characters used during routing.
 route_memory_max_chars = 1400
+
+# 是否在技能规划/调用阶段注入记忆上下文。
+# Whether memory context is enabled for skill planning/execution.
 skill_memory_enabled = true
+
+# 技能阶段记忆上下文最大字符数。
+# Maximum memory-context characters used for skill planning/execution.
 skill_memory_max_chars = 1800
+
+# 日程相关上下文是否包含长期记忆摘要。
+# Whether schedule-related context includes long-term memory summaries.
 schedule_memory_include_long_term = true
+
+# 日程相关上下文是否包含用户偏好。
+# Whether schedule-related context includes user preferences.
 schedule_memory_include_preferences = true
+
+# 日程相关记忆上下文最大字符数。
+# Maximum memory-context characters used for schedule-related flows.
 schedule_memory_max_chars = 1600
+
+# 图片相关上下文是否包含长期记忆摘要。
+# Whether image-related context includes long-term memory summaries.
 image_memory_include_long_term = true
+
+# 图片相关上下文是否包含用户偏好。
+# Whether image-related context includes user preferences.
 image_memory_include_preferences = true
+
+# 图片相关记忆上下文最大字符数。
+# Maximum memory-context characters used for image-related flows.
 image_memory_max_chars = 1400
+
+# 是否启用混合召回，同时使用全文检索和向量/语义候选。
+# Whether hybrid recall is enabled, combining full-text and vector/semantic candidates.
 hybrid_recall_enabled = true
+
+# 全文检索候选数量上限。
+# Maximum number of full-text-search candidates.
 fts_candidate_limit = 24
+
+# 向量/语义候选数量上限。
+# Maximum number of vector/semantic candidates.
 vector_candidate_limit = 24
+
+# 触发锚点召回数量上限。
+# Maximum number of trigger-anchor memories recalled.
 trigger_anchor_limit = 2
+
+# 事实卡片召回数量上限。
+# Maximum number of fact-card memories recalled.
 fact_card_limit = 3
+
+# 聊天回复阶段记忆预算字符数。
+# Memory budget in characters for chat replies.
 chat_memory_budget_chars = 1200
+
+# Agent 执行/规划阶段记忆预算字符数。
+# Memory budget in characters for agent planning/execution.
 agent_memory_budget_chars = 2200
+
+# 路由触发信息的记忆预算字符数。
+# Memory budget in characters for route-trigger context.
 route_trigger_budget_chars = 900
+
+# 记忆索引使用的 embedding 模型标识；local-hash-v1 表示本地哈希向量。
+# Embedding model identifier for memory indexing; local-hash-v1 means local hash vectors.
 embedding_model = "local-hash-v1"
+
+# embedding 批处理大小。
+# Batch size for embedding/indexing work.
 embedding_batch_size = 16
+
+# 启动时是否重建记忆索引。
+# Whether to rebuild memory indexes at startup.
 reindex_on_startup = false
 
+# 自然语言记忆规则维护在这个配置文件里，而不是 Rust 默认值里。
+# Natural-language memory rules live in this config file, not in Rust defaults.
+# Rust 默认值刻意使用空列表，这样部署方可以在这里维护各语言触发词而无需重新编译。
+# The Rust defaults intentionally use empty lists so deployments can maintain locale-specific trigger words here without rebuilding.
+#
+# 维护建议：新增语言时优先改这里；只放高置信短语，模糊表达交给可选 LLM fallback。
+# Maintenance guidance: add new languages here first; keep high-confidence phrases only and leave vague phrasing to the optional LLM fallback.
 [rules]
+
+# 不值得保存的助手短确认，例如“收到”“好的”。
+# Short assistant acknowledgements that are not worth storing, such as "ok" or "收到".
 assistant_ack_skip = ["ok", "okay", "done", "received", "收到", "好的", "明白了"]
+
+# 指令提示词；通常需要和 `salience_boost_markers` 同时命中才算长期指令。
+# Instruction markers; usually paired with `salience_boost_markers` to detect durable instructions.
 instruction_markers = ["请", "执行", "run ", "please "]
+
+# 提示词注入或提示词泄露相关信号；应保守维护，命中后会标记为安全风险记忆。
+# Prompt-injection or prompt-leak signals; keep conservative because matches are treated as safety-risk memories.
 injection_markers = [
     "ignore previous instructions",
     "ignore all previous rules",
@@ -55,6 +217,9 @@ injection_markers = [
     "忽略之前所有规则",
     "忽略系统规则",
 ]
+
+# 长期记忆显著性提示词，例如“以后”“记住”“from now on”。
+# Durable-memory salience hints, such as "以后", "记住", and "from now on".
 salience_boost_markers = [
     "以后",
     "下次",
@@ -68,8 +233,23 @@ salience_boost_markers = [
 ]
 
 [rules.preferences]
+
+# 规则抽取：用户偏好中文回复的表达。
+# Rule extraction phrases for a user preference to reply in Chinese.
 language_zh = ["以后都用中文", "请用中文", "中文回复", "默认中文", "都说中文"]
+
+# 规则抽取：用户偏好英文回复的表达。
+# Rule extraction phrases for a user preference to reply in English.
 language_en = ["以后都用英文", "请用英文", "英文回复", "reply in english", "speak english"]
+
+# 规则抽取：用户偏好简洁回复的表达。
+# Rule extraction phrases for a concise-response preference.
 style_concise = ["简洁", "简短", "精简", "concise", "brief"]
+
+# 规则抽取：用户偏好详细回复的表达。
+# Rule extraction phrases for a detailed-response preference.
 style_detailed = ["详细", "展开", "细一点", "detailed", "step by step"]
+
+# 规则抽取：用户偏好纯文本/不用 Markdown 的表达。
+# Rule extraction phrases for a plain-text / no-Markdown response preference.
 format_plain_text = ["不要markdown", "别用markdown", "纯文本", "plain text", "no markdown"]
