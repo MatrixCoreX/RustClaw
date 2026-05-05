@@ -1169,6 +1169,33 @@ fn can_fallback_to_initial_plan_after_repair_failure(
         && !has_discussion_followup_action(actions)
 }
 
+fn scalar_path_auto_locator_observation_plan(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<Vec<AgentAction>> {
+    let route = route_result?;
+    if route.needs_clarify
+        || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarPathOnly
+    {
+        return None;
+    }
+    let path = auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())?;
+    if !Path::new(path).is_file() {
+        return None;
+    }
+    Some(vec![AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: serde_json::json!({
+            "action": "path_batch_facts",
+            "paths": [path],
+            "include_missing": true,
+        }),
+    }])
+}
+
 fn normalize_planned_actions(
     state: &AppState,
     route_result: Option<&RouteResult>,
@@ -1183,6 +1210,8 @@ fn normalize_planned_actions(
         strip_terminal_discussion_for_direct_skill_passthrough(state, route_result, actions);
     let actions = normalize_system_basic_schema_aliases(actions);
     let actions = enforce_output_contract_tool_args(route_result, actions);
+    let actions =
+        rewrite_sqlite_table_listing_plan_to_db_basic(route_result, auto_locator_path, actions);
     let actions =
         rewrite_single_target_file_read_to_auto_locator(route_result, auto_locator_path, actions);
     let actions = rewrite_extract_field_alias_args(actions);
@@ -1280,7 +1309,12 @@ fn normalize_system_basic_args(mut args: Value) -> Value {
         }
         "path_batch_facts" => {
             if !obj.contains_key("paths") {
-                if let Some(paths) = obj.remove("targets").or_else(|| obj.remove("target_paths")) {
+                if let Some(paths) = obj
+                    .remove("targets")
+                    .or_else(|| obj.remove("target_paths"))
+                    .or_else(|| obj.remove("path_list"))
+                    .or_else(|| obj.remove("path_array"))
+                {
                     obj.insert("paths".to_string(), paths);
                 } else if let Some(path) = obj.remove("path") {
                     obj.insert("paths".to_string(), Value::Array(vec![path]));
@@ -1372,9 +1406,6 @@ fn enforce_output_contract_tool_args(
     let Some(route) = route_result else {
         return actions;
     };
-    if route.output_contract.semantic_kind != crate::OutputSemanticKind::HiddenEntriesCheck {
-        return actions;
-    }
 
     actions
         .into_iter()
@@ -1387,6 +1418,11 @@ fn enforce_output_contract_tool_args(
                     let Some(obj) = args.as_object_mut() else {
                         return action;
                     };
+                    if route.output_contract.semantic_kind
+                        != crate::OutputSemanticKind::HiddenEntriesCheck
+                    {
+                        return action;
+                    }
                     let action_name = obj
                         .get("action")
                         .and_then(Value::as_str)
@@ -1405,11 +1441,78 @@ fn enforce_output_contract_tool_args(
                         );
                     }
                 }
+                AgentAction::CallSkill { skill, args }
+                | AgentAction::CallTool { tool: skill, args }
+                    if skill.eq_ignore_ascii_case("fs_search") =>
+                {
+                    enforce_fs_search_path_output_args(route, args);
+                }
                 _ => {}
             }
             action
         })
         .collect()
+}
+
+fn route_prefers_fs_search_name_result(route: &RouteResult) -> bool {
+    !route.output_contract.delivery_required
+        && matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
+        )
+        && matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ScalarPathOnly | crate::OutputSemanticKind::FileNames
+        )
+}
+
+fn enforce_fs_search_path_output_args(route: &RouteResult, args: &mut Value) -> bool {
+    if !route_prefers_fs_search_name_result(route) {
+        return false;
+    }
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    if obj
+        .get("root")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        if let Some(path) = obj
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .filter(|value| Path::new(value).is_dir())
+            .map(ToString::to_string)
+        {
+            obj.insert("root".to_string(), Value::String(path));
+            changed = true;
+        }
+    }
+    let has_action = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty());
+    if !has_action {
+        if let Some(query) = obj
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+        {
+            obj.insert("action".to_string(), Value::String("find_name".to_string()));
+            obj.entry("pattern".to_string())
+                .or_insert_with(|| Value::String(query));
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn action_is_workspace_summary_evidence(action: &AgentAction) -> bool {
@@ -1924,6 +2027,102 @@ fn rewrite_extract_field_alias_args(actions: Vec<AgentAction>) -> Vec<AgentActio
     rewritten
 }
 
+fn route_requests_sqlite_table_listing(route: &RouteResult) -> bool {
+    matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::SqliteTableListing
+            | crate::OutputSemanticKind::SqliteTableNamesOnly
+    )
+}
+
+fn sqlite_locator_path_for_route(
+    route: &RouteResult,
+    auto_locator_path: Option<&str>,
+) -> Option<String> {
+    let hint = route.output_contract.locator_hint.trim();
+    [
+        auto_locator_path.map(str::trim),
+        (!hint.is_empty()).then_some(hint),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|path| {
+        let lower = path.to_ascii_lowercase();
+        lower.ends_with(".sqlite") || lower.ends_with(".db")
+    })
+    .map(ToString::to_string)
+}
+
+fn action_should_be_sqlite_table_query(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            let skill = skill.trim().to_ascii_lowercase();
+            if skill == "db_basic" {
+                return false;
+            }
+            if skill == "read_file" || skill == "run_cmd" {
+                return true;
+            }
+            skill == "system_basic"
+                && args
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .map(|action| {
+                        matches!(
+                            action.trim().to_ascii_lowercase().as_str(),
+                            "read_range"
+                                | "read"
+                                | "read_file"
+                                | "run_cmd"
+                                | "sqlite_table_names"
+                                | "sqlite_tables"
+                                | "list_tables"
+                        )
+                    })
+                    .unwrap_or(false)
+        }
+        AgentAction::Think { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::SynthesizeAnswer { .. } => false,
+    }
+}
+
+fn rewrite_sqlite_table_listing_plan_to_db_basic(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if !route_requests_sqlite_table_listing(route) {
+        return actions;
+    }
+    let Some(db_path) = sqlite_locator_path_for_route(route, auto_locator_path) else {
+        return actions;
+    };
+    let mut rewritten = actions;
+    let mut changed = false;
+    for action in rewritten.iter_mut() {
+        if !action_should_be_sqlite_table_query(action) {
+            continue;
+        }
+        *action = AgentAction::CallSkill {
+            skill: "db_basic".to_string(),
+            args: serde_json::json!({
+                "action": "sqlite_query",
+                "db_path": db_path,
+                "sql": "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
+            }),
+        };
+        changed = true;
+    }
+    if changed {
+        info!("plan_rewrite_sqlite_table_listing_to_db_basic");
+    }
+    rewritten
+}
+
 /// 检测 `respond.content` 是否是裸的 `{{last_output}}` / `{{last_output.xxx}}` /
 /// `{{last_output[xxx]}}` 之类纯模板占位符。
 ///
@@ -2424,8 +2623,19 @@ pub(super) async fn plan_round_actions(
         loop_state.round_no,
         crate::truncate_for_log(&plan_raw)
     );
-    let initial_actions = parse_single_plan_actions(&plan_raw, state, task)
-        .await
+    let parsed_actions = parse_single_plan_actions(&plan_raw, state, task).await;
+    let initial_actions = parsed_actions
+        .or_else(|| {
+            let fallback =
+                scalar_path_auto_locator_observation_plan(route_result, auto_locator_path);
+            if fallback.is_some() {
+                warn!(
+                    "plan_parse_failed_using_auto_locator_observation_plan task_id={} round={}",
+                    task.task_id, loop_state.round_no
+                );
+            }
+            fallback
+        })
         .map(|actions| {
             normalize_planned_actions(
                 state,
@@ -2642,12 +2852,14 @@ mod tests {
 
     use super::{
         build_lightweight_tool_spec, can_fallback_to_initial_plan_after_repair_failure,
-        classify_planning_prompt_class, has_pre_observation_structured_output_shape,
+        classify_planning_prompt_class, enforce_output_contract_tool_args,
+        has_pre_observation_structured_output_shape,
         inject_synthesize_answer_for_bare_placeholder_respond, is_bare_last_output_placeholder,
         normalize_planned_actions, normalize_system_basic_schema_aliases, plan_repair_reason,
         rewrite_extract_field_alias_args, rewrite_pre_observation_concrete_respond_to_placeholder,
+        rewrite_sqlite_table_listing_plan_to_db_basic,
         rewrite_terminal_placeholder_respond_to_synthesize_answer, round1_prompt_spec_for_class,
-        should_force_actionable_plan_repair,
+        scalar_path_auto_locator_observation_plan, should_force_actionable_plan_repair,
         strip_terminal_discussion_for_direct_skill_passthrough,
         strip_terminal_discussion_for_observed_finalize, LoopState, PlanningPromptClass,
     };
@@ -2747,6 +2959,93 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract::default(),
+        }
+    }
+
+    #[test]
+    fn sqlite_table_listing_route_rewrites_text_read_plan_to_db_basic_query() {
+        let mut route = base_route_result();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableListing;
+        route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: json!({
+                    "action": "read_range",
+                    "path": "/tmp/app.sqlite",
+                    "command": "sqlite3 /tmp/app.sqlite \"SELECT name FROM sqlite_master WHERE type='table';\""
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let rewritten = rewrite_sqlite_table_listing_plan_to_db_basic(
+            Some(&route),
+            Some("/tmp/app.sqlite"),
+            actions,
+        );
+
+        match &rewritten[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "db_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("sqlite_query")
+                );
+                assert_eq!(
+                    args.get("db_path").and_then(|value| value.as_str()),
+                    Some("/tmp/app.sqlite")
+                );
+                assert!(args
+                    .get("sql")
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|sql| sql.contains("sqlite_master")));
+            }
+            other => panic!("expected db_basic action, got {other:?}"),
+        }
+        assert!(matches!(rewritten[1], AgentAction::SynthesizeAnswer { .. }));
+        assert!(matches!(rewritten[2], AgentAction::Respond { .. }));
+    }
+
+    #[test]
+    fn sqlite_table_names_route_rewrites_system_basic_action_alias_to_db_basic_query() {
+        let mut route = base_route_result();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableNamesOnly;
+        route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "sqlite_table_names",
+                "path": "/tmp/app.sqlite"
+            }),
+        }];
+
+        let rewritten = rewrite_sqlite_table_listing_plan_to_db_basic(Some(&route), None, actions);
+
+        match &rewritten[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "db_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("sqlite_query")
+                );
+                assert_eq!(
+                    args.get("db_path").and_then(|value| value.as_str()),
+                    Some("/tmp/app.sqlite")
+                );
+            }
+            other => panic!("expected db_basic action, got {other:?}"),
         }
     }
 
@@ -3673,6 +3972,123 @@ mod tests {
                 assert!(args.get("path").is_none());
             }
             other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn system_basic_path_batch_facts_path_list_alias_becomes_paths() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "path_batch_facts",
+                "path_list": ["Cargo.toml", "Cargo.lock"],
+            }),
+        }];
+
+        let normalized = normalize_system_basic_schema_aliases(actions);
+        assert_eq!(normalized.len(), 1);
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("path_batch_facts")
+                );
+                assert_eq!(
+                    args.get("paths"),
+                    Some(&json!(["Cargo.toml", "Cargo.lock"]))
+                );
+                assert!(args.get("path_list").is_none());
+            }
+            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scalar_path_auto_locator_file_builds_observation_plan() {
+        let root = TempDirGuard::new("scalar_auto_locator");
+        let report = root.path.join("Report.MD");
+        fs::write(&report, "hello").expect("write report");
+        let report_path = report.display().to_string();
+        let route = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "只输出匹配文件路径".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ScalarPathOnly,
+                locator_hint: "report.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+
+        let actions =
+            scalar_path_auto_locator_observation_plan(Some(&route), Some(&report_path)).unwrap();
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("path_batch_facts")
+                );
+                assert_eq!(args.get("paths"), Some(&json!([report_path])));
+            }
+            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scalar_path_route_treats_fs_search_query_as_name_pattern_when_action_missing() {
+        let root = TempDirGuard::new("fs_search_name_contract");
+        let root_path = root.path.display().to_string();
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Scalar);
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+        route.output_contract.delivery_required = false;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "fs_search".to_string(),
+            args: json!({
+                "path": root_path,
+                "query": "abcd",
+            }),
+        }];
+
+        let normalized = enforce_output_contract_tool_args(Some(&route), actions);
+        assert_eq!(normalized.len(), 1);
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "fs_search");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("find_name")
+                );
+                assert_eq!(
+                    args.get("pattern").and_then(|value| value.as_str()),
+                    Some("abcd")
+                );
+                assert_eq!(
+                    args.get("root").and_then(|value| value.as_str()),
+                    Some(root_path.as_str())
+                );
+            }
+            other => panic!("expected fs_search action, got {other:?}"),
         }
     }
 

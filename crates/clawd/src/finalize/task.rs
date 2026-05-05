@@ -57,21 +57,13 @@ fn journal_has_missing_file_search_evidence(
         .into_iter()
         .flat_map(|journal| journal.step_results.iter().rev())
         .any(|step| {
-            if step.skill != "fs_search" {
-                return false;
-            }
-            let Some(output) = step.output_excerpt.as_deref() else {
-                return false;
-            };
-            let Ok(value) = serde_json::from_str::<Value>(output) else {
-                return false;
-            };
-            value.get("action").and_then(|v| v.as_str()) == Some("find_name")
-                && value.get("count").and_then(|v| v.as_i64()) == Some(0)
-                && value
-                    .get("results")
-                    .and_then(|v| v.as_array())
-                    .is_some_and(|results| results.is_empty())
+            step.output_excerpt
+                .as_deref()
+                .is_some_and(crate::finalize::loop_reply::output_excerpt_has_missing_file_evidence)
+                || step
+                    .error_excerpt
+                    .as_deref()
+                    .is_some_and(text_looks_like_missing_file_target)
         })
 }
 
@@ -82,20 +74,121 @@ fn has_any_delivery_file_token(text: &str, messages: &[String]) -> bool {
             .any(|message| !crate::extract_delivery_file_tokens(message).is_empty())
 }
 
-fn should_use_missing_file_delivery_reply(
-    route_result: &crate::RouteResult,
-    answer: &crate::AskReply,
-) -> bool {
-    let file_delivery_contract = route_result.wants_file_delivery
+fn route_has_file_delivery_contract(route_result: &crate::RouteResult) -> bool {
+    route_result.wants_file_delivery
         || route_result.output_contract.delivery_required
         || matches!(
             route_result.output_contract.response_shape,
             crate::OutputResponseShape::FileToken
-        );
-    file_delivery_contract
+        )
+}
+
+fn should_use_missing_file_delivery_reply(
+    route_result: &crate::RouteResult,
+    answer: &crate::AskReply,
+) -> bool {
+    route_has_file_delivery_contract(route_result)
         && !answer.should_fail_task
         && !has_any_delivery_file_token(&answer.text, &answer.messages)
         && journal_has_missing_file_search_evidence(answer.task_journal.as_ref())
+}
+
+fn resume_context_body(value: &Value) -> &Value {
+    value.get("resume_context").unwrap_or(value)
+}
+
+fn text_looks_like_missing_file_target(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("no such file or directory")
+        || lower.contains("__rc_read_file_not_found__")
+        || lower.contains("file not found")
+        || lower.contains("doesn't exist")
+        || lower.contains("does not exist")
+        || lower.contains("cannot access")
+}
+
+fn resume_context_has_remaining_actions(resume_ctx: &Value) -> bool {
+    resume_context_body(resume_ctx)
+        .get("remaining_actions")
+        .and_then(|value| value.as_array())
+        .is_some_and(|actions| !actions.is_empty())
+}
+
+fn resume_context_failed_step_texts<'a>(resume_ctx: &'a Value) -> Vec<&'a str> {
+    let body = resume_context_body(resume_ctx);
+    let mut texts = Vec::new();
+    if let Some(error) = body
+        .get("failed_step")
+        .and_then(|step| step.get("error"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        texts.push(error);
+    }
+    if let Some(messages) = body
+        .get("completed_messages")
+        .and_then(|value| value.as_array())
+    {
+        texts.extend(
+            messages
+                .iter()
+                .filter_map(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
+        );
+    }
+    texts
+}
+
+fn resume_failure_is_missing_file_delivery_result(
+    route_result: &crate::RouteResult,
+    user_error: &str,
+    resume_ctx: &Value,
+) -> bool {
+    route_has_file_delivery_contract(route_result)
+        && !resume_context_has_remaining_actions(resume_ctx)
+        && (text_looks_like_missing_file_target(user_error)
+            || resume_context_failed_step_texts(resume_ctx)
+                .iter()
+                .any(|text| text_looks_like_missing_file_target(text)))
+}
+
+fn resume_context_execution_summary_messages(
+    resume_ctx: &Value,
+    prefer_english: bool,
+) -> Vec<String> {
+    let body = resume_context_body(resume_ctx);
+    let Some(failed_step) = body.get("failed_step") else {
+        return Vec::new();
+    };
+    let action = failed_step
+        .get("action")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("step");
+    let error = failed_step
+        .get("error")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Execution failed.");
+    let prefix = if prefer_english {
+        crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN
+    } else {
+        crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX
+    };
+    let label = if prefer_english { "Error" } else { "错误" };
+    let line = if prefer_english {
+        format!("1. Called `{action}`")
+    } else {
+        format!("1. 调用 `{action}`")
+    };
+    vec![format!(
+        "{prefix}\n{line}\n   {label}：\n```text\n{}\n```",
+        crate::truncate_for_agent_trace(error).replace("```", "'''")
+    )]
 }
 
 async fn missing_file_delivery_reply_text(
@@ -559,21 +652,43 @@ pub(crate) async fn finalize_ask_result(
                             .collect(),
                     )
                 } else if let Some(reply_text) = missing_file_delivery_reply {
-                    (reply_text.clone(), vec![reply_text])
+                    let mut messages = answer
+                        .messages
+                        .into_iter()
+                        .map(|message| message.trim().to_string())
+                        .filter(|message| !message.is_empty())
+                        .filter(|message| crate::finalize::is_execution_summary_message(message))
+                        .collect::<Vec<_>>();
+                    messages.push(reply_text.clone());
+                    (reply_text, messages)
                 } else {
-                    crate::intercept_response_payload_for_delivery(
-                        state,
-                        // Delivery interception must stay grounded in the original user request.
-                        // The execution prompt may contain injected runtime hints such as
-                        // [AUTO_LOCATOR], which are useful for planning/execution but must not be
-                        // reinterpreted as fresh user-provided locator input during final delivery
-                        // normalization.
-                        prompt,
-                        route_result.wants_file_delivery,
-                        &route_result.output_contract,
-                        answer.text,
-                        answer.messages,
-                    )
+                    let original_messages = answer.messages;
+                    let execution_summaries = original_messages
+                        .iter()
+                        .map(|message| message.trim().to_string())
+                        .filter(|message| !message.is_empty())
+                        .filter(|message| crate::finalize::is_execution_summary_message(message))
+                        .collect::<Vec<_>>();
+                    let (answer_text, mut answer_messages) =
+                        crate::intercept_response_payload_for_delivery(
+                            state,
+                            // Delivery interception must stay grounded in the original user request.
+                            // The execution prompt may contain injected runtime hints such as
+                            // [AUTO_LOCATOR], which are useful for planning/execution but must not be
+                            // reinterpreted as fresh user-provided locator input during final delivery
+                            // normalization.
+                            prompt,
+                            route_result.wants_file_delivery,
+                            &route_result.output_contract,
+                            answer.text,
+                            original_messages,
+                        );
+                    for summary in execution_summaries.into_iter().rev() {
+                        if !answer_messages.iter().any(|message| message == &summary) {
+                            answer_messages.insert(0, summary);
+                        }
+                    }
+                    (answer_text, answer_messages)
                 };
             journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
             journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
@@ -685,6 +800,73 @@ pub(crate) async fn finalize_ask_result(
                     .get("resume_context")
                     .cloned()
                     .unwrap_or(resume_ctx);
+                let language_hint =
+                    crate::language_policy::task_response_language_hint(state, task, prompt);
+                let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
+                if resume_failure_is_missing_file_delivery_result(
+                    route_result,
+                    &user_error,
+                    &resume_payload,
+                ) {
+                    let mut answer_messages =
+                        resume_context_execution_summary_messages(&resume_payload, prefer_english);
+                    answer_messages.push(user_error.clone());
+                    journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
+                    journal
+                        .record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
+                    journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
+                    journal.record_final_answer(&user_error);
+                    crate::finalize::ensure_task_metrics(
+                        &mut journal,
+                        &user_error,
+                        &answer_messages,
+                    );
+                    journal
+                        .record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+                    finalize_ask_success(
+                        state,
+                        task,
+                        payload,
+                        prompt,
+                        &user_error,
+                        &answer_messages,
+                        false,
+                        route_result.should_refresh_long_term_memory,
+                        &route_result.agent_display_name_hint,
+                        &journal,
+                    )
+                    .await?;
+                    crate::conversation_state::update_active_session_from_ask_outcome(
+                        state,
+                        task,
+                        Some(payload),
+                        prompt,
+                        route_result,
+                        turn_analysis,
+                        resolved_prompt_for_execution,
+                        &user_error,
+                        &answer_messages,
+                        false,
+                        fuzzy_locator_suggestions,
+                        &journal,
+                    );
+                    let completed_transition = crate::log_ask_transition(
+                        state,
+                        &task.task_id,
+                        Some(crate::AskState::Finalizing),
+                        crate::AskState::Completed,
+                        "finalize_missing_file_delivery_resume_success",
+                        None,
+                    );
+                    journal.transitions.push(completed_transition);
+                    info!(
+                        "task_journal_summary task_id={} kind=ask phase=missing_file_delivery_resume_success {}",
+                        task.task_id,
+                        journal.to_log_json()
+                    );
+                    state.clear_task_llm_call_count(&task.task_id);
+                    return Ok(());
+                }
                 journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
                 journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
                 journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
@@ -790,6 +972,57 @@ mod tests {
     }
 
     #[test]
+    fn journal_missing_file_search_evidence_detects_path_batch_facts() {
+        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                skill: "system_basic".to_string(),
+                output_excerpt: Some(
+                    json!({
+                        "action": "path_batch_facts",
+                        "count": 1,
+                        "facts": [{
+                            "exists": false,
+                            "path": "/tmp/missing.txt",
+                            "error": "not found"
+                        }],
+                        "include_missing": true
+                    })
+                    .to_string(),
+                ),
+                ..Default::default()
+            });
+        assert!(journal_has_missing_file_search_evidence(Some(&journal)));
+    }
+
+    #[test]
+    fn journal_missing_file_search_evidence_detects_not_found_probe() {
+        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                skill: "run_cmd".to_string(),
+                output_excerpt: Some("NOT_FOUND\n".to_string()),
+                ..Default::default()
+            });
+        assert!(journal_has_missing_file_search_evidence(Some(&journal)));
+    }
+
+    #[test]
+    fn journal_missing_file_search_evidence_detects_read_file_error_marker() {
+        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                skill: "read_file".to_string(),
+                error_excerpt: Some("__RC_READ_FILE_NOT_FOUND__:/tmp/missing.txt".to_string()),
+                ..Default::default()
+            });
+        assert!(journal_has_missing_file_search_evidence(Some(&journal)));
+    }
+
+    #[test]
     fn missing_file_delivery_reply_uses_structured_search_evidence() {
         let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
         journal
@@ -881,5 +1114,60 @@ mod tests {
         assert!(super::should_use_missing_file_delivery_reply(
             &route, &answer
         ));
+    }
+
+    #[test]
+    fn resume_failure_missing_file_delivery_is_success_result() {
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route.output_contract.delivery_required = true;
+        let resume_ctx = json!({
+            "failed_step": {
+                "action": "skill(run_cmd)",
+                "error": "ls: cannot access '/tmp/missing.txt': No such file or directory"
+            },
+            "remaining_actions": []
+        });
+
+        assert!(super::resume_failure_is_missing_file_delivery_result(
+            &route,
+            "I couldn't send the requested file because it doesn't exist at the path `/tmp/missing.txt`.",
+            &resume_ctx
+        ));
+    }
+
+    #[test]
+    fn resume_context_execution_summary_uses_failed_step() {
+        let resume_ctx = json!({
+            "failed_step": {
+                "action": "skill(run_cmd)",
+                "error": "ls: cannot access '/tmp/missing.txt': No such file or directory"
+            },
+            "remaining_actions": []
+        });
+
+        let messages = super::resume_context_execution_summary_messages(&resume_ctx, false);
+
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].contains("**执行过程**"));
+        assert!(messages[0].contains("skill(run_cmd)"));
+        assert!(messages[0].contains("No such file or directory"));
     }
 }

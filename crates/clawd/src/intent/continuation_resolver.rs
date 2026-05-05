@@ -202,6 +202,9 @@ pub(crate) fn surface_has_structural_clarify_target_fill(
     if surface.token_count == 0 {
         return false;
     }
+    if surface.has_deictic_reference() && !surface.has_explicit_path_or_url() {
+        return false;
+    }
     matches!(
         surface.inline_json_shape,
         Some(crate::intent::surface_signals::InlineJsonShape::WholeValue)
@@ -419,6 +422,34 @@ mod tests {
             }
             other => panic!("expected clarify-state locator reply rewrite, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn active_clarify_state_does_not_treat_deictic_new_request_as_target_fill() {
+        let clarify_state = crate::clarify_state::ClarifyState {
+            missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
+            pending_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
+            candidate_targets: Vec::new(),
+            delivery_required: true,
+            output_shape: Some(crate::OutputResponseShape::FileToken.as_str().to_string()),
+            semantic_kind: None,
+            source_request: "把那个 release checklist 发给我".to_string(),
+            source_task_id: "task-1".to_string(),
+            updated_at_ts: 1,
+            expires_at_ts: 2,
+        };
+        let out = resolve_clarify_followup(
+            "读一下那个 README 开头 3 行",
+            Some("<none>"),
+            None,
+            Some(&clarify_state),
+            None,
+        );
+        assert!(matches!(out, ClarifyFollowupResolution::None));
+        assert!(!prompt_can_fill_active_clarify_target(
+            "读一下那个 README 开头 3 行",
+            Some(&clarify_state),
+        ));
     }
 
     #[test]

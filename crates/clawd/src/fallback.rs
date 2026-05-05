@@ -416,6 +416,25 @@ async fn compose_user_response_from_contract_impl(
                     None,
                     &contract.language_hint,
                 )
+            } else if !user_response_contract_shape_satisfied(contract, trimmed) {
+                tracing::warn!(
+                    task_id = %task.task_id,
+                    response_shape = %contract.response_shape,
+                    fallback_source = fallback_source.as_metric_label(),
+                    reply_chars = trimmed.chars().count(),
+                    reply_lines = trimmed.lines().filter(|line| !line.trim().is_empty()).count(),
+                    "user_response_composer_invalid_shape"
+                );
+                if let Some(default_text) = default_text {
+                    return default_text.to_string();
+                }
+                render_clarify_fallback_with_language_hint(
+                    state,
+                    &task.task_id,
+                    fallback_source,
+                    None,
+                    &contract.language_hint,
+                )
             } else {
                 trimmed.to_string()
             }
@@ -438,6 +457,140 @@ async fn compose_user_response_from_contract_impl(
                 &contract.language_hint,
             )
         }
+    }
+}
+
+fn user_response_contract_shape_satisfied(contract: &UserResponseContract, reply: &str) -> bool {
+    let trimmed = reply.trim();
+    if trimmed.is_empty() || trimmed.starts_with('{') || trimmed.starts_with('[') {
+        return false;
+    }
+    if trimmed.contains("```") {
+        return false;
+    }
+    if reply_makes_false_local_filesystem_access_claim(trimmed) {
+        return false;
+    }
+    match contract.response_shape.trim() {
+        "one_short_clarification" => {
+            concise_single_line_reply_satisfied(trimmed, 160)
+                && clarification_reply_is_grounded_in_request(contract, trimmed)
+        }
+        "one_short_confirmation_question" => concise_single_line_reply_satisfied(trimmed, 220),
+        _ => true,
+    }
+}
+
+fn reply_makes_false_local_filesystem_access_claim(reply: &str) -> bool {
+    let lower = reply.to_ascii_lowercase();
+    (reply.contains("没有直接访问") && reply.contains("本地文件系统"))
+        || (reply.contains("无法访问") && reply.contains("本地文件系统"))
+        || (lower.contains("cannot access") && lower.contains("local filesystem"))
+        || (lower.contains("can't access") && lower.contains("local filesystem"))
+        || (lower.contains("no access") && lower.contains("local filesystem"))
+}
+
+fn concise_single_line_reply_satisfied(reply: &str, max_chars: usize) -> bool {
+    let nonempty_lines = reply.lines().filter(|line| !line.trim().is_empty()).count();
+    nonempty_lines <= 1 && reply.chars().count() <= max_chars
+}
+
+fn clarification_reply_is_grounded_in_request(
+    contract: &UserResponseContract,
+    reply: &str,
+) -> bool {
+    let salient = salient_request_tokens(&contract.original_user_request);
+    if salient.is_empty() {
+        return true;
+    }
+    let reply_lower = reply.to_ascii_lowercase();
+    salient.iter().any(|token| {
+        if token.is_ascii() {
+            reply_lower.contains(&token.to_ascii_lowercase())
+        } else {
+            reply.contains(token)
+        }
+    }) || (request_uses_deictic_reference(&contract.original_user_request)
+        && clarification_reply_requests_missing_target(reply))
+}
+
+fn request_uses_deictic_reference(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .any(|token| matches!(token, "it" | "this" | "that" | "those" | "these"))
+        || ["它", "这个", "那个", "这份", "那份", "这里", "那里"]
+            .iter()
+            .any(|marker| text.contains(marker))
+}
+
+fn clarification_reply_requests_missing_target(reply: &str) -> bool {
+    let trimmed = reply.trim();
+    let asks_for_input = trimmed.contains('？')
+        || trimmed.contains('?')
+        || ["请提供", "请指定", "发我", "告诉我", "补充"]
+            .iter()
+            .any(|marker| trimmed.contains(marker));
+    let mentions_target = [
+        "哪个",
+        "哪一个",
+        "哪份",
+        "目标",
+        "文件",
+        "路径",
+        "目录",
+        "内容",
+        "日志",
+        "数据库",
+        "sqlite",
+        "压缩包",
+        "链接",
+    ]
+    .iter()
+    .any(|marker| trimmed.contains(marker));
+    asks_for_input && mentions_target
+}
+
+fn salient_request_tokens(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for token in text.split(|ch: char| !ch.is_ascii_alphanumeric()) {
+        if token.chars().count() >= 3 && token.chars().any(|ch| ch.is_ascii_alphabetic()) {
+            push_unique_token(&mut out, token.to_ascii_lowercase());
+        }
+    }
+    let mut cjk_run = String::new();
+    for ch in text.chars() {
+        if ('\u{4E00}'..='\u{9FFF}').contains(&ch) {
+            cjk_run.push(ch);
+        } else {
+            push_cjk_ngrams(&mut out, &cjk_run);
+            cjk_run.clear();
+        }
+    }
+    push_cjk_ngrams(&mut out, &cjk_run);
+    out
+}
+
+fn push_cjk_ngrams(out: &mut Vec<String>, run: &str) {
+    let chars = run.chars().collect::<Vec<_>>();
+    if chars.len() < 2 {
+        return;
+    }
+    for window in chars.windows(2) {
+        let token = window.iter().collect::<String>();
+        if matches!(token.as_str(), "那个" | "这个" | "那份" | "这份" | "一下") {
+            continue;
+        }
+        push_unique_token(out, token);
+        if out.len() >= 16 {
+            break;
+        }
+    }
+}
+
+fn push_unique_token(out: &mut Vec<String>, token: String) {
+    if !token.trim().is_empty() && !out.iter().any(|existing| existing == &token) {
+        out.push(token);
     }
 }
 
@@ -578,6 +731,23 @@ pub(crate) const LEGACY_SUPER_FALLBACK_DEFAULT_ZH: &str =
 ///
 /// `context_hint` 仅用于 `ExecutionFailedPartial` / `VerifyRejected` 等带 `{context_hint}`
 /// 占位符的文案；其它 source 传 `None` 即可。
+pub(crate) fn clarify_fallback_text_with_language_hint(
+    state: &AppState,
+    source: ClarifyFallbackSource,
+    context_hint: Option<&str>,
+    language_hint: &str,
+) -> String {
+    let hint = context_hint.unwrap_or("").trim();
+    crate::bilingual_t_with_default_vars(
+        state,
+        source.i18n_key(),
+        source.default_zh(),
+        source.default_en(),
+        fallback_prefers_english_for_language_hint(state, language_hint),
+        &[("context_hint", hint)],
+    )
+}
+
 pub(crate) fn render_clarify_fallback_with_language_hint(
     state: &AppState,
     task_id: &str,
@@ -592,14 +762,7 @@ pub(crate) fn render_clarify_fallback_with_language_hint(
         context_hint = %hint,
         "clarify_fallback_emitted"
     );
-    crate::bilingual_t_with_default_vars(
-        state,
-        source.i18n_key(),
-        source.default_zh(),
-        source.default_en(),
-        fallback_prefers_english_for_language_hint(state, language_hint),
-        &[("context_hint", hint)],
-    )
+    clarify_fallback_text_with_language_hint(state, source, context_hint, language_hint)
 }
 
 fn fallback_prefers_english_for_language_hint(state: &AppState, language_hint: &str) -> bool {
@@ -779,6 +942,83 @@ mod tests {
         assert!(block.contains("\"original_user_request\": \"看一下这个\""));
         assert!(block.contains("\"language_hint\": \"zh-CN\""));
         assert!(block.contains("candidate_context"));
+    }
+
+    #[test]
+    fn one_short_clarification_shape_rejects_multiline_composer_output() {
+        let contract = UserResponseContract {
+            response_shape: "one_short_clarification".to_string(),
+            ..UserResponseContract::default()
+        };
+
+        assert!(user_response_contract_shape_satisfied(
+            &contract,
+            "请提供这个配置文件的完整路径。"
+        ));
+        assert!(!user_response_contract_shape_satisfied(
+            &contract,
+            "我会遵循当前规则来回答。\n\n请问你接下来希望我处理什么具体任务？"
+        ));
+    }
+
+    #[test]
+    fn one_short_clarification_shape_rejects_overlong_composer_output() {
+        let contract = UserResponseContract {
+            response_shape: "one_short_clarification".to_string(),
+            ..UserResponseContract::default()
+        };
+        let long_reply = "请补充目标。".repeat(30);
+
+        assert!(!user_response_contract_shape_satisfied(
+            &contract,
+            &long_reply
+        ));
+    }
+
+    #[test]
+    fn one_short_clarification_shape_rejects_generic_meta_reply() {
+        let contract = UserResponseContract {
+            response_shape: "one_short_clarification".to_string(),
+            original_user_request: "查一下那个 sqlite 里有哪些表".to_string(),
+            ..UserResponseContract::default()
+        };
+
+        assert!(user_response_contract_shape_satisfied(
+            &contract,
+            "请提供 sqlite 数据库的完整路径。"
+        ));
+        assert!(!user_response_contract_shape_satisfied(
+            &contract,
+            "我已准备好处理后续任务，请告诉我接下来需要我做什么。"
+        ));
+    }
+
+    #[test]
+    fn one_short_clarification_shape_rejects_false_local_filesystem_access_claim() {
+        let contract = UserResponseContract {
+            response_shape: "one_short_clarification".to_string(),
+            original_user_request: "读一下那个 README 开头 3 行".to_string(),
+            ..UserResponseContract::default()
+        };
+
+        assert!(!user_response_contract_shape_satisfied(
+            &contract,
+            "请问你指的是哪个目录下的 README 文件？我目前没有直接访问你本地文件系统的权限。"
+        ));
+    }
+
+    #[test]
+    fn one_short_clarification_shape_accepts_deictic_missing_target_question() {
+        let contract = UserResponseContract {
+            response_shape: "one_short_clarification".to_string(),
+            original_user_request: "把它发给我".to_string(),
+            ..UserResponseContract::default()
+        };
+
+        assert!(user_response_contract_shape_satisfied(
+            &contract,
+            "请问您想发送哪个文件或内容？请提供具体的文件名或路径。"
+        ));
     }
 
     #[test]
