@@ -21,7 +21,7 @@ Current repository highlights:
 
 ## Planner-First Architecture
 
-RustClaw's main natural-language path is moving toward a planner-first single-loop design. The goal is to keep one authoritative runtime path for normal requests: bind the turn to session state, run a single intent-normalizer LLM for routing signals (including when to clarify), then either chat once or enter the planner/runtime loop for tools, skills, optional grounded synthesis, and response—finishing with post-route guards for safety and contract checks.
+RustClaw's main natural-language path is moving toward a planner-first single-loop design. The goal is to keep one authoritative runtime path for normal requests: bind the turn to session state, run a single intent-normalizer LLM for routing signals (including when to clarify), then either chat once or enter the planner/runtime loop for tools, skills, optional grounded synthesis, and response. Post-route policy runs before dispatch; final delivery and output-contract guards run before the result is saved.
 
 ### Runtime Flow
 
@@ -30,43 +30,49 @@ flowchart TD
     A[User input] --> B[Channel / API ingress]
     B --> B1[Task queue<br/>POST /v1/tasks]
     B1 --> B2[worker_once / process task]
-    B2 --> C[Session binding]
-    C --> D[Context bundle + local surface hints]
+    B2 --> C[Session snapshot + local surface hints]
+    C --> D[Binding / resume / active-task context]
     D --> E[Intent normalizer LLM]
-    E --> F{Ask gate}
+    E --> E2[Post-route policy<br/>locator + contract guards]
+    E2 --> F{Ask gate}
     F -->|AskClarify| G[Clarify question]
-    F -->|chat / execute| H[Planner / runtime loop]
-    H --> I[Read state]
-    H --> J[Build working context]
-    H --> K[Read durable memory]
-    H --> L{Planner action}
+    F -->|chat| CH[Build chat context + prompt]
+    CH --> CR[Chat response LLM]
+    F -->|execute| H[Build execution context<br/>state + memory + attachments]
+    H --> I[Planner / runtime loop]
+    I --> L{Planner action}
     L -->|respond| M[Respond]
     L -->|synthesize_answer| SS[Grounded synthesis LLM]
     L -->|tool| N[Tool execution]
     L -->|call_skill| N1[run_skill_with_runner]
     N1 --> N2[skill-runner subprocess]
     N2 --> P
-    N --> P[Observed facts]
+    N --> P[Loop observations]
     SS --> P
-    P --> H
-    M --> Q[Post-route safety guard]
+    P -->|next round| I
+    P -->|observation-only finish| OF[Observed-output finalizer<br/>direct answer or synthesis]
+    M --> Q[Final delivery / output-contract guard]
+    CR --> Q
+    G --> Q
+    OF --> Q
     Q --> R[Finalize result<br/>text + messages]
     R --> S[Channel delivery<br/>single or multi-message]
-    R --> T[Update session state / task journal]
+    R --> T[Update session state / task journal<br/>persist observed facts]
     R -. background .-> U[Long-term memory refresh]
     R -. optional .-> V[Memory preference LLM fallback]
 ```
 
-- `Session binding`: attaches each turn to the active conversation instead of treating every message as a standalone task.
-- `Context bundle + local surface hints`: assembles routing context (session, memory, recent turns, etc.) plus lightweight local parsing signals; this is not a separate “taxonomy engine” LLM.
+- `Session snapshot + local surface hints`: attaches each turn to the active conversation and extracts bounded local facts before routing; this is not a separate “taxonomy engine” LLM.
 - `Intent normalizer LLM`: one call that emits `routed_mode`, `needs_clarify`, `output_contract`, and optional `turn_type` / `target_task_policy` style fields—**clarify vs chat vs act is decided here**, not via a `clarify` action inside the planner JSON.
 - `Task queue`: HTTP callers submit `POST /v1/tasks`; channel daemons also hand work to the same queued worker path.
-- `Ask gate`: keeps only a thin `AskClarify / chat / execute` split (`RoutedMode`: `AskClarify`, `Chat`, `Act`, `ChatAct`) and avoids becoming a semantic fast path.
+- `Post-route policy`: applies locator resolution, missing-locator clarification, and contract guards after normalization and before dispatch. It can refine the gate, but it is not a semantic fast path.
+- `Ask gate`: keeps only a thin `AskClarify / chat / execute` split. Code dispatches through `AskMode` (`ClarifyOrChat` vs `Act`), while `RoutedMode` (`AskClarify`, `Chat`, `Act`, `ChatAct`) remains the normalizer-facing compatibility shape.
+- `Chat response LLM`: handles `mode=chat` directly; chat requests do not enter the execution planner loop.
 - `Planner / runtime loop`: for act / chat_act, runs multiple rounds; planner steps are `think`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today—execution steps are traced as subtasks in logs, not a nested child loop).
-- `State`, `Working context`, and `Durable memory`: separate run control, current task context, and long-lived preferences so memory cannot override the latest user instruction.
+- `Execution context`: combines run state, current working context, attachments, recent execution context, and durable memory so memory cannot override the latest user instruction.
 - `call_skill`: goes through `run_skill_with_runner`, which launches `skill-runner` and then the concrete skill binary.
-- `Observed facts`: stores tool, skill, and synthesis outputs as grounded evidence for the next planner step.
-- `Post-route safety guard`: validates safety and output contracts without taking over normal semantic routing.
+- `Loop observations` and `Observed-output finalizer`: tool, skill, and synthesis outputs remain grounded evidence inside the loop; observation-only plans can still finish through direct structured answers or runtime-owned synthesis.
+- `Final delivery / output-contract guard`: normalizes file tokens, `messages`, exact scalar/strict output shapes, and delivery consistency before the result is saved.
 - `Finalize result`: can emit one `text` field and a `messages` array; channel adapters send each publishable message separately when present.
 
 ### LLM Request Flow
@@ -77,12 +83,11 @@ flowchart TD
     B --> C[LLM request 1<br/>Intent normalizer]
     C --> D[Parse JSON]
     D --> E{Structured result}
-    E -->|needs_clarify=true| F[Clarify question]
-    E -->|mode=chat| G[Build chat prompt]
-    E -->|mode=act or chat_act| H[Build planner prompt]
+    E --> E2[Post-route policy<br/>locator + contract guards]
+    E2 -->|needs_clarify=true| F[Clarify question]
+    E2 -->|mode=chat| G[Build chat prompt]
+    E2 -->|mode=act or chat_act| H[Build planner prompt]
     G --> Ic[LLM request 2<br/>Chat response]
-    Ic --> S[Finalize / user-visible reply]
-    F --> S
     H --> Ip[LLM request 2+<br/>Planner per round]
     Ip --> J[Parse plan steps]
     J --> K{Step type}
@@ -90,13 +95,17 @@ flowchart TD
     K -->|call_tool| M[Execute tool]
     K -->|call_skill| Ms[run_skill_with_runner<br/>skill-runner subprocess]
     K -->|synthesize_answer| N[Synthesis LLM from evidence]
-    M --> O[Write observed facts]
+    M --> O[Record loop observations]
     Ms --> O
     N --> O
     O --> P{Need another planner round?}
     P -->|yes| H
-    P -->|no| S
-    L --> S
+    P -->|no| Q[Observed-output finalizer<br/>direct answer or synthesis if needed]
+    L --> R[Final delivery / output-contract guard]
+    Q --> R
+    Ic --> R
+    F --> R
+    R --> S[Finalize / user-visible reply]
     S -. optional background .-> T[Long-term summary LLM]
     S -. optional background .-> U[Memory preference extraction LLM]
 ```
@@ -106,6 +115,8 @@ flowchart TD
 - `LLM request 2`: **Chat** mode uses one chat-completion call, then finalize. **Act / chat_act** uses one-or-more **planner** calls per loop round; the planner emits JSON steps in `{think, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types).
 - `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened.
 - `synthesize_answer`: an extra LLM call **scheduled inside the planner loop** when the plan includes that step—**not** always a single fixed “LLM 3 after all planning is done”; rounds can interleave execution, synthesis, and further planning.
+- `Observed-output finalizer`: if a plan ends after observation steps without a terminal `respond`, runtime can still publish a grounded direct answer or run the observed-answer synthesis path.
+- `Final delivery / output-contract guard`: applies delivery normalization and output-contract verification before final task persistence.
 - `Finalize`: may also start background memory work after the user-visible result is saved, including long-term summary refresh and optional preference extraction controlled by `configs/memory.toml`.
 
 ## Main Components
