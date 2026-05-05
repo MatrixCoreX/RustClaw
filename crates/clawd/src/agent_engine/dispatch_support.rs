@@ -4,8 +4,9 @@ use tracing::{debug, info};
 
 use super::{
     append_delivery_message, append_progress_hint, build_safe_skill_args_summary,
-    encode_progress_i18n, execute_prepared_skill_action, register_step_output, resolve_arg_string,
-    resolve_arg_value, rewrite_args_with_auto_locator_path, rewrite_run_cmd_with_written_aliases,
+    encode_progress_i18n, execute_prepared_skill_action, normalize_skill_arg_aliases,
+    register_step_output, resolve_arg_string, resolve_arg_value,
+    rewrite_args_with_auto_locator_path, rewrite_run_cmd_with_written_aliases,
     rewrite_tool_path_with_written_aliases, ActionLoopDecision, AgentLoopGuardPolicy,
     AgentRunContext, AppState, ClaimedTask, LoopState, RespondActionOutcome, SkillActionOutcome,
     WriteFileEffectivePath, PROGRESS_ARGS_SUMMARY_MAX_LEN,
@@ -599,6 +600,16 @@ pub(super) async fn handle_call_tool_action(
 ) -> Result<ActionLoopDecision, String> {
     let mut resolved_args = resolve_arg_value(args, loop_state);
     let normalized_skill = state.resolve_canonical_skill_name(tool);
+    if normalize_skill_arg_aliases(&normalized_skill, &mut resolved_args) {
+        info!(
+            "executor_args_rewrite task_id={} round={} step={} type=arg_alias skill={} args={}",
+            task.task_id,
+            loop_state.round_no,
+            step_in_round,
+            normalized_skill,
+            crate::truncate_for_log(&resolved_args.to_string())
+        );
+    }
     if rewrite_args_with_auto_locator_path(&normalized_skill, &mut resolved_args, loop_state) {
         info!(
             "executor_args_rewrite task_id={} round={} step={} type=auto_locator skill={} args={}",
@@ -685,6 +696,16 @@ pub(super) async fn handle_call_skill_action(
     let mut resolved_args = resolve_arg_value(args, loop_state);
     loop_state.tool_calls_total += 1;
     let normalized_skill = state.resolve_canonical_skill_name(skill);
+    if normalize_skill_arg_aliases(&normalized_skill, &mut resolved_args) {
+        info!(
+            "executor_args_rewrite task_id={} round={} step={} type=arg_alias skill={} args={}",
+            task.task_id,
+            loop_state.round_no,
+            step_in_round,
+            normalized_skill,
+            crate::truncate_for_log(&resolved_args.to_string())
+        );
+    }
     if rewrite_args_with_auto_locator_path(&normalized_skill, &mut resolved_args, loop_state) {
         info!(
             "executor_args_rewrite task_id={} round={} step={} type=auto_locator skill={} args={}",
@@ -767,6 +788,16 @@ pub(super) async fn handle_synthesize_answer_action(
     );
     let step_execution =
         crate::executor::execute_step(&format!("step_{global_step}"), action, || async {
+            if let Some(answer) =
+                crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
+                    loop_state,
+                    state,
+                    agent_run_context,
+                )
+                .filter(|answer| !answer.trim().is_empty())
+            {
+                return Ok(answer);
+            }
             let synthesized =
                 crate::agent_engine::observed_output::synthesize_answer_from_observed_output(
                     state,
@@ -779,16 +810,6 @@ pub(super) async fn handle_synthesize_answer_action(
                 .map(|(answer, _summary)| answer)
                 .filter(|answer| !answer.trim().is_empty());
             if let Some(answer) = synthesized {
-                return Ok(answer);
-            }
-            if let Some(answer) =
-                crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
-                    loop_state,
-                    state,
-                    agent_run_context,
-                )
-                .filter(|answer| !answer.trim().is_empty())
-            {
                 return Ok(answer);
             }
             Err(synthesize_failure_user_message(

@@ -87,6 +87,22 @@ struct ObservedAnswerFallbackOut {
     _reason: String,
 }
 
+fn strip_bare_json_language_prefix(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    let Some(rest) = trimmed
+        .strip_prefix("json")
+        .or_else(|| trimmed.strip_prefix("JSON"))
+    else {
+        return trimmed;
+    };
+    let rest = rest.trim_start();
+    if rest.starts_with('{') || rest.starts_with('[') {
+        rest
+    } else {
+        trimmed
+    }
+}
+
 fn latest_successful_step_index<F>(loop_state: &LoopState, predicate: F) -> Option<usize>
 where
     F: Fn(&crate::executor::StepExecutionResult) -> bool,
@@ -337,6 +353,37 @@ pub(crate) fn scalar_route_prefers_structured_observed_answer(
 fn route_requests_scalar_path_only(route: &crate::RouteResult) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Scalar
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
+}
+
+fn route_prefers_plain_fs_search_paths(route: &crate::RouteResult) -> bool {
+    route_requests_scalar_path_only(route)
+        || (matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
+        ) && route.output_contract.semantic_kind == crate::OutputSemanticKind::FileNames)
+}
+
+fn looks_like_plain_path_literal(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.contains('\n') || trimmed.split_whitespace().count() > 1 {
+        return false;
+    }
+    let path = Path::new(trimmed);
+    path.is_absolute()
+        || trimmed.starts_with("~/")
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+}
+
+fn route_scalar_has_plain_path_terminal_respond(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> bool {
+    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+        && loop_state
+            .last_user_visible_respond
+            .as_deref()
+            .is_some_and(looks_like_plain_path_literal)
 }
 
 fn route_allows_raw_listing_direct_answer(route: Option<&crate::RouteResult>) -> bool {
@@ -1129,6 +1176,37 @@ fn normalize_system_basic_match_path(
     Some(root.join(candidate).to_string_lossy().to_string())
 }
 
+fn path_batch_fact_preferred_path<'a>(
+    entry: &'a serde_json::Map<String, serde_json::Value>,
+) -> Option<&'a str> {
+    let fact = entry.get("fact").and_then(|v| v.as_object());
+    fact.and_then(|item| item.get("resolved_path"))
+        .or_else(|| fact.and_then(|item| item.get("path")))
+        .or_else(|| entry.get("resolved_path"))
+        .or_else(|| entry.get("path"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+}
+
+fn system_basic_path_batch_scalar_path_candidate(value: &serde_json::Value) -> Option<String> {
+    if value.get("action").and_then(|v| v.as_str()) != Some("path_batch_facts") {
+        return None;
+    }
+    let facts = value.get("facts")?.as_array()?;
+    if facts.len() != 1 {
+        return None;
+    }
+    let entry = facts.first()?.as_object()?;
+    let exists = entry
+        .get("exists")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    exists
+        .then(|| path_batch_fact_preferred_path(entry).map(ToString::to_string))
+        .flatten()
+}
+
 fn system_basic_existence_with_path_candidate(
     state: Option<&AppState>,
     value: &serde_json::Value,
@@ -1217,15 +1295,7 @@ fn system_basic_existence_with_path_candidate(
             if !exists {
                 return Some(candidate_not_found_text(state, prefer_english));
             }
-            let path = entry
-                .get("fact")
-                .and_then(|v| v.as_object())
-                .and_then(|fact| {
-                    fact.get("resolved_path")
-                        .and_then(|v| v.as_str())
-                        .or_else(|| fact.get("path").and_then(|v| v.as_str()))
-                })
-                .or_else(|| entry.get("path").and_then(|v| v.as_str()));
+            let path = path_batch_fact_preferred_path(entry);
             Some(candidate_exists_with_path_text(state, path, prefer_english))
         }
         _ => None,
@@ -1479,6 +1549,7 @@ fn fs_search_direct_answer_candidate(
     locator_hint: Option<&str>,
     prefer_english: bool,
     allow_multi_result_list: bool,
+    prefer_path_only: bool,
 ) -> Option<String> {
     if let Some((results, count, ext)) = fs_search_find_ext_results(value) {
         if count == 0 || results.is_empty() {
@@ -1501,6 +1572,9 @@ fn fs_search_direct_answer_candidate(
         ));
     }
     if results.len() == 1 {
+        if prefer_path_only {
+            return Some(results[0].clone());
+        }
         return Some(observed_t_with_vars(
             state,
             "clawd.msg.exists_with_path",
@@ -1514,6 +1588,9 @@ fn fs_search_direct_answer_candidate(
         .or_else(|| normalized_find_name_pattern(locator_hint))
     {
         if let Some(preferred) = preferred_fs_search_exact_match(&results, &pattern) {
+            if prefer_path_only {
+                return Some(preferred);
+            }
             return Some(observed_t_with_vars(
                 state,
                 "clawd.msg.exists_with_path",
@@ -1650,6 +1727,10 @@ fn structured_scalar_candidate(
                 &[("field_path", field_path)],
             ))
         }
+        "path_batch_facts" => route
+            .is_some_and(route_requests_scalar_path_only)
+            .then(|| system_basic_path_batch_scalar_path_candidate(&value))
+            .flatten(),
         "count_inventory" => value
             .get("counts")
             .and_then(|v| v.get("total"))
@@ -1943,14 +2024,7 @@ fn path_batch_facts_observed_candidate(value: &serde_json::Value) -> Option<Stri
                 .and_then(|value| value.as_bool())
                 .unwrap_or(false);
             let fact = entry.get("fact").and_then(|value| value.as_object());
-            let path = fact
-                .and_then(|item| item.get("resolved_path"))
-                .or_else(|| fact.and_then(|item| item.get("path")))
-                .or_else(|| entry.get("path"))
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .unwrap_or("-");
+            let path = path_batch_fact_preferred_path(entry).unwrap_or("-");
             let label = observed_path_label(path);
             let kind = fact
                 .and_then(|item| item.get("kind"))
@@ -2091,7 +2165,7 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
         }
         "db_basic" => db_basic_observed_candidate(&value),
         "service_control" => service_control_summary_candidate(&value),
-        "fs_search" => fs_search_direct_answer_candidate(None, &value, None, false, true),
+        "fs_search" => fs_search_direct_answer_candidate(None, &value, None, false, true, false),
         "archive_basic" => archive_basic_observed_candidate(&value),
         "log_analyze" => compact_log_analyze_excerpt(&value),
         "package_manager" => {
@@ -2291,7 +2365,7 @@ fn extract_direct_answer_from_generic_output_impl(
     {
         return None;
     }
-    let prefer_full_path = route.is_some_and(route_requests_scalar_path_only);
+    let prefer_full_path = route.is_some_and(route_prefers_plain_fs_search_paths);
 
     if let Some(route) = route {
         if let Some(answer) =
@@ -2355,6 +2429,7 @@ fn extract_direct_answer_from_generic_output_impl(
                             locator_hint,
                             prefers_english_free_text,
                             allow_raw_listing_direct_answer,
+                            prefer_full_path,
                         )
                     }),
                 "git_basic" => None,
@@ -2379,11 +2454,7 @@ fn extract_direct_answer_from_generic_output_impl(
                         })?;
                     let action = value.get("action").and_then(|v| v.as_str());
                     if action == Some("read_range")
-                        && (is_plain_act
-                            && !matches!(
-                                response_shape,
-                                Some(crate::OutputResponseShape::OneSentence)
-                            ))
+                        && route_allows_read_range_direct_passthrough(route, response_shape)
                     {
                         value
                             .get("excerpt")
@@ -2416,6 +2487,13 @@ fn extract_direct_answer_from_generic_output_impl(
                         } else {
                             None
                         }
+                    } else if action == Some("path_batch_facts")
+                        && route.is_some_and(|route| {
+                            route_requests_scalar_path_only(route)
+                                || route_scalar_has_plain_path_terminal_respond(route, loop_state)
+                        })
+                    {
+                        system_basic_path_batch_scalar_path_candidate(&value)
                     } else if !existence_with_path_should_use_llm_synthesis
                         && route.is_some_and(|route| {
                             route.output_contract.semantic_kind
@@ -2463,6 +2541,32 @@ fn extract_direct_answer_from_generic_output_impl(
         return None;
     }
     Some(answer)
+}
+
+fn route_allows_read_range_direct_passthrough(
+    route: Option<&crate::RouteResult>,
+    response_shape: Option<crate::OutputResponseShape>,
+) -> bool {
+    if matches!(
+        response_shape,
+        Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar)
+    ) {
+        return false;
+    }
+    let Some(route) = route else {
+        return false;
+    };
+    if route.ask_mode.is_plain_act() {
+        return true;
+    }
+    matches!(route.routed_mode, crate::RoutedMode::ChatAct)
+        && route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
+        )
 }
 
 fn allows_normalized_scalar_direct_fallback(
@@ -2683,8 +2787,9 @@ pub(crate) async fn synthesize_answer_from_observed_output(
         llm_gateway::run_with_fallback_with_prompt_source(state, task, &prompt, &prompt_source)
             .await
             .ok()?;
+    let llm_out_for_parse = strip_bare_json_language_prefix(&llm_out);
     let parsed = match crate::prompt_utils::validate_against_schema::<ObservedAnswerFallbackOut>(
-        &llm_out,
+        llm_out_for_parse,
         crate::prompt_utils::PromptSchemaId::FinalizerOut,
     ) {
         Ok(validated) => {
@@ -2715,7 +2820,7 @@ pub(crate) async fn synthesize_answer_from_observed_output(
             // 同时 publishable=true、qualified=true、confidence=0.7（足以越过下游
             // OBSERVED_SELF_CLASSIFY_CONF_THRESHOLD=0.55，并保留下游 semantic_judge 的
             // meta-instruction 检查仍能拦截 "我会去检查/please confirm" 之类伪答案）。
-            let trimmed = llm_out.trim().trim_matches('`').trim();
+            let trimmed = llm_out_for_parse.trim().trim_matches('`').trim();
             if trimmed.is_empty() {
                 return None;
             }
@@ -3216,7 +3321,8 @@ version.workspace = true
             "results": ["Cargo.toml", "configs/config.toml", "configs/git_basic.toml"]
         });
         assert_eq!(
-            super::fs_search_direct_answer_candidate(None, &value, None, false, true).as_deref(),
+            super::fs_search_direct_answer_candidate(None, &value, None, false, true, false)
+                .as_deref(),
             Some("Cargo.toml\nconfigs/config.toml\nconfigs/git_basic.toml")
         );
     }
@@ -3228,11 +3334,13 @@ version.workspace = true
         )
         .expect("json");
         assert_eq!(
-            super::fs_search_direct_answer_candidate(None, &value, None, false, false).as_deref(),
+            super::fs_search_direct_answer_candidate(None, &value, None, false, false, false)
+                .as_deref(),
             None
         );
         assert_eq!(
-            super::fs_search_direct_answer_candidate(None, &value, None, false, true).as_deref(),
+            super::fs_search_direct_answer_candidate(None, &value, None, false, true, false)
+                .as_deref(),
             Some("abcd_report.md\nmy_abcd.txt\nx_abcd_log.txt")
         );
     }
@@ -3244,8 +3352,60 @@ version.workspace = true
         )
         .expect("json");
         assert_eq!(
-            super::fs_search_direct_answer_candidate(None, &value, None, false, false).as_deref(),
+            super::fs_search_direct_answer_candidate(None, &value, None, false, false, false)
+                .as_deref(),
             Some("有，路径：README.md")
+        );
+        assert_eq!(
+            super::fs_search_direct_answer_candidate(None, &value, None, false, false, true)
+                .as_deref(),
+            Some("README.md")
+        );
+    }
+
+    #[test]
+    fn direct_answer_for_strict_file_names_fs_search_uses_plain_path() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_search",
+            r#"{"action":"find_name","count":1,"results":["scripts/nl_tests/fixtures/locator_smart/stem_unique/ABCD.txt"],"root":"scripts/nl_tests/fixtures/locator_smart/stem_unique"}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "在目标目录里找 abcd，只输出路径".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::FileNames,
+                locator_hint: "scripts/nl_tests/fixtures/locator_smart/stem_unique".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("scripts/nl_tests/fixtures/locator_smart/stem_unique/ABCD.txt")
         );
     }
 
@@ -3256,12 +3416,19 @@ version.workspace = true
         )
         .expect("json");
         assert_eq!(
-            super::fs_search_direct_answer_candidate(None, &value, Some("abcd"), false, false)
-                .as_deref(),
+            super::fs_search_direct_answer_candidate(
+                None,
+                &value,
+                Some("abcd"),
+                false,
+                false,
+                false
+            )
+            .as_deref(),
             None
         );
         assert_eq!(
-            super::fs_search_direct_answer_candidate(None, &value, Some("abcd"), false, true)
+            super::fs_search_direct_answer_candidate(None, &value, Some("abcd"), false, true, false)
                 .as_deref(),
             Some(
                 "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt"
@@ -3594,6 +3761,54 @@ version.workspace = true
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
             Some("# RustClaw\n\n<img src=\"./RustClaw.png\" width=\"420\" />")
+        );
+    }
+
+    #[test]
+    fn direct_answer_passthroughs_chat_act_path_read_range_when_no_transform_is_requested() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","excerpt":"1|[app]\n2|name = \"fixture\"\n3|mode = \"test\""}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "用户提供了文件路径 /tmp/config.toml，但未说明要对该文件执行什么操作"
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::None,
+                locator_hint: "/tmp/config.toml".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/config.toml".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("[app]\nname = \"fixture\"\nmode = \"test\"")
         );
     }
 
@@ -5380,6 +5595,99 @@ version.workspace = true
     }
 
     #[test]
+    fn direct_scalar_path_only_prefers_resolved_path_from_path_batch_facts() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/case_only/Report.MD","resolved_path":"/tmp/case_only/Report.MD","size_bytes":33},"path":"/tmp/case_only/report.md","resolved_from_case_insensitive":true}],"include_missing":true}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "去 case_only 目录里找 report.md，只输出路径".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+                locator_hint: "report.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("/tmp/case_only/Report.MD")
+        );
+    }
+
+    #[test]
+    fn direct_answer_keeps_plain_path_terminal_format_for_observed_path_fact() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.last_user_visible_respond = Some("/tmp/case_only/Report.MD".to_string());
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/case_only/Report.MD","resolved_path":"/tmp/case_only/Report.MD","size_bytes":33},"path":"/tmp/case_only/Report.MD"}],"include_missing":true}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "去 case_only 目录里找 report.md，只输出路径".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
+                locator_hint: "report.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("/tmp/case_only/Report.MD")
+        );
+    }
+
+    #[test]
     fn direct_scalar_does_not_passthrough_multiline_list_dir_listing() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -6988,6 +7296,19 @@ version.workspace = true
         assert!(entries[0].contains("keyword_counts: error=9, panic=1"));
         assert!(entries[0].contains("recent_matches:\n- 10: error one\n- 20: panic two"));
         assert!(!entries[0].contains(r#""keyword_counts""#));
+    }
+
+    #[test]
+    fn observed_answer_parser_strips_bare_json_language_prefix() {
+        let raw = "json\n{\"answer\":\"ok\",\"qualified\":true}";
+        assert_eq!(
+            super::strip_bare_json_language_prefix(raw),
+            "{\"answer\":\"ok\",\"qualified\":true}"
+        );
+        assert_eq!(
+            super::strip_bare_json_language_prefix("json response follows"),
+            "json response follows"
+        );
     }
 
     /// §D2.b：finalizer_out schema 与 `ObservedAnswerFallbackOut` 漂移检查。

@@ -715,6 +715,9 @@ fn apply_spurious_structured_observation_clarify_repair(
     if !*needs_clarify || is_bare_path_only_input_for_clarify(req, req_surface) {
         return None;
     }
+    if req_surface.has_deictic_reference() {
+        return None;
+    }
     let has_current_turn_locator = req_surface.has_explicit_path_or_url()
         || req_surface.has_single_filename_candidate()
         || req_surface.has_concrete_locator_hint();
@@ -747,6 +750,47 @@ fn apply_spurious_structured_observation_clarify_repair(
         false,
     );
     Some("structured_observation_clarify_repair")
+}
+
+fn bare_path_only_input_can_fill_active_observable_task(
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+    turn_type: Option<TurnType>,
+    target_task_policy: Option<TargetTaskPolicy>,
+    routed_mode: RoutedMode,
+    output_contract: &IntentOutputContract,
+) -> bool {
+    let active_followup_policy = matches!(
+        turn_type,
+        Some(TurnType::TaskAppend | TurnType::TaskCorrect | TurnType::TaskReplace)
+    ) && matches!(
+        target_task_policy,
+        Some(TargetTaskPolicy::ReuseActive | TargetTaskPolicy::ReplaceActive)
+    );
+    let executable_observation_contract = output_contract.requires_content_evidence
+        && output_semantic_kind_requires_fresh_evidence(output_contract.semantic_kind);
+    let active_replacement_locator_policy = matches!(turn_type, Some(TurnType::TaskRequest))
+        && matches!(target_task_policy, Some(TargetTaskPolicy::ReplaceActive))
+        && executable_observation_contract;
+    let active_implicit_locator_policy =
+        turn_type.is_none() && target_task_policy.is_none() && executable_observation_contract;
+
+    if active_primary_task_prompt(session_snapshot).is_none()
+        || !matches!(routed_mode, RoutedMode::Act | RoutedMode::ChatAct)
+        || !(active_followup_policy
+            || active_replacement_locator_policy
+            || active_implicit_locator_policy)
+    {
+        return false;
+    }
+
+    output_contract.requires_content_evidence
+        || matches!(
+            output_contract.response_shape,
+            OutputResponseShape::Scalar
+                | OutputResponseShape::Strict
+                | OutputResponseShape::FileToken
+        )
+        || output_semantic_kind_requires_fresh_evidence(output_contract.semantic_kind)
 }
 
 fn sanitize_resolved_intent_for_current_turn_locator(
@@ -3349,7 +3393,18 @@ pub(crate) async fn run_intent_normalizer(
         // ask for the missing operation instead of letting the planner repair a non-actionable
         // instruction. This does not classify natural-language intent.
         let bare_path_only = is_bare_path_only_input_for_clarify(req, &req_surface);
-        let (needs_clarify_eff, clarify_question_eff) = if !needs_clarify && bare_path_only {
+        let bare_path_fills_active_observable_task = bare_path_only
+            && bare_path_only_input_can_fill_active_observable_task(
+                session_snapshot,
+                turn_type,
+                target_task_policy,
+                routed_mode,
+                &output_contract,
+            );
+        let (needs_clarify_eff, clarify_question_eff) = if !needs_clarify
+            && bare_path_only
+            && !bare_path_fills_active_observable_task
+        {
             if reason.trim().is_empty() {
                 reason = "bare_path_no_verb".to_string();
             } else if !reason.contains("bare_path_no_verb") {
@@ -3600,11 +3655,18 @@ pub(crate) async fn generate_or_reuse_clarify_question(
             candidate_context,
             &request_language_hint,
         );
-        return crate::fallback::compose_user_response_from_contract(
+        let default_text = crate::fallback::clarify_fallback_text_with_language_hint(
+            state,
+            default_source,
+            None,
+            &request_language_hint,
+        );
+        return crate::fallback::compose_user_response_from_contract_with_default(
             state,
             task,
             &contract,
             default_source,
+            &default_text,
         )
         .await;
     }
@@ -6281,6 +6343,72 @@ mod tests {
     }
 
     #[test]
+    fn structured_observation_clarify_repair_preserves_deictic_bare_target_clarify() {
+        let req = "读一下那个 README 开头并用一句话总结";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            ..IntentOutputContract::default()
+        };
+        let mut needs_clarify = true;
+        let mut clarify_question = "请确认具体 README 路径".to_string();
+        let mut routed_mode = RoutedMode::AskClarify;
+
+        let reason = super::apply_spurious_structured_observation_clarify_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(2)
+                .expect("workspace root"),
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut routed_mode,
+        );
+
+        assert_eq!(reason, None);
+        assert!(needs_clarify);
+        assert_eq!(clarify_question, "请确认具体 README 路径");
+        assert!(matches!(routed_mode, RoutedMode::AskClarify));
+        assert!(!contract.requires_content_evidence);
+    }
+
+    #[test]
+    fn structured_observation_clarify_repair_preserves_deictic_with_destination_path_clarify() {
+        let req = "把那个压缩包解压到 /tmp/unpack_dest 然后告诉我结果";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "/tmp/unpack_dest".to_string(),
+            ..IntentOutputContract::default()
+        };
+        let mut needs_clarify = true;
+        let mut clarify_question = "请提供压缩包路径".to_string();
+        let mut routed_mode = RoutedMode::AskClarify;
+
+        let reason = super::apply_spurious_structured_observation_clarify_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(2)
+                .expect("workspace root"),
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut routed_mode,
+        );
+
+        assert_eq!(reason, None);
+        assert!(needs_clarify);
+        assert_eq!(clarify_question, "请提供压缩包路径");
+        assert!(matches!(routed_mode, RoutedMode::AskClarify));
+        assert!(!contract.requires_content_evidence);
+    }
+
+    #[test]
     fn current_turn_locator_sanitizer_drops_contextual_path_prefix() {
         let req = "读一下 README 然后用恰好三句话总结，不要多也不要少";
         let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
@@ -6954,6 +7082,115 @@ mod tests {
             false,
             RoutedMode::AskClarify,
         ));
+    }
+
+    #[test]
+    fn bare_path_correction_can_fill_active_observable_task() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some(
+                    "读一下 configs/config.toml 里的名字字段，只输出值".to_string(),
+                ),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Scalar,
+            requires_content_evidence: true,
+            ..IntentOutputContract::default()
+        };
+
+        assert!(super::bare_path_only_input_can_fill_active_observable_task(
+            Some(&snapshot),
+            Some(TurnType::TaskCorrect),
+            Some(TargetTaskPolicy::ReuseActive),
+            RoutedMode::Act,
+            &contract,
+        ));
+    }
+
+    #[test]
+    fn bare_filename_task_request_can_replace_active_existence_check() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("看看那个重启脚本在不在".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            locator_kind: OutputLocatorKind::Filename,
+            locator_hint: "restart_clawd_latest.sh".to_string(),
+            ..IntentOutputContract::default()
+        };
+
+        assert!(super::bare_path_only_input_can_fill_active_observable_task(
+            Some(&snapshot),
+            Some(TurnType::TaskRequest),
+            Some(TargetTaskPolicy::ReplaceActive),
+            RoutedMode::Act,
+            &contract,
+        ));
+    }
+
+    #[test]
+    fn bare_path_with_executable_contract_can_fill_active_log_tail() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("帮我看一下那个日志最近 20 行".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            locator_kind: OutputLocatorKind::Filename,
+            locator_hint: "logs/clawd.log".to_string(),
+            ..IntentOutputContract::default()
+        };
+
+        assert!(super::bare_path_only_input_can_fill_active_observable_task(
+            Some(&snapshot),
+            None,
+            None,
+            RoutedMode::Act,
+            &contract,
+        ));
+    }
+
+    #[test]
+    fn bare_path_without_observable_contract_still_needs_action_clarify() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("帮我检查这个文件".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(
+            !super::bare_path_only_input_can_fill_active_observable_task(
+                Some(&snapshot),
+                Some(TurnType::TaskAppend),
+                Some(TargetTaskPolicy::ReuseActive),
+                RoutedMode::Act,
+                &IntentOutputContract::default(),
+            )
+        );
     }
 
     #[test]

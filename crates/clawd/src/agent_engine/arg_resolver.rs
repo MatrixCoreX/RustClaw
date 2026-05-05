@@ -47,7 +47,19 @@ pub(super) fn rewrite_tool_path_with_written_aliases(
     obj.insert("path".to_string(), Value::String(effective.clone()));
 }
 
-fn rewrite_path_field(args: &mut Value, auto_locator_path: &str) -> bool {
+fn broad_current_workspace_auto_locator(loop_state: &LoopState) -> bool {
+    let Some(contract) = loop_state.output_contract.as_ref() else {
+        return false;
+    };
+    contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && contract.locator_hint.trim().is_empty()
+}
+
+fn rewrite_path_field(
+    args: &mut Value,
+    auto_locator_path: &str,
+    allow_missing_rewrite: bool,
+) -> bool {
     let Some(obj) = args.as_object_mut() else {
         return false;
     };
@@ -63,6 +75,9 @@ fn rewrite_path_field(args: &mut Value, auto_locator_path: &str) -> bool {
             if !trimmed.is_empty() && Path::new(trimmed).exists() {
                 return false;
             }
+            if !trimmed.is_empty() && !allow_missing_rewrite {
+                return false;
+            }
             obj.insert(
                 "path".to_string(),
                 Value::String(auto_locator_path.to_string()),
@@ -73,7 +88,11 @@ fn rewrite_path_field(args: &mut Value, auto_locator_path: &str) -> bool {
     }
 }
 
-fn rewrite_root_field(args: &mut Value, auto_locator_path: &str) -> bool {
+fn rewrite_root_field(
+    args: &mut Value,
+    auto_locator_path: &str,
+    allow_missing_rewrite: bool,
+) -> bool {
     let Some(obj) = args.as_object_mut() else {
         return false;
     };
@@ -86,6 +105,9 @@ fn rewrite_root_field(args: &mut Value, auto_locator_path: &str) -> bool {
             if !trimmed.is_empty() && Path::new(trimmed).exists() {
                 return false;
             }
+            if !trimmed.is_empty() && !allow_missing_rewrite {
+                return false;
+            }
             obj.insert(
                 "root".to_string(),
                 Value::String(auto_locator_path.to_string()),
@@ -94,6 +116,174 @@ fn rewrite_root_field(args: &mut Value, auto_locator_path: &str) -> bool {
         }
         None => false,
     }
+}
+
+fn set_root_field_if_missing(args: &mut Value, auto_locator_path: &str) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    if obj.get("root").and_then(|v| v.as_str()).is_some() {
+        return false;
+    }
+    obj.insert(
+        "root".to_string(),
+        Value::String(auto_locator_path.to_string()),
+    );
+    true
+}
+
+pub(super) fn normalize_skill_arg_aliases(normalized_skill: &str, args: &mut Value) -> bool {
+    match normalized_skill {
+        "fs_search" => normalize_fs_search_arg_aliases(args),
+        _ => false,
+    }
+}
+
+fn move_string_alias_if_missing(
+    obj: &mut serde_json::Map<String, Value>,
+    canonical: &str,
+    aliases: &[&str],
+) -> bool {
+    if obj
+        .get(canonical)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+    {
+        return false;
+    }
+    let Some(value) = aliases.iter().find_map(|alias| {
+        obj.get(*alias)
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    }) else {
+        return false;
+    };
+    obj.insert(canonical.to_string(), Value::String(value));
+    true
+}
+
+fn move_value_alias_if_missing(
+    obj: &mut serde_json::Map<String, Value>,
+    canonical: &str,
+    aliases: &[&str],
+) -> bool {
+    if obj.get(canonical).is_some() {
+        return false;
+    }
+    let Some(value) = aliases.iter().find_map(|alias| obj.get(*alias).cloned()) else {
+        return false;
+    };
+    obj.insert(canonical.to_string(), value);
+    true
+}
+
+fn normalize_fs_search_arg_aliases(args: &mut Value) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    changed |= move_string_alias_if_missing(
+        obj,
+        "root",
+        &["search_root", "search_dir", "directory", "dir"],
+    );
+    changed |= move_string_alias_if_missing(obj, "pattern", &["name_pattern"]);
+    changed |= move_value_alias_if_missing(obj, "max_results", &["limit"]);
+    changed |= normalize_fs_search_action_aliases(obj);
+    if obj.get("action").and_then(|value| value.as_str()).is_none()
+        && (obj
+            .get("pattern")
+            .and_then(|value| value.as_str())
+            .is_some()
+            || obj.get("name").and_then(|value| value.as_str()).is_some()
+            || obj
+                .get("keyword")
+                .and_then(|value| value.as_str())
+                .is_some())
+    {
+        obj.insert("action".to_string(), Value::String("find_name".to_string()));
+        changed = true;
+    }
+    if obj
+        .get("action")
+        .and_then(|value| value.as_str())
+        .is_some_and(|action| action.eq_ignore_ascii_case("find_name"))
+    {
+        changed |= move_string_alias_if_missing(obj, "pattern", &["name", "keyword", "query"]);
+        changed |= normalize_find_name_pattern_for_fs_search(obj);
+    } else if obj
+        .get("action")
+        .and_then(|value| value.as_str())
+        .is_some_and(|action| action.eq_ignore_ascii_case("grep_text"))
+    {
+        changed |= move_string_alias_if_missing(obj, "query", &["pattern", "keyword", "text"]);
+    }
+    changed
+}
+
+fn normalize_fs_search_action_aliases(obj: &mut serde_json::Map<String, Value>) -> bool {
+    let Some(action) = obj
+        .get("action")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    let normalized = match action.to_ascii_lowercase().as_str() {
+        "find_file" | "find_files" | "find_filename" | "find_filenames" | "search_name"
+        | "search_names" | "search_filename" | "search_filenames" | "name_search"
+        | "file_search" | "find_content" => "find_name",
+        "grep" | "grep_content" | "search_text" | "text_search" | "search_content" => "grep_text",
+        "find_extension" | "search_extension" | "extension_search" => "find_ext",
+        "images" | "image_search" | "find_image" | "find_images" => "find_images",
+        _ => return false,
+    };
+    if action == normalized {
+        return false;
+    }
+    obj.insert("action".to_string(), Value::String(normalized.to_string()));
+    true
+}
+
+fn normalize_find_name_pattern_for_fs_search(obj: &mut serde_json::Map<String, Value>) -> bool {
+    let Some(current) = obj
+        .get("pattern")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    let Some(normalized) = find_name_contains_pattern_from_globish(current) else {
+        return false;
+    };
+    if normalized == current {
+        return false;
+    }
+    obj.insert("pattern".to_string(), Value::String(normalized));
+    true
+}
+
+fn find_name_contains_pattern_from_globish(pattern: &str) -> Option<String> {
+    let trimmed = pattern.trim();
+    if trimmed.is_empty() || trimmed.contains('/') || trimmed.contains('\\') {
+        return None;
+    }
+    let stripped = trimmed.trim_matches('*').trim();
+    if stripped.is_empty()
+        || stripped == trimmed
+        || stripped.contains('*')
+        || stripped.contains('?')
+        || stripped.contains('[')
+        || stripped.contains(']')
+    {
+        return None;
+    }
+    Some(stripped.to_string())
 }
 
 pub(super) fn rewrite_args_with_auto_locator_path(
@@ -111,9 +301,14 @@ pub(super) fn rewrite_args_with_auto_locator_path(
         return false;
     };
     let auto_path = Path::new(auto_locator_path);
+    let allow_missing_rewrite = !broad_current_workspace_auto_locator(loop_state);
     match normalized_skill {
-        "read_file" if auto_path.is_file() => rewrite_path_field(args, auto_locator_path),
-        "list_dir" if auto_path.is_dir() => rewrite_path_field(args, auto_locator_path),
+        "read_file" if auto_path.is_file() => {
+            rewrite_path_field(args, auto_locator_path, allow_missing_rewrite)
+        }
+        "list_dir" if auto_path.is_dir() => {
+            rewrite_path_field(args, auto_locator_path, allow_missing_rewrite)
+        }
         "system_basic" => {
             let action = args
                 .as_object()
@@ -124,16 +319,22 @@ pub(super) fn rewrite_args_with_auto_locator_path(
                 "extract_field" | "extract_fields" | "structured_keys" | "read_range"
                     if auto_path.is_file() =>
                 {
-                    rewrite_path_field(args, auto_locator_path)
+                    rewrite_path_field(args, auto_locator_path, allow_missing_rewrite)
                 }
                 "inventory_dir" | "count_inventory" | "workspace_glance" | "tree_summary"
                     if auto_path.is_dir() =>
                 {
-                    rewrite_path_field(args, auto_locator_path)
+                    rewrite_path_field(args, auto_locator_path, allow_missing_rewrite)
                 }
-                "find_path" if auto_path.is_dir() => rewrite_root_field(args, auto_locator_path),
+                "find_path" if auto_path.is_dir() => {
+                    rewrite_root_field(args, auto_locator_path, allow_missing_rewrite)
+                }
                 _ => false,
             }
+        }
+        "fs_search" if auto_path.is_dir() => {
+            rewrite_root_field(args, auto_locator_path, allow_missing_rewrite)
+                || set_root_field_if_missing(args, auto_locator_path)
         }
         _ => false,
     }
@@ -213,8 +414,8 @@ pub(super) fn resolve_arg_value(value: &Value, loop_state: &LoopState) -> Value 
 
 #[cfg(test)]
 mod tests {
-    use super::rewrite_args_with_auto_locator_path;
-    use crate::agent_engine::LoopState;
+    use super::{normalize_skill_arg_aliases, rewrite_args_with_auto_locator_path};
+    use crate::{agent_engine::LoopState, IntentOutputContract, OutputLocatorKind};
     use serde_json::json;
     use std::fs;
     use std::path::PathBuf;
@@ -302,6 +503,127 @@ mod tests {
     }
 
     #[test]
+    fn fs_search_aliases_normalize_to_supported_contract() {
+        let mut args = json!({
+            "name_pattern": "*abcd*",
+            "search_root": "/tmp/stem_unique",
+            "limit": 25,
+            "match_mode": "substring"
+        });
+
+        assert!(normalize_skill_arg_aliases("fs_search", &mut args));
+        assert_eq!(
+            args.get("action").and_then(|v| v.as_str()),
+            Some("find_name")
+        );
+        assert_eq!(args.get("pattern").and_then(|v| v.as_str()), Some("abcd"));
+        assert_eq!(args.get("max_results").and_then(|v| v.as_u64()), Some(25));
+        assert_eq!(
+            args.get("root").and_then(|v| v.as_str()),
+            Some("/tmp/stem_unique")
+        );
+    }
+
+    #[test]
+    fn fs_search_globish_find_name_pattern_normalizes_to_contains_pattern() {
+        let mut args = json!({
+            "action": "find_name",
+            "pattern": "*report.md*",
+            "directory": "/tmp/docs"
+        });
+
+        assert!(normalize_skill_arg_aliases("fs_search", &mut args));
+        assert_eq!(
+            args.get("pattern").and_then(|v| v.as_str()),
+            Some("report.md")
+        );
+        assert_eq!(args.get("root").and_then(|v| v.as_str()), Some("/tmp/docs"));
+    }
+
+    #[test]
+    fn fs_search_find_content_alias_normalizes_to_name_search_contract() {
+        let mut args = json!({
+            "action": "find_content",
+            "query": "abcd",
+            "dir": "/tmp/stem_unique"
+        });
+
+        assert!(normalize_skill_arg_aliases("fs_search", &mut args));
+        assert_eq!(
+            args.get("action").and_then(|v| v.as_str()),
+            Some("find_name")
+        );
+        assert_eq!(args.get("pattern").and_then(|v| v.as_str()), Some("abcd"));
+        assert_eq!(
+            args.get("root").and_then(|v| v.as_str()),
+            Some("/tmp/stem_unique")
+        );
+    }
+
+    #[test]
+    fn auto_locator_sets_missing_fs_search_root() {
+        let root = TempDirGuard::new("fs_search_auto_root");
+        let search_root = root.path.join("stem_unique");
+        fs::create_dir_all(&search_root).expect("create search root");
+        let search_root_path = search_root.display().to_string();
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .output_vars
+            .insert("auto_locator_path".to_string(), search_root_path.clone());
+        loop_state.output_contract = Some(IntentOutputContract {
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: search_root_path.clone(),
+            ..IntentOutputContract::default()
+        });
+        let mut args = json!({
+            "action": "find_name",
+            "pattern": "abcd"
+        });
+
+        assert!(rewrite_args_with_auto_locator_path(
+            "fs_search",
+            &mut args,
+            &loop_state
+        ));
+        assert_eq!(
+            args.get("root").and_then(|v| v.as_str()),
+            Some(search_root_path.as_str())
+        );
+    }
+
+    #[test]
+    fn auto_locator_overwrites_missing_fs_search_root() {
+        let root = TempDirGuard::new("fs_search_missing_root");
+        let search_root = root.path.join("case_only");
+        fs::create_dir_all(&search_root).expect("create search root");
+        let search_root_path = search_root.display().to_string();
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .output_vars
+            .insert("auto_locator_path".to_string(), search_root_path.clone());
+        loop_state.output_contract = Some(IntentOutputContract {
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: search_root_path.clone(),
+            ..IntentOutputContract::default()
+        });
+        let mut args = json!({
+            "action": "find_name",
+            "pattern": "report.md",
+            "root": "/nonexistent_case_only"
+        });
+
+        assert!(rewrite_args_with_auto_locator_path(
+            "fs_search",
+            &mut args,
+            &loop_state
+        ));
+        assert_eq!(
+            args.get("root").and_then(|v| v.as_str()),
+            Some(search_root_path.as_str())
+        );
+    }
+
+    #[test]
     fn auto_locator_preserves_explicit_existing_path() {
         // F8 回归用例：当 LLM 显式给的 path 是真实存在的具体文件时（典型场景：
         // 多文件 read 链路第二个 read_file），AUTO_LOCATOR 不得覆盖它。
@@ -320,6 +642,71 @@ mod tests {
         assert_eq!(
             args.get("path").and_then(|v| v.as_str()),
             Some(readme.display().to_string().as_str())
+        );
+    }
+
+    #[test]
+    fn broad_current_workspace_auto_locator_does_not_overwrite_missing_inventory_path() {
+        let root = TempDirGuard::new("broad_current_workspace");
+        let root_path = root.path.display().to_string();
+        let explicit_missing = root.path.join("archive").display().to_string();
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .output_vars
+            .insert("auto_locator_path".to_string(), root_path);
+        loop_state.output_contract = Some(IntentOutputContract {
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            locator_hint: String::new(),
+            ..IntentOutputContract::default()
+        });
+        let mut args = json!({
+            "action": "inventory_dir",
+            "path": explicit_missing,
+            "depth": 1
+        });
+
+        let rewritten = rewrite_args_with_auto_locator_path("system_basic", &mut args, &loop_state);
+
+        assert!(
+            !rewritten,
+            "broad workspace fallback must not silently replace a concrete missing path"
+        );
+        assert_eq!(
+            args.get("path").and_then(|v| v.as_str()),
+            Some(explicit_missing.as_str())
+        );
+    }
+
+    #[test]
+    fn concrete_auto_locator_still_overwrites_missing_inventory_path() {
+        let root = TempDirGuard::new("concrete_locator");
+        let archive = root.path.join("docs_archive");
+        fs::create_dir_all(&archive).expect("create archive");
+        let archive_path = archive.display().to_string();
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .output_vars
+            .insert("auto_locator_path".to_string(), archive_path.clone());
+        loop_state.output_contract = Some(IntentOutputContract {
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: archive_path.clone(),
+            ..IntentOutputContract::default()
+        });
+        let mut args = json!({
+            "action": "inventory_dir",
+            "path": "/nonexistent_dir_for_concrete_auto_locator_test_xyz",
+            "depth": 1
+        });
+
+        let rewritten = rewrite_args_with_auto_locator_path("system_basic", &mut args, &loop_state);
+
+        assert!(
+            rewritten,
+            "concrete locator should repair guessed missing paths"
+        );
+        assert_eq!(
+            args.get("path").and_then(|v| v.as_str()),
+            Some(archive_path.as_str())
         );
     }
 }

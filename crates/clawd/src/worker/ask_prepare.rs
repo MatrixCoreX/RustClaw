@@ -115,6 +115,15 @@ fn merged_prompt_from_task_turn_analysis(
     }
 }
 
+fn should_apply_task_turn_merge(
+    clarify_followup_resolution: &crate::intent::continuation_resolver::ClarifyFollowupResolution,
+) -> bool {
+    matches!(
+        clarify_followup_resolution,
+        crate::intent::continuation_resolver::ClarifyFollowupResolution::None
+    )
+}
+
 fn truncate_task_output_for_merge(output: &str) -> String {
     const MAX_CHARS: usize = 2000;
     let trimmed = output.trim();
@@ -427,6 +436,139 @@ pub(super) async fn maybe_finalize_schedule_direct_text_success(
     Ok(true)
 }
 
+fn parse_clarify_state_response_shape(value: Option<&str>) -> Option<crate::OutputResponseShape> {
+    match value?.trim() {
+        "free" => Some(crate::OutputResponseShape::Free),
+        "one_sentence" => Some(crate::OutputResponseShape::OneSentence),
+        "scalar" => Some(crate::OutputResponseShape::Scalar),
+        "file_token" => Some(crate::OutputResponseShape::FileToken),
+        "strict" => Some(crate::OutputResponseShape::Strict),
+        _ => None,
+    }
+}
+
+fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::OutputSemanticKind> {
+    match value?.trim() {
+        "content_excerpt_summary" => Some(crate::OutputSemanticKind::ContentExcerptSummary),
+        "scalar_path_only" => Some(crate::OutputSemanticKind::ScalarPathOnly),
+        "raw_command_output" => Some(crate::OutputSemanticKind::RawCommandOutput),
+        "file_names" => Some(crate::OutputSemanticKind::FileNames),
+        "existence_with_path" => Some(crate::OutputSemanticKind::ExistenceWithPath),
+        "hidden_entries_check" => Some(crate::OutputSemanticKind::HiddenEntriesCheck),
+        "recent_scalar_equality_check" => {
+            Some(crate::OutputSemanticKind::RecentScalarEqualityCheck)
+        }
+        "sqlite_table_listing" => Some(crate::OutputSemanticKind::SqliteTableListing),
+        "sqlite_table_names_only" => Some(crate::OutputSemanticKind::SqliteTableNamesOnly),
+        "sqlite_database_kind_judgment" => {
+            Some(crate::OutputSemanticKind::SqliteDatabaseKindJudgment)
+        }
+        "service_status" => Some(crate::OutputSemanticKind::ServiceStatus),
+        _ => None,
+    }
+}
+
+fn route_requests_file_delivery(route_result: &crate::RouteResult) -> bool {
+    route_result.wants_file_delivery
+        || route_result.output_contract.delivery_required
+        || matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+}
+
+fn deictic_file_delivery_from_read_context_needs_clarify(
+    route_result: &crate::RouteResult,
+    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> bool {
+    route_requests_file_delivery(route_result)
+        && surface.has_deictic_reference()
+        && !surface.has_any_locator_reference()
+        && session_snapshot
+            .active_followup_frame
+            .as_ref()
+            .is_some_and(|frame| {
+                matches!(frame.op_kind, crate::followup_frame::FollowupOpKind::Read)
+            })
+}
+
+fn force_deictic_file_delivery_from_read_context_clarify(
+    route_result: &mut crate::RouteResult,
+    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) {
+    if !deictic_file_delivery_from_read_context_needs_clarify(
+        route_result,
+        surface,
+        session_snapshot,
+    ) {
+        return;
+    }
+    route_result.needs_clarify = true;
+    route_result.set_routed_mode(crate::RoutedMode::AskClarify);
+    route_result.clarify_question = "请提供要发送的文件路径或文件名。".to_string();
+    route_result.wants_file_delivery = false;
+    route_result.output_contract.delivery_required = false;
+    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    route_result.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route_result.output_contract.requires_content_evidence = false;
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.output_contract.locator_hint.clear();
+    route_result
+        .route_reason
+        .push_str("; deictic_file_delivery_from_read_context_requires_clarify");
+}
+
+fn preserve_active_clarify_output_contract_for_locator_reply(
+    route_result: &mut crate::RouteResult,
+    clarify_followup_resolution: &crate::intent::continuation_resolver::ClarifyFollowupResolution,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) {
+    let crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(hit) =
+        clarify_followup_resolution
+    else {
+        return;
+    };
+    let Some(clarify_state) = session_snapshot.active_clarify_state.as_ref() else {
+        return;
+    };
+    if hit.prior_user_text.trim() != clarify_state.source_request.trim() {
+        return;
+    }
+    let prior_shape = parse_clarify_state_response_shape(clarify_state.output_shape.as_deref());
+    let prior_semantic = parse_clarify_state_semantic_kind(clarify_state.semantic_kind.as_deref());
+    let prior_requested_file_delivery = clarify_state.delivery_required
+        || matches!(prior_shape, Some(crate::OutputResponseShape::FileToken));
+    if prior_requested_file_delivery {
+        return;
+    }
+    if prior_shape.is_none() && prior_semantic.is_none() {
+        return;
+    }
+
+    let current_requested_file_delivery = route_requests_file_delivery(route_result);
+    if current_requested_file_delivery {
+        route_result.wants_file_delivery = false;
+        route_result.output_contract.delivery_required = false;
+        route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    }
+    if let Some(shape) =
+        prior_shape.filter(|shape| !matches!(shape, crate::OutputResponseShape::FileToken))
+    {
+        route_result.output_contract.response_shape = shape;
+    } else if current_requested_file_delivery {
+        route_result.output_contract.response_shape = crate::OutputResponseShape::Free;
+    }
+    if let Some(semantic) = prior_semantic {
+        route_result.output_contract.semantic_kind = semantic;
+    }
+    route_result
+        .route_reason
+        .push_str("; preserve_active_clarify_output_contract");
+}
+
 pub(super) async fn prepare_ask_routing(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -534,6 +676,16 @@ pub(super) async fn prepare_ask_routing(
     let mut execution_recipe_hint = normalizer_out.execution_recipe_hint;
     let mut route_result =
         crate::intent_router::route_result_from_normalizer(state, task, &normalizer_out);
+    preserve_active_clarify_output_contract_for_locator_reply(
+        &mut route_result,
+        &clarify_followup_resolution,
+        &session_snapshot,
+    );
+    force_deictic_file_delivery_from_read_context_clarify(
+        &mut route_result,
+        &routed_prompt_surface,
+        &session_snapshot,
+    );
     let resume_runtime_binding = crate::intent::resume_policy::select_resume_runtime_binding(
         &route_result,
         resume_binding.as_ref(),
@@ -554,19 +706,20 @@ pub(super) async fn prepare_ask_routing(
         resume_runtime_binding,
     );
     let mut runtime_prompt = resume_runtime.runtime_prompt;
-    if let Some(merged_prompt) = merged_prompt_from_task_turn_analysis(
-        session_snapshot
-            .conversation_state
-            .as_ref()
-            .and_then(|state| state.last_primary_task_prompt.as_deref()),
-        session_snapshot
-            .conversation_state
-            .as_ref()
-            .and_then(|state| state.last_primary_task_output.as_deref()),
-        prompt,
-        turn_analysis.as_ref(),
-    ) {
-        info!(
+    if should_apply_task_turn_merge(&clarify_followup_resolution) {
+        if let Some(merged_prompt) = merged_prompt_from_task_turn_analysis(
+            session_snapshot
+                .conversation_state
+                .as_ref()
+                .and_then(|state| state.last_primary_task_prompt.as_deref()),
+            session_snapshot
+                .conversation_state
+                .as_ref()
+                .and_then(|state| state.last_primary_task_output.as_deref()),
+            prompt,
+            turn_analysis.as_ref(),
+        ) {
+            info!(
             "{} worker_once: ask task_turn_merge task_id={} turn_type={:?} target_task_policy={:?} merged_prompt={}",
             crate::highlight_tag("routing"),
             task.task_id,
@@ -576,8 +729,9 @@ pub(super) async fn prepare_ask_routing(
                 .and_then(|analysis| analysis.target_task_policy),
             crate::truncate_for_log(&merged_prompt)
         );
-        runtime_prompt = merged_prompt;
-        route_result.resolved_intent = runtime_prompt.clone();
+            runtime_prompt = merged_prompt;
+            route_result.resolved_intent = runtime_prompt.clone();
+        }
     }
     info!(
         "worker_once: ask received_message task_id={} user_id={} chat_id={} text={}",
@@ -650,7 +804,10 @@ pub(super) async fn prepare_ask_routing(
 #[cfg(test)]
 mod tests {
     use super::{
-        merged_prompt_from_task_turn_analysis, should_probe_transcript_for_clarify_fallback,
+        force_deictic_file_delivery_from_read_context_clarify,
+        merged_prompt_from_task_turn_analysis,
+        preserve_active_clarify_output_contract_for_locator_reply, should_apply_task_turn_merge,
+        should_probe_transcript_for_clarify_fallback,
     };
 
     use serde_json::json;
@@ -714,6 +871,245 @@ mod tests {
             Some(&binding)
         )
         .is_none());
+    }
+
+    #[test]
+    fn clarify_locator_reply_preserves_prior_content_excerpt_contract() {
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "读取文件最后 10 行并发送内容".to_string(),
+            needs_clarify: false,
+            route_reason: String::new(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::FileToken,
+                requires_content_evidence: true,
+                delivery_required: true,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: "/tmp/model_io.log".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let clarify_state = crate::clarify_state::ClarifyState {
+            missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
+            pending_question: "请提供日志路径".to_string(),
+            candidate_targets: Vec::new(),
+            delivery_required: false,
+            output_shape: None,
+            semantic_kind: Some(
+                crate::OutputSemanticKind::ContentExcerptSummary
+                    .as_str()
+                    .to_string(),
+            ),
+            source_request: "看下那个最近 10 行".to_string(),
+            source_task_id: "task-1".to_string(),
+            updated_at_ts: 1,
+            expires_at_ts: 2,
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: Some(clarify_state),
+            active_observed_facts: None,
+        };
+        let resolution =
+            crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
+                crate::clarify_followup::ClarifyLocatorReplyRewrite {
+                    resolved_intent: "Continue...".to_string(),
+                    prior_user_text: "看下那个最近 10 行".to_string(),
+                    current_user_text: "/tmp/model_io.log".to_string(),
+                    reason: crate::clarify_followup::ClarifyRewriteReason::ClarifyLocatorReply,
+                },
+            );
+
+        preserve_active_clarify_output_contract_for_locator_reply(
+            &mut route,
+            &resolution,
+            &snapshot,
+        );
+
+        assert!(!route.wants_file_delivery);
+        assert!(!route.output_contract.delivery_required);
+        assert_eq!(
+            route.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::None
+        );
+        assert_eq!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Free
+        );
+        assert_eq!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ContentExcerptSummary
+        );
+        assert!(route
+            .route_reason
+            .contains("preserve_active_clarify_output_contract"));
+    }
+
+    #[test]
+    fn clarify_locator_reply_preserves_prior_scalar_path_contract_without_delivery() {
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "在目录 fixtures/stem_unique 中查找 abcd".to_string(),
+            needs_clarify: false,
+            route_reason: String::new(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: "fixtures/stem_unique".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let clarify_state = crate::clarify_state::ClarifyState {
+            missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
+            pending_question: "请提供要搜索的目录或目标文件的具体路径。".to_string(),
+            candidate_targets: Vec::new(),
+            delivery_required: false,
+            output_shape: Some(crate::OutputResponseShape::Scalar.as_str().to_string()),
+            semantic_kind: Some(
+                crate::OutputSemanticKind::ScalarPathOnly
+                    .as_str()
+                    .to_string(),
+            ),
+            source_request: "去那个 stem_unique 目录里找 abcd，只输出路径".to_string(),
+            source_task_id: "task-1".to_string(),
+            updated_at_ts: 1,
+            expires_at_ts: 2,
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: Some(clarify_state),
+            active_observed_facts: None,
+        };
+        let resolution =
+            crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
+                crate::clarify_followup::ClarifyLocatorReplyRewrite {
+                    resolved_intent: "Continue...".to_string(),
+                    prior_user_text: "去那个 stem_unique 目录里找 abcd，只输出路径".to_string(),
+                    current_user_text: "fixtures/stem_unique".to_string(),
+                    reason: crate::clarify_followup::ClarifyRewriteReason::ClarifyLocatorReply,
+                },
+            );
+
+        preserve_active_clarify_output_contract_for_locator_reply(
+            &mut route,
+            &resolution,
+            &snapshot,
+        );
+
+        assert!(!route.wants_file_delivery);
+        assert!(!route.output_contract.delivery_required);
+        assert_eq!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar
+        );
+        assert_eq!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ScalarPathOnly
+        );
+        assert!(route
+            .route_reason
+            .contains("preserve_active_clarify_output_contract"));
+    }
+
+    #[test]
+    fn deictic_file_delivery_after_read_context_requires_clarify_without_locator() {
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "send the referenced file".to_string(),
+            needs_clarify: false,
+            route_reason: String::new(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::FileToken,
+                requires_content_evidence: false,
+                delivery_required: true,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: "/tmp/model_io.log".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+                source_request: "read the last 10 lines".to_string(),
+                op_kind: crate::followup_frame::FollowupOpKind::Read,
+                bound_target: Some("/tmp/model_io.log".to_string()),
+                source_task_id: "task-1".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+                ..Default::default()
+            }),
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let surface =
+            crate::intent::surface_signals::analyze_prompt_surface("把那个文件发给我，不要贴内容");
+
+        force_deictic_file_delivery_from_read_context_clarify(&mut route, &surface, &snapshot);
+
+        assert!(route.needs_clarify);
+        assert!(route.is_clarify_gate());
+        assert!(!route.wants_file_delivery);
+        assert!(!route.output_contract.delivery_required);
+        assert_eq!(
+            route.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::None
+        );
+        assert!(!route.output_contract.requires_content_evidence);
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        );
+        assert_eq!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+        );
+        assert!(route.clarify_question.contains("文件路径"));
+        assert!(route
+            .route_reason
+            .contains("deictic_file_delivery_from_read_context_requires_clarify"));
     }
 
     #[test]
@@ -829,6 +1225,20 @@ mod tests {
                 None,
             ),
             crate::intent::continuation_resolver::ClarifyFollowupResolution::None
+        ));
+    }
+
+    #[test]
+    fn clarify_followup_resolution_disables_active_task_merge() {
+        let resolution =
+            crate::intent::continuation_resolver::ClarifyFollowupResolution::NormalizerRewrite {
+                rewritten_prompt:
+                    "Continue the previous request that was waiting for clarification: 看看日志最后 5 行"
+                        .to_string(),
+            };
+        assert!(!should_apply_task_turn_merge(&resolution));
+        assert!(should_apply_task_turn_merge(
+            &crate::intent::continuation_resolver::ClarifyFollowupResolution::None
         ));
     }
 

@@ -30,6 +30,7 @@ impl VerifyMode {
 pub(crate) enum VerifyIssueKind {
     SkillNotVisible,
     MissingRequiredArg,
+    UnresolvedTemplateArg,
     InvalidDependsOn,
     ConfirmationRequired,
     PrimaryFallbackConflict,
@@ -50,6 +51,7 @@ impl VerifyIssueKind {
         match self {
             Self::SkillNotVisible => "SkillNotVisible",
             Self::MissingRequiredArg => "MissingRequiredArg",
+            Self::UnresolvedTemplateArg => "UnresolvedTemplateArg",
             Self::InvalidDependsOn => "InvalidDependsOn",
             Self::ConfirmationRequired => "ConfirmationRequired",
             Self::PrimaryFallbackConflict => "PrimaryFallbackConflict",
@@ -227,6 +229,7 @@ fn verify_step_args(
     normalized_skill: &str,
     issues: &mut Vec<VerifyIssue>,
 ) {
+    let has_unresolved_template = value_contains_unresolved_template(&step.args);
     let manifest_required = manifest_required_args(state, normalized_skill);
     let fallback_required = required_args_for_skill(normalized_skill);
     let required: Vec<String> = if manifest_required.is_empty() {
@@ -237,6 +240,15 @@ fn verify_step_args(
     } else {
         manifest_required
     };
+    if has_unresolved_template {
+        issues.push(VerifyIssue {
+            step_id: step.step_id.clone(),
+            kind: VerifyIssueKind::UnresolvedTemplateArg,
+            detail: format!(
+                "skill `{normalized_skill}` has unresolved template placeholder in args"
+            ),
+        });
+    }
     if required.is_empty() {
         return;
     }
@@ -265,11 +277,24 @@ fn verify_step_args(
     }
 }
 
+fn value_contains_unresolved_template(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(text) => {
+            let text = text.trim();
+            text.contains("{{") && text.contains("}}")
+        }
+        serde_json::Value::Array(items) => items.iter().any(value_contains_unresolved_template),
+        serde_json::Value::Object(map) => map.values().any(value_contains_unresolved_template),
+        _ => false,
+    }
+}
+
 fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
     matches!(
         kind,
         VerifyIssueKind::SkillNotVisible
             | VerifyIssueKind::MissingRequiredArg
+            | VerifyIssueKind::UnresolvedTemplateArg
             | VerifyIssueKind::InvalidDependsOn
             | VerifyIssueKind::PrimaryFallbackConflict
             | VerifyIssueKind::RouteClarifyRequired
@@ -732,13 +757,36 @@ fn first_shadow_blocked_reason(issues: &[VerifyIssue]) -> Option<String> {
         .map(|issue| issue.detail.clone())
 }
 
+fn request_prefers_english(request_text: Option<&str>) -> bool {
+    request_text
+        .map(crate::language_policy::request_language_hint)
+        .is_some_and(|hint| hint == "en")
+}
+
+fn unresolved_template_response_step(request_text: Option<&str>) -> PlanStep {
+    let content = if request_prefers_english(request_text) {
+        "I need the concrete input before I can continue. Please provide the JSON array, file path, or previous result to use.".to_string()
+    } else {
+        "我还缺少要处理的具体内容。请直接提供 JSON 数组、文件路径或上一条结果后，我再继续处理。"
+            .to_string()
+    };
+    PlanStep {
+        step_id: "verify_unresolved_template_response".to_string(),
+        action_type: "respond".to_string(),
+        skill: "respond".to_string(),
+        args: serde_json::json!({ "content": content }),
+        depends_on: Vec::new(),
+        why: "unresolved template placeholder in executable step args".to_string(),
+    }
+}
+
 pub(crate) fn verify_plan(
     state: &AppState,
     task: &ClaimedTask,
     input: VerifyInput<'_>,
     mode: VerifyMode,
 ) -> VerifyResult {
-    if input
+    let route_requires_clarify_before_tools = input
         .route_result
         .map(|route| route.needs_clarify)
         .unwrap_or(false)
@@ -746,29 +794,7 @@ pub(crate) fn verify_plan(
             .plan_result
             .steps
             .iter()
-            .any(|step| matches!(step.action_type.as_str(), "call_skill" | "call_tool"))
-    {
-        let detail = format!(
-            "route requires clarify before execution; context={}",
-            input.context_bundle_summary.unwrap_or("<none>")
-        );
-        let shadow_blocked_reason = Some(detail.clone());
-        let blocked_reason = matches!(mode, VerifyMode::Enforce).then_some(detail.clone());
-        return VerifyResult {
-            mode,
-            approved: blocked_reason.is_none(),
-            blocked_reason,
-            shadow_blocked_reason,
-            approved_steps: input.plan_result.steps.clone(),
-            needs_confirmation: false,
-            rewritten_steps: Vec::new(),
-            issues: vec![VerifyIssue {
-                step_id: "route".to_string(),
-                kind: VerifyIssueKind::RouteClarifyRequired,
-                detail,
-            }],
-        };
-    }
+            .any(|step| matches!(step.action_type.as_str(), "call_skill" | "call_tool"));
     let visible_skills: HashSet<String> = state
         .planner_visible_skills_for_task(task)
         .into_iter()
@@ -782,6 +808,16 @@ pub(crate) fn verify_plan(
     let confirmation_already_granted = route_has_confirmation_resume(input.route_result);
     let mut issues = Vec::new();
     let mut needs_confirmation = false;
+    if route_requires_clarify_before_tools {
+        issues.push(VerifyIssue {
+            step_id: "route".to_string(),
+            kind: VerifyIssueKind::RouteClarifyRequired,
+            detail: format!(
+                "route requires clarify before execution; context={}",
+                input.context_bundle_summary.unwrap_or("<none>")
+            ),
+        });
+    }
 
     for step in &input.plan_result.steps {
         if matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
@@ -835,13 +871,20 @@ pub(crate) fn verify_plan(
 
     let approved = blocked_reason.is_none();
     let approved_steps = input.plan_result.steps.clone();
-    let rewritten_steps = rewrite_execution_recipe_steps(
-        state,
-        input.route_result,
-        input.request_text,
-        input.plan_result,
-        input.execution_recipe,
-    );
+    let rewritten_steps = if issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::UnresolvedTemplateArg))
+    {
+        vec![unresolved_template_response_step(input.request_text)]
+    } else {
+        rewrite_execution_recipe_steps(
+            state,
+            input.route_result,
+            input.request_text,
+            input.plan_result,
+            input.execution_recipe,
+        )
+    };
 
     VerifyResult {
         mode,
@@ -1034,6 +1077,49 @@ primary_fallback_role = "fallback"
             Some(VerifyIssueKind::RouteClarifyRequired)
         ));
         assert!(result.shadow_blocked_reason.is_some());
+    }
+
+    #[test]
+    fn observe_mode_rewrites_unresolved_template_args_to_response() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(true)),
+                request_text: Some("帮我转成表格"),
+                context_bundle_summary: Some("needs concrete JSON array"),
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "read_file".to_string(),
+                    args: json!({ "path": "{{last_output}}" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::ObserveOnly,
+        );
+        assert!(result.approved);
+        assert!(result.shadow_blocked_reason.is_some());
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::RouteClarifyRequired)));
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::UnresolvedTemplateArg)));
+        assert_eq!(result.rewritten_steps.len(), 1);
+        assert_eq!(result.rewritten_steps[0].action_type, "respond");
+        assert!(result.rewritten_steps[0]
+            .args
+            .get("content")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .contains("具体内容"));
     }
 
     #[test]

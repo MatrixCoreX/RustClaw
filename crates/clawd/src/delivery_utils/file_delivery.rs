@@ -461,7 +461,7 @@ pub(super) fn scan_filename_under_roots(
             }
         }
         FilenameScanResult::TooManyEntries => {
-            FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::Rule3ScanTooMany)
+            FileDeliveryTargetResolution::UserMessage(scan_limit_message_for_filename(file_name))
         }
         FilenameScanResult::NotFound => {
             if system_root == Path::new("/") {
@@ -484,11 +484,19 @@ pub(super) fn scan_filename_under_roots(
                 FilenameScanResult::NotFound => FileDeliveryTargetResolution::UserMessage(
                     DeliveryMessageKind::Rule3FileNotFound,
                 ),
-                FilenameScanResult::TooManyEntries => {
-                    FileDeliveryTargetResolution::UserMessage(DeliveryMessageKind::Rule3ScanTooMany)
-                }
+                FilenameScanResult::TooManyEntries => FileDeliveryTargetResolution::UserMessage(
+                    scan_limit_message_for_filename(file_name),
+                ),
             }
         }
+    }
+}
+
+fn scan_limit_message_for_filename(file_name: &str) -> DeliveryMessageKind {
+    if token_has_definite_file_shape(file_name) {
+        DeliveryMessageKind::Rule3FileNotFound
+    } else {
+        DeliveryMessageKind::Rule3ScanTooMany
     }
 }
 
