@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use crate::AppState;
@@ -31,12 +32,31 @@ pub(crate) fn try_resolve_implicit_locator_path(
     context_hint: Option<&str>,
 ) -> Option<LocatorAutoResolution> {
     let query_text = format!("{raw_text}\n{resolved_text}");
-    if let Some(explicit_path) = resolve_explicit_locator_path_from_text(
+    let explicit_tokens = extract_explicit_path_like_tokens(&query_text);
+    if let Some(explicit_path) = resolve_context_aware_explicit_locator_path_from_text(
         &state.skill_rt.workspace_root,
         &state.skill_rt.default_locator_search_dir,
-        &query_text,
+        &explicit_tokens,
+        context_hint,
     ) {
         return Some(LocatorAutoResolution::Direct(explicit_path));
+    }
+    let relative_file_tokens = relative_explicit_file_tokens(&explicit_tokens);
+    if !relative_file_tokens.is_empty() {
+        let roots = context_relative_locator_roots(
+            &state.skill_rt.workspace_root,
+            &state.skill_rt.default_locator_search_dir,
+            context_hint,
+        );
+        if let Some(resolved) = try_resolve_relative_explicit_suffix_tokens_in_roots(
+            &roots,
+            &relative_file_tokens,
+            state.skill_rt.locator_scan_max_depth,
+            state.skill_rt.locator_scan_max_files,
+        ) {
+            return Some(resolved);
+        }
+        return None;
     }
     let keywords = extract_locator_keywords(&query_text);
     let filename_tokens = extract_filename_like_tokens(&query_text);
@@ -457,14 +477,24 @@ fn extract_explicit_path_like_tokens(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for raw in text.split_whitespace() {
         let token = trim_locator_token(raw);
-        if looks_like_explicit_path_or_url_token(&token) && !out.iter().any(|v| v == &token) {
-            out.push(token);
+        push_explicit_path_token_candidate(&token, &mut out);
+        if let Some((_, suffix)) = token.rsplit_once('=') {
+            push_explicit_path_token_candidate(&trim_locator_token(suffix), &mut out);
+        }
+        if let Some((_, suffix)) = token.rsplit_once(':') {
+            push_explicit_path_token_candidate(&trim_locator_token(suffix), &mut out);
         }
         if out.len() >= 8 {
             break;
         }
     }
     out
+}
+
+fn push_explicit_path_token_candidate(token: &str, out: &mut Vec<String>) {
+    if looks_like_explicit_path_or_url_token(token) && !out.iter().any(|v| v == token) {
+        out.push(token.to_string());
+    }
 }
 
 fn expand_home_prefixed_path(token: &str) -> Option<PathBuf> {
@@ -507,6 +537,258 @@ fn resolve_explicit_locator_path_token(
             )
         } {
             return Some(canonical.display().to_string());
+        }
+    }
+    None
+}
+
+fn is_relative_explicit_locator_token(token: &str) -> bool {
+    looks_like_explicit_path_or_url_token(token)
+        && !token.starts_with('/')
+        && !token.starts_with("~/")
+        && !token.starts_with("http://")
+        && !token.starts_with("https://")
+        && !token.contains(":\\")
+}
+
+fn context_relative_locator_roots(
+    workspace_root: &Path,
+    default_locator_search_dir: &Path,
+    context_hint: Option<&str>,
+) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    let workspace_root = normalize_implicit_locator_root(workspace_root);
+    if let Some(context_root) = resolve_contextual_locator_root(
+        workspace_root.as_deref().unwrap_or(Path::new("/")),
+        default_locator_search_dir,
+        context_hint,
+    )
+    .and_then(|path| normalize_implicit_locator_root(&path))
+    {
+        let mut current = Some(context_root);
+        for _ in 0..8 {
+            let Some(root) = current.take() else {
+                break;
+            };
+            if let Some(workspace_root) = workspace_root.as_ref() {
+                if !root.starts_with(workspace_root) {
+                    break;
+                }
+            }
+            append_implicit_root_if_missing(&mut roots, root.clone());
+            if workspace_root
+                .as_ref()
+                .is_some_and(|workspace| &root == workspace)
+            {
+                break;
+            }
+            current = root.parent().map(Path::to_path_buf);
+        }
+    }
+    append_implicit_root_if_missing(&mut roots, default_locator_search_dir.to_path_buf());
+    if workspace_root
+        .as_ref()
+        .is_none_or(|workspace| workspace != default_locator_search_dir)
+    {
+        append_implicit_root_if_missing(
+            &mut roots,
+            workspace_root.unwrap_or_else(|| {
+                default_locator_search_dir
+                    .canonicalize()
+                    .unwrap_or_else(|_| default_locator_search_dir.to_path_buf())
+            }),
+        );
+    }
+    roots
+}
+
+fn resolve_relative_explicit_locator_path_token_in_roots(
+    token: &str,
+    roots: &[PathBuf],
+) -> Option<String> {
+    for root in roots {
+        let candidate = root.join(token);
+        if let Some(canonical) = if candidate.is_file() || candidate.is_dir() {
+            Some(candidate.canonicalize().unwrap_or(candidate))
+        } else {
+            crate::delivery_utils::resolve_existing_path_under_root_case_insensitive(
+                Path::new("/"),
+                &candidate.display().to_string(),
+            )
+        } {
+            return Some(canonical.display().to_string());
+        }
+    }
+    None
+}
+
+fn resolve_context_aware_explicit_locator_path_from_text(
+    workspace_root: &Path,
+    default_locator_search_dir: &Path,
+    explicit_tokens: &[String],
+    context_hint: Option<&str>,
+) -> Option<String> {
+    for token in explicit_tokens {
+        if is_relative_explicit_locator_token(token) {
+            let roots = context_relative_locator_roots(
+                workspace_root,
+                default_locator_search_dir,
+                context_hint,
+            );
+            if let Some(path) = resolve_relative_explicit_locator_path_token_in_roots(token, &roots)
+            {
+                return Some(path);
+            }
+        }
+        if let Some(path) =
+            resolve_explicit_locator_path_token(workspace_root, default_locator_search_dir, token)
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn relative_explicit_file_tokens(explicit_tokens: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for token in explicit_tokens {
+        if !is_relative_explicit_locator_token(token) {
+            continue;
+        }
+        let Some(file_name) = Path::new(token).file_name().and_then(|v| v.to_str()) else {
+            continue;
+        };
+        if !looks_like_filename_locator(file_name) {
+            continue;
+        }
+        if !out.iter().any(|v| v == token) {
+            out.push(token.clone());
+        }
+    }
+    out
+}
+
+fn normalized_path_components(path: &Path) -> Vec<String> {
+    path.components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_string_lossy().to_lowercase()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn normalized_relative_token_components(token: &str) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    for component in Path::new(token).components() {
+        match component {
+            std::path::Component::Normal(value) => out.push(value.to_string_lossy().to_lowercase()),
+            std::path::Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+fn path_ends_with_relative_token(path: &Path, token: &str) -> bool {
+    let Some(suffix) = normalized_relative_token_components(token) else {
+        return false;
+    };
+    let full = normalized_path_components(path);
+    full.len() >= suffix.len() && full[full.len() - suffix.len()..] == suffix
+}
+
+fn relative_suffix_scan_depth(max_depth: usize, tokens: &[String]) -> usize {
+    let extra = tokens
+        .iter()
+        .filter_map(|token| normalized_relative_token_components(token))
+        .map(|components| components.len())
+        .max()
+        .unwrap_or(0)
+        .saturating_add(4);
+    max_depth.saturating_add(extra).min(24)
+}
+
+fn skip_relative_suffix_scan_dir(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    matches!(name, ".git" | "node_modules" | "target")
+}
+
+fn collect_relative_suffix_candidate_matches(
+    root: &Path,
+    token: &str,
+    max_depth: usize,
+    max_dirs: usize,
+) -> Vec<String> {
+    if !root.is_dir() || normalized_relative_token_components(token).is_none() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut seen_dirs = 0usize;
+    let mut queue = VecDeque::from([(root.to_path_buf(), 0usize)]);
+    while let Some((dir, depth)) = queue.pop_front() {
+        seen_dirs += 1;
+        if seen_dirs > max_dirs.max(1) {
+            break;
+        }
+        let candidate = dir.join(token);
+        if candidate.is_file() && path_ends_with_relative_token(&candidate, token) {
+            let canonical = candidate.canonicalize().unwrap_or(candidate);
+            let rendered = canonical.display().to_string();
+            if !out.iter().any(|value| value == &rendered) {
+                out.push(rendered);
+            }
+        }
+        if depth >= max_depth {
+            continue;
+        }
+        let mut entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| path.is_dir() && !skip_relative_suffix_scan_dir(path))
+                .collect::<Vec<_>>(),
+            Err(_) => continue,
+        };
+        entries.sort();
+        for child in entries {
+            queue.push_back((child, depth + 1));
+        }
+    }
+    out
+}
+
+fn try_resolve_relative_explicit_suffix_tokens_in_roots(
+    roots: &[PathBuf],
+    tokens: &[String],
+    max_depth: usize,
+    max_files: usize,
+) -> Option<LocatorAutoResolution> {
+    let scan_depth = relative_suffix_scan_depth(max_depth, tokens);
+    let max_dirs = max_files.max(1).saturating_mul(4);
+    for token in tokens {
+        let mut matches = Vec::new();
+        for root in roots {
+            for rendered in
+                collect_relative_suffix_candidate_matches(root, token, scan_depth, max_dirs)
+            {
+                if !matches.iter().any(|value| value == &rendered) {
+                    matches.push(rendered);
+                }
+            }
+        }
+        matches.sort();
+        matches.dedup();
+        if matches.len() == 1 {
+            return Some(LocatorAutoResolution::Direct(
+                matches.into_iter().next().unwrap_or_default(),
+            ));
+        }
+        if matches.len() > 1 {
+            return Some(LocatorAutoResolution::Fuzzy(
+                matches.into_iter().take(3).collect(),
+            ));
         }
     }
     None
@@ -1028,6 +1310,117 @@ mod tests {
             }
             other => panic!("expected direct match, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn relative_explicit_locator_prefers_recent_context_ancestor_over_workspace_root() {
+        let workspace = TempDirGuard::new("relative_context_workspace");
+        let context_root = workspace.path.join("fixtures").join("device");
+        let config_dir = context_root.join("configs");
+        fs::create_dir_all(context_root.join("data")).expect("create context data");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        fs::create_dir_all(workspace.path.join("data")).expect("create workspace data");
+        fs::write(
+            config_dir.join("app.toml"),
+            "db_path = \"data/value.sqlite\"\n",
+        )
+        .expect("write config");
+        fs::write(context_root.join("data/value.sqlite"), "context-db\n")
+            .expect("write context db");
+        fs::write(workspace.path.join("data/value.sqlite"), "workspace-db\n")
+            .expect("write workspace db");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = workspace.path.clone();
+        state.skill_rt.default_locator_search_dir = workspace.path.clone();
+        let context_hint = format!(
+            "recent file={} output=db_path = \"data/value.sqlite\"",
+            config_dir.join("app.toml").display()
+        );
+
+        let out = super::try_resolve_implicit_locator_path(
+            &state,
+            "data/value.sqlite",
+            "查看配置里 data/value.sqlite 指向的库",
+            crate::OutputLocatorKind::Path,
+            Some(&context_hint),
+        );
+
+        match out {
+            Some(super::LocatorAutoResolution::Direct(path)) => {
+                assert_eq!(
+                    PathBuf::from(path)
+                        .canonicalize()
+                        .expect("canonical resolved path"),
+                    context_root
+                        .join("data/value.sqlite")
+                        .canonicalize()
+                        .expect("canonical context db")
+                );
+            }
+            other => panic!("expected context-relative sqlite path, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn relative_explicit_file_token_scans_exact_suffix_before_parent_directory_fallback() {
+        let workspace = TempDirGuard::new("relative_suffix_workspace");
+        let context_root = workspace.path.join("fixtures").join("device");
+        fs::create_dir_all(context_root.join("data")).expect("create context data");
+        fs::create_dir_all(workspace.path.join("data")).expect("create workspace data dir");
+        fs::write(context_root.join("data/value.sqlite"), "context-db\n")
+            .expect("write context db");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = workspace.path.clone();
+        state.skill_rt.default_locator_search_dir = workspace.path.clone();
+        state.skill_rt.locator_scan_max_depth = 2;
+        state.skill_rt.locator_scan_max_files = 200;
+
+        let out = super::try_resolve_implicit_locator_path(
+            &state,
+            "data/value.sqlite",
+            "检查配置文件中指定的 data/value.sqlite 数据库中的表名列表",
+            crate::OutputLocatorKind::Path,
+            None,
+        );
+
+        match out {
+            Some(super::LocatorAutoResolution::Direct(path)) => {
+                assert_eq!(
+                    PathBuf::from(path)
+                        .canonicalize()
+                        .expect("canonical resolved path"),
+                    context_root
+                        .join("data/value.sqlite")
+                        .canonicalize()
+                        .expect("canonical context db")
+                );
+            }
+            other => panic!("expected suffix-resolved sqlite path, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unresolved_relative_explicit_file_token_does_not_fallback_to_parent_directory() {
+        let workspace = TempDirGuard::new("relative_missing_file_workspace");
+        fs::create_dir_all(workspace.path.join("data")).expect("create workspace data dir");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = workspace.path.clone();
+        state.skill_rt.default_locator_search_dir = workspace.path.clone();
+        state.skill_rt.locator_scan_max_depth = 4;
+        state.skill_rt.locator_scan_max_files = 100;
+
+        let out = super::try_resolve_implicit_locator_path(
+            &state,
+            "data/missing.sqlite",
+            "检查配置文件中指定的 data/missing.sqlite 数据库",
+            crate::OutputLocatorKind::Path,
+            None,
+        );
+
+        assert!(
+            out.is_none(),
+            "relative missing file should not resolve to parent directory: {out:?}"
+        );
     }
 
     #[test]

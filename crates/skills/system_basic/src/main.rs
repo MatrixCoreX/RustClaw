@@ -977,11 +977,23 @@ fn path_batch_facts(
                 "fact": build_path_fact(workspace_root, &real, &meta),
             })),
             Err(err) if include_missing && err.kind() == io::ErrorKind::NotFound => {
-                facts.push(json!({
-                    "path": path,
-                    "exists": false,
-                    "error": "not found",
-                }))
+                if let Some(resolved) = resolve_case_insensitive_leaf(&real) {
+                    let meta = std::fs::metadata(&resolved).map_err(|err| {
+                        format!("metadata failed for {}: {err}", resolved.display())
+                    })?;
+                    facts.push(json!({
+                        "path": path,
+                        "exists": true,
+                        "resolved_from_case_insensitive": true,
+                        "fact": build_path_fact(workspace_root, &resolved, &meta),
+                    }));
+                } else {
+                    facts.push(json!({
+                        "path": path,
+                        "exists": false,
+                        "error": "not found",
+                    }))
+                }
             }
             Err(err) => return Err(format!("metadata failed for {}: {err}", real.display())),
         }
@@ -994,6 +1006,22 @@ fn path_batch_facts(
         "facts": facts,
     })
     .to_string())
+}
+
+fn resolve_case_insensitive_leaf(path: &Path) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    let target_name = path.file_name()?.to_str()?;
+    let entries = std::fs::read_dir(parent).ok()?;
+    for entry in entries.flatten() {
+        let candidate_name = entry.file_name();
+        let Some(candidate_name) = candidate_name.to_str() else {
+            continue;
+        };
+        if candidate_name.eq_ignore_ascii_case(target_name) {
+            return Some(entry.path());
+        }
+    }
+    None
 }
 
 fn diagnose_runtime(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
@@ -1690,6 +1718,39 @@ mod tests {
         let root = temp_root("allow_abs");
         let resolved = resolve_path(&root, "/etc/passwd", true).expect("should allow");
         assert_eq!(resolved, PathBuf::from("/etc/passwd"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn path_batch_facts_resolves_case_insensitive_leaf() {
+        let root = temp_root("path_facts_case_leaf");
+        let dir = root.join("reports");
+        std::fs::create_dir_all(&dir).expect("create reports");
+        std::fs::write(dir.join("Report.MD"), "ok").expect("write report");
+        let mut obj = Map::new();
+        obj.insert(
+            "paths".to_string(),
+            json!([root.join("reports/report.md").display().to_string()]),
+        );
+
+        let out = path_batch_facts(&root, &obj, true).expect("path facts");
+        let value: Value = serde_json::from_str(&out).expect("json");
+        let fact = value
+            .get("facts")
+            .and_then(Value::as_array)
+            .and_then(|facts| facts.first())
+            .expect("first fact");
+        assert_eq!(fact.get("exists").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            fact.get("resolved_from_case_insensitive")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert!(fact
+            .get("fact")
+            .and_then(|inner| inner.get("resolved_path"))
+            .and_then(Value::as_str)
+            .is_some_and(|path| path.ends_with("reports/Report.MD")));
         let _ = std::fs::remove_dir_all(root);
     }
 

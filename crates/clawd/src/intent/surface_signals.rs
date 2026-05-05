@@ -28,6 +28,7 @@ pub(crate) struct PromptSurfaceSignals {
     pub(crate) single_filename_candidate: Option<String>,
     pub(crate) delivery_token_reference: bool,
     pub(crate) locator_target_pair: Option<(String, String)>,
+    pub(crate) deictic_reference: bool,
 }
 
 impl PromptSurfaceSignals {
@@ -73,6 +74,10 @@ impl PromptSurfaceSignals {
 
     pub(crate) fn has_delivery_token_reference(&self) -> bool {
         self.delivery_token_reference
+    }
+
+    pub(crate) fn has_deictic_reference(&self) -> bool {
+        self.deictic_reference
     }
 
     pub(crate) fn filename_candidates_excluding_field_selectors(&self) -> Vec<String> {
@@ -128,6 +133,7 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
         structural_locator_only_reply.then_some(LocatorReplyPromptShape::LocatorOnly);
     let delivery_token_reference = prompt_contains_delivery_token_reference(trimmed);
     let locator_target_pair = detect_locator_target_pair_shape(trimmed);
+    let deictic_reference = prompt_has_deictic_reference(trimmed);
     PromptSurfaceSignals {
         token_count,
         inline_json_shape,
@@ -140,7 +146,29 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
         single_filename_candidate,
         delivery_token_reference,
         locator_target_pair,
+        deictic_reference,
     }
+}
+
+fn prompt_has_deictic_reference(prompt: &str) -> bool {
+    let trimmed = prompt.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // Grammar-level deictic markers only. This intentionally does not match
+    // task-specific target names such as README, archive, config, or logs.
+    if [
+        "那个", "这个", "那份", "这份", "那条", "这条", "那篇", "这篇", "那张", "这张",
+    ]
+    .iter()
+    .any(|marker| trimmed.contains(marker))
+    {
+        return true;
+    }
+    trimmed
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .map(|token| token.to_ascii_lowercase())
+        .any(|token| matches!(token.as_str(), "that" | "this" | "those" | "these"))
 }
 
 fn classify_locator_hint_prompt_shape(

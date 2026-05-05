@@ -42,15 +42,6 @@ fn clarify_fallback_source_or_default(
     source.unwrap_or(crate::fallback::ClarifyFallbackSource::IntentUnresolved)
 }
 
-fn clarify_reason_allows_route_question_reuse(
-    clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
-) -> bool {
-    matches!(
-        clarify_reason_kind,
-        crate::post_route_policy::ClarifyReasonKind::RouteReasonText
-    )
-}
-
 fn should_preserve_original_inline_structured_input(
     prompt: &str,
     resolved_prompt_for_execution: &str,
@@ -125,12 +116,10 @@ fn should_suppress_recent_execution_in_clarify_context(
 
 fn should_reuse_route_clarify_question(
     route_result: &crate::RouteResult,
-    clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
+    _clarify_reason_kind: crate::post_route_policy::ClarifyReasonKind,
     fuzzy_locator_suggestions: &[String],
 ) -> bool {
-    !should_suppress_recent_execution_in_clarify_context(route_result, fuzzy_locator_suggestions)
-        && fuzzy_locator_suggestions.is_empty()
-        && clarify_reason_allows_route_question_reuse(clarify_reason_kind)
+    fuzzy_locator_suggestions.is_empty() && !route_result.clarify_question.trim().is_empty()
 }
 
 fn structured_fuzzy_locator_clarify_context(
@@ -233,10 +222,19 @@ fn apply_ask_post_route(
     prompt: &str,
     resolved_prompt: &str,
     recent_execution_context: &str,
-    route_result: crate::RouteResult,
+    mut route_result: crate::RouteResult,
     mut resolved_prompt_for_execution: String,
     mut prompt_with_memory_for_execution: String,
 ) -> AppliedAskPostRoute {
+    if deictic_bare_locator_should_force_clarify(prompt, &route_result) {
+        route_result.needs_clarify = true;
+        route_result.set_routed_mode(crate::RoutedMode::AskClarify);
+        if route_result.clarify_question.trim().is_empty() {
+            route_result.clarify_question =
+                deictic_missing_locator_question(&route_result).to_string();
+        }
+        append_route_reason(&mut route_result, "deictic_bare_locator_requires_clarify");
+    }
     let locator_resolution = if should_attempt_auto_locator(&route_result) {
         current_workspace_locator_resolution(&state.skill_rt.workspace_root, &route_result)
             .unwrap_or_else(|| {
@@ -244,11 +242,12 @@ fn apply_ask_post_route(
                 if locator_hint.is_empty() {
                     return crate::post_route_policy::LocatorResolution::None;
                 }
+                let locator_kind = effective_auto_locator_kind(&route_result);
                 match super::try_resolve_implicit_locator_path(
                     state,
                     locator_hint,
                     locator_hint,
-                    route_result.output_contract.locator_kind,
+                    locator_kind,
                     Some(recent_execution_context),
                 )
                 .map(|resolution| match resolution {
@@ -327,17 +326,25 @@ fn apply_ask_post_route(
     }
 }
 
+fn effective_auto_locator_kind(route_result: &crate::RouteResult) -> crate::OutputLocatorKind {
+    if route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && !route_result.output_contract.locator_hint.trim().is_empty()
+    {
+        crate::OutputLocatorKind::Path
+    } else {
+        route_result.output_contract.locator_kind
+    }
+}
+
 fn current_workspace_locator_resolution(
     workspace_root: &std::path::Path,
     route_result: &crate::RouteResult,
 ) -> Option<crate::post_route_policy::LocatorResolution> {
-    (route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace).then(
-        || {
-            crate::post_route_policy::LocatorResolution::Direct(
-                workspace_root.display().to_string(),
-            )
-        },
-    )
+    (route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && route_result.output_contract.locator_hint.trim().is_empty())
+    .then(|| {
+        crate::post_route_policy::LocatorResolution::Direct(workspace_root.display().to_string())
+    })
 }
 
 fn should_attempt_auto_locator(route_result: &crate::RouteResult) -> bool {
@@ -350,6 +357,81 @@ fn should_attempt_auto_locator(route_result: &crate::RouteResult) -> bool {
             | crate::OutputLocatorKind::CurrentWorkspace
             | crate::OutputLocatorKind::Filename
     )
+}
+
+fn append_route_reason(route_result: &mut crate::RouteResult, reason: &'static str) {
+    if route_result.route_reason.trim().is_empty() {
+        route_result.route_reason = reason.to_string();
+    } else if !route_result.route_reason.contains(reason) {
+        route_result.route_reason.push_str("; ");
+        route_result.route_reason.push_str(reason);
+    }
+}
+
+fn deictic_bare_locator_should_force_clarify(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+) -> bool {
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
+    let locator_hint = route_result.output_contract.locator_hint.trim();
+    let locator_hint_is_inferred_relative_path =
+        !surface.has_explicit_path_or_url() && locator_hint_is_relative_path_like(locator_hint);
+    let locator_hint_is_file_like = !locator_hint.is_empty()
+        && crate::delivery_utils::extract_filename_candidates(locator_hint)
+            .into_iter()
+            .any(|candidate| candidate == locator_hint);
+    surface.has_deictic_reference()
+        && !surface.has_explicit_path_or_url()
+        && (!surface.has_single_filename_candidate()
+            || !locator_hint_is_file_like
+            || locator_hint_is_inferred_relative_path)
+        && (!crate::worker::has_explicit_path_or_url_locator_hint(locator_hint)
+            || locator_hint_is_inferred_relative_path)
+        && route_result.output_contract.requires_content_evidence
+        && matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::CurrentWorkspace
+                | crate::OutputLocatorKind::Filename
+        )
+}
+
+fn locator_hint_is_relative_path_like(locator_hint: &str) -> bool {
+    let hint = locator_hint.trim();
+    !hint.is_empty()
+        && !hint.starts_with('/')
+        && !hint.starts_with("~/")
+        && !hint.starts_with("http://")
+        && !hint.starts_with("https://")
+        && !hint.contains(":\\")
+        && (hint.contains('/') || hint.contains('\\'))
+}
+
+fn deictic_missing_locator_question(route_result: &crate::RouteResult) -> &'static str {
+    if matches!(
+        route_result.output_contract.delivery_intent,
+        crate::OutputDeliveryIntent::FileSingle
+            | crate::OutputDeliveryIntent::DirectoryLookup
+            | crate::OutputDeliveryIntent::DirectoryBatchFiles
+    ) {
+        return "请提供目标文件或目录的具体路径。";
+    }
+    if matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ServiceStatus
+    ) {
+        return "请提供要查看状态的具体服务名。";
+    }
+    if matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ScalarPathOnly | crate::OutputSemanticKind::ExistenceWithPath
+    ) {
+        return "请提供要搜索的目录或目标文件的具体路径。";
+    }
+    if route_result.output_contract.requires_content_evidence {
+        return "请提供要读取或检查的具体文件、目录或路径。";
+    }
+    "请提供具体目标或路径。"
 }
 
 pub(super) async fn prepare_ask_flow(
@@ -633,7 +715,9 @@ pub(super) async fn execute_ask_dispatch(
 #[cfg(test)]
 mod tests {
     use super::{
-        clarify_fallback_source_or_default, execution_user_request, should_attempt_auto_locator,
+        clarify_fallback_source_or_default, current_workspace_locator_resolution,
+        deictic_bare_locator_should_force_clarify, deictic_missing_locator_question,
+        effective_auto_locator_kind, execution_user_request, should_attempt_auto_locator,
         should_preserve_original_inline_structured_input, should_reuse_route_clarify_question,
         should_suppress_recent_execution_in_clarify_context,
         structured_missing_locator_clarify_context,
@@ -655,6 +739,32 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).expect("temp root");
         path
+    }
+
+    fn executable_filename_route() -> crate::RouteResult {
+        crate::RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "读取 README 开头并总结".to_string(),
+            needs_clarify: false,
+            route_reason: String::new(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                locator_kind: crate::OutputLocatorKind::Filename,
+                locator_hint: "README.md".to_string(),
+                requires_content_evidence: true,
+                ..Default::default()
+            },
+        }
     }
 
     #[test]
@@ -700,6 +810,92 @@ mod tests {
             },
         };
         assert!(should_attempt_auto_locator(&route));
+    }
+
+    #[test]
+    fn deictic_bare_locator_forces_clarify_before_auto_locator() {
+        let route = executable_filename_route();
+        assert!(deictic_bare_locator_should_force_clarify(
+            "读一下那个 README 开头并用一句话总结",
+            &route
+        ));
+    }
+
+    #[test]
+    fn deictic_directory_scope_with_target_filename_forces_clarify() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "case_only".to_string();
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        assert!(deictic_bare_locator_should_force_clarify(
+            "去那个 case_only 目录里找 report.md，只输出路径",
+            &route
+        ));
+    }
+
+    #[test]
+    fn deictic_synthesized_relative_path_forces_clarify() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "reports/report.md".to_string();
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        assert!(deictic_bare_locator_should_force_clarify(
+            "去那个 reports 目录里找 report.md，只输出路径",
+            &route
+        ));
+    }
+
+    #[test]
+    fn deictic_forced_clarify_question_names_missing_locator() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "reports/report.md".to_string();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        assert_eq!(
+            deictic_missing_locator_question(&route),
+            "请提供要搜索的目录或目标文件的具体路径。"
+        );
+    }
+
+    #[test]
+    fn deictic_file_locator_with_filename_hint_still_allows_auto_locator() {
+        let route = executable_filename_route();
+        assert!(!deictic_bare_locator_should_force_clarify(
+            "把那个 README.md 发给我",
+            &route
+        ));
+    }
+
+    #[test]
+    fn direct_bare_locator_still_allows_auto_locator() {
+        let route = executable_filename_route();
+        assert!(!deictic_bare_locator_should_force_clarify(
+            "读一下 README 开头并用一句话总结",
+            &route
+        ));
+    }
+
+    #[test]
+    fn deictic_explicit_path_still_allows_auto_locator() {
+        let route = executable_filename_route();
+        assert!(!deictic_bare_locator_should_force_clarify(
+            "读一下这个 /tmp/README.md 开头并用一句话总结",
+            &route
+        ));
+    }
+
+    #[test]
+    fn deictic_context_bound_path_still_allows_execution() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
+                .to_string();
+        assert!(!deictic_bare_locator_should_force_clarify(
+            "查一下那个 sqlite 里有哪些表",
+            &route
+        ));
     }
 
     #[test]
@@ -787,6 +983,79 @@ mod tests {
             Some(crate::post_route_policy::LocatorResolution::Direct(path))
                 if path == root.display().to_string()
         ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn current_workspace_locator_hint_with_target_name_does_not_resolve_to_root() {
+        let root = make_temp_root("current_workspace_locator_named_hint");
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "列出 archive 目录下的所有条目".to_string(),
+            needs_clarify: false,
+            route_reason: String::new(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                locator_hint: "archive".to_string(),
+                requires_content_evidence: true,
+                ..Default::default()
+            },
+        };
+
+        assert!(current_workspace_locator_resolution(&root, &route).is_none());
+        assert_eq!(
+            effective_auto_locator_kind(&route),
+            crate::OutputLocatorKind::Path
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn current_workspace_empty_locator_hint_resolves_to_root() {
+        let root = make_temp_root("current_workspace_locator_empty_hint");
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "列出当前工作区".to_string(),
+            needs_clarify: false,
+            route_reason: String::new(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                requires_content_evidence: true,
+                ..Default::default()
+            },
+        };
+
+        assert!(matches!(
+            current_workspace_locator_resolution(&root, &route),
+            Some(crate::post_route_policy::LocatorResolution::Direct(path))
+                if path == root.display().to_string()
+        ));
+        assert_eq!(
+            effective_auto_locator_kind(&route),
+            crate::OutputLocatorKind::CurrentWorkspace
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -1012,9 +1281,9 @@ mod tests {
     }
 
     #[test]
-    fn filename_clarify_without_locator_does_not_reuse_router_question() {
+    fn filename_clarify_without_locator_reuses_specific_router_question() {
         let route = clarify_route(crate::OutputLocatorKind::Filename);
-        assert!(!should_reuse_route_clarify_question(
+        assert!(should_reuse_route_clarify_question(
             &route,
             crate::post_route_policy::ClarifyReasonKind::MissingPathScopedLocator,
             &[],

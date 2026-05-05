@@ -344,6 +344,10 @@ expected = sys.argv[3] if len(sys.argv) > 3 else ""
 prompt_l = prompt.lower()
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
+journal = result.get("task_journal") or {}
+summary = journal.get("summary") or {}
+route_result = summary.get("route_result") or {}
+needs_clarify = bool(route_result.get("needs_clarify"))
 texts = [str(data.get("error_text") or ""), str(result.get("text") or "")]
 for item in result.get("messages") or []:
     if isinstance(item, str):
@@ -385,18 +389,6 @@ strict_prompt_markers = [
     "do not summarize",
     "with no summary",
 ]
-execution_trace_markers = [
-    "**执行过程**",
-    "调用技能 `",
-    "调用命令 `",
-    "called skill",
-    "called command",
-]
-if any(marker in prompt_l or marker in prompt for marker in strict_prompt_markers):
-    if any(marker.lower() in text_l for marker in execution_trace_markers):
-        print("strict_output_contains_execution_trace")
-        raise SystemExit(0)
-
 delivery_markers = [
     "发给我",
     "发送给我",
@@ -411,8 +403,11 @@ missing_or_clarify = any(
     for marker in [
         "not found",
         "不存在",
+        "没有找到",
+        "找不到",
         "未找到",
         "文件未找到",
+        "无法完成发送",
         "请提供完整路径",
         "provide the full path",
     ]
@@ -494,7 +489,8 @@ if "调用技能 `schedule`（action=compile" in text and re.search(r"已成功(
     print("schedule_compile_overclaimed_created")
     raise SystemExit(0)
 
-raise SystemExit(1)
+print("__NO_QUALITY_VIOLATION__")
+raise SystemExit(0)
 PY
 }
 
@@ -692,9 +688,16 @@ PY
     return 1
   fi
   if [[ "$QUALITY_GUARD" -eq 1 ]]; then
-    local quality_reason
-    quality_reason="$(quality_violation_reason "$out_file" "$prompt" "$expected_marker" || true)"
-    if [[ -n "$quality_reason" ]]; then
+    local quality_reason quality_status
+    quality_status=0
+    quality_reason="$(quality_violation_reason "$out_file" "$prompt" "$expected_marker" 2>&1)" || quality_status=$?
+    if [[ "$quality_status" -ne 0 ]]; then
+      echo "Turn ${turn} quality guard crashed." >&2
+      echo "  checker_output=${quality_reason:-<empty>}" >&2
+      print_log_hints "$task_id" >&2
+      return 1
+    fi
+    if [[ "$quality_reason" != "__NO_QUALITY_VIOLATION__" ]]; then
       echo "Turn ${turn} failed quality guard: ${quality_reason}" >&2
       echo "  reply=${text:-${error:-<empty>}}" >&2
       print_log_hints "$task_id" >&2

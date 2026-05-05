@@ -280,7 +280,7 @@ fn sync_output_payload_collapses_strict_contract_to_single_message() {
 }
 
 #[test]
-fn sync_output_payload_strict_contract_drops_execution_summary_message() {
+fn sync_output_payload_strict_contract_preserves_execution_summary_message() {
     let contract = IntentOutputContract {
         response_shape: OutputResponseShape::Strict,
         ..IntentOutputContract::default()
@@ -297,7 +297,35 @@ fn sync_output_payload_strict_contract_drops_execution_summary_message() {
     sync_output_payload(&contract, &mut text, &mut messages);
 
     assert_eq!(text, "有。例如：.git/、.gitignore、.codex");
-    assert_eq!(messages, vec!["有。例如：.git/、.gitignore、.codex"]);
+    assert_eq!(
+        messages,
+        vec![
+            format!(
+                "{}\n1. 调用技能 `list_dir`\n   输出：\n```text\n.git\n.gitignore\n.codex\n```",
+                crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX
+            ),
+            "有。例如：.git/、.gitignore、.codex".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn sync_output_payload_scalar_contract_preserves_execution_summary_message() {
+    let contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Scalar,
+        ..IntentOutputContract::default()
+    };
+    let mut text = "rustclaw-nl-fixture".to_string();
+    let summary = format!(
+        "{}\n1. 调用技能 `system_basic`\n   输出：\n```text\nrustclaw-nl-fixture\n```",
+        crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX
+    );
+    let mut messages = vec![summary.clone(), text.clone()];
+
+    sync_output_payload(&contract, &mut text, &mut messages);
+
+    assert_eq!(text, "rustclaw-nl-fixture");
+    assert_eq!(messages, vec![summary, "rustclaw-nl-fixture".to_string()]);
 }
 
 #[test]
@@ -1055,6 +1083,30 @@ fn rule3_filename_only_scan_not_found() {
 }
 
 #[test]
+fn rule3_precise_missing_filename_prefers_not_found_over_scan_too_many() {
+    let system_root = TempDirGuard::new("rule3_system_precise_missing_many");
+    let project_root = TempDirGuard::new("rule3_project_precise_missing_many");
+    for idx in 0..5 {
+        write_text_file(&project_root.path().join(format!("other_{idx}.txt")));
+    }
+
+    let resolved = resolve_file_delivery_target(
+        "把 definitely_missing_named_file_rustclaw_001.txt 发给我",
+        system_root.path(),
+        project_root.path(),
+        1,
+        2,
+    );
+
+    assert_eq!(
+        resolved,
+        Some(FileDeliveryTargetResolution::UserMessage(
+            DeliveryMessageKind::Rule3FileNotFound
+        ))
+    );
+}
+
+#[test]
 fn rule3_filename_only_long_missing_name_does_not_match_short_substrings() {
     let system_root = TempDirGuard::new("rule3_system_missing_long_name");
     let project_root = TempDirGuard::new("rule3_project_missing_long_name");
@@ -1108,7 +1160,7 @@ fn rule3_filename_only_scan_rejects_when_scope_too_large() {
     }
 
     let resolved = resolve_file_delivery_target(
-        "把 target.md 发给我",
+        "把 target 发给我",
         system_root.path(),
         project_root.path(),
         3,
