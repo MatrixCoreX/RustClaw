@@ -437,6 +437,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: shape,
                 requires_content_evidence: true,
                 delivery_required: false,

@@ -166,11 +166,11 @@ timeout_seconds = 120
 # request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
 [image_vision]
 # Routing & mode / 路由与模式
-default_vendor = "minimax"
+default_vendor = "mimo"
 adapter_mode = "compat" # Vision currently recommended to stay in compat / vision 当前建议保持 compat
 
 # Default model / 默认模型
-default_model = "MiniMax-VL-01"
+default_model = "mimo-v2.5"
 
 # Vendor models / 按厂商模型
 openai_models = ["gpt-4o-mini", "gpt-4o"]
@@ -178,7 +178,8 @@ google_models = ["gemini-2.5-flash", "gemini-2.5-pro"]
 anthropic_models = ["claude-sonnet-4-6"]
 qwen_models = ["qwen-vl-max", "qwen-vl-plus"]
 minimax_models = ["MiniMax-VL-01"]
-models = ["qwen-vl-max", "qwen-vl-plus"]
+mimo_models = ["mimo-v2.5", "mimo-v2-omni"]
+models = ["mimo-v2.5", "mimo-v2-omni", "qwen-vl-max", "qwen-vl-plus"]
 
 # Runtime limits / 运行限制
 default_output_dir = "image/upload"
@@ -189,8 +190,8 @@ timeout_seconds = 90
 
 # Optional dedicated provider override / 可选独立 provider 覆盖
 # Recommended / 推荐：
-# - image_vision: OpenAI `gpt-4o-mini` for broad compatibility and steady vision output
-#   / 图片理解推荐 OpenAI `gpt-4o-mini`，兼容性更广、输出更稳
+# - image_vision: Mimo `mimo-v2.5` for current default chat/vision alignment
+#   / 图片理解当前默认使用 Mimo `mimo-v2.5`，与主模型切换保持一致
 # [image_vision.providers.google]
 # base_url = "https://generativelanguage.googleapis.com/v1beta"
 # api_key = "REPLACE_ME_GOOGLE_API_KEY"
@@ -201,9 +202,13 @@ base_url = "https://api.minimaxi.com/v1"
 api_key = ""
 model = "MiniMax-VL-01"
 timeout_seconds = 90
+# [image_vision.providers.mimo]
+# base_url = "https://token-plan-sgp.xiaomimimo.com/v1"
+# api_key = ""
+# model = "mimo-v2.5"
+# timeout_seconds = 90
 # [image_vision.providers.openai]
 # base_url = "https://api.openai.com/v1"
 # api_key = "sk-proj-..."
 # model = "gpt-4o-mini"
 # timeout_seconds = 90
-

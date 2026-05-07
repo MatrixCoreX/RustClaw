@@ -373,6 +373,8 @@ Skill discovery and runtime behavior are driven by:
 - `crates/skills/*/INTERFACE.md`
 - `prompts/layers/generated/skills/*.md`
 
+Planner skill selection is registry- and interface-driven. After a skill is registered, enabled, documented in `INTERFACE.md`, and synced with `python3 scripts/sync_skill_docs.py`, the planner should learn when to use it from the generated skill prompt. Do not add per-skill selection branches to `clawd` just to make new natural-language examples pass. If selection accuracy is weak, improve the skill interface, generated prompt, or model-specific vendor patch; keep Rust code for protocol validation, permission/safety checks, runner dispatch, output-contract enforcement, and deterministic execution compatibility.
+
 Skill integration entry points:
 
 - unified guide: `docs/skill_integration_guide.md`

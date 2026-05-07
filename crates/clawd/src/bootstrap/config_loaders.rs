@@ -9,6 +9,14 @@ use tracing::{info, warn};
 use super::prompts::{load_required_prompt_template_for_vendor, RequiredPromptLoadError};
 use crate::{CommandIntentRules, CommandIntentRuntime, MemoryConfigFileWrapper, ScheduleRuntime};
 
+fn push_unique_trimmed(values: &mut Vec<String>, value: impl AsRef<str>) {
+    let value = value.as_ref().trim();
+    if value.is_empty() || values.iter().any(|existing| existing == value) {
+        return;
+    }
+    values.push(value.to_string());
+}
+
 pub(crate) fn load_command_intent_runtime(
     workspace_root: &Path,
     cfg: &CommandIntentConfig,
@@ -19,11 +27,24 @@ pub(crate) fn load_command_intent_runtime(
         cfg.default_locale.trim().to_string()
     };
     let rules_dir = workspace_root.join(cfg.rules_dir.trim());
+    let mut all_result_suffixes = Vec::new();
+    let mut execute_prefixes = Vec::new();
+    let mut negative_markers = Vec::new();
     for locale in ["zh-CN", "en-US"] {
         let path = rules_dir.join(format!("{locale}.toml"));
         match std::fs::read_to_string(&path) {
             Ok(raw) => match toml::from_str::<CommandIntentRules>(&raw) {
-                Ok(_) => {}
+                Ok(rules) => {
+                    for value in rules.result_suffixes {
+                        push_unique_trimmed(&mut all_result_suffixes, value);
+                    }
+                    for value in rules.execute_prefixes {
+                        push_unique_trimmed(&mut execute_prefixes, value);
+                    }
+                    for value in rules.negative_markers {
+                        push_unique_trimmed(&mut negative_markers, value);
+                    }
+                }
                 Err(err) => {
                     warn!(
                         "load command intent rules failed: path={} err={err}",
@@ -41,7 +62,9 @@ pub(crate) fn load_command_intent_runtime(
     }
 
     CommandIntentRuntime {
-        all_result_suffixes: Vec::new(),
+        all_result_suffixes,
+        execute_prefixes,
+        negative_markers,
         default_locale,
         verify_enforce_enabled: cfg.verify_enforce_enabled,
     }

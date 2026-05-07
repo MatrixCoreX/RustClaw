@@ -42,6 +42,42 @@ fn clarify_fallback_source_or_default(
     source.unwrap_or(crate::fallback::ClarifyFallbackSource::IntentUnresolved)
 }
 
+fn visible_process_summary_for_prompt(
+    state: &crate::AppState,
+    task: &crate::ClaimedTask,
+    prompt: &str,
+) -> String {
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, prompt);
+    if language_hint.to_ascii_lowercase().starts_with("en") {
+        format!(
+            "{}\n1. Used the current request and available conversation context to produce the answer.",
+            crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN
+        )
+    } else {
+        format!(
+            "{}\n1. 使用当前请求和可用会话上下文生成回答。",
+            crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX
+        )
+    }
+}
+
+fn ask_reply_with_visible_process(
+    state: &crate::AppState,
+    task: &crate::ClaimedTask,
+    prompt: &str,
+    text: String,
+) -> crate::AskReply {
+    let answer = text.trim().to_string();
+    if answer.is_empty() || crate::finalize::is_execution_summary_message(&answer) {
+        crate::AskReply::non_llm(text)
+    } else {
+        crate::AskReply::non_llm(answer.clone()).with_messages(vec![
+            visible_process_summary_for_prompt(state, task, prompt),
+            answer,
+        ])
+    }
+}
+
 fn should_preserve_original_inline_structured_input(
     prompt: &str,
     resolved_prompt_for_execution: &str,
@@ -222,11 +258,17 @@ fn apply_ask_post_route(
     prompt: &str,
     resolved_prompt: &str,
     recent_execution_context: &str,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     mut route_result: crate::RouteResult,
     mut resolved_prompt_for_execution: String,
     mut prompt_with_memory_for_execution: String,
 ) -> AppliedAskPostRoute {
-    if deictic_bare_locator_should_force_clarify(prompt, &route_result) {
+    prebind_direct_file_delivery_locator_before_deictic_guard(
+        state,
+        recent_execution_context,
+        &mut route_result,
+    );
+    if deictic_bare_locator_should_force_clarify(&route_result, turn_analysis) {
         route_result.needs_clarify = true;
         route_result.set_routed_mode(crate::RoutedMode::AskClarify);
         if route_result.clarify_question.trim().is_empty() {
@@ -326,6 +368,64 @@ fn apply_ask_post_route(
     }
 }
 
+fn direct_auto_locator_path(
+    state: &AppState,
+    route_result: &crate::RouteResult,
+    recent_execution_context: &str,
+) -> Option<String> {
+    if !should_attempt_auto_locator(route_result) {
+        return None;
+    }
+    if let Some(crate::post_route_policy::LocatorResolution::Direct(path)) =
+        current_workspace_locator_resolution(&state.skill_rt.workspace_root, route_result)
+    {
+        return Some(path);
+    }
+    let locator_hint = route_result.output_contract.locator_hint.trim();
+    if locator_hint.is_empty() {
+        return None;
+    }
+    let locator_kind = effective_auto_locator_kind(route_result);
+    super::try_resolve_implicit_locator_path(
+        state,
+        locator_hint,
+        locator_hint,
+        locator_kind,
+        Some(recent_execution_context),
+    )
+    .and_then(|resolution| match resolution {
+        super::LocatorAutoResolution::Direct(path) => Some(path),
+        super::LocatorAutoResolution::Fuzzy(_) => None,
+    })
+}
+
+fn prebind_direct_file_delivery_locator_before_deictic_guard(
+    state: &AppState,
+    recent_execution_context: &str,
+    route_result: &mut crate::RouteResult,
+) -> bool {
+    if route_result.needs_clarify
+        || !route_result.output_contract.delivery_required
+        || route_result.output_contract.response_shape != crate::OutputResponseShape::FileToken
+        || route_result.output_contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
+        || crate::worker::has_explicit_path_or_url_locator_hint(
+            route_result.output_contract.locator_hint.trim(),
+        )
+    {
+        return false;
+    }
+    let Some(path) = direct_auto_locator_path(state, route_result, recent_execution_context) else {
+        return false;
+    };
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route_result.output_contract.locator_hint = path;
+    append_route_reason(
+        route_result,
+        "direct_file_delivery_locator_prebound_before_deictic_guard",
+    );
+    true
+}
+
 fn effective_auto_locator_kind(route_result: &crate::RouteResult) -> crate::OutputLocatorKind {
     if route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
         && !route_result.output_contract.locator_hint.trim().is_empty()
@@ -369,24 +469,19 @@ fn append_route_reason(route_result: &mut crate::RouteResult, reason: &'static s
 }
 
 fn deictic_bare_locator_should_force_clarify(
-    prompt: &str,
     route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> bool {
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
+    if state_patch_allows_deictic_locator_guard_bypass(turn_analysis) {
+        return false;
+    }
+    if !state_patch_requires_deictic_locator_clarify(turn_analysis) {
+        return false;
+    }
     let locator_hint = route_result.output_contract.locator_hint.trim();
-    let locator_hint_is_inferred_relative_path =
-        !surface.has_explicit_path_or_url() && locator_hint_is_relative_path_like(locator_hint);
-    let locator_hint_is_file_like = !locator_hint.is_empty()
-        && crate::delivery_utils::extract_filename_candidates(locator_hint)
-            .into_iter()
-            .any(|candidate| candidate == locator_hint);
-    surface.has_deictic_reference()
-        && !surface.has_explicit_path_or_url()
-        && (!surface.has_single_filename_candidate()
-            || !locator_hint_is_file_like
-            || locator_hint_is_inferred_relative_path)
-        && (!crate::worker::has_explicit_path_or_url_locator_hint(locator_hint)
-            || locator_hint_is_inferred_relative_path)
+    let locator_hint_is_inferred_relative_path = locator_hint_is_relative_path_like(locator_hint);
+    (!crate::worker::has_explicit_path_or_url_locator_hint(locator_hint)
+        || locator_hint_is_inferred_relative_path)
         && route_result.output_contract.requires_content_evidence
         && matches!(
             route_result.output_contract.locator_kind,
@@ -394,6 +489,49 @@ fn deictic_bare_locator_should_force_clarify(
                 | crate::OutputLocatorKind::CurrentWorkspace
                 | crate::OutputLocatorKind::Filename
         )
+}
+
+fn state_patch_allows_deictic_locator_guard_bypass(
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    let Some(state_patch) = turn_analysis.and_then(|analysis| analysis.state_patch.as_ref()) else {
+        return false;
+    };
+    if state_patch
+        .get("current_result_ref")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    state_patch
+        .get("deictic_reference")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|obj| obj.get("target"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|target| {
+            matches!(
+                target,
+                "current_action_result" | "current_turn_locator" | "comparison_result"
+            )
+        })
+}
+
+fn state_patch_requires_deictic_locator_clarify(
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    turn_analysis
+        .and_then(|analysis| analysis.state_patch.as_ref())
+        .and_then(|state_patch| state_patch.get("deictic_reference"))
+        .and_then(serde_json::Value::as_object)
+        .and_then(|obj| obj.get("target"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|target| {
+            matches!(
+                target,
+                "unresolved_prior_object" | "missing_locator" | "ambiguous_locator"
+            )
+        })
 }
 
 fn locator_hint_is_relative_path_like(locator_hint: &str) -> bool {
@@ -456,6 +594,7 @@ pub(super) async fn prepare_ask_flow(
         prompt,
         &prepared_routing.resolved_prompt,
         &prepared_execution.recent_execution_context,
+        prepared_routing.turn_analysis.as_ref(),
         prepared_routing.route_result,
         prepared_execution.resolved_prompt_for_execution,
         prepared_execution.prompt_with_memory_for_execution,
@@ -573,7 +712,9 @@ pub(super) async fn execute_ask_dispatch(
             fallback_source,
         )
         .await;
-        return Ok(Some(Ok(crate::AskReply::non_llm(clarify))));
+        return Ok(Some(Ok(ask_reply_with_visible_process(
+            state, task, prompt, clarify,
+        ))));
     }
     if ask_mode.is_resume_discussion() {
         crate::log_ask_transition(
@@ -717,13 +858,18 @@ mod tests {
     use super::{
         clarify_fallback_source_or_default, current_workspace_locator_resolution,
         deictic_bare_locator_should_force_clarify, deictic_missing_locator_question,
-        effective_auto_locator_kind, execution_user_request, should_attempt_auto_locator,
+        effective_auto_locator_kind, execution_user_request,
+        prebind_direct_file_delivery_locator_before_deictic_guard, should_attempt_auto_locator,
         should_preserve_original_inline_structured_input, should_reuse_route_clarify_question,
         should_suppress_recent_execution_in_clarify_context,
         structured_missing_locator_clarify_context,
     };
+    use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
+    use claw_core::config::{AgentConfig, ToolsConfig};
+    use std::collections::{HashMap, HashSet};
     use std::{
         path::PathBuf,
+        sync::{Arc, RwLock},
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -739,6 +885,39 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).expect("temp root");
         path
+    }
+
+    fn test_state_with_root(root: PathBuf) -> AppState {
+        let agents_by_id = HashMap::from([(
+            crate::DEFAULT_AGENT_ID.to_string(),
+            AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
+        )]);
+        AppState {
+            core: crate::CoreServices {
+                agents_by_id: Arc::new(agents_by_id),
+                skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                    registry: None,
+                    skills_list: Arc::new(HashSet::new()),
+                }))),
+                ..crate::CoreServices::test_default()
+            },
+            skill_rt: crate::SkillRuntime {
+                workspace_root: root.clone(),
+                default_locator_search_dir: root,
+                locator_scan_max_depth: 2,
+                locator_scan_max_files: 100,
+                tools_policy: Arc::new(
+                    crate::ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+                ),
+                ..crate::SkillRuntime::test_default()
+            },
+            policy: crate::PolicyConfig::test_default(),
+            worker: crate::WorkerConfig::test_default(),
+            metrics: crate::TaskMetricsRegistry::default(),
+            channels: crate::ChannelConfig::default(),
+            reload_ctx: crate::ReloadContext::default(),
+            ask_states: crate::AskStateRegistry::default(),
+        }
     }
 
     fn executable_filename_route() -> crate::RouteResult {
@@ -759,11 +938,24 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 locator_kind: crate::OutputLocatorKind::Filename,
                 locator_hint: "README.md".to_string(),
                 requires_content_evidence: true,
                 ..Default::default()
             },
+        }
+    }
+
+    fn turn_analysis_with_state_patch(
+        state_patch: serde_json::Value,
+    ) -> crate::intent_router::TurnAnalysis {
+        crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskAppend),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+            should_interrupt_active_run: false,
+            state_patch: Some(state_patch),
+            attachment_processing_required: false,
         }
     }
 
@@ -804,6 +996,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 locator_kind: crate::OutputLocatorKind::Path,
                 requires_content_evidence: false,
                 ..Default::default()
@@ -815,9 +1008,12 @@ mod tests {
     #[test]
     fn deictic_bare_locator_forces_clarify_before_auto_locator() {
         let route = executable_filename_route();
+        let analysis = turn_analysis_with_state_patch(
+            serde_json::json!({"deictic_reference":{"target":"unresolved_prior_object"}}),
+        );
         assert!(deictic_bare_locator_should_force_clarify(
-            "读一下那个 README 开头并用一句话总结",
-            &route
+            &route,
+            Some(&analysis)
         ));
     }
 
@@ -827,9 +1023,12 @@ mod tests {
         route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
         route.output_contract.locator_hint = "case_only".to_string();
         route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        let analysis = turn_analysis_with_state_patch(
+            serde_json::json!({"deictic_reference":{"target":"unresolved_prior_object"}}),
+        );
         assert!(deictic_bare_locator_should_force_clarify(
-            "去那个 case_only 目录里找 report.md，只输出路径",
-            &route
+            &route,
+            Some(&analysis)
         ));
     }
 
@@ -839,9 +1038,12 @@ mod tests {
         route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
         route.output_contract.locator_hint = "reports/report.md".to_string();
         route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        let analysis = turn_analysis_with_state_patch(
+            serde_json::json!({"deictic_reference":{"target":"unresolved_prior_object"}}),
+        );
         assert!(deictic_bare_locator_should_force_clarify(
-            "去那个 reports 目录里找 report.md，只输出路径",
-            &route
+            &route,
+            Some(&analysis)
         ));
     }
 
@@ -861,28 +1063,19 @@ mod tests {
     #[test]
     fn deictic_file_locator_with_filename_hint_still_allows_auto_locator() {
         let route = executable_filename_route();
-        assert!(!deictic_bare_locator_should_force_clarify(
-            "把那个 README.md 发给我",
-            &route
-        ));
+        assert!(!deictic_bare_locator_should_force_clarify(&route, None));
     }
 
     #[test]
     fn direct_bare_locator_still_allows_auto_locator() {
         let route = executable_filename_route();
-        assert!(!deictic_bare_locator_should_force_clarify(
-            "读一下 README 开头并用一句话总结",
-            &route
-        ));
+        assert!(!deictic_bare_locator_should_force_clarify(&route, None));
     }
 
     #[test]
     fn deictic_explicit_path_still_allows_auto_locator() {
         let route = executable_filename_route();
-        assert!(!deictic_bare_locator_should_force_clarify(
-            "读一下这个 /tmp/README.md 开头并用一句话总结",
-            &route
-        ));
+        assert!(!deictic_bare_locator_should_force_clarify(&route, None));
     }
 
     #[test]
@@ -892,9 +1085,102 @@ mod tests {
         route.output_contract.locator_hint =
             "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
                 .to_string();
+        assert!(!deictic_bare_locator_should_force_clarify(&route, None));
+    }
+
+    #[test]
+    fn direct_file_delivery_locator_prebinds_directory_before_deictic_guard() {
+        let root = make_temp_root("delivery_dir_prebind");
+        std::fs::create_dir_all(root.join("document")).expect("document dir");
+        let state = test_state_with_root(root.clone());
+        let mut route = executable_filename_route();
+        route.routed_mode = crate::RoutedMode::Act;
+        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::Act);
+        route.resolved_intent =
+            "send the last file in the document directory, rejecting the previous file".to_string();
+        route.wants_file_delivery = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route.output_contract.delivery_required = true;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "document directory".to_string();
+
+        assert!(prebind_direct_file_delivery_locator_before_deictic_guard(
+            &state, "", &mut route
+        ));
+
+        assert!(!deictic_bare_locator_should_force_clarify(&route, None));
+        assert_eq!(
+            route.output_contract.locator_hint,
+            root.join("document")
+                .canonicalize()
+                .expect("canonical document")
+                .display()
+                .to_string()
+        );
+        assert!(route
+            .route_reason
+            .contains("direct_file_delivery_locator_prebound_before_deictic_guard"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn deictic_result_reference_with_two_named_files_allows_execution() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        let analysis = turn_analysis_with_state_patch(
+            serde_json::json!({"deictic_reference":{"target":"comparison_result"}}),
+        );
         assert!(!deictic_bare_locator_should_force_clarify(
-            "查一下那个 sqlite 里有哪些表",
-            &route
+            &route,
+            Some(&analysis)
+        ));
+    }
+
+    #[test]
+    fn deictic_result_reference_after_command_allows_execution() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+        let analysis = turn_analysis_with_state_patch(
+            serde_json::json!({"deictic_reference":{"target":"current_action_result"}}),
+        );
+
+        assert!(!deictic_bare_locator_should_force_clarify(
+            &route,
+            Some(&analysis)
+        ));
+    }
+
+    #[test]
+    fn deictic_target_before_followup_still_forces_clarify() {
+        let route = executable_filename_route();
+        let analysis = turn_analysis_with_state_patch(
+            serde_json::json!({"deictic_reference":{"target":"unresolved_prior_object"}}),
+        );
+        assert!(deictic_bare_locator_should_force_clarify(
+            &route,
+            Some(&analysis)
+        ));
+    }
+
+    #[test]
+    fn deictic_directory_reference_after_named_folder_allows_execution() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint = "docs".to_string();
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        let analysis = turn_analysis_with_state_patch(
+            serde_json::json!({"deictic_reference":{"target":"current_turn_locator"}}),
+        );
+
+        assert!(!deictic_bare_locator_should_force_clarify(
+            &route,
+            Some(&analysis)
         ));
     }
 
@@ -917,6 +1203,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 locator_kind: crate::OutputLocatorKind::None,
                 requires_content_evidence: false,
                 ..Default::default()
@@ -944,6 +1231,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
                 requires_content_evidence: false,
                 ..Default::default()
@@ -973,6 +1261,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
                 requires_content_evidence: true,
                 ..Default::default()
@@ -1006,6 +1295,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
                 locator_hint: "archive".to_string(),
                 requires_content_evidence: true,
@@ -1041,6 +1331,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
                 requires_content_evidence: true,
                 ..Default::default()
@@ -1078,6 +1369,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 locator_kind: crate::OutputLocatorKind::Filename,
                 requires_content_evidence: true,
                 ..Default::default()
@@ -1105,6 +1397,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 locator_kind: crate::OutputLocatorKind::Path,
                 requires_content_evidence: true,
                 response_shape: crate::OutputResponseShape::OneSentence,
@@ -1134,6 +1427,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 locator_kind: crate::OutputLocatorKind::Filename,
                 requires_content_evidence: true,
                 response_shape: crate::OutputResponseShape::Free,
@@ -1182,6 +1476,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 locator_kind,
                 requires_content_evidence: true,
                 response_shape: crate::OutputResponseShape::Scalar,

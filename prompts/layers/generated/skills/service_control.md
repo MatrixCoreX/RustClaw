@@ -18,7 +18,7 @@
 - No dedicated config entry points declared.
 
 ## Actions (from interface)
-- `status` — Get running state (one or all for rustclaw).
+- `status` — Get running state. When `target` is omitted, default to RustClaw aggregate status for the built-in RustClaw services.
 - `start`, `stop`, `restart`, `reload` — Lifecycle (reload → restart for rustclaw).
 - `logs` — Bounded recent logs (rustclaw: fixed log files; systemd: journalctl; macOS managers provide bounded diagnostic guidance/evidence).
 - `verify` — Explicit post-check (running/stopped/unknown).
@@ -28,7 +28,7 @@
 | Param         | Required | Type   | Default | Description |
 |---------------|----------|--------|---------|-------------|
 | `action`      | yes      | string | -       | One of: `status`, `start`, `stop`, `restart`, `reload`, `logs`, `verify`, `diagnose_start_failure`, `diagnose_unhealthy_state`. |
-| `target`      | yes*     | string | -       | Service/unit name. *Optional for `status` (all services when manager is rustclaw). |
+| `target`      | yes*     | string | -       | Service/unit name. *Optional for `status`; omitted target checks RustClaw aggregate status for built-in RustClaw services by default. |
 | `service`     | no       | string | -       | Alias for `target` (backward compatible). |
 | `manager_type`| no       | string | -       | One of: `brew_services`, `launchd`, `systemd`, `service`, `docker_compose`, `docker_container`, `supervisor`, `process_only`, `rustclaw`, `unknown`. Auto when target in rustclaw whitelist or resolved through service discovery. |
 | `tail_lines`  | no       | number | 100     | Max 500. For `logs` and for auto-logs on failure. |
@@ -36,7 +36,7 @@
 | `verify`      | no       | bool   | true    | After start/restart/reload, run verify step. |
 | `allow_risky` | no       | bool   | false   | If true, allow stop/restart even when target is ambiguous (not recommended). |
 
-- **Target missing**: Required for all actions except `status` without target; returns structured error with `failure_reason` and `next_step`.
+- **Target missing**: Required for all actions except `status` without target. `status` without target defaults to RustClaw aggregate status; other missing-target actions return structured error with `failure_reason` and `next_step`.
 - **Target aliases (skill-internal)**: The skill normalizes common names before discovery: e.g. `mysql`/`mysqld` → `mysql`, `redis`/`redis-server` → `redis`, `postgres`/`postgresql` → `postgresql`, `docker`/`dockerd` → `docker`, `ssh`/`sshd` → `sshd`, `cron`/`crond` → `cron`, `nginx` → `nginx`, `caddy` → `caddy`. Trailing "服务" / " service" suffix is stripped for lookup. Only the target name is affected; `action` is unchanged.
 - **Service discovery**: Before executing control (when manager is not explicitly set), the skill discovers candidates via Homebrew services, launchd, systemd, and `service --status-all` where those tools are available. Exact match > prefix > contains; candidate count is limited. If **0 candidates**: returns error with `next_step` suggesting "请提供更具体服务名" (do not invent a service name). If **>1 candidates**: returns error with `failure_reason` "ambiguous: multiple matching services" and `next_step` listing the candidates so the user can pick one. Only when exactly **1 candidate** is the control command executed. When `manager_type` is explicitly set, discovery is skipped and the normalized target is used as given.
 - **Ambiguous target (vague wording)**: Values like "后端", "服务们", "all", "*" block high-risk actions unless `allow_risky` is true.

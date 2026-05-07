@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use claw_core::config::{AppConfig, LlmProviderConfig, LlmVendorConfig};
+use serde_json::{json, Value};
 use tokio::sync::Semaphore;
 use tracing::{info, warn};
 
@@ -523,8 +524,30 @@ async fn run_with_fallback_with_hints(
 
         match crate::call_provider_with_retry_with_hints(provider.clone(), prompt, &hints).await {
             Ok(output) => {
-                let (cleaned_text, sanitized) =
+                let (mut cleaned_text, mut sanitized) =
                     crate::maybe_sanitize_llm_text_output(vendor, &output.text);
+                if cleaned_text.trim().is_empty() {
+                    if let Some(recovered) = recover_normalizer_text_from_openai_tool_calls(
+                        prompt_source,
+                        prompt,
+                        &output.raw_response,
+                    ) {
+                        cleaned_text = recovered;
+                        sanitized = true;
+                        warn!(
+                            "{} [LLM_CALL] stage=cleanup task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_source={} note=recovered_tool_call_contract",
+                            crate::highlight_tag("llm"),
+                            task.task_id,
+                            task.user_id,
+                            task.chat_id,
+                            vendor,
+                            model,
+                            model_kind,
+                            provider_name,
+                            prompt_source
+                        );
+                    }
+                }
                 if sanitized {
                     warn!(
                         "{} [LLM_CALL] stage=cleanup task_id={} user_id={} chat_id={} vendor={} model={} model_kind={} provider={} prompt_source={} note=removed_think_block",
@@ -680,6 +703,104 @@ async fn run_with_fallback_with_hints(
     Err(last_error)
 }
 
+fn recover_normalizer_text_from_openai_tool_calls(
+    prompt_source: &str,
+    prompt: &str,
+    raw_response: &str,
+) -> Option<String> {
+    if classify_prompt_source(prompt_source) != "normalizer" {
+        return None;
+    }
+    let value = serde_json::from_str::<Value>(raw_response).ok()?;
+    let tool_calls = value
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("tool_calls"))
+        .and_then(Value::as_array)?;
+    let first_call = tool_calls.first()?;
+    let args_value = first_call
+        .pointer("/function/arguments")
+        .and_then(Value::as_str)
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .or_else(|| first_call.pointer("/function/arguments").cloned())
+        .unwrap_or(Value::Null);
+    let locator_hint = extract_first_locator_hint_from_value(&args_value)?;
+    let locator_kind = if crate::worker::has_explicit_path_or_url_locator_hint(&locator_hint) {
+        "path"
+    } else {
+        "filename"
+    };
+    let resolved_user_intent = extract_request_from_normalizer_prompt(prompt).unwrap_or_default();
+    let recovered = json!({
+        "resolved_user_intent": resolved_user_intent,
+        "answer_candidate": "",
+        "resume_behavior": "none",
+        "schedule_kind": "none",
+        "schedule_intent": null,
+        "wants_file_delivery": false,
+        "should_refresh_long_term_memory": false,
+        "agent_display_name_hint": "",
+        "needs_clarify": false,
+        "clarify_question": "",
+        "reason": "openai_compat_tool_call_recovered_to_observable_route",
+        "confidence": 0.74,
+        "mode": "act",
+        "output_contract": {
+            "response_shape": "free",
+            "requires_content_evidence": true,
+            "delivery_required": false,
+            "locator_kind": locator_kind,
+            "delivery_intent": "none",
+            "semantic_kind": "none",
+            "locator_hint": locator_hint,
+            "self_extension": {
+                "mode": "none",
+                "trigger": "none",
+                "execute_now": false
+            }
+        },
+        "execution_recipe": {
+            "kind": "none",
+            "profile": "none",
+            "target_scope": "none"
+        },
+        "turn_type": "task_request",
+        "target_task_policy": "standalone",
+        "should_interrupt_active_run": false,
+        "state_patch": null,
+        "attachment_processing_required": false
+    });
+    serde_json::to_string(&recovered).ok()
+}
+
+fn extract_first_locator_hint_from_value(value: &Value) -> Option<String> {
+    match value {
+        Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            (crate::worker::has_explicit_path_or_url_locator_hint(trimmed)
+                || crate::worker::has_concrete_locator_hint(trimmed))
+            .then(|| trimmed.to_string())
+        }
+        Value::Array(items) => items.iter().find_map(extract_first_locator_hint_from_value),
+        Value::Object(map) => map.values().find_map(extract_first_locator_hint_from_value),
+        _ => None,
+    }
+}
+
+fn extract_request_from_normalizer_prompt(prompt: &str) -> Option<String> {
+    let (_, tail) = prompt.rsplit_once("REQUEST:")?;
+    tail.lines()
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 pub(crate) fn selected_openai_api_key(state: &AppState, task: Option<&ClaimedTask>) -> String {
     let providers = task
         .map(|task| state.task_llm_providers(task))
@@ -727,7 +848,10 @@ mod tests {
 
     use claw_core::config::AppConfig;
 
-    use super::{classify_prompt_source, matches_provider_override, synthesize_llm_providers};
+    use super::{
+        classify_prompt_source, matches_provider_override,
+        recover_normalizer_text_from_openai_tool_calls, synthesize_llm_providers,
+    };
 
     fn repo_config_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -752,6 +876,70 @@ mod tests {
             ),
             "plan"
         );
+    }
+
+    #[test]
+    fn normalizer_recovers_openai_tool_call_as_execution_contract() {
+        let raw_response = r#"{
+          "choices":[{
+            "finish_reason":"tool_calls",
+            "message":{
+              "content":"<think>need file evidence</think>",
+              "tool_calls":[{
+                "type":"function",
+                "function":{
+                  "name":"read_file",
+                  "arguments":"{\"file_path\":\"/home/guagua/rustclaw/README.md\"}"
+                }
+              }]
+            }
+          }]
+        }"#;
+        let recovered = recover_normalizer_text_from_openai_tool_calls(
+            "layered:prompts/intent_normalizer_prompt.md#vendor=minimax",
+            "REQUEST: 读取 README 开头内容，再用一句话总结\n",
+            raw_response,
+        )
+        .expect("recover tool call");
+        let value = serde_json::from_str::<serde_json::Value>(&recovered).expect("json");
+
+        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value
+                .pointer("/output_contract/requires_content_evidence")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/locator_hint")
+                .and_then(|v| v.as_str()),
+            Some("/home/guagua/rustclaw/README.md")
+        );
+        assert_eq!(
+            value.get("resolved_user_intent").and_then(|v| v.as_str()),
+            Some("读取 README 开头内容，再用一句话总结")
+        );
+    }
+
+    #[test]
+    fn tool_call_recovery_ignores_non_normalizer_prompts() {
+        let raw_response = r#"{
+          "choices":[{
+            "message":{
+              "tool_calls":[{
+                "function":{"arguments":"{\"path\":\"/tmp/a.txt\"}"}
+              }]
+            }
+          }]
+        }"#;
+
+        assert!(recover_normalizer_text_from_openai_tool_calls(
+            "layered:prompts/chat_response_prompt.md#vendor=minimax",
+            "REQUEST: read a file",
+            raw_response,
+        )
+        .is_none());
     }
 
     #[test]

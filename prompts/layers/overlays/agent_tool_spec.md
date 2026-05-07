@@ -29,6 +29,7 @@ All capabilities are skills. Use `{"type":"call_skill","skill":"<name>","args":{
 These six are independent base skills for filesystem and command. Do not use `system_basic` for any of them.
 
 Skill behavior notes (file/path):
+- If an admin-authorized task hits an operating-system permission denial and runtime policy allows sudo for this task, the executor may retry once with non-interactive `sudo -n` based on the structured skill/action args. Do not plan a manual explanatory refusal before that runtime retry has a chance to run.
 - `list_dir(path)` returns direct entries from the target directory and includes dot-prefixed hidden entries when they exist.
 - Therefore, when the user asks whether hidden files / dot-prefixed entries exist, answer directly from `list_dir` output. If hidden entries exist, name them explicitly; if none exist, say that none were found. Do not turn that into a suggestion to inspect the listing later.
 - For hidden-file questions, do not paste the entire directory listing as the answer. Filter to dot-prefixed entries only, excluding `.` and `..` because they are navigation entries rather than hidden files.
@@ -124,6 +125,7 @@ Skill behavior notes (file/path):
 - common optional args: `exchange`, `symbol`, `symbols`
 - trade args:
   - required: `action`, `side`, `order_type`, (`quote_qty_usd` OR `qty`)
+  - canonical names are preferred. Accepted structured aliases: `type`/`orderType` → `order_type`; `quantity`/`amount`/`base_qty`/`base_quantity` → `qty`; `timeInForce` → `time_in_force`. `amount` means base-asset amount; quote-currency notional must use `quote_qty_usd`/`amount_usd`.
   - optional: `price` (limit/stop orders), `stop_price` (stop_loss_limit/take_profit_limit), `time_in_force` (GTC/IOC/FOK), `confirm`
   - supported order types: `market`, `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker`
   - `trade_submit`: for explicit place-order intent with complete params, call directly and pass `confirm=true`. No runtime gate.
@@ -200,6 +202,7 @@ Skill behavior notes (file/path):
 - normalization rules:
   - `exchange` should use canonical values when known.
   - `symbol` should use canonical spot pair form when inferred.
+  - normalize trade-field aliases to canonical names before calling when possible: `order_type`, `qty`, `time_in_force`; keep quote-currency notional as `quote_qty_usd`/`amount_usd`, not bare `amount`.
   - for one-symbol price query, prefer `action="quote"` with `symbol`.
   - use `multi_quote` only when user explicitly requests multiple symbols/comparison.
   - do not add `exchanges`/extra scope fields unless user explicitly asks to constrain/re-scope sources.
@@ -413,6 +416,7 @@ Skill behavior notes (file/path):
 - required:
   - `sqlite_query`: `sql` (read-only SELECT/PRAGMA/WITH), optional `db_path`, `limit`
   - `sqlite_execute`: `sql`, `confirm=true` (optional `db_path`)
+- SQLite metadata reads are queries; for schema-version metadata use `{"action":"sqlite_query","db_path":"...","sql":"PRAGMA schema_version;"}`.
 
 #### db_basic JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"db_basic","args":{...}}`
@@ -444,6 +448,7 @@ Skill behavior notes (file/path):
 - Use `fs_search.find_name` with `target_kind="dir"` when the task is explicitly a name search over files/directories rather than a direct path-resolution request.
 - Prefer `system_basic.inventory_dir` for immediate directory listing / hidden-file / names-only inventory tasks, especially recent/last-modified listings where `sort_by="mtime_desc"` exactly and `max_entries` are required. If the user asks for files, set `files_only=true`; do not use unsupported sort aliases, including `mtime`.
 - When the user specifies a folder/directory and asks to find files inside it, treat search as recursive under `root` (traverse all subdirectories).
+- For repository/workspace-wide extension searches or final answers that must be file paths rather than basenames, prefer `fs_search.find_ext` over `system_basic.inventory_dir`; `inventory_dir` is an immediate directory inventory.
 - Path matching rule for file search: case-insensitive exact basename match can be used directly; if only fuzzy/approximate matches exist, ask one concise clarification with 1-3 candidate full absolute paths before execution.
 
 #### fs_search JSON-schema style contract (strict)

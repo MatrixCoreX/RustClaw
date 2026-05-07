@@ -38,6 +38,7 @@ use self::support::{
 use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
 
 const AGENT_TOOL_SPEC_PATH: &str = "prompts/agent_tool_spec.md";
+const CLAWD_CONTINUE_ON_ERROR_ARG: &str = "_clawd_continue_on_error";
 const SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/single_plan_execution_prompt.md";
 const LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/lightweight_execution_prompt.md";
 const LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
@@ -450,6 +451,53 @@ fn register_step_output(
         format!("{key_prefix}.content_status"),
         content_status.as_str().to_string(),
     );
+    register_structured_indexed_output_vars(
+        loop_state,
+        global_step,
+        round_step,
+        key_prefix,
+        trimmed,
+    );
+}
+
+fn register_structured_indexed_output_vars(
+    loop_state: &mut LoopState,
+    global_step: usize,
+    round_step: usize,
+    key_prefix: &str,
+    output: &str,
+) {
+    let Ok(value) = serde_json::from_str::<Value>(output) else {
+        return;
+    };
+    let Some(names) = value.get("names").and_then(Value::as_array) else {
+        return;
+    };
+    for (idx, item) in names.iter().enumerate() {
+        let Some(name) = item.as_str().map(str::trim).filter(|name| !name.is_empty()) else {
+            continue;
+        };
+        let name = name.to_string();
+        for base in [
+            "last_output".to_string(),
+            format!("s{global_step}"),
+            format!("s{round_step}"),
+            key_prefix.to_string(),
+        ] {
+            loop_state
+                .output_vars
+                .insert(format!("{base}.{idx}"), name.clone());
+            loop_state
+                .output_vars
+                .insert(format!("{base}[{idx}]"), name.clone());
+            loop_state
+                .output_vars
+                .insert(format!("{base}.names.{idx}"), name.clone());
+            loop_state
+                .output_vars
+                .insert(format!("{base}.names[{idx}]"), name.clone());
+        }
+    }
 }
 
 fn remember_written_file_alias(
@@ -930,6 +978,41 @@ mod tests {
         let args = json!({});
         let s = build_safe_skill_args_summary(&args, 160);
         assert!(s.is_empty());
+    }
+
+    #[test]
+    fn register_step_output_indexes_inventory_names_for_followup_paths() {
+        let mut loop_state = LoopState::new(1);
+        register_step_output(
+            &mut loop_state,
+            1,
+            1,
+            "step_1",
+            r#"{"action":"inventory_dir","names":["act_plan.log","clawd.log","clawd.run.log"],"path":"logs"}"#,
+        );
+
+        assert_eq!(
+            loop_state
+                .output_vars
+                .get("last_output.0")
+                .map(String::as_str),
+            Some("act_plan.log")
+        );
+        assert_eq!(
+            loop_state
+                .output_vars
+                .get("last_output.1")
+                .map(String::as_str),
+            Some("clawd.log")
+        );
+        assert_eq!(
+            loop_state.output_vars.get("s1.names.2").map(String::as_str),
+            Some("clawd.run.log")
+        );
+        assert_eq!(
+            loop_state.output_vars.get("step_1[2]").map(String::as_str),
+            Some("clawd.run.log")
+        );
     }
 
     // --- build_final_delivery_with_priority: last_respond has priority over delivery_messages ---

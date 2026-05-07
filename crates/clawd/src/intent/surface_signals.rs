@@ -282,6 +282,9 @@ fn normalize_field_selector_token(token: &str, allow_single_segment: bool) -> Op
     if trimmed.is_empty() || trimmed.contains('/') || trimmed.contains('\\') {
         return None;
     }
+    if crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(trimmed) {
+        return None;
+    }
     let mut parts = trimmed.split('.');
     let first = parts.next()?;
     if first.is_empty()
@@ -609,5 +612,13 @@ mod tests {
         let signals =
             analyze_prompt_surface("Correction: not Python 3.10, use Python 3.11 instead");
         assert!(signals.locator_target_pair.is_none());
+    }
+
+    #[test]
+    fn dotted_version_numbers_are_not_field_or_filename_signals() {
+        let signals = analyze_prompt_surface("Correction: mention Python 3.11, not Python 3.10.");
+        assert_eq!(signals.field_selector_count, 0);
+        assert!(signals.dotted_field_selector.is_none());
+        assert!(signals.filename_candidates.is_empty());
     }
 }

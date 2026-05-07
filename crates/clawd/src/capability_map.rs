@@ -40,7 +40,7 @@ impl CapabilityDomain {
                 "run shell commands and inspect local system, developer, package, archive, git, HTTP, and database information"
             }
             CapabilityDomain::OpsStatus => {
-                "check service/process/task status, read logs, run health checks, and inspect safe config state"
+                "check service/process/runtime task status, list or cancel the current chat's queued/running tasks, read logs, run health checks, and inspect safe config state"
             }
             CapabilityDomain::MarketData => {
                 "retrieve stock and crypto quotes, market indicators, portfolio/position data, order status, and trading-related facts"
@@ -116,11 +116,11 @@ pub(crate) fn build_capability_map_for_task(state: &AppState, task: &ClaimedTask
     }
 
     let mut grouped: BTreeMap<CapabilityDomain, BTreeSet<String>> = BTreeMap::new();
-    for skill in visible {
+    for skill in &visible {
         grouped
-            .entry(classify_skill(state, &skill))
+            .entry(classify_skill(state, skill))
             .or_default()
-            .insert(skill);
+            .insert(skill.clone());
     }
 
     let mut lines = vec![
@@ -136,6 +136,42 @@ pub(crate) fn build_capability_map_for_task(state: &AppState, task: &ClaimedTask
             domain.summary(),
             skills_text
         ));
+    }
+
+    if let Some(registry) = state.get_skills_registry() {
+        let mut hints = Vec::new();
+        for skill in &visible {
+            let Some(entry) = registry.get(skill) else {
+                continue;
+            };
+            let aliases = entry
+                .aliases
+                .iter()
+                .map(|alias| alias.trim())
+                .filter(|alias| !alias.is_empty())
+                .take(6)
+                .collect::<Vec<_>>();
+            let description = entry
+                .description
+                .as_deref()
+                .map(str::trim)
+                .filter(|description| !description.is_empty());
+            if aliases.is_empty() && description.is_none() {
+                continue;
+            }
+            let mut parts = Vec::new();
+            if let Some(description) = description {
+                parts.push(description.to_string());
+            }
+            if !aliases.is_empty() {
+                parts.push(format!("aliases: {}", aliases.join(", ")));
+            }
+            hints.push(format!("  - {skill}: {}", parts.join("; ")));
+        }
+        if !hints.is_empty() {
+            lines.push("Registry skill hints:".to_string());
+            lines.extend(hints);
+        }
     }
 
     lines.push(

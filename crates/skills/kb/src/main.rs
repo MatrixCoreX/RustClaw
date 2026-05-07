@@ -619,14 +619,7 @@ fn parse_ingest_args(args: &Value) -> Result<IngestArgs> {
     if namespace.is_empty() {
         return Err(anyhow!("ingest requires namespace"));
     }
-    let paths = args
-        .get("paths")
-        .and_then(Value::as_array)
-        .ok_or_else(|| anyhow!("ingest requires paths[]"))?
-        .iter()
-        .filter_map(Value::as_str)
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
+    let paths = parse_ingest_paths(args)?;
     if paths.is_empty() {
         return Err(anyhow!("paths[] must not be empty"));
     }
@@ -670,6 +663,34 @@ fn parse_ingest_args(args: &Value) -> Result<IngestArgs> {
         file_types,
         max_file_size,
     })
+}
+
+fn parse_ingest_paths(args: &Value) -> Result<Vec<String>> {
+    let mut paths = match args.get("paths") {
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>(),
+        Some(Value::String(path)) if !path.trim().is_empty() => vec![path.trim().to_string()],
+        _ => Vec::new(),
+    };
+    if paths.is_empty() {
+        if let Some(path) = args
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            paths.push(path.to_string());
+        }
+    }
+    if paths.is_empty() {
+        return Err(anyhow!("ingest requires paths[]"));
+    }
+    Ok(paths)
 }
 
 fn parse_search_args(args: &Value) -> Result<SearchArgs> {
@@ -1156,8 +1177,8 @@ fn save_namespace(runtime: &KbRuntime, index: &NamespaceIndex) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_search_path_prefix, parse_stats_args, split_chunks, storage_path_for,
-        storage_segment, tokenize, KbRuntime,
+        normalize_search_path_prefix, parse_ingest_args, parse_stats_args, split_chunks,
+        storage_path_for, storage_segment, tokenize, KbRuntime,
     };
     use serde_json::json;
     use std::path::PathBuf;
@@ -1177,6 +1198,17 @@ mod tests {
 
         let global = parse_stats_args(&json!({})).expect("parse global stats");
         assert!(global.namespace.is_none());
+    }
+
+    #[test]
+    fn ingest_args_accept_single_path_alias() {
+        let parsed = parse_ingest_args(&json!({
+            "namespace": "docs",
+            "path": "README.md"
+        }))
+        .expect("parse single path alias");
+
+        assert_eq!(parsed.paths, vec!["README.md"]);
     }
 
     #[test]

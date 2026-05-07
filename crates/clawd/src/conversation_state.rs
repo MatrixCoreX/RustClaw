@@ -160,10 +160,27 @@ fn next_last_primary_task_prompt(
     prompt: &str,
     resolved_prompt_for_execution: &str,
 ) -> Option<String> {
+    if standalone_preference_or_memory_turn_clears_primary_task(route_result, turn_analysis) {
+        return None;
+    }
     if should_preserve_active_session_pointers(turn_analysis) {
         return prior_state.and_then(|state| state.last_primary_task_prompt.clone());
     }
     let prior_prompt = prior_state.and_then(|state| state.last_primary_task_prompt.clone());
+    if standalone_answer_candidate_request_should_not_promote(
+        route_result,
+        turn_analysis,
+        resolved_prompt_for_execution,
+    ) {
+        return prior_prompt;
+    }
+    if standalone_task_request_preserves_prior_primary(
+        prior_prompt.as_deref(),
+        route_result,
+        turn_analysis,
+    ) {
+        return prior_prompt;
+    }
     let user_prompt = prompt.trim();
     let resolved_prompt = resolved_prompt_for_execution.trim();
     let current_prompt = if user_prompt.is_empty() {
@@ -175,6 +192,9 @@ fn next_last_primary_task_prompt(
         return prior_prompt;
     }
     let Some(turn_type) = turn_analysis.and_then(|analysis| analysis.turn_type) else {
+        if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
+            return Some(current_prompt.to_string());
+        }
         if route_result.is_clarify_gate() && prior_prompt.is_none() {
             return Some(current_prompt.to_string());
         }
@@ -271,17 +291,183 @@ fn prior_last_primary_task_output(prior_state: Option<&ConversationState>) -> Op
     prior_state.and_then(|state| state.last_primary_task_output.clone())
 }
 
+fn standalone_contextual_chat_result_starts_primary_task(
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    let allowed_turn = turn_analysis.is_none()
+        || matches!(
+            (
+                turn_analysis.and_then(|analysis| analysis.turn_type),
+                turn_analysis.and_then(|analysis| analysis.target_task_policy),
+            ),
+            (
+                Some(crate::intent_router::TurnType::TaskRequest),
+                Some(crate::intent_router::TargetTaskPolicy::Standalone)
+            )
+        );
+    if !allowed_turn
+        || !matches!(route_result.routed_mode, crate::RoutedMode::Chat)
+        || route_result.needs_clarify
+        || route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        )
+        || !matches!(
+            route_result.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::None
+        )
+    {
+        return false;
+    }
+    matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::QuantityComparison
+            | crate::OutputSemanticKind::RecentScalarEqualityCheck
+    )
+}
+
+fn standalone_preference_or_memory_turn_clears_primary_task(
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    matches!(
+        turn_analysis.and_then(|analysis| analysis.turn_type),
+        Some(crate::intent_router::TurnType::PreferenceOrMemory)
+    ) && !matches!(
+        turn_analysis.and_then(|analysis| analysis.target_task_policy),
+        Some(
+            crate::intent_router::TargetTaskPolicy::ReuseActive
+                | crate::intent_router::TargetTaskPolicy::ReplaceActive
+        )
+    ) && matches!(route_result.routed_mode, crate::RoutedMode::Chat)
+        && !route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+        && matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        )
+}
+
+fn state_patch_requests_primary_task_replacement(
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    let Some(patch) = turn_analysis.and_then(|analysis| analysis.state_patch.as_ref()) else {
+        return false;
+    };
+    let primary_update = patch
+        .get("primary_task_update")
+        .and_then(|value| value.as_str())
+        .map(str::trim);
+    let active_boundary = patch
+        .get("active_task_boundary")
+        .and_then(|value| value.as_str())
+        .map(str::trim);
+    matches!(primary_update, Some("replace")) || matches!(active_boundary, Some("new_deliverable"))
+}
+
+fn standalone_task_request_preserves_prior_primary(
+    prior_primary_task_prompt: Option<&str>,
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
+        return false;
+    }
+    if state_patch_requests_primary_task_replacement(turn_analysis) {
+        return false;
+    }
+    prior_primary_task_prompt
+        .map(str::trim)
+        .is_some_and(|prompt| !prompt.is_empty())
+        && matches!(
+            turn_analysis.and_then(|analysis| analysis.turn_type),
+            Some(crate::intent_router::TurnType::TaskRequest)
+        )
+        && matches!(
+            turn_analysis.and_then(|analysis| analysis.target_task_policy),
+            Some(crate::intent_router::TargetTaskPolicy::Standalone)
+        )
+        && matches!(route_result.routed_mode, crate::RoutedMode::Chat)
+        && !route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+        && matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        )
+}
+
+fn standalone_answer_candidate_request_should_not_promote(
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    resolved_prompt_for_execution: &str,
+) -> bool {
+    matches!(
+        turn_analysis.and_then(|analysis| analysis.turn_type),
+        Some(crate::intent_router::TurnType::TaskRequest)
+    ) && matches!(
+        turn_analysis.and_then(|analysis| analysis.target_task_policy),
+        Some(crate::intent_router::TargetTaskPolicy::Standalone)
+    ) && matches!(route_result.routed_mode, crate::RoutedMode::Chat)
+        && !route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+        && matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        )
+        && (matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar
+        ) || resolved_prompt_for_execution
+            .lines()
+            .any(|line| line.trim_start().starts_with("answer_candidate:")))
+}
+
 fn next_last_primary_task_output(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    resolved_prompt_for_execution: &str,
     answer_text: &str,
     answer_messages: &[String],
 ) -> Option<String> {
+    if standalone_preference_or_memory_turn_clears_primary_task(route_result, turn_analysis) {
+        return None;
+    }
     if should_preserve_active_session_pointers(turn_analysis)
         || route_result.is_clarify_gate()
+        || standalone_answer_candidate_request_should_not_promote(
+            route_result,
+            turn_analysis,
+            resolved_prompt_for_execution,
+        )
+        || standalone_task_request_preserves_prior_primary(
+            prior_state.and_then(|state| state.last_primary_task_prompt.as_deref()),
+            route_result,
+            turn_analysis,
+        )
         || !should_track_primary_task_output(turn_analysis)
     {
+        if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
+            let latest_output = answer_text
+                .trim()
+                .is_empty()
+                .then(|| {
+                    answer_messages
+                        .iter()
+                        .map(String::as_str)
+                        .find(|text| !text.trim().is_empty())
+                        .map(str::to_string)
+                })
+                .flatten()
+                .or_else(|| {
+                    let trimmed = answer_text.trim();
+                    (!trimmed.is_empty()).then(|| trimmed.to_string())
+                });
+            return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
+        }
         return prior_last_primary_task_output(prior_state);
     }
     let latest_output = answer_text
@@ -619,6 +805,7 @@ pub(crate) fn update_active_session_from_ask_outcome(
                 prior_state.as_ref(),
                 route_result,
                 turn_analysis,
+                resolved_prompt_for_execution,
                 answer_text,
                 answer_messages,
             ),
@@ -737,9 +924,9 @@ pub(crate) fn load_active_session_snapshot(
 #[cfg(test)]
 mod tests {
     use super::{
-        effective_locale_hint, load_active_session_snapshot, next_last_primary_task_prompt,
-        normalized_locale_hint, ActiveSessionPointers, ActiveSessionSnapshot, ConversationState,
-        SessionAliasBinding,
+        effective_locale_hint, load_active_session_snapshot, next_last_primary_task_output,
+        next_last_primary_task_prompt, normalized_locale_hint, ActiveSessionPointers,
+        ActiveSessionSnapshot, ConversationState, SessionAliasBinding,
     };
     use crate::runtime::AppState;
     use crate::ClaimedTask;
@@ -852,6 +1039,320 @@ mod tests {
             "RC-CONT-CN-0428-A",
         );
         assert_eq!(preserved.as_deref(), Some("帮我写个方案"));
+    }
+
+    #[test]
+    fn standalone_task_request_preserves_existing_primary_task() {
+        let route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let turn_analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+        let prior_state = ConversationState {
+            last_primary_task_prompt: Some("帮我写个方案".to_string()),
+            last_primary_task_output: Some("三条登录模块要点".to_string()),
+            ..ConversationState::default()
+        };
+
+        let prompt = next_last_primary_task_prompt(
+            Some(&prior_state),
+            &route_result,
+            Some(&turn_analysis),
+            "问一个独立概念问题",
+            "问一个独立概念问题",
+        );
+        let output = next_last_primary_task_output(
+            Some(&prior_state),
+            &route_result,
+            Some(&turn_analysis),
+            "问一个独立概念问题",
+            "独立概念回答",
+            &[],
+        );
+
+        assert_eq!(prompt.as_deref(), Some("帮我写个方案"));
+        assert_eq!(output.as_deref(), Some("三条登录模块要点"));
+    }
+
+    #[test]
+    fn standalone_new_deliverable_replaces_existing_primary_task() {
+        let route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let turn_analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: Some(json!({
+                "primary_task_update": "replace",
+                "active_task_boundary": "new_deliverable"
+            })),
+            attachment_processing_required: false,
+        };
+        let prior_state = ConversationState {
+            last_primary_task_prompt: Some("Write a short release note for RustClaw".to_string()),
+            last_primary_task_output: Some(
+                "RustClaw is easier for non-technical users.".to_string(),
+            ),
+            ..ConversationState::default()
+        };
+
+        let prompt = next_last_primary_task_prompt(
+            Some(&prior_state),
+            &route_result,
+            Some(&turn_analysis),
+            "Write one deployment note that mentions Python 3.10",
+            "Write one deployment note that mentions Python 3.10",
+        );
+        let output = next_last_primary_task_output(
+            Some(&prior_state),
+            &route_result,
+            Some(&turn_analysis),
+            "Write one deployment note that mentions Python 3.10",
+            "RustClaw deployment should use Python 3.10.",
+            &[],
+        );
+
+        assert_eq!(
+            prompt.as_deref(),
+            Some("Write one deployment note that mentions Python 3.10")
+        );
+        assert_eq!(
+            output.as_deref(),
+            Some("RustClaw deployment should use Python 3.10.")
+        );
+    }
+
+    #[test]
+    fn standalone_task_request_without_prior_can_start_primary_task() {
+        let route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let turn_analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+
+        let prompt = next_last_primary_task_prompt(
+            None,
+            &route_result,
+            Some(&turn_analysis),
+            "帮我写个方案",
+            "帮我写个方案",
+        );
+        let output = next_last_primary_task_output(
+            None,
+            &route_result,
+            Some(&turn_analysis),
+            "帮我写个方案",
+            "方案正文",
+            &[],
+        );
+
+        assert_eq!(prompt.as_deref(), Some("帮我写个方案"));
+        assert_eq!(output.as_deref(), Some("方案正文"));
+    }
+
+    #[test]
+    fn standalone_preference_or_memory_turn_clears_prior_primary_task() {
+        let mut route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        route_result.should_refresh_long_term_memory = true;
+        route_result.agent_display_name_hint = "巡检爪".to_string();
+        let turn_analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+        let prior_state = ConversationState {
+            last_primary_task_prompt: Some(
+                "compare README.md and AGENTS.md, tell me which one is larger".to_string(),
+            ),
+            last_primary_task_output: Some("README.md is larger.".to_string()),
+            ..ConversationState::default()
+        };
+
+        let prompt = next_last_primary_task_prompt(
+            Some(&prior_state),
+            &route_result,
+            Some(&turn_analysis),
+            "后面我要提到你的时候，统一按“巡检爪”这个称呼来",
+            "用户要求统一使用“巡检爪”作为称呼",
+        );
+        let output = next_last_primary_task_output(
+            Some(&prior_state),
+            &route_result,
+            Some(&turn_analysis),
+            "用户要求统一使用“巡检爪”作为称呼",
+            "已记住：巡检爪。",
+            &[],
+        );
+
+        assert!(prompt.is_none());
+        assert!(output.is_none());
+    }
+
+    #[test]
+    fn memory_grounded_comparison_chat_becomes_latest_primary_task() {
+        let mut route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        route_result.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        let prior_state = ConversationState {
+            last_primary_task_prompt: Some(
+                "再看一下 scripts/nl_tests/fixtures/device_local/logs 目录有多少个直接子项，只输出数字"
+                    .to_string(),
+            ),
+            last_primary_task_output: Some("2".to_string()),
+            ..ConversationState::default()
+        };
+
+        let prompt = next_last_primary_task_prompt(
+            Some(&prior_state),
+            &route_result,
+            Some(&crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+                should_interrupt_active_run: false,
+                state_patch: None,
+                attachment_processing_required: false,
+            }),
+            "上上个目录和上个目录相比，哪个直接子项更多？只用一句话",
+            "比较 docs（3个直接子项）和 logs（2个直接子项）的直接子项数量。",
+        );
+        let output = next_last_primary_task_output(
+            Some(&prior_state),
+            &route_result,
+            Some(&crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+                should_interrupt_active_run: false,
+                state_patch: None,
+                attachment_processing_required: false,
+            }),
+            "比较 docs（3个直接子项）和 logs（2个直接子项）的直接子项数量。",
+            "上上个目录（docs）的直接子项更多，有3个，而上个目录（logs）是2个。",
+            &[],
+        );
+
+        assert_eq!(
+            prompt.as_deref(),
+            Some("上上个目录和上个目录相比，哪个直接子项更多？只用一句话")
+        );
+        assert_eq!(
+            output.as_deref(),
+            Some("上上个目录（docs）的直接子项更多，有3个，而上个目录（logs）是2个。")
+        );
+    }
+
+    #[test]
+    fn standalone_answer_candidate_request_without_prior_does_not_start_primary_task() {
+        let mut route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        let turn_analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+        let resolved = "查询之前记住的编号\nanswer_candidate: RC-CONT-CN-0428-A";
+
+        let prompt = next_last_primary_task_prompt(
+            None,
+            &route_result,
+            Some(&turn_analysis),
+            "刚才让你记住的编号是什么？只回答编号。",
+            resolved,
+        );
+        let output = next_last_primary_task_output(
+            None,
+            &route_result,
+            Some(&turn_analysis),
+            resolved,
+            "RC-CONT-CN-0428-A",
+            &[],
+        );
+
+        assert!(prompt.is_none());
+        assert!(output.is_none());
+    }
+
+    #[test]
+    fn standalone_scalar_chat_request_without_answer_marker_does_not_start_primary_task() {
+        let mut route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        let turn_analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+        let resolved = "Answer the continuous test marker, which is RC-CONT-EN-0428-B.";
+
+        let prompt = next_last_primary_task_prompt(
+            None,
+            &route_result,
+            Some(&turn_analysis),
+            "What continuous test marker did I ask you to remember? Answer only the marker.",
+            resolved,
+        );
+        let output = next_last_primary_task_output(
+            None,
+            &route_result,
+            Some(&turn_analysis),
+            resolved,
+            "RC-CONT-EN-0428-B",
+            &[],
+        );
+
+        assert!(prompt.is_none());
+        assert!(output.is_none());
+    }
+
+    #[test]
+    fn evidence_backed_standalone_task_replaces_prior_scalar_primary_task() {
+        let mut route_result = route_result_for_test(crate::RoutedMode::ChatAct, false);
+        route_result.output_contract.requires_content_evidence = true;
+        route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        let turn_analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+        let prior_state = ConversationState {
+            last_primary_task_prompt: Some(
+                "What continuous test marker did I ask you to remember?".to_string(),
+            ),
+            last_primary_task_output: Some("RC-CONT-EN-0428-B".to_string()),
+            ..ConversationState::default()
+        };
+
+        let prompt = next_last_primary_task_prompt(
+            Some(&prior_state),
+            &route_result,
+            Some(&turn_analysis),
+            "Write a short release note for RustClaw.",
+            "Write a short release note for RustClaw.",
+        );
+        let output = next_last_primary_task_output(
+            Some(&prior_state),
+            &route_result,
+            Some(&turn_analysis),
+            "Write a short release note for RustClaw.",
+            "RustClaw 0.1.6 is now available.",
+            &[],
+        );
+
+        assert_eq!(
+            prompt.as_deref(),
+            Some("Write a short release note for RustClaw.")
+        );
+        assert_eq!(output.as_deref(), Some("RustClaw 0.1.6 is now available."));
     }
 
     #[test]

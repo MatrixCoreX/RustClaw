@@ -7,22 +7,6 @@ use crate::{AppState, AskReply, ClaimedTask};
 
 fn backfill_delivery_from_last_outputs(task: &ClaimedTask, loop_state: &mut LoopState) {
     if loop_state.delivery_messages.is_empty() {
-        if let Some(ref last_respond) = loop_state.last_user_visible_respond {
-            if !last_respond.trim().is_empty() {
-                append_delivery_message(
-                    &task.task_id,
-                    &mut loop_state.delivery_messages,
-                    last_respond.clone(),
-                );
-                info!(
-                    "final_result_use_last_respond task_id={} (delivery was empty)",
-                    task.task_id
-                );
-            }
-        }
-    }
-
-    if loop_state.delivery_messages.is_empty() {
         if let Some(ref last_synthesis_output) = loop_state.last_publishable_synthesis_output {
             if !last_synthesis_output.trim().is_empty() {
                 append_delivery_message(
@@ -37,6 +21,60 @@ fn backfill_delivery_from_last_outputs(task: &ClaimedTask, loop_state: &mut Loop
             }
         }
     }
+
+    if loop_state.delivery_messages.is_empty() {
+        if let Some(ref last_respond) = loop_state.last_user_visible_respond {
+            if !last_respond.trim().is_empty() {
+                append_delivery_message(
+                    &task.task_id,
+                    &mut loop_state.delivery_messages,
+                    last_respond.clone(),
+                );
+                info!(
+                    "final_result_use_last_respond task_id={} (delivery was empty)",
+                    task.task_id
+                );
+            }
+        }
+    }
+}
+
+fn is_bare_template_placeholder(text: &str) -> bool {
+    let trimmed = text.trim();
+    if !trimmed.starts_with("{{") || !trimmed.ends_with("}}") {
+        return false;
+    }
+    let inner = trimmed[2..trimmed.len() - 2].trim();
+    !inner.is_empty() && !inner.contains("{{") && !inner.contains("}}")
+}
+
+fn replace_placeholder_delivery_with_synthesis(task: &ClaimedTask, loop_state: &mut LoopState) {
+    let Some(synthesis) = loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    else {
+        return;
+    };
+    let Some(last_delivery) = loop_state.delivery_messages.last().map(String::as_str) else {
+        return;
+    };
+    if !is_bare_template_placeholder(last_delivery) {
+        return;
+    }
+    info!(
+        "final_result_replace_placeholder_delivery_with_synthesis task_id={} placeholder={}",
+        task.task_id,
+        crate::truncate_for_log(last_delivery)
+    );
+    loop_state.delivery_messages.pop();
+    append_delivery_message(
+        &task.task_id,
+        &mut loop_state.delivery_messages,
+        synthesis.to_string(),
+    );
+    loop_state.last_user_visible_respond = Some(synthesis.to_string());
 }
 
 fn route_requires_content_evidence(agent_run_context: Option<&AgentRunContext>) -> bool {
@@ -110,11 +148,116 @@ fn has_missing_file_search_evidence(loop_state: &LoopState) -> bool {
     })
 }
 
+fn output_excerpt_has_existing_file_evidence(output: &str) -> bool {
+    if crate::finalize::parse_delivery_file_token(output.trim()).is_some() {
+        return true;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+        return false;
+    };
+    if value.get("action").and_then(|v| v.as_str()) == Some("find_name") {
+        return value.get("count").and_then(|v| v.as_i64()).unwrap_or(0) > 0
+            && value
+                .get("results")
+                .and_then(|v| v.as_array())
+                .is_some_and(|results| !results.is_empty());
+    }
+    let path_facts = value.get("facts").and_then(|v| v.as_array());
+    let has_path_batch_shape = value.get("action").and_then(|v| v.as_str())
+        == Some("path_batch_facts")
+        || path_facts.is_some();
+    has_path_batch_shape
+        && path_facts.is_some_and(|facts| {
+            facts.iter().any(|fact| {
+                fact.get("exists").and_then(|v| v.as_bool()) == Some(true)
+                    && missing_path_from_path_fact(fact).is_some()
+            })
+        })
+}
+
+fn latest_file_delivery_observation_is_missing(loop_state: &LoopState) -> bool {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "think" | "synthesize_answer"
+            )
+        })
+        .filter_map(|step| step.output.as_deref())
+        .find_map(|output| {
+            if output_excerpt_has_missing_file_evidence(output) {
+                Some(true)
+            } else if output_excerpt_has_existing_file_evidence(output) {
+                Some(false)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false)
+}
+
+fn loop_has_delivery_file_token(loop_state: &LoopState) -> bool {
+    loop_state
+        .last_user_visible_respond
+        .as_deref()
+        .into_iter()
+        .chain(loop_state.delivery_messages.iter().map(String::as_str))
+        .any(|message| crate::finalize::parse_delivery_file_token(message.trim()).is_some())
+}
+
+fn should_return_missing_file_delivery_reply(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    route_requires_file_token(agent_run_context)
+        && latest_file_delivery_observation_is_missing(loop_state)
+        && !loop_has_delivery_file_token(loop_state)
+}
+
 fn route_locator_hint(agent_run_context: Option<&AgentRunContext>) -> Option<&str> {
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .map(|route| route.output_contract.locator_hint.trim())
         .filter(|value| !value.is_empty())
+}
+
+fn missing_path_from_path_fact(fact: &serde_json::Value) -> Option<String> {
+    let fact_obj = fact.get("fact").and_then(|value| value.as_object());
+    fact_obj
+        .and_then(|item| item.get("resolved_path"))
+        .or_else(|| fact_obj.and_then(|item| item.get("path")))
+        .or_else(|| fact.get("resolved_path"))
+        .or_else(|| fact.get("path"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(ToString::to_string)
+}
+
+fn missing_file_path_from_output(output: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(output).ok()?;
+    let facts = value.get("facts").and_then(|value| value.as_array())?;
+    facts.iter().find_map(|fact| {
+        (fact.get("exists").and_then(|value| value.as_bool()) == Some(false))
+            .then(|| missing_path_from_path_fact(fact))
+            .flatten()
+    })
+}
+
+fn missing_file_path_from_loop(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter_map(|step| step.output.as_deref())
+        .find_map(missing_file_path_from_output)
+        .or_else(|| route_locator_hint(agent_run_context).map(ToString::to_string))
 }
 
 fn resolve_file_token_from_auto_locator_answer(
@@ -326,11 +469,26 @@ async fn enforce_delivery_output_contract(
     {
         return;
     }
-    let seed_text = loop_state
-        .last_user_visible_respond
-        .clone()
-        .or_else(|| loop_state.delivery_messages.last().cloned())
-        .unwrap_or_default();
+    let publishable_synthesis = loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty());
+    let seed_text = if publishable_synthesis.is_some() {
+        loop_state
+            .delivery_messages
+            .last()
+            .cloned()
+            .or_else(|| loop_state.last_publishable_synthesis_output.clone())
+            .or_else(|| loop_state.last_user_visible_respond.clone())
+            .unwrap_or_default()
+    } else {
+        loop_state
+            .last_user_visible_respond
+            .clone()
+            .or_else(|| loop_state.delivery_messages.last().cloned())
+            .unwrap_or_default()
+    };
     let (mut normalized_text, mut normalized_messages) =
         crate::intercept_response_payload_for_delivery(
             state,
@@ -823,6 +981,25 @@ fn prefer_english_for_user_text_without_state(user_text: &str) -> bool {
     crate::language_policy::request_language_hint(user_text) == "en"
 }
 
+fn prefer_english_for_execution_summary(
+    agent_run_context: Option<&AgentRunContext>,
+    user_text: Option<&str>,
+) -> bool {
+    if let Some(original) = agent_run_context
+        .and_then(|ctx| ctx.original_user_request.as_deref())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        let hint = crate::language_policy::request_language_hint(original);
+        if hint != "config_default" {
+            return hint == "en";
+        }
+    }
+    user_text
+        .map(prefer_english_for_user_text_without_state)
+        .unwrap_or(false)
+}
+
 fn execution_recipe_closeout_note(
     state: Option<&AppState>,
     user_text: &str,
@@ -1018,6 +1195,9 @@ fn direct_structured_observed_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    if crate::agent_engine::observed_output::route_requires_synthesized_delivery(route) {
+        return None;
+    }
     if matches!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
@@ -1096,6 +1276,13 @@ fn prefer_observed_answer_for_exact_contract(
     if delivery_messages.is_empty() {
         return;
     }
+    if loop_state
+        .executed_step_results
+        .iter()
+        .any(|step| matches!(step.status, crate::executor::StepExecutionStatus::Error))
+    {
+        return;
+    }
     if let Some(synthesis) = loop_state
         .last_publishable_synthesis_output
         .as_deref()
@@ -1139,6 +1326,16 @@ fn prefer_observed_answer_for_exact_contract(
         *finalizer_summary = Some(summary);
         return;
     }
+    if delivery_messages.last().is_some_and(|message| {
+        should_keep_planned_delivery_over_observed_answer(route, message, answer)
+    }) {
+        info!(
+            "delivery exact_contract_keep_planned_delivery task_id={} observed={}",
+            task_id,
+            crate::truncate_for_log(answer)
+        );
+        return;
+    }
 
     info!(
         "delivery exact_contract_from_observed task_id={} previous={} observed={}",
@@ -1162,6 +1359,14 @@ fn direct_non_builtin_skill_raw_answer(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|text| !text.is_empty())
+    {
+        return None;
+    }
     let last_skill_name = loop_state
         .output_vars
         .get("last_skill_name")
@@ -1181,6 +1386,15 @@ fn direct_non_builtin_skill_raw_answer(
     if direct_structured_observed_answer(None, loop_state, agent_run_context)
         .is_some_and(|(structured_answer, _)| structured_answer.trim() != answer.trim())
     {
+        return None;
+    }
+    if matches!(
+        route.map(|route| route.output_contract.response_shape),
+        Some(crate::OutputResponseShape::Scalar)
+    ) && !matches!(
+        route.map(|route| route.output_contract.semantic_kind),
+        Some(crate::OutputSemanticKind::RawCommandOutput)
+    ) {
         return None;
     }
     if matches!(
@@ -1294,12 +1508,15 @@ fn route_explicitly_requests_command_result(route: &crate::RouteResult) -> bool 
 fn output_contract_requests_exact_delivery(route: &crate::RouteResult) -> bool {
     matches!(
         route.output_contract.response_shape,
-        crate::OutputResponseShape::Scalar
-            | crate::OutputResponseShape::FileToken
-            | crate::OutputResponseShape::Strict
+        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
     ) || matches!(
         route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::RawCommandOutput | crate::OutputSemanticKind::FileNames
+        crate::OutputSemanticKind::RawCommandOutput
+            | crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::FilePaths
+            | crate::OutputSemanticKind::GitCommitSubject
+            | crate::OutputSemanticKind::StructuredKeys
     )
 }
 
@@ -1313,9 +1530,45 @@ fn route_prefers_observed_answer(route: &crate::RouteResult) -> bool {
     ) || matches!(
         route.output_contract.semantic_kind,
         crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::FilePaths
             | crate::OutputSemanticKind::ExistenceWithPath
+            | crate::OutputSemanticKind::GitCommitSubject
             | crate::OutputSemanticKind::HiddenEntriesCheck
+            | crate::OutputSemanticKind::StructuredKeys
     )
+}
+
+fn delivery_has_planned_content_beyond_observed_answer(delivery: &str, observed: &str) -> bool {
+    let delivery = delivery.trim();
+    let observed = observed.trim();
+    if delivery.is_empty() || observed.is_empty() || delivery == observed {
+        return false;
+    }
+    if !delivery.contains(observed) {
+        return false;
+    }
+    delivery
+        .replacen(observed, "", 1)
+        .chars()
+        .any(|ch| !ch.is_whitespace())
+}
+
+fn should_keep_planned_delivery_over_observed_answer(
+    route: &crate::RouteResult,
+    delivery: &str,
+    observed: &str,
+) -> bool {
+    matches!(route.routed_mode, crate::RoutedMode::ChatAct)
+        && !matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+        && matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::RawCommandOutput
+        )
+        && delivery_has_planned_content_beyond_observed_answer(delivery, observed)
 }
 
 const EXECUTION_SUMMARY_MAX_STEPS: usize = 4;
@@ -1350,13 +1603,14 @@ fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
 }
 
 fn execution_summary_value_to_string(value: &serde_json::Value) -> String {
-    match value {
+    let raw = match value {
         serde_json::Value::String(value) => value.trim().to_string(),
         serde_json::Value::Number(value) => value.to_string(),
         serde_json::Value::Bool(value) => value.to_string(),
         serde_json::Value::Null => String::new(),
         _ => value.to_string(),
-    }
+    };
+    crate::visible_text::sanitize_user_visible_text(&raw)
 }
 
 fn execution_summary_arg_is_sensitive(key: &str) -> bool {
@@ -1406,16 +1660,27 @@ fn safe_execution_args_summary(args: &serde_json::Value, max_chars: usize) -> St
     truncate_with_ellipsis(&parts.join(", "), max_chars)
 }
 
+fn plan_step_matches_execution(
+    plan_step: &crate::PlanStep,
+    step: &crate::executor::StepExecutionResult,
+) -> bool {
+    let plan_skill = plan_step.skill.trim();
+    plan_skill.eq_ignore_ascii_case(step.skill.trim())
+        || (step.skill == "run_cmd" && plan_skill.eq_ignore_ascii_case("run_cmd"))
+}
+
 fn plan_step_for_execution<'a>(
     loop_state: &'a LoopState,
-    step_id: &str,
+    step: &crate::executor::StepExecutionResult,
 ) -> Option<&'a crate::PlanStep> {
     loop_state
         .round_traces
         .iter()
         .filter_map(|trace| trace.plan_result.as_ref())
         .flat_map(|plan| plan.steps.iter())
-        .find(|step| step.step_id == step_id)
+        .find(|plan_step| {
+            plan_step.step_id == step.step_id && plan_step_matches_execution(plan_step, step)
+        })
 }
 
 fn command_arg_from_plan_step(plan_step: Option<&crate::PlanStep>) -> Option<String> {
@@ -1426,6 +1691,15 @@ fn command_arg_from_plan_step(plan_step: Option<&crate::PlanStep>) -> Option<Str
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| truncate_with_ellipsis(value, 140))
+}
+
+fn raw_command_arg_from_plan_step(plan_step: Option<&crate::PlanStep>) -> Option<&str> {
+    let args = &plan_step?.args;
+    args.get("command")
+        .or_else(|| args.get("cmd"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 fn execution_summary_invocation_label(
@@ -1486,7 +1760,15 @@ fn output_text_from_execution_result(
         return Some("file not found".to_string());
     }
     if let Some(path) = trimmed.strip_prefix("__RC_READ_FILE_NOT_FOUND__:") {
-        return Some(format!("file not found: {}", path.trim()));
+        return Some(crate::visible_text::sanitize_user_visible_text(&format!(
+            "file not found: {}",
+            path.trim()
+        )));
+    }
+    if !step.is_ok() && crate::skills::is_recoverable_skill_error(&step.skill, trimmed) {
+        return Some(crate::visible_text::sanitize_user_visible_text(
+            &crate::skills::normalize_skill_error_for_user(&step.skill, trimmed),
+        ));
     }
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
         if let Some(text) = value
@@ -1495,7 +1777,7 @@ fn output_text_from_execution_result(
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            return Some(text.to_string());
+            return Some(crate::visible_text::sanitize_user_visible_text(text));
         }
         if let Some(text) = value
             .get("stdout")
@@ -1503,7 +1785,7 @@ fn output_text_from_execution_result(
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            return Some(text.to_string());
+            return Some(crate::visible_text::sanitize_user_visible_text(text));
         }
         if let Some(text) = value
             .get("error_text")
@@ -1511,10 +1793,10 @@ fn output_text_from_execution_result(
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            return Some(text.to_string());
+            return Some(crate::visible_text::sanitize_user_visible_text(text));
         }
     }
-    Some(trimmed.to_string())
+    Some(crate::visible_text::sanitize_user_visible_text(trimmed))
 }
 
 fn structured_observation_suppresses_execution_summary(
@@ -1548,9 +1830,7 @@ fn build_execution_summary_messages(
         return Vec::new();
     }
 
-    let prefer_english = user_text
-        .map(prefer_english_for_user_text_without_state)
-        .unwrap_or(false);
+    let prefer_english = prefer_english_for_execution_summary(agent_run_context, user_text);
     let prefix = if prefer_english {
         crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN.to_string()
     } else {
@@ -1562,7 +1842,7 @@ fn build_execution_summary_messages(
         .take(EXECUTION_SUMMARY_MAX_STEPS)
         .enumerate()
         .filter_map(|(index, step)| {
-            let plan_step = plan_step_for_execution(loop_state, &step.step_id);
+            let plan_step = plan_step_for_execution(loop_state, step);
             let output = output_text_from_execution_result(step)?.replace("```", "'''");
             let output = truncate_with_ellipsis(&output, EXECUTION_SUMMARY_OUTPUT_MAX_CHARS);
             let status_label = if prefer_english {
@@ -1637,8 +1917,7 @@ fn attach_execution_summary_to_delivery(
 }
 
 fn error_looks_like_os_permission_denied(error: &str) -> bool {
-    let lower = error.to_ascii_lowercase();
-    lower.contains("permission denied") || lower.contains("os error 13")
+    crate::skills::error_looks_like_os_permission_denied(error)
 }
 
 fn error_looks_like_missing_file_or_directory(error: &str) -> bool {
@@ -1845,12 +2124,21 @@ async fn content_evidence_step_failure_answer(
                 "respond" | "synthesize_answer" | "think"
             )
     })?;
-    let error = failed_step.error.as_deref().map(str::trim)?;
-    if error.is_empty() {
+    let raw_error = failed_step.error.as_deref().map(str::trim)?;
+    if raw_error.is_empty() {
         return None;
     }
+    let recoverable_skill_error =
+        crate::skills::is_recoverable_skill_error(&failed_step.skill, raw_error);
+    let user_visible_error = if recoverable_skill_error {
+        crate::skills::normalize_skill_error_for_user(&failed_step.skill, raw_error)
+    } else {
+        raw_error.to_string()
+    };
+    let error = user_visible_error.as_str();
 
-    if let Some(answer) = service_status_failure_answer(state, user_text, error, agent_run_context)
+    if let Some(answer) =
+        service_status_failure_answer(state, user_text, raw_error, agent_run_context)
     {
         return Some((
             answer,
@@ -1868,10 +2156,10 @@ async fn content_evidence_step_failure_answer(
         ));
     }
 
-    let missing_target = error_looks_like_missing_file_or_directory(error);
+    let missing_target = error_looks_like_missing_file_or_directory(raw_error);
     if missing_target {
         let answer =
-            content_evidence_missing_target_answer(state, user_text, agent_run_context, error);
+            content_evidence_missing_target_answer(state, user_text, agent_run_context, raw_error);
         return Some((
             answer,
             crate::task_journal::TaskJournalFinalizerSummary {
@@ -1888,6 +2176,7 @@ async fn content_evidence_step_failure_answer(
         ));
     }
 
+    let permission_denied = error_looks_like_os_permission_denied(raw_error);
     let default_answer = content_evidence_step_failure_default_answer(
         state,
         user_text,
@@ -1895,12 +2184,27 @@ async fn content_evidence_step_failure_answer(
         failed_step,
         error,
     );
+    if permission_denied || recoverable_skill_error {
+        return Some((
+            default_answer,
+            crate::task_journal::TaskJournalFinalizerSummary {
+                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                contract_ok: true,
+                completion_ok: Some(true),
+                grounded_ok: Some(true),
+                format_ok: Some(true),
+                needs_clarify: Some(false),
+                used_evidence_ids_count: 1,
+                ..Default::default()
+            },
+        ));
+    }
     let locator = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .map(|route| route.output_contract.locator_hint.trim())
         .filter(|locator| !locator.is_empty());
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
-    let permission_denied = error_looks_like_os_permission_denied(error);
     let mut observed_facts = vec![
         format!("failed_skill: {}", failed_step.skill.trim()),
         format!("error_summary: {}", crate::truncate_for_agent_trace(error)),
@@ -2128,6 +2432,267 @@ fn missing_delivery_after_observation_default_message(state: &AppState, user_tex
     }
 }
 
+fn observed_execution_status_steps<'a>(
+    loop_state: &'a crate::agent_engine::LoopState,
+) -> Vec<&'a crate::executor::StepExecutionResult> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "think" | "synthesize_answer"
+            ) && output_text_from_execution_result(step).is_some()
+        })
+        .collect::<Vec<_>>()
+}
+
+fn deterministic_observed_execution_status_answer(
+    state: &AppState,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+) -> Option<String> {
+    let prefer_english = prefer_english_for_user_text(state, user_text);
+    let steps = observed_execution_status_steps(loop_state);
+    if steps.len() < 2 || !steps.iter().any(|step| !step.is_ok()) {
+        return None;
+    }
+
+    let lines = steps
+        .iter()
+        .take(6)
+        .enumerate()
+        .map(|(idx, step)| {
+            let skill = step.skill.trim();
+            if step.is_ok() {
+                if prefer_english {
+                    format!("Step {} `{skill}` succeeded.", idx + 1)
+                } else {
+                    format!("第 {} 步 `{skill}` 成功。", idx + 1)
+                }
+            } else {
+                let error = output_text_from_execution_result(step)
+                    .unwrap_or_else(|| "execution failed".to_string());
+                let error = truncate_with_ellipsis(&error.replace('\n', " "), 220);
+                if prefer_english {
+                    format!("Step {} `{skill}` failed: {error}.", idx + 1)
+                } else {
+                    format!("第 {} 步 `{skill}` 失败：{error}。", idx + 1)
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+    Some(lines.join(if prefer_english { " " } else { "" }))
+}
+
+fn route_requests_execution_failed_step_answer(
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .is_some_and(|route| {
+            route.output_contract.semantic_kind == crate::OutputSemanticKind::ExecutionFailedStep
+        })
+}
+
+fn failed_execution_step_item(
+    loop_state: &crate::agent_engine::LoopState,
+    step_index: usize,
+    step: &crate::executor::StepExecutionResult,
+    prefer_english: bool,
+) -> String {
+    let command = plan_step_for_execution(loop_state, step)
+        .and_then(|plan_step| raw_command_arg_from_plan_step(Some(plan_step)))
+        .map(|value| truncate_with_ellipsis(&value.replace('`', "'"), 180));
+    match command {
+        Some(command) if prefer_english => format!("Step {} failed: `{command}`.", step_index + 1),
+        Some(command) => format!("第 {} 步失败：`{command}`。", step_index + 1),
+        None if prefer_english => format!("Step {} failed.", step_index + 1),
+        None => format!("第 {} 步失败。", step_index + 1),
+    }
+}
+
+fn deterministic_execution_failed_step_answer(
+    state: &AppState,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    if !route_requests_execution_failed_step_answer(agent_run_context) {
+        return None;
+    }
+    let steps = observed_execution_status_steps(loop_state);
+    if steps.len() < 2 {
+        return None;
+    }
+    let prefer_english = prefer_english_for_user_text(state, user_text);
+    let failed = steps
+        .iter()
+        .enumerate()
+        .filter(|(_, step)| !step.is_ok())
+        .map(|(idx, step)| failed_execution_step_item(loop_state, idx, step, prefer_english))
+        .collect::<Vec<_>>();
+    if failed.is_empty() {
+        return Some(if prefer_english {
+            "No step failed.".to_string()
+        } else {
+            "没有步骤失败。".to_string()
+        });
+    }
+    Some(failed.join(if prefer_english { " " } else { "" }))
+}
+
+fn deterministic_observed_execution_status_summary(
+    loop_state: &crate::agent_engine::LoopState,
+) -> crate::task_journal::TaskJournalFinalizerSummary {
+    crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        parsed: true,
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: loop_state.executed_step_results.len(),
+        ..Default::default()
+    }
+}
+
+fn attach_deterministic_observed_execution_status_answer(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut crate::agent_engine::LoopState,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some(answer) = deterministic_observed_execution_status_answer(state, user_text, loop_state)
+    else {
+        return false;
+    };
+    *finalizer_summary = Some(deterministic_observed_execution_status_summary(loop_state));
+    loop_state.last_user_visible_respond = Some(answer.clone());
+    append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+    info!(
+        "delivery fallback_from_deterministic_observed_status task_id={}",
+        task.task_id
+    );
+    true
+}
+
+fn attach_deterministic_execution_failed_step_answer(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut crate::agent_engine::LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some(answer) =
+        deterministic_execution_failed_step_answer(state, user_text, loop_state, agent_run_context)
+    else {
+        return false;
+    };
+    *finalizer_summary = Some(deterministic_observed_execution_status_summary(loop_state));
+    loop_state.last_user_visible_respond = Some(answer.clone());
+    append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+    info!(
+        "delivery fallback_from_deterministic_execution_failed_step task_id={}",
+        task.task_id
+    );
+    true
+}
+
+fn replace_delivery_with_deterministic_observed_execution_status_answer(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut crate::agent_engine::LoopState,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some(answer) = deterministic_observed_execution_status_answer(state, user_text, loop_state)
+    else {
+        return false;
+    };
+    if loop_state.delivery_messages.last().is_some_and(|message| {
+        planned_delivery_identifies_failed_observed_step(message, loop_state)
+    }) {
+        *finalizer_summary = Some(deterministic_observed_execution_status_summary(loop_state));
+        return false;
+    }
+    let unchanged = loop_state
+        .delivery_messages
+        .last()
+        .map(|message| message.trim() == answer.trim())
+        .unwrap_or(false);
+    *finalizer_summary = Some(deterministic_observed_execution_status_summary(loop_state));
+    loop_state.last_user_visible_respond = Some(answer.clone());
+    loop_state
+        .delivery_messages
+        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    if !unchanged {
+        append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+        info!(
+            "delivery replace_with_deterministic_observed_status task_id={}",
+            task.task_id
+        );
+    }
+    true
+}
+
+fn replace_delivery_with_deterministic_execution_failed_step_answer(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut crate::agent_engine::LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some(answer) =
+        deterministic_execution_failed_step_answer(state, user_text, loop_state, agent_run_context)
+    else {
+        return false;
+    };
+    let unchanged = loop_state
+        .delivery_messages
+        .last()
+        .map(|message| message.trim() == answer.trim())
+        .unwrap_or(false);
+    *finalizer_summary = Some(deterministic_observed_execution_status_summary(loop_state));
+    loop_state.last_user_visible_respond = Some(answer.clone());
+    loop_state
+        .delivery_messages
+        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    if !unchanged {
+        append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+        info!(
+            "delivery replace_with_deterministic_execution_failed_step task_id={}",
+            task.task_id
+        );
+    }
+    true
+}
+
+fn planned_delivery_identifies_failed_observed_step(
+    delivery: &str,
+    loop_state: &crate::agent_engine::LoopState,
+) -> bool {
+    let delivery = delivery.trim();
+    if delivery.is_empty() {
+        return false;
+    }
+    loop_state.executed_step_results.iter().any(|step| {
+        !step.is_ok()
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "think" | "synthesize_answer"
+            )
+            && plan_step_for_execution(loop_state, step)
+                .and_then(|plan_step| raw_command_arg_from_plan_step(Some(plan_step)))
+                .is_some_and(|command| delivery.contains(command))
+    })
+}
+
 async fn missing_delivery_after_observation_message(
     state: &AppState,
     task: &ClaimedTask,
@@ -2136,6 +2701,16 @@ async fn missing_delivery_after_observation_message(
     agent_run_context: Option<&AgentRunContext>,
     clarify_reason: &str,
 ) -> String {
+    if let Some(answer) =
+        deterministic_execution_failed_step_answer(state, user_text, loop_state, agent_run_context)
+    {
+        return answer;
+    }
+    if let Some(answer) =
+        deterministic_observed_execution_status_answer(state, user_text, loop_state)
+    {
+        return answer;
+    }
     let default_text = missing_delivery_after_observation_default_message(state, user_text);
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let contract = crate::fallback::UserResponseContract::tool_failure(
@@ -2175,6 +2750,11 @@ async fn observed_execution_without_publishable_delivery_reply(
 ) -> Option<AskReply> {
     let execution_summaries =
         build_execution_summary_messages(loop_state, agent_run_context, Some(user_text));
+    let deterministic_answer =
+        deterministic_execution_failed_step_answer(state, user_text, loop_state, agent_run_context)
+            .or_else(|| {
+                deterministic_observed_execution_status_answer(state, user_text, loop_state)
+            });
     let message = missing_delivery_after_observation_message(
         state,
         task,
@@ -2197,14 +2777,20 @@ async fn observed_execution_without_publishable_delivery_reply(
         finalizer_summary,
         delivery_consistent,
         &message,
-        crate::task_journal::TaskJournalFinalStatus::Failure,
+        if deterministic_answer.is_some() {
+            crate::task_journal::TaskJournalFinalStatus::Success
+        } else {
+            crate::task_journal::TaskJournalFinalStatus::Failure
+        },
     );
-    Some(
-        AskReply::non_llm(message.clone())
-            .with_messages(delivery_messages)
-            .with_task_journal(journal)
-            .with_failure(message),
-    )
+    let reply = AskReply::non_llm(message.clone())
+        .with_messages(delivery_messages)
+        .with_task_journal(journal);
+    Some(if deterministic_answer.is_some() {
+        reply
+    } else {
+        reply.with_failure(message)
+    })
 }
 
 async fn missing_file_delivery_reply_from_loop(
@@ -2222,15 +2808,20 @@ async fn missing_file_delivery_reply_from_loop(
     }
 
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
-    let message = crate::fallback::compose_missing_file_delivery_response(
-        state,
-        task,
-        user_text,
-        &route_resolved_intent(agent_run_context),
-        route_locator_hint(agent_run_context),
-        &language_hint,
-    )
-    .await;
+    let prefer_english =
+        crate::fallback::fallback_prefers_english_for_language_hint(state, &language_hint);
+    let message = if let Some(path) = missing_file_path_from_loop(loop_state, agent_run_context) {
+        crate::bilingual_t_with_default_vars(
+            state,
+            "clawd.msg.delivery.file_not_found_path_cannot_send",
+            "未找到文件：{path}，所以无法发送。",
+            "File not found: {path}, so I cannot send it.",
+            prefer_english,
+            &[("path", path.as_str())],
+        )
+    } else {
+        crate::fallback::missing_file_delivery_default_text_for_language(state, &language_hint)
+    };
     let mut delivery_messages =
         build_execution_summary_messages(loop_state, agent_run_context, Some(user_text));
     delivery_messages.push(message.clone());
@@ -2348,6 +2939,20 @@ pub(crate) async fn finalize_loop_reply(
         agent_run_context,
     );
     let mut finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary> = None;
+    if should_return_missing_file_delivery_reply(&loop_state, agent_run_context) {
+        if let Some(reply) = missing_file_delivery_reply_from_loop(
+            state,
+            task,
+            user_text,
+            &loop_state,
+            agent_run_context,
+            finalizer_summary.clone(),
+        )
+        .await
+        {
+            return Ok(reply);
+        }
+    }
     let should_try_observed_scalar_fallback = crate::finalize::should_attempt_observed_fallback(
         loop_state.has_tool_or_skill_output,
         loop_state.has_recoverable_failure_context,
@@ -2407,6 +3012,27 @@ pub(crate) async fn finalize_loop_reply(
         {
             return Ok(reply);
         }
+    }
+
+    if loop_state.delivery_messages.is_empty() {
+        attach_deterministic_execution_failed_step_answer(
+            state,
+            task,
+            user_text,
+            &mut loop_state,
+            agent_run_context,
+            &mut finalizer_summary,
+        );
+    }
+
+    if loop_state.delivery_messages.is_empty() {
+        attach_deterministic_observed_execution_status_answer(
+            state,
+            task,
+            user_text,
+            &mut loop_state,
+            &mut finalizer_summary,
+        );
     }
 
     if loop_state.delivery_messages.is_empty() {
@@ -2473,6 +3099,24 @@ pub(crate) async fn finalize_loop_reply(
     normalize_file_token_delivery_from_observed_paths(state, &mut loop_state, agent_run_context);
     enforce_delivery_output_contract(state, task, user_text, &mut loop_state, agent_run_context)
         .await;
+    replace_placeholder_delivery_with_synthesis(task, &mut loop_state);
+    let replaced_failed_step = replace_delivery_with_deterministic_execution_failed_step_answer(
+        state,
+        task,
+        user_text,
+        &mut loop_state,
+        agent_run_context,
+        &mut finalizer_summary,
+    );
+    if !replaced_failed_step {
+        replace_delivery_with_deterministic_observed_execution_status_answer(
+            state,
+            task,
+            user_text,
+            &mut loop_state,
+            &mut finalizer_summary,
+        );
+    }
 
     if let Some((error_answer, summary)) =
         content_evidence_step_failure_answer(state, task, user_text, &loop_state, agent_run_context)
@@ -2577,10 +3221,20 @@ pub(crate) async fn finalize_loop_reply(
             .with_task_journal(journal));
     }
 
+    let synthesis_is_publishable = loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|text| !text.is_empty());
+    let priority_last_respond = if synthesis_is_publishable {
+        None
+    } else {
+        loop_state.last_user_visible_respond.as_ref()
+    };
     let (mut delivery_deduped, _, used_last_respond) =
         crate::finalize::build_final_delivery_with_priority(
             &loop_state.delivery_messages,
-            loop_state.last_user_visible_respond.as_ref(),
+            priority_last_respond,
         );
 
     if delivery_deduped.is_empty() {
@@ -2759,21 +3413,27 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
+        attach_deterministic_observed_execution_status_answer,
         attach_execution_recipe_closeout_to_delivery, attach_execution_summary_to_delivery,
         auto_requested_success_marker, build_execution_summary_message,
-        content_evidence_step_failure_answer, direct_non_builtin_skill_raw_answer,
+        build_execution_summary_messages, content_evidence_step_failure_answer,
+        deterministic_observed_execution_status_answer, direct_non_builtin_skill_raw_answer,
         direct_publishable_observed_answer, direct_scalar_observed_answer,
         direct_structured_observed_answer,
         discard_raw_passthrough_delivery_when_structured_answer_available,
         ensure_requested_success_marker_visible, execution_recipe_closeout_note,
         finalize_loop_reply, finalizer_requires_clarify, has_missing_file_search_evidence,
-        looks_like_raw_command_snapshot, looks_like_structured_machine_output,
-        missing_requested_success_marker, normalize_file_token_delivery_from_auto_locator,
+        latest_file_delivery_observation_is_missing, looks_like_raw_command_snapshot,
+        looks_like_structured_machine_output, missing_requested_success_marker,
+        normalize_file_token_delivery_from_auto_locator,
         normalize_file_token_delivery_from_observed_paths,
         observed_execution_without_publishable_delivery_reply,
-        prefer_observed_answer_for_exact_contract, resolve_file_token_from_auto_locator_answer,
+        prefer_observed_answer_for_exact_contract,
+        replace_delivery_with_deterministic_execution_failed_step_answer,
+        replace_delivery_with_deterministic_observed_execution_status_answer,
+        resolve_file_token_from_auto_locator_answer,
         should_drop_passthrough_delivery_for_content_evidence,
-        verify_summary_requires_resume_confirmation,
+        should_return_missing_file_delivery_reply, verify_summary_requires_resume_confirmation,
     };
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
@@ -2900,6 +3560,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3149,6 +3810,88 @@ mod tests {
         assert!(crate::finalize::is_execution_summary_message(&summary));
     }
 
+    #[test]
+    fn execution_summary_does_not_reuse_same_step_id_from_wrong_round() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "pack archive".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![
+                    crate::PlanStep {
+                        step_id: "step_1".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "archive_basic".to_string(),
+                        args: serde_json::json!({"action": "pack"}),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    crate::PlanStep {
+                        step_id: "step_2".to_string(),
+                        action_type: "respond".to_string(),
+                        skill: "respond".to_string(),
+                        args: serde_json::json!({}),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                ])),
+                verify_result: None,
+            });
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 2,
+                goal: "verify archive".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![
+                    crate::PlanStep {
+                        step_id: "step_1".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "system_basic".to_string(),
+                        args: serde_json::json!({"action": "path_batch_facts"}),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    crate::PlanStep {
+                        step_id: "step_2".to_string(),
+                        action_type: "respond".to_string(),
+                        skill: "respond".to_string(),
+                        args: serde_json::json!({}),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                ])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "archive_basic",
+            "exit=0\n",
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "system_basic",
+            r#"{"action":"path_batch_facts","count":1}"#,
+        ));
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(free_route_result()),
+            ..Default::default()
+        };
+
+        let summary = build_execution_summary_message(
+            &loop_state,
+            Some(&ctx),
+            Some("Zip scripts/skill_calls into tmp/nl_archive_case_en.zip, then tell me briefly whether it succeeded."),
+        )
+        .expect("execution summary");
+
+        assert!(summary.contains("Called skill `archive_basic`"));
+        assert!(summary.contains("Called skill `system_basic`"));
+        assert!(!summary.contains("Called skill `respond`"));
+    }
+
     #[tokio::test]
     async fn observed_execution_without_delivery_reply_attaches_raw_summary() {
         let state = test_state();
@@ -3248,9 +3991,9 @@ mod tests {
         .await
         .expect("observed execution reply");
 
-        assert_eq!(reply.messages.len(), 1);
-        assert!(!reply.text.contains("**执行过程**"));
-        assert!(!reply.text.contains("**Execution**"));
+        assert_eq!(reply.messages.len(), 2);
+        assert!(reply.messages[0].contains("**执行过程**"));
+        assert!(reply.messages[0].contains("system_basic"));
     }
 
     #[test]
@@ -3363,7 +4106,35 @@ mod tests {
     }
 
     #[test]
-    fn execution_summary_skips_exact_file_names_contract() {
+    fn execution_summary_sanitizes_log_excerpt_secrets_and_ansi() {
+        let mut route = free_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","excerpt":"1|\u001b[32mconnected\u001b[0m to wss://host/ws?device_id=123&access_key=abc123&service_id=7&ticket=deadbeef","path":"/tmp/feishud.log"}"#,
+        ));
+
+        let summary = build_execution_summary_message(&loop_state, Some(&ctx), None)
+            .expect("strict content excerpt should expose sanitized execution process");
+
+        assert!(summary.contains("**执行过程**"));
+        assert!(summary.contains("access_key=[REDACTED]"));
+        assert!(summary.contains("ticket=[REDACTED]"));
+        assert!(!summary.contains("\\u001b"));
+        assert!(!summary.contains("abc123"));
+        assert!(!summary.contains("deadbeef"));
+    }
+
+    #[test]
+    fn execution_summary_attaches_for_exact_file_names_contract() {
         let mut route = free_route_result();
         route.output_contract.locator_hint = "document".to_string();
         route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
@@ -3381,8 +4152,40 @@ mod tests {
 
         attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-        assert_eq!(delivery, vec!["alpha.md\nbeta.md"]);
-        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
+        assert_eq!(delivery.len(), 2);
+        assert!(delivery[0].contains("**执行过程**"));
+        assert!(delivery[0].contains("list_dir"));
+        assert_eq!(delivery[1], "alpha.md\nbeta.md");
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_some());
+    }
+
+    #[test]
+    fn execution_summary_language_uses_original_user_request_before_resolved_text() {
+        let mut route = free_route_result();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            original_user_request: Some("先列出 logs 目录下前 5 个文件名".to_string()),
+            user_request: Some("List the first five filenames under logs.".to_string()),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "list_dir",
+            "act_plan.log\nclawd.log\n",
+        ));
+
+        let summary = build_execution_summary_message(
+            &loop_state,
+            Some(&ctx),
+            Some("List the first five filenames under logs."),
+        )
+        .expect("execution summary should be attached");
+
+        assert!(summary.starts_with("**执行过程**"));
+        assert!(summary.contains("调用"));
+        assert!(!summary.starts_with("**Execution**"));
     }
 
     #[test]
@@ -3431,7 +4234,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_summary_skips_existence_with_path_contract() {
+    fn execution_summary_attaches_for_existence_with_path_contract() {
         let mut route = free_route_result();
         route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
         route.output_contract.locator_hint = "rustclaw.service".to_string();
@@ -3449,8 +4252,11 @@ mod tests {
 
         attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-        assert_eq!(delivery, vec!["有，路径：rustclaw.service"]);
-        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
+        assert_eq!(delivery.len(), 2);
+        assert!(delivery[0].contains("**执行过程**"));
+        assert!(delivery[0].contains("fs_search"));
+        assert_eq!(delivery[1], "有，路径：rustclaw.service");
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_some());
     }
 
     #[test]
@@ -3724,11 +4530,455 @@ mod tests {
         assert!(answer.contains("Permission denied"));
         assert!(answer.contains("`clawd` 进程当前没有 sudo/root 权限"));
         assert_eq!(summary.grounded_ok, Some(true));
-        assert_eq!(summary.completion_ok, Some(false));
+        assert_eq!(summary.completion_ok, Some(true));
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
     }
 
     #[tokio::test]
-    async fn finalize_loop_reply_returns_failure_for_content_evidence_step_error() {
+    async fn content_evidence_recoverable_crypto_account_error_is_completion() {
+        let state = test_state();
+        let task = claimed_task("task-crypto-account-error");
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let err = r#"__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:{"exchange":"binance","detail":"binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"}"#;
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state
+            .executed_step_results
+            .push(err_step_result("step_1", "crypto", err));
+
+        let (answer, summary) = content_evidence_step_failure_answer(
+            &state,
+            &task,
+            "查一下我现在的持仓。",
+            &loop_state,
+            Some(&agent_run_context),
+        )
+        .await
+        .expect("recoverable crypto account error should be publishable");
+
+        assert!(answer.contains("crypto account access failed on binance"));
+        assert!(!answer.contains("__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__"));
+        assert_eq!(summary.completion_ok, Some(true));
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
+    fn execution_summary_normalizes_recoverable_crypto_account_error() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_recoverable_failure_context = true;
+        let err = r#"__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:{"exchange":"binance","detail":"binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"}"#;
+        loop_state
+            .executed_step_results
+            .push(err_step_result("step_1", "crypto", err));
+
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(free_route_result()),
+            ..Default::default()
+        };
+        let summaries = build_execution_summary_messages(
+            &loop_state,
+            Some(&agent_run_context),
+            Some("查一下持仓"),
+        );
+
+        assert_eq!(summaries.len(), 1);
+        assert!(summaries[0].contains("crypto account access failed on binance"));
+        assert!(!summaries[0].contains("__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__"));
+    }
+
+    #[test]
+    fn deterministic_observed_execution_status_answer_reports_mixed_results() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "health_check",
+            r#"{"ok":true}"#,
+        ));
+        loop_state.executed_step_results.push(err_step_result(
+            "step_2",
+            "run_cmd",
+            "Command failed with exit code 127\nstderr:\nmissing command",
+        ));
+
+        let answer = deterministic_observed_execution_status_answer(
+            &state,
+            "先检查健康，再执行缺失命令，然后总结哪一步成功了、哪一步失败了。",
+            &loop_state,
+        )
+        .expect("mixed observed results should produce deterministic answer");
+
+        assert!(answer.contains("第 1 步 `health_check` 成功"));
+        assert!(answer.contains("第 2 步 `run_cmd` 失败"));
+        assert!(answer.contains("exit code 127"));
+    }
+
+    #[test]
+    fn deterministic_observed_execution_status_answer_attaches_before_llm_fallback() {
+        let state = test_state();
+        let task = claimed_task("task-deterministic-observed-status");
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "health_check",
+            r#"{"ok":true}"#,
+        ));
+        loop_state.executed_step_results.push(err_step_result(
+            "step_2",
+            "run_cmd",
+            "Command failed with exit code 127\nstderr:\nmissing command",
+        ));
+        let mut finalizer_summary = None;
+
+        assert!(attach_deterministic_observed_execution_status_answer(
+            &state,
+            &task,
+            "先检查健康，再执行缺失命令，然后总结哪一步成功了、哪一步失败了。",
+            &mut loop_state,
+            &mut finalizer_summary,
+        ));
+
+        assert_eq!(loop_state.delivery_messages.len(), 1);
+        assert!(loop_state.delivery_messages[0].contains("第 1 步 `health_check` 成功"));
+        assert!(loop_state.delivery_messages[0].contains("第 2 步 `run_cmd` 失败"));
+        let summary = finalizer_summary.expect("summary");
+        assert_eq!(summary.completion_ok, Some(true));
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
+    fn deterministic_observed_execution_status_answer_replaces_bad_synthesis() {
+        let state = test_state();
+        let task = claimed_task("task-deterministic-observed-status-replace");
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state
+            .delivery_messages
+            .push("步骤2未观察到执行结果，因此无法确认成功或失败。".to_string());
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "health_check",
+            r#"{"ok":true}"#,
+        ));
+        loop_state.executed_step_results.push(err_step_result(
+            "step_2",
+            "run_cmd",
+            "Command failed with exit code 127\nstderr:\nmissing command",
+        ));
+        let mut finalizer_summary = None;
+
+        assert!(
+            replace_delivery_with_deterministic_observed_execution_status_answer(
+                &state,
+                &task,
+                "先检查健康，再执行缺失命令，然后总结哪一步成功了、哪一步失败了。",
+                &mut loop_state,
+                &mut finalizer_summary,
+            )
+        );
+
+        assert_eq!(loop_state.delivery_messages.len(), 1);
+        assert!(loop_state.delivery_messages[0].contains("第 2 步 `run_cmd` 失败"));
+        assert!(!loop_state.delivery_messages[0].contains("无法确认成功或失败"));
+        assert_eq!(
+            finalizer_summary.and_then(|summary| summary.completion_ok),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn deterministic_observed_execution_status_keeps_planned_failed_step_answer() {
+        let state = test_state();
+        let task = claimed_task("task-deterministic-observed-status-keep-planned");
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "run two commands and report failed step".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![
+                    crate::PlanStep {
+                        step_id: "step_1".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "run_cmd".to_string(),
+                        args: serde_json::json!({"command": "echo BEFORE_BREAK"}),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    crate::PlanStep {
+                        step_id: "step_2".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "run_cmd".to_string(),
+                        args: serde_json::json!({
+                            "command": "definitely_missing_command_rustclaw_user_ops_13579"
+                        }),
+                        depends_on: vec!["step_1".to_string()],
+                        why: String::new(),
+                    },
+                    crate::PlanStep {
+                        step_id: "step_3".to_string(),
+                        action_type: "respond".to_string(),
+                        skill: "respond".to_string(),
+                        args: serde_json::json!({
+                            "content": "第二步挂了，`definitely_missing_command_rustclaw_user_ops_13579` 命令不存在。"
+                        }),
+                        depends_on: vec!["step_2".to_string()],
+                        why: String::new(),
+                    },
+                ])),
+                verify_result: None,
+            });
+        let planned =
+            "第二步挂了，`definitely_missing_command_rustclaw_user_ops_13579` 命令不存在。"
+                .to_string();
+        loop_state.delivery_messages.push(planned.clone());
+        loop_state.last_user_visible_respond = Some(planned.clone());
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "run_cmd",
+            "BEFORE_BREAK\n",
+        ));
+        loop_state.executed_step_results.push(err_step_result(
+            "step_2",
+            "run_cmd",
+            "Command failed with exit code 127\nstderr:\nmissing command",
+        ));
+        let mut finalizer_summary = None;
+
+        assert!(!replace_delivery_with_deterministic_observed_execution_status_answer(
+            &state,
+            &task,
+            "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_user_ops_13579，只告诉我哪一步挂了",
+            &mut loop_state,
+            &mut finalizer_summary,
+        ));
+
+        assert_eq!(loop_state.delivery_messages, vec![planned.clone()]);
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some(planned.as_str())
+        );
+        assert_eq!(
+            finalizer_summary.and_then(|summary| summary.completion_ok),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn deterministic_execution_failed_step_contract_replaces_verbose_status() {
+        let state = test_state();
+        let task = claimed_task("task-deterministic-failed-step-only");
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::ChatAct;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "run two commands and identify only failed step".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![
+                    crate::PlanStep {
+                        step_id: "step_1".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "run_cmd".to_string(),
+                        args: serde_json::json!({"command": "echo BEFORE_BREAK"}),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    crate::PlanStep {
+                        step_id: "step_2".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "run_cmd".to_string(),
+                        args: serde_json::json!({
+                            "command": "definitely_missing_command_rustclaw_user_ops_13579"
+                        }),
+                        depends_on: vec!["step_1".to_string()],
+                        why: String::new(),
+                    },
+                ])),
+                verify_result: None,
+            });
+        loop_state.delivery_messages.push(
+            "第 1 步 `run_cmd` 成功。第 2 步 `run_cmd` 失败：Command failed with exit code 127。"
+                .to_string(),
+        );
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "run_cmd",
+            "BEFORE_BREAK\n",
+        ));
+        loop_state.executed_step_results.push(err_step_result(
+            "step_2",
+            "run_cmd",
+            "Command failed with exit code 127\nstderr:\nmissing command",
+        ));
+        let mut finalizer_summary = None;
+
+        assert!(replace_delivery_with_deterministic_execution_failed_step_answer(
+            &state,
+            &task,
+            "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_user_ops_13579，只告诉我哪一步挂了",
+            &mut loop_state,
+            Some(&ctx),
+            &mut finalizer_summary,
+        ));
+
+        assert_eq!(loop_state.delivery_messages.len(), 1);
+        let answer = &loop_state.delivery_messages[0];
+        assert!(answer.contains("第 2 步失败"));
+        assert!(answer.contains("definitely_missing_command_rustclaw_user_ops_13579"));
+        assert!(!answer.contains("第 1 步"));
+        assert!(!answer.contains("exit code 127"));
+        assert_eq!(
+            finalizer_summary.and_then(|summary| summary.completion_ok),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn deterministic_observed_execution_status_replaces_raw_success_output() {
+        let state = test_state();
+        let task = claimed_task("task-deterministic-observed-status-replace-raw");
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state
+            .delivery_messages
+            .push("THINK_BREAK_CN".to_string());
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "run_cmd",
+            "THINK_BREAK_CN\n",
+        ));
+        loop_state.executed_step_results.push(err_step_result(
+            "step_2",
+            "run_cmd",
+            "Command failed with exit code 127\nstderr:\nbash: definitely_missing_command: command not found",
+        ));
+        let mut finalizer_summary = None;
+
+        assert!(
+            replace_delivery_with_deterministic_observed_execution_status_answer(
+                &state,
+                &task,
+                "先执行第一个命令，再执行第二个命令，然后总结成功和失败分别是什么。",
+                &mut loop_state,
+                &mut finalizer_summary,
+            )
+        );
+
+        assert_eq!(loop_state.delivery_messages.len(), 1);
+        assert!(loop_state.delivery_messages[0].contains("第 1 步 `run_cmd` 成功"));
+        assert!(loop_state.delivery_messages[0].contains("第 2 步 `run_cmd` 失败"));
+        assert!(!loop_state.delivery_messages[0].trim().eq("THINK_BREAK_CN"));
+        assert_eq!(
+            finalizer_summary.and_then(|summary| summary.completion_ok),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn exact_observed_answer_does_not_replace_mixed_failure_summary() {
+        let state = test_state();
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::ChatAct;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+        route.output_contract.requires_content_evidence = true;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state
+            .executed_step_results
+            .push(ok_step_result("step_1", "run_cmd", "BREAK_A\n"));
+        loop_state.executed_step_results.push(err_step_result(
+            "step_2",
+            "run_cmd",
+            "Command failed with exit code 127\nstderr:\nmissing command",
+        ));
+        let summary =
+            "第 1 步 `run_cmd` 成功。第 2 步 `run_cmd` 失败：Command failed with exit code 127。"
+                .to_string();
+        let mut delivery_messages = vec![summary.clone()];
+        let mut finalizer_summary = Some(super::deterministic_observed_execution_status_summary(
+            &loop_state,
+        ));
+
+        prefer_observed_answer_for_exact_contract(
+            &state,
+            "task-exact-observed-mixed-failure",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut delivery_messages,
+            &mut finalizer_summary,
+        );
+
+        assert_eq!(delivery_messages, vec![summary]);
+        assert_ne!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some("BREAK_A")
+        );
+    }
+
+    #[test]
+    fn raw_command_chatact_keeps_planned_delivery_with_extra_content() {
+        let state = test_state();
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::ChatAct;
+        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+        route.output_contract.requires_content_evidence = true;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "run_cmd",
+            "/workspace/project\n",
+        ));
+        let planned = "/workspace/project\n\nworkspace ready".to_string();
+        loop_state.last_user_visible_respond = Some(planned.clone());
+        let mut delivery_messages = vec![planned.clone()];
+        let mut finalizer_summary = None;
+
+        prefer_observed_answer_for_exact_contract(
+            &state,
+            "task-raw-command-chatact-planned",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut delivery_messages,
+            &mut finalizer_summary,
+        );
+
+        assert_eq!(delivery_messages, vec![planned]);
+        assert!(finalizer_summary.is_none());
+    }
+
+    #[tokio::test]
+    async fn finalize_loop_reply_returns_graceful_result_for_permission_denied_content_evidence() {
         let state = test_state();
         let task = claimed_task("task-content-error-finalize");
         let mut route = free_route_result();
@@ -3769,7 +5019,7 @@ mod tests {
         assert!(reply.text.contains("`/etc/shadow`"));
         assert!(reply.text.contains("Permission denied"));
         assert!(reply.text.contains("`clawd` 进程当前没有 sudo/root 权限"));
-        assert!(reply.should_fail_task);
+        assert!(!reply.should_fail_task);
         assert_eq!(reply.messages.len(), 2);
         assert!(crate::finalize::is_execution_summary_message(
             &reply.messages[0]
@@ -4529,7 +5779,7 @@ mod tests {
         let (answer, summary) =
             direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
                 .expect("hidden entries scalar fallback should succeed");
-        assert_eq!(answer, "有。示例：.git, .env");
+        assert_eq!(answer, "2");
         assert_eq!(
             summary.disposition,
             Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
@@ -4741,9 +5991,169 @@ mod tests {
         .expect("finalize should succeed");
 
         assert_eq!(reply.text, "有，路径：/tmp/rustclaw.service");
-        assert_eq!(reply.messages, vec!["有，路径：/tmp/rustclaw.service"]);
+        assert_eq!(reply.messages.len(), 2);
+        assert!(reply.messages[0].contains("**执行过程**"));
+        assert!(reply.messages[0].contains("run_cmd"));
+        assert_eq!(reply.messages[1], "有，路径：/tmp/rustclaw.service");
         assert!(!reply.should_fail_task);
         assert!(!reply.is_llm_reply);
+    }
+
+    #[tokio::test]
+    async fn finalize_loop_reply_prefers_synthesis_over_raw_last_respond() {
+        let state = test_state();
+        let task = claimed_task("task-synth-over-raw");
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state
+            .output_vars
+            .insert("last_skill_name".to_string(), "git_basic".to_string());
+        let raw_git = "exit=0\nabc123 fix deployment docs\n";
+        loop_state.last_user_visible_respond = Some(raw_git.to_string());
+        loop_state.last_publishable_synthesis_output =
+            Some("RustClaw 的部署可按项目文档和安装脚本完成。".to_string());
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "git_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(raw_git.to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "synthesize_answer".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("RustClaw 的部署可按项目文档和安装脚本完成。".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::ChatAct;
+        route.output_contract.requires_content_evidence = true;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let reply = finalize_loop_reply(
+            &state,
+            &task,
+            "帮我写一段 RustClaw 部署说明",
+            loop_state,
+            Some(&agent_run_context),
+        )
+        .await
+        .expect("finalize should succeed");
+
+        assert_eq!(reply.text, "RustClaw 的部署可按项目文档和安装脚本完成。");
+        assert!(reply.messages[0].contains("**执行过程**"));
+        assert!(reply.messages[0].contains("git_basic"));
+        assert_eq!(
+            reply.messages.last().map(String::as_str),
+            Some("RustClaw 的部署可按项目文档和安装脚本完成。")
+        );
+    }
+
+    #[tokio::test]
+    async fn finalize_loop_reply_replaces_template_placeholder_with_synthesis() {
+        let state = test_state();
+        let task = claimed_task("task-synth-placeholder");
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state
+            .delivery_messages
+            .push("{{synthesized}}".to_string());
+        loop_state.last_user_visible_respond = Some("{{synthesized}}".to_string());
+        loop_state.last_publishable_synthesis_output =
+            Some("RustClaw 可以按 README 中的安装脚本路径完成部署。".to_string());
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "read_file".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("# RustClaw\n\nUse install-rustclaw-cmd.sh".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "synthesize_answer".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("RustClaw 可以按 README 中的安装脚本路径完成部署。".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::ChatAct;
+        route.output_contract.requires_content_evidence = true;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let reply = finalize_loop_reply(
+            &state,
+            &task,
+            "帮我写一段 RustClaw 部署说明",
+            loop_state,
+            Some(&agent_run_context),
+        )
+        .await
+        .expect("finalize should succeed");
+
+        assert_eq!(
+            reply.text,
+            "RustClaw 可以按 README 中的安装脚本路径完成部署。"
+        );
+        assert_eq!(
+            reply.messages.last().map(String::as_str),
+            Some("RustClaw 可以按 README 中的安装脚本路径完成部署。")
+        );
+        assert!(!reply.text.contains("{{"));
+    }
+
+    #[test]
+    fn strict_scalar_count_keeps_planned_explanatory_answer() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .executed_step_results
+            .push(ok_step_result("step_1", "run_cmd", "55\n"));
+        loop_state.last_user_visible_respond =
+            Some("55 个。当前范围内共有这么多普通文件。".to_string());
+        let mut delivery_messages = vec!["55 个。当前范围内共有这么多普通文件。".to_string()];
+        let mut route = scalar_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        route.output_contract.exact_sentence_count = Some(1);
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut finalizer_summary = None;
+
+        prefer_observed_answer_for_exact_contract(
+            &state,
+            "task-strict-scalar-count",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut delivery_messages,
+            &mut finalizer_summary,
+        );
+
+        assert_eq!(
+            delivery_messages,
+            vec!["55 个。当前范围内共有这么多普通文件。"]
+        );
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some("55 个。当前范围内共有这么多普通文件。")
+        );
+        assert!(finalizer_summary.is_none());
     }
 
     #[test]
@@ -4898,6 +6308,48 @@ mod tests {
     }
 
     #[test]
+    fn scalar_path_from_write_file_is_not_dropped_as_meta_placeholder() {
+        let path = "/home/guagua/rustclaw/document/pwd_line.txt";
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.last_user_visible_respond = Some(path.to_string());
+        loop_state.delivery_messages.push(path.to_string());
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "run_cmd",
+            "/home/guagua/rustclaw\n",
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "write_file",
+            "written 48 bytes to /home/guagua/rustclaw/document/pwd_line.txt",
+        ));
+        loop_state
+            .output_vars
+            .insert("last_file_path".to_string(), path.to_string());
+        loop_state
+            .written_file_aliases
+            .insert("pwd_line.txt".to_string(), path.to_string());
+        let mut route = scalar_route_result();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+        route.output_contract.locator_hint = "pwd_line.txt".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            should_drop_passthrough_delivery_for_content_evidence(
+                &loop_state,
+                true,
+                Some(&agent_run_context),
+                path
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
     fn raw_listing_passthrough_is_dropped_for_content_evidence_free_shape() {
         let listing = "base_skill_response_contract.md\nskill_integration_guide.md";
         let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -4931,6 +6383,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -4992,6 +6445,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -5089,6 +6543,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -5139,7 +6594,7 @@ mod tests {
     }
 
     #[test]
-    fn package_manager_summary_defers_to_synthesis_instead_of_raw_passthrough() {
+    fn package_manager_summary_uses_structured_detect_answer() {
         let state = test_state();
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state
@@ -5169,10 +6624,14 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(
-            direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
-                .is_none(),
-            "package manager summary should be synthesized from observed evidence"
+        let structured_answer =
+            direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context));
+        assert_eq!(
+            structured_answer
+                .as_ref()
+                .map(|(answer, _summary)| answer.as_str()),
+            Some("Detected package manager: brew."),
+            "package manager summary should use structured skill evidence"
         );
 
         assert!(
@@ -5222,6 +6681,39 @@ mod tests {
             direct_non_builtin_skill_raw_answer(&state, &loop_state, Some(&agent_run_context))
                 .is_none(),
             "one-sentence summary should not raw-passthrough git status output"
+        );
+    }
+
+    #[test]
+    fn scalar_git_log_does_not_use_non_builtin_raw_passthrough() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .output_vars
+            .insert("last_skill_name".to_string(), "git_basic".to_string());
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "git_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                "exit=0\n09342a6a fix: expose nl execution and locator flows\n".to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        let mut route = scalar_route_result();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(
+            direct_non_builtin_skill_raw_answer(&state, &loop_state, Some(&agent_run_context))
+                .is_none(),
+            "scalar git requests should use structured extraction or synthesis, not raw passthrough"
         );
     }
 
@@ -5391,6 +6883,54 @@ mod tests {
         });
 
         assert!(has_missing_file_search_evidence(&loop_state));
+    }
+
+    #[test]
+    fn latest_file_delivery_observation_treats_missing_path_facts_as_terminal_missing() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                serde_json::json!({
+                    "action": "path_batch_facts",
+                    "count": 1,
+                    "facts": [{
+                        "exists": false,
+                        "path": "/tmp/definitely-missing.txt",
+                        "error": "not found"
+                    }],
+                    "include_missing": true
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.last_publishable_synthesis_output =
+            Some("文件 /tmp/definitely-missing.txt 不存在，无法发送。".to_string());
+        loop_state.last_user_visible_respond = loop_state.last_publishable_synthesis_output.clone();
+        loop_state.delivery_messages = vec![loop_state
+            .last_publishable_synthesis_output
+            .clone()
+            .unwrap()];
+
+        let mut route = scalar_route_result();
+        route.wants_file_delivery = true;
+        route.output_contract.response_shape = OutputResponseShape::FileToken;
+        route.output_contract.delivery_required = true;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(latest_file_delivery_observation_is_missing(&loop_state));
+        assert!(should_return_missing_file_delivery_reply(
+            &loop_state,
+            Some(&agent_run_context)
+        ));
     }
 
     #[test]
@@ -5602,5 +7142,70 @@ mod tests {
                 .and_then(|journal| journal.final_status),
             Some(crate::task_journal::TaskJournalFinalStatus::Success)
         );
+    }
+
+    #[tokio::test]
+    async fn finalize_loop_reply_keeps_missing_file_delivery_when_synthesis_is_non_token() {
+        let state = test_state();
+        let task = claimed_task("task-missing-file-delivery-synthesis");
+        let mut route = scalar_route_result();
+        route.wants_file_delivery = true;
+        route.output_contract.response_shape = OutputResponseShape::FileToken;
+        route.output_contract.delivery_required = true;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_hint = "/tmp/definitely-missing.txt".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                serde_json::json!({
+                    "action": "path_batch_facts",
+                    "count": 1,
+                    "facts": [{
+                        "exists": false,
+                        "path": "/tmp/definitely-missing.txt",
+                        "error": "not found"
+                    }],
+                    "include_missing": true
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.last_publishable_synthesis_output =
+            Some("文件 /tmp/definitely-missing.txt 不存在，无法发送。".to_string());
+
+        let reply = finalize_loop_reply(
+            &state,
+            &task,
+            "把 /tmp/definitely-missing.txt 发给我，不要猜内容",
+            loop_state,
+            Some(&agent_run_context),
+        )
+        .await
+        .expect("finalize should return a missing-file answer");
+
+        assert!(!reply.should_fail_task);
+        assert_eq!(reply.messages.last(), Some(&reply.text));
+        assert!(reply.text.contains("/tmp/definitely-missing.txt"));
+        assert!(
+            reply.text.contains("未找到")
+                || reply.text.contains("没有找到")
+                || reply.text.contains("not found")
+        );
+        assert!(reply
+            .messages
+            .iter()
+            .any(|message| crate::finalize::is_execution_summary_message(message)));
     }
 }

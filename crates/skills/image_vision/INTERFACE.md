@@ -6,6 +6,7 @@
 ## Capability Summary
 - `image_vision` analyzes one or more images for description, extraction, comparison, and screenshot summaries.
 - It returns textual understanding without mutating source images.
+- It supports Mimo image understanding through OpenAI-compatible chat completions (`mimo-v2.5` / `mimo-v2-omni`); this is image understanding, not image generation.
 - **Output language is owned by this skill end-to-end.** The host (`clawd`) does **not** rewrite `image_vision` result text after the skill returns.
 
 ## Actions
@@ -24,6 +25,13 @@
 | all | `language` | no | string | - | Used only when `response_language` is absent or empty (not a parallel alias on the same tier). |
 | all | `detail_level` | no | string | `normal` | For `describe`, controls verbosity. |
 | all | `schema` | no | JSON | - | For `extract`, optional extraction schema hint. |
+
+## Config Entry Points
+- Default vision provider/model: `configs/image.toml` -> `[image_vision].default_vendor` / `default_model`.
+- Current default: `mimo` + `mimo-v2.5`.
+- Recommended shared key: `configs/config.toml` -> `[llm.mimo].api_key`, or environment `MIMO_API_KEY`.
+- Optional dedicated image-vision key: `configs/image.toml` -> `[image_vision.providers.mimo].api_key`, or environment `IMAGE_VISION_MIMO_API_KEY`.
+- Mimo supports remote image URLs and local/base64 images through the OpenAI-compatible `image_url` message part.
 
 ### Language behavior (skill-side only)
 1. **Host vs skill (target language):**

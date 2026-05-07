@@ -102,6 +102,7 @@ fn contract_with_delivery_intent(
     locator_hint: &str,
 ) -> IntentOutputContract {
     IntentOutputContract {
+        exact_sentence_count: None,
         delivery_intent,
         semantic_kind: Default::default(),
         locator_hint: locator_hint.to_string(),
@@ -216,6 +217,7 @@ fn take_first_sentence_skips_markdown_wrapped_label_line() {
 #[test]
 fn sync_output_payload_collapses_file_token_to_single_exit() {
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         response_shape: OutputResponseShape::FileToken,
         ..IntentOutputContract::default()
     };
@@ -235,6 +237,7 @@ fn sync_output_payload_wraps_existing_file_path_for_file_token_contract() {
     write_text_file(&target);
     let canonical = target.canonicalize().expect("canonical target");
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         response_shape: OutputResponseShape::FileToken,
         delivery_required: true,
         ..IntentOutputContract::default()
@@ -252,6 +255,7 @@ fn sync_output_payload_wraps_existing_file_path_for_file_token_contract() {
 #[test]
 fn sync_output_payload_collapses_one_sentence_contract_to_single_message() {
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         response_shape: OutputResponseShape::OneSentence,
         ..IntentOutputContract::default()
     };
@@ -267,6 +271,7 @@ fn sync_output_payload_collapses_one_sentence_contract_to_single_message() {
 #[test]
 fn sync_output_payload_collapses_strict_contract_to_single_message() {
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         response_shape: OutputResponseShape::Strict,
         ..IntentOutputContract::default()
     };
@@ -282,6 +287,7 @@ fn sync_output_payload_collapses_strict_contract_to_single_message() {
 #[test]
 fn sync_output_payload_strict_contract_preserves_execution_summary_message() {
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         response_shape: OutputResponseShape::Strict,
         ..IntentOutputContract::default()
     };
@@ -312,6 +318,7 @@ fn sync_output_payload_strict_contract_preserves_execution_summary_message() {
 #[test]
 fn sync_output_payload_scalar_contract_preserves_execution_summary_message() {
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         response_shape: OutputResponseShape::Scalar,
         ..IntentOutputContract::default()
     };
@@ -331,6 +338,7 @@ fn sync_output_payload_scalar_contract_preserves_execution_summary_message() {
 #[test]
 fn directory_purpose_summary_one_sentence_contract_preserves_multiline_listing() {
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         response_shape: OutputResponseShape::OneSentence,
         semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
         ..IntentOutputContract::default()
@@ -352,6 +360,7 @@ fn directory_purpose_summary_one_sentence_contract_preserves_multiline_listing()
 #[test]
 fn sync_output_payload_strips_preamble_before_markdown_table() {
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         response_shape: OutputResponseShape::Free,
         ..IntentOutputContract::default()
     };
@@ -376,6 +385,7 @@ fn directory_lookup_contract_does_not_replace_synthesized_answer() {
     write_text_file(&isolated.path().join("model_io.log"));
 
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         delivery_intent: OutputDeliveryIntent::DirectoryLookup,
         locator_kind: OutputLocatorKind::CurrentWorkspace,
         locator_hint: "logs".to_string(),
@@ -414,6 +424,7 @@ fn file_names_contract_does_not_reexpand_single_filename_answer_as_directory_loo
     state.skill_rt.default_locator_search_dir = isolated.path().to_path_buf();
 
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         delivery_intent: OutputDeliveryIntent::DirectoryLookup,
         locator_kind: OutputLocatorKind::Path,
         locator_hint: document.display().to_string(),
@@ -443,6 +454,7 @@ fn intercept_response_payload_localizes_missing_file_message_to_english_request(
         "在系统根目录和项目根目录都没有找到该文件",
     )]);
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         delivery_required: true,
         response_shape: OutputResponseShape::FileToken,
         locator_hint: "document/definitely_missing_runtime_case_002.txt".to_string(),
@@ -477,6 +489,7 @@ fn intercept_response_payload_localizes_missing_directory_message_to_english_req
     state.skill_rt.workspace_root = isolated.path().to_path_buf();
     state.skill_rt.default_locator_search_dir = isolated.path().to_path_buf();
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         delivery_intent: OutputDeliveryIntent::DirectoryLookup,
         locator_kind: OutputLocatorKind::Path,
         locator_hint: "missing-directory".to_string(),
@@ -513,6 +526,7 @@ fn intercept_response_payload_preserves_existing_file_token_before_re_resolving_
     let selected = selected.canonicalize().expect("canonical selected");
 
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         delivery_required: true,
         response_shape: OutputResponseShape::FileToken,
         locator_kind: OutputLocatorKind::Path,
@@ -543,6 +557,7 @@ fn file_delivery_contract_does_not_reparse_request_filename_without_hint() {
     write_text_file(&isolated.path().join("README.md"));
 
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         delivery_required: true,
         response_shape: OutputResponseShape::FileToken,
         ..IntentOutputContract::default()
@@ -570,6 +585,7 @@ fn file_delivery_contract_does_not_reparse_request_explicit_path_without_hint() 
     write_text_file(&isolated.path().join("docs/report.md"));
 
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         delivery_required: true,
         response_shape: OutputResponseShape::FileToken,
         ..IntentOutputContract::default()
@@ -599,6 +615,7 @@ fn intercept_file_delivery_contract_uses_planner_locator_hint_for_filename_scan(
     let canonical = target.canonicalize().expect("canonical target");
 
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         delivery_required: true,
         response_shape: OutputResponseShape::FileToken,
         locator_hint: "readme".to_string(),
@@ -1477,6 +1494,7 @@ fn directory_lookup_can_be_driven_by_llm_locator_hint_without_language_keywords(
 fn directory_lookup_uses_current_workspace_locator_kind_without_text_reparse() {
     let root = TempDirGuard::new("current_workspace_lookup");
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         delivery_intent: OutputDeliveryIntent::DirectoryLookup,
         locator_kind: OutputLocatorKind::CurrentWorkspace,
         ..IntentOutputContract::default()
@@ -1498,6 +1516,7 @@ fn directory_lookup_uses_current_workspace_locator_kind_without_text_reparse() {
 fn batch_directory_delivery_uses_current_workspace_locator_kind_without_text_reparse() {
     let root = TempDirGuard::new("current_workspace_batch_delivery");
     let contract = IntentOutputContract {
+        exact_sentence_count: None,
         delivery_intent: OutputDeliveryIntent::DirectoryBatchFiles,
         locator_kind: OutputLocatorKind::CurrentWorkspace,
         ..IntentOutputContract::default()
@@ -1529,6 +1548,12 @@ fn chinese_filename_candidates_are_extracted() {
     let out = extract_filename_candidates("把 测试文档.md 发给我，并且发一下 日报_最终版.txt");
     assert!(out.iter().any(|v| v == "测试文档.md"));
     assert!(out.iter().any(|v| v == "日报_最终版.txt"));
+}
+
+#[test]
+fn dotted_version_numbers_are_not_filename_candidates() {
+    let out = extract_filename_candidates("Correction: mention Python 3.11, not Python 3.10.");
+    assert!(out.is_empty());
 }
 
 #[test]

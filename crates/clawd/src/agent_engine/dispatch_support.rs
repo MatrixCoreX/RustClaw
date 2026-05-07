@@ -46,6 +46,100 @@ pub(super) fn apply_respond_action_outcome(
     ActionLoopDecision::NextAction
 }
 
+fn synthesize_answer_allows_direct_fallback(evidence_refs: &[String]) -> bool {
+    evidence_refs.is_empty()
+        || evidence_refs
+            .iter()
+            .all(|reference| reference.trim().eq_ignore_ascii_case("last_output"))
+}
+
+fn synthesize_route_allows_direct_fallback(agent_run_context: Option<&AgentRunContext>) -> bool {
+    let Some(route) = agent_run_context.and_then(|context| context.route_result.as_ref()) else {
+        return true;
+    };
+    if crate::agent_engine::observed_output::route_requires_synthesized_delivery(route) {
+        return false;
+    }
+    if route.ask_mode.is_plain_act()
+        && route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+    {
+        return true;
+    }
+    matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar
+            | crate::OutputResponseShape::Strict
+            | crate::OutputResponseShape::FileToken
+    ) || route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+}
+
+fn deterministic_observed_execution_status_answer(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &LoopState,
+) -> Option<String> {
+    let observed_steps = loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+        })
+        .collect::<Vec<_>>();
+    if observed_steps.len() < 2 || !observed_steps.iter().any(|step| !step.is_ok()) {
+        return None;
+    }
+
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
+    let prefer_english = language_hint == "en";
+    let mut parts = Vec::new();
+    for (idx, step) in observed_steps.iter().enumerate() {
+        let step_no = idx + 1;
+        let skill = step.skill.trim();
+        if step.is_ok() {
+            if prefer_english {
+                parts.push(format!("Step {step_no} `{skill}` succeeded."));
+            } else {
+                parts.push(format!("第 {step_no} 步 `{skill}` 成功。"));
+            }
+            continue;
+        }
+        let error = step
+            .error
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(|text| {
+                if crate::skills::is_recoverable_skill_error(skill, text) {
+                    crate::skills::normalize_skill_error_for_user(skill, text)
+                } else {
+                    text.to_string()
+                }
+            })
+            .unwrap_or_else(|| {
+                if prefer_english {
+                    "execution failed without a clear error".to_string()
+                } else {
+                    "执行失败，但没有返回明确错误".to_string()
+                }
+            });
+        let error = crate::truncate_for_agent_trace(
+            &crate::visible_text::sanitize_user_visible_text(&error).replace('\n', " "),
+        );
+        if prefer_english {
+            parts.push(format!("Step {step_no} `{skill}` failed: {error}."));
+        } else {
+            parts.push(format!("第 {step_no} 步 `{skill}` 失败：{error}。"));
+        }
+    }
+    Some(parts.join(" "))
+}
+
 fn rewrite_response_with_written_aliases(text: &str, loop_state: &LoopState) -> String {
     let mut out = text.to_string();
     for (alias, effective) in &loop_state.written_file_aliases {
@@ -78,6 +172,13 @@ fn has_remaining_action_after(
         .any(|action| !matches!(action, AgentAction::Think { .. }))
 }
 
+fn has_remaining_action_after_full(actions: &[AgentAction], current_idx: usize) -> bool {
+    actions
+        .iter()
+        .skip(current_idx + 1)
+        .any(|action| !matches!(action, AgentAction::Think { .. }))
+}
+
 fn remaining_actions_are_discussion_only(
     actions: &[AgentAction],
     current_idx: usize,
@@ -96,6 +197,38 @@ fn remaining_actions_are_discussion_only(
         })
 }
 
+fn remaining_actions_after_round_cap_are_discussion_only(
+    actions: &[AgentAction],
+    current_idx: usize,
+    max_steps: usize,
+) -> bool {
+    if current_idx + 1 < max_steps.max(1) {
+        return false;
+    }
+    let remaining = actions
+        .iter()
+        .skip(current_idx + 1)
+        .filter(|action| !matches!(action, AgentAction::Think { .. }))
+        .collect::<Vec<_>>();
+    !remaining.is_empty()
+        && remaining.iter().all(|action| match action {
+            AgentAction::Respond { .. } | AgentAction::SynthesizeAnswer { .. } => true,
+            _ => false,
+        })
+}
+
+fn run_cmd_should_continue_after_split_failure(args: Option<&Value>) -> bool {
+    args.and_then(|value| value.get(super::CLAWD_CONTINUE_ON_ERROR_ARG))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn strip_internal_execution_args(args: &mut Value) {
+    if let Some(obj) = args.as_object_mut() {
+        obj.remove(super::CLAWD_CONTINUE_ON_ERROR_ARG);
+    }
+}
+
 pub(super) fn classify_skill_failure_recovery(
     state: &AppState,
     actions: &[AgentAction],
@@ -110,6 +243,12 @@ pub(super) fn classify_skill_failure_recovery(
             return Some("recoverable_failure_continue_in_round");
         }
         return Some("recoverable_failure_finalize");
+    }
+    if normalized_skill.eq_ignore_ascii_case("run_cmd")
+        && run_cmd_should_continue_after_split_failure(call_args)
+        && has_remaining_action_after(actions, current_idx, max_steps)
+    {
+        return Some("recoverable_failure_continue_in_round");
     }
     if state.skill_is_retryable(normalized_skill)
         && !state.skill_requires_confirmation_policy(normalized_skill)
@@ -130,6 +269,15 @@ pub(super) fn classify_skill_failure_recovery(
     }
     if remaining_actions_are_discussion_only(actions, current_idx, max_steps) {
         return Some("recoverable_failure_continue_in_round");
+    }
+    if remaining_actions_after_round_cap_are_discussion_only(actions, current_idx, max_steps) {
+        return Some("recoverable_failure_finalize");
+    }
+    if normalized_skill.eq_ignore_ascii_case("run_cmd")
+        && current_idx > 0
+        && !has_remaining_action_after_full(actions, current_idx)
+    {
+        return Some("recoverable_failure_finalize");
     }
     None
 }
@@ -279,8 +427,12 @@ mod tests {
     use std::path::Path;
     use std::sync::{Arc, RwLock};
 
-    use super::{classify_skill_failure_recovery, synthesize_failure_observed_facts};
-    use crate::agent_engine::LoopState;
+    use super::{
+        classify_skill_failure_recovery, deterministic_observed_execution_status_answer,
+        strip_internal_execution_args, synthesize_answer_allows_direct_fallback,
+        synthesize_failure_observed_facts, synthesize_route_allows_direct_fallback,
+    };
+    use crate::agent_engine::{AgentRunContext, LoopState};
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
         AgentAction, AgentRuntimeConfig, AppState, SkillViewsSnapshot, ToolsPolicy,
@@ -349,6 +501,124 @@ mod tests {
         );
     }
 
+    #[test]
+    fn split_sequence_run_cmd_failure_continues_to_remaining_run_cmd() {
+        let state = test_state_with_registry();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: serde_json::json!({
+                    "command": "echo before",
+                    "_clawd_continue_on_error": true
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: serde_json::json!({
+                    "command": "missing_cmd_from_split",
+                    "_clawd_continue_on_error": true
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: serde_json::json!({
+                    "command": "echo after",
+                    "_clawd_continue_on_error": true
+                }),
+            },
+        ];
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                1,
+                8,
+                "run_cmd",
+                Some(&serde_json::json!({
+                    "command": "missing_cmd_from_split",
+                    "_clawd_continue_on_error": true
+                })),
+                "command not found",
+            ),
+            Some("recoverable_failure_continue_in_round")
+        );
+    }
+
+    #[test]
+    fn internal_execution_args_are_removed_before_skill_call() {
+        let mut args = serde_json::json!({
+            "command": "echo visible",
+            "_clawd_continue_on_error": true
+        });
+
+        strip_internal_execution_args(&mut args);
+
+        assert_eq!(args, serde_json::json!({"command": "echo visible"}));
+    }
+
+    #[test]
+    fn failure_at_round_cap_with_terminal_discussion_remaining_finalizes() {
+        let state = test_state_with_registry();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "list_dir".to_string(),
+                args: serde_json::json!({"path":"logs"}),
+            },
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: serde_json::json!({"command":"definitely_missing_command"}),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["s1".to_string(), "s2".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                1,
+                2,
+                "run_cmd",
+                Some(&serde_json::json!({"command":"definitely_missing_command"})),
+                "command not found",
+            ),
+            Some("recoverable_failure_finalize")
+        );
+    }
+
+    #[test]
+    fn terminal_run_cmd_failure_after_prior_command_finalizes_for_summary() {
+        let state = test_state_with_registry();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: serde_json::json!({"command":"echo READY"}),
+            },
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: serde_json::json!({"command":"definitely_missing_command"}),
+            },
+        ];
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                1,
+                4,
+                "run_cmd",
+                Some(&serde_json::json!({"command":"definitely_missing_command"})),
+                "command not found",
+            ),
+            Some("recoverable_failure_finalize")
+        );
+    }
+
     fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
         StepExecutionResult {
             step_id: step_id.to_string(),
@@ -375,6 +645,178 @@ mod tests {
         assert!(joined.contains("observed_steps_count: 1"));
         assert!(joined.contains("skill=list_dir"));
         assert!(joined.contains("alpha.md"));
+    }
+
+    #[test]
+    fn deterministic_status_answer_uses_observed_step_status_before_llm() {
+        let state = test_state_with_registry();
+        let task = crate::ClaimedTask {
+            task_id: "task-1".to_string(),
+            user_id: 1,
+            chat_id: 1,
+            user_key: None,
+            channel: "test".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".to_string(),
+            payload_json: String::new(),
+        };
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "list_dir", "alpha.log\n"));
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "run_cmd".to_string(),
+            status: StepExecutionStatus::Error,
+            output: None,
+            error: Some("Command failed with exit code 127".to_string()),
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        let answer = deterministic_observed_execution_status_answer(
+            &state,
+            &task,
+            "先列目录，再执行缺失命令，总结成功和失败。",
+            &loop_state,
+        )
+        .expect("deterministic status answer");
+
+        assert!(answer.contains("list_dir"));
+        assert!(answer.contains("run_cmd"));
+        assert!(answer.contains("exit code 127"));
+    }
+
+    #[test]
+    fn synthesize_answer_direct_fallback_only_for_single_last_output() {
+        assert!(synthesize_answer_allows_direct_fallback(&[]));
+        assert!(synthesize_answer_allows_direct_fallback(&[
+            "last_output".to_string()
+        ]));
+        assert!(!synthesize_answer_allows_direct_fallback(&[
+            "s1".to_string(),
+            "s2".to_string()
+        ]));
+        assert!(!synthesize_answer_allows_direct_fallback(&[
+            "last_output".to_string(),
+            "step_1".to_string()
+        ]));
+    }
+
+    #[test]
+    fn synthesize_route_allows_direct_fallback_for_plain_act_observed_read() {
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "读 README.md 前 2 行".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "plain observed read".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Filename,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: "README.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let ctx = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+
+        assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
+    }
+
+    #[test]
+    fn synthesize_route_uses_llm_for_chat_wrapped_unclassified_delivery() {
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "Run a command, then produce a short final reply based on the result."
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "execution plus synthesis".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let ctx = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+
+        assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
+    }
+
+    #[test]
+    fn synthesize_route_allows_direct_fallback_for_chat_wrapped_raw_output_contract() {
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "Run a command and return its raw output.".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "raw command output".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let ctx = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+
+        assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
     }
 }
 
@@ -641,6 +1083,8 @@ pub(super) async fn handle_call_tool_action(
         &normalized_skill,
         &mut resolved_args,
     );
+    let recovery_args = resolved_args.clone();
+    strip_internal_execution_args(&mut resolved_args);
     loop_state.tool_calls_total += 1;
     let args_summary = build_safe_skill_args_summary(&resolved_args, PROGRESS_ARGS_SUMMARY_MAX_LEN);
     let skill_outcome = execute_prepared_skill_action(
@@ -659,7 +1103,7 @@ pub(super) async fn handle_call_tool_action(
         step_in_round,
         &normalized_skill,
         resolved_args,
-        None,
+        Some(recovery_args),
         write_file_effective_path,
         read_file_requested_path,
         args_summary,
@@ -724,6 +1168,7 @@ pub(super) async fn handle_call_skill_action(
         &mut resolved_args,
     );
     let recovery_args = resolved_args.clone();
+    strip_internal_execution_args(&mut resolved_args);
     let read_file_requested_path = read_file_requested_path(&normalized_skill, &resolved_args);
     let write_file_effective_path =
         write_file_effective_path(state, &normalized_skill, &resolved_args);
@@ -789,14 +1234,28 @@ pub(super) async fn handle_synthesize_answer_action(
     let step_execution =
         crate::executor::execute_step(&format!("step_{global_step}"), action, || async {
             if let Some(answer) =
-                crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
-                    loop_state,
-                    state,
-                    agent_run_context,
-                )
-                .filter(|answer| !answer.trim().is_empty())
+                deterministic_observed_execution_status_answer(state, task, user_text, loop_state)
             {
                 return Ok(answer);
+            }
+            let requires_synthesized_delivery = agent_run_context
+                .and_then(|context| context.route_result.as_ref())
+                .is_some_and(
+                    crate::agent_engine::observed_output::route_requires_synthesized_delivery,
+                );
+            let allow_direct_fallback = synthesize_answer_allows_direct_fallback(evidence_refs)
+                && synthesize_route_allows_direct_fallback(agent_run_context);
+            if allow_direct_fallback {
+                if let Some(answer) =
+                    crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
+                        loop_state,
+                        state,
+                        agent_run_context,
+                    )
+                    .filter(|answer| !answer.trim().is_empty())
+                {
+                    return Ok(answer);
+                }
             }
             let synthesized =
                 crate::agent_engine::observed_output::synthesize_answer_from_observed_output(
@@ -811,6 +1270,18 @@ pub(super) async fn handle_synthesize_answer_action(
                 .filter(|answer| !answer.trim().is_empty());
             if let Some(answer) = synthesized {
                 return Ok(answer);
+            }
+            if !allow_direct_fallback && !requires_synthesized_delivery {
+                if let Some(answer) =
+                    crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
+                        loop_state,
+                        state,
+                        agent_run_context,
+                    )
+                    .filter(|answer| !answer.trim().is_empty())
+                {
+                    return Ok(answer);
+                }
             }
             Err(synthesize_failure_user_message(
                 state,

@@ -20,7 +20,7 @@
 - No dedicated config entry points declared.
 
 ## Actions (from interface)
-- Market/info: `quote` (aliases `price`, `get_price` when querying one symbol), `multi_quote` (aliases `get_multi_price`; `price` when `symbols` is present), `get_book_ticker` (alias `book_ticker`), `binance_symbol_check`, `normalize_symbol`, `healthcheck`, `candles`, `indicator`, `price_alert_check`, `onchain`
+- Market/info: `quote` (aliases `price`, `get_price` when querying one symbol), `multi_quote` (aliases `get_multi_price`; `price` when `symbols` is present), `get_book_ticker` (alias `book_ticker`), `binance_symbol_check`, `normalize_symbol`, `healthcheck`, `candles` (aliases `kline`, `klines`, `candlestick`, `candlesticks`, `ohlcv`; these normalize to `indicator` when an `indicator` param is also present), `indicator` (aliases `technical_indicator`, `technical_indicators`, `ta_indicator`, `ta`), `price_alert_check`, `onchain`
 - **Price-alert aliases** (normalize to `price_alert_check` internally, no separate actions): `price_monitor`, `monitor_price`, `price_alert`, `volatility_alert`.
 - Trade/order: `trade_preview`, `trade_submit`, `order_status`, `cancel_order`, `cancel_all_orders` (alias `cancel_open_orders`), `open_orders` (alias `get_open_orders`, `pending_orders`), `trade_history` (alias `my_trades`, `recent_trades`), `positions`
 
@@ -37,13 +37,13 @@
 | `binance_symbol_check` | `symbol` | yes | string | - | Validate symbol exists on Binance and return lot/filter info. |
 | `normalize_symbol` | `symbol` | yes | string | - | Convert to canonical exchange forms. |
 | `candles` | `symbol` | yes | string | - | K-line source symbol. |
-| `candles` | `timeframe` | no | string | `1h` | Candle interval: `1m`,`3m`,`5m`,`15m`,`30m`,`1h`,`2h`,`4h`,`6h`,`8h`,`12h`,`1d`,`3d`,`1w`,`1M`. |
+| `candles` | `timeframe`/`interval` | no | string | `1h` | Candle interval: `1m`,`3m`,`5m`,`15m`,`30m`,`1h`,`2h`,`4h`,`6h`,`8h`,`12h`,`1d`,`3d`,`1w`,`1M`. |
 | `candles` | `limit` | no | number | `30` | Candle count (max 500). Returns `close_prices` array and full `candles` OHLCV array. |
 | `candles` | `exchange` | no | string | config default | `binance` or `okx`. If omitted, use `crypto.execution_mode` / `crypto.default_exchange`; if neither is configured, clarify. |
 | `indicator` | `symbol` | yes | string | - | Symbol for computation. |
 | `indicator` | `indicator` | no | string | `sma` | Indicator type: `sma`, `ema`, `rsi`. |
 | `indicator` | `period` | no | number | `14` | Indicator period (2–200). |
-| `indicator` | `timeframe` | no | string | `1h` | Candle interval for source data. |
+| `indicator` | `timeframe`/`interval` | no | string | `1h` | Candle interval for source data. |
 | `indicator` | `exchange` | no | string | config default | Data source exchange. If omitted, use `crypto.execution_mode` / `crypto.default_exchange`; if neither is configured, clarify. |
 | `price_alert_check` | `symbol` | yes | string | - | Symbol to monitor (normalized). |
 | `price_alert_check` | `exchange` | no | string | config default | Data source (`binance` or `okx`). If omitted: use config `execution_mode` / `default_exchange`; if neither is configured, clarify. |
@@ -63,12 +63,12 @@
 | `onchain` (eth address mode) | `tx_limit`/`limit` | no | number | `5` | Recent tx count. |
 | `trade_preview`/`trade_submit` | `symbol` | yes | string | - | Order symbol. |
 | `trade_preview`/`trade_submit` | `side` | no* | string | `buy` | `buy` or `sell`. |
-| `trade_preview`/`trade_submit` | `order_type` | no | string | `market` | `market`, `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker`. |
-| `trade_preview`/`trade_submit` | `qty` | cond | number/string | - | Base asset quantity. Use `"all"` for full-position sell (SELL side only). |
+| `trade_preview`/`trade_submit` | `order_type` | no | string | `market` | `market`, `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker`. Aliases: `type`, `orderType`. |
+| `trade_preview`/`trade_submit` | `qty` | cond | number/string | - | Base asset quantity. Use `"all"` for full-position sell (SELL side only). Aliases: `quantity`, `amount`, `base_qty`, `base_quantity`. `amount` means base-asset amount; use `quote_qty_usd`/`amount_usd` for quote-currency notional. |
 | `trade_preview`/`trade_submit` | `quote_qty_usd` | cond | number | - | USDT amount to spend/receive. Aliases: `quote_qty`, `amount_usd`, `notional_usd`. |
 | `trade_preview`/`trade_submit` | `price` | required for limit/stop orders | number | - | Required for `limit`, `stop_loss_limit`, `take_profit_limit`, `limit_maker`. |
 | `trade_preview`/`trade_submit` | `stop_price` | required for stop orders | number | - | Trigger price for `stop_loss_limit` / `take_profit_limit`. Alias: `stopPrice`. |
-| `trade_preview`/`trade_submit` | `time_in_force` | no | string | `GTC` | `GTC`/`IOC`/`FOK` for limit/stop orders (Binance). |
+| `trade_preview`/`trade_submit` | `time_in_force` | no | string | `GTC` | `GTC`/`IOC`/`FOK` for limit/stop orders (Binance). Alias: `timeInForce`. |
 | `trade_preview`/`trade_submit` | `client_order_id` | no | string | - | Client correlation id. |
 | `trade_submit` | `confirm` | no | boolean | `false` | Set `true` only when the **current** user message explicitly indicates immediate / confirmed execution (same turn). Not for inferring confirmation from a prior preview turn or any deprecated yes/no host flow; no runtime enforcement. |
 | `order_status` | `order_id` or `client_order_id` | yes | string | - | At least one order identifier. |

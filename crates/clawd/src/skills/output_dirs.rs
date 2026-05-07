@@ -12,6 +12,13 @@ pub(crate) fn ensure_default_output_dir_for_skill_args(
     };
     match skill_name {
         "image_generate" | "image_edit" => {
+            let has_output_path = obj
+                .get("output_path")
+                .and_then(|value| value.as_str())
+                .is_some_and(|value| !value.trim().is_empty());
+            if has_output_path {
+                return Value::Object(obj);
+            }
             let section = if skill_name == "image_edit" {
                 "image_edit"
             } else {
@@ -51,4 +58,48 @@ fn resolve_output_dir_from_config(workspace_root: &Path, section: &str) -> Strin
         .filter(|s| !s.is_empty())
         .unwrap_or("document")
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_default_output_dir_for_skill_args;
+    use serde_json::json;
+    use std::path::Path;
+
+    #[test]
+    fn preserves_explicit_image_output_path() {
+        let args = json!({
+            "prompt": "make a smoke image",
+            "output_path": "document/skill_generate_smoke.png"
+        });
+
+        let actual = ensure_default_output_dir_for_skill_args(
+            Path::new("/tmp/no-such-workspace"),
+            "image_generate",
+            args,
+        );
+
+        assert_eq!(
+            actual.get("output_path").and_then(|value| value.as_str()),
+            Some("document/skill_generate_smoke.png")
+        );
+    }
+
+    #[test]
+    fn adds_image_output_path_when_missing() {
+        let args = json!({ "prompt": "make a smoke image" });
+
+        let actual = ensure_default_output_dir_for_skill_args(
+            Path::new("/tmp/no-such-workspace"),
+            "image_generate",
+            args,
+        );
+
+        let output_path = actual
+            .get("output_path")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        assert!(output_path.starts_with("document/gen-"));
+        assert!(output_path.ends_with(".png"));
+    }
 }

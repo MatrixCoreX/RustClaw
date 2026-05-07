@@ -7,6 +7,7 @@
 - `audio_synthesize` generates speech audio from text input.
 - It saves the generated audio file to disk and returns a file marker in `text`.
 - It supports voice/format/output path tuning plus optional vendor/model routing.
+- It supports Mimo native TTS through `mimo-v2.5-tts` using the chat-completions audio response contract.
 - Successful responses include machine-readable `extra` metadata such as `provider`, `model`, `voice`, `response_format`, `output_path`, and `outputs`.
 
 ## Actions
@@ -22,6 +23,11 @@
 | synthesize | `output_path` | no | string(path) | auto | Output audio file path. |
 | synthesize | `vendor` | no | string | impl default | Backend vendor selector. |
 | synthesize | `model` | no | string | impl default | Backend model selector. |
+
+Provider notes:
+- `mimo` uses `mimo-v2.5-tts` by default, with voices such as `mimo_default`, `Mia`, `Chloe`, `冰糖`, `茉莉`, `苏打`, and `白桦`.
+- Mimo native TTS currently returns chat-completions audio data; use `mp3`, `wav`, or `pcm16` according to the requested file/container format.
+- Qwen native TTS remains supported, but external account billing errors should surface as provider failures rather than being hidden.
 
 ## Success `extra` (`status=ok`)
 - `provider`: resolved backend provider name

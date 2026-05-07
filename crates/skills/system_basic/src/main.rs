@@ -188,7 +188,7 @@ fn inventory_dir(
     let files_only = bool_arg(obj, "files_only", false);
     let dirs_only = bool_arg(obj, "dirs_only", false);
     let names_only = bool_arg(obj, "names_only", false);
-    let max_entries = u64_arg(obj, "max_entries", 200).clamp(1, 1000) as usize;
+    let max_entries = u64_arg_any(obj, &["max_entries", "limit"], 200).clamp(1, 1000) as usize;
     let sort_by = obj
         .get("sort_by")
         .and_then(Value::as_str)
@@ -854,12 +854,6 @@ fn read_range(
     let text = std::fs::read_to_string(&real).map_err(|err| format!("read file failed: {err}"))?;
     let lines: Vec<&str> = text.lines().collect();
     let total_lines = lines.len();
-    let mode = obj
-        .get("mode")
-        .and_then(Value::as_str)
-        .unwrap_or("head")
-        .to_ascii_lowercase();
-    let n = u64_arg(obj, "n", 20).clamp(1, 500) as usize;
     let start = obj
         .get("start_line")
         .and_then(Value::as_u64)
@@ -868,6 +862,18 @@ fn read_range(
         .get("end_line")
         .and_then(Value::as_u64)
         .map(|v| v as usize);
+    let mode = obj
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| {
+            if start.is_some() || end.is_some() {
+                "range"
+            } else {
+                "head"
+            }
+        })
+        .to_ascii_lowercase();
+    let n = u64_arg(obj, "n", 20).clamp(1, 500) as usize;
 
     let (from, to) = if total_lines == 0 {
         (0, 0)
@@ -977,14 +983,17 @@ fn path_batch_facts(
                 "fact": build_path_fact(workspace_root, &real, &meta),
             })),
             Err(err) if include_missing && err.kind() == io::ErrorKind::NotFound => {
-                if let Some(resolved) = resolve_case_insensitive_leaf(&real) {
+                if let Some(resolved) =
+                    resolve_case_insensitive_leaf(&real).or_else(|| resolve_unique_stem_leaf(&real))
+                {
                     let meta = std::fs::metadata(&resolved).map_err(|err| {
                         format!("metadata failed for {}: {err}", resolved.display())
                     })?;
                     facts.push(json!({
                         "path": path,
                         "exists": true,
-                        "resolved_from_case_insensitive": true,
+                        "resolved_from_case_insensitive": case_equivalent_path_leaf(&resolved, &real),
+                        "resolved_from_stem": path_leaf_matches_file_stem(&resolved, &real),
                         "fact": build_path_fact(workspace_root, &resolved, &meta),
                     }));
                 } else {
@@ -1022,6 +1031,58 @@ fn resolve_case_insensitive_leaf(path: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn case_equivalent(a: &str, b: &str) -> bool {
+    a == b || a.eq_ignore_ascii_case(b) || a.to_lowercase() == b.to_lowercase()
+}
+
+fn case_equivalent_path_leaf(resolved: &Path, requested: &Path) -> bool {
+    match (
+        resolved.file_name().and_then(|name| name.to_str()),
+        requested.file_name().and_then(|name| name.to_str()),
+    ) {
+        (Some(resolved), Some(requested)) => case_equivalent(resolved, requested),
+        _ => false,
+    }
+}
+
+fn path_leaf_matches_file_stem(resolved: &Path, requested: &Path) -> bool {
+    match (
+        resolved.file_stem().and_then(|name| name.to_str()),
+        requested.file_name().and_then(|name| name.to_str()),
+    ) {
+        (Some(resolved_stem), Some(requested_leaf)) => {
+            !requested_leaf.contains('.') && case_equivalent(resolved_stem, requested_leaf)
+        }
+        _ => false,
+    }
+}
+
+fn resolve_unique_stem_leaf(path: &Path) -> Option<PathBuf> {
+    let parent = path.parent()?;
+    let target_name = path.file_name()?.to_str()?;
+    if target_name.contains('.') {
+        return None;
+    }
+    let mut matched: Option<PathBuf> = None;
+    for entry in std::fs::read_dir(parent).ok()?.flatten() {
+        let candidate_path = entry.path();
+        if !entry.metadata().ok().is_some_and(|meta| meta.is_file()) {
+            continue;
+        }
+        let Some(candidate_stem) = candidate_path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        if !case_equivalent(candidate_stem, target_name) {
+            continue;
+        }
+        if matched.is_some() {
+            return None;
+        }
+        matched = Some(candidate_path);
+    }
+    matched
 }
 
 fn diagnose_runtime(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
@@ -1334,18 +1395,22 @@ fn cmp_name(a: &Value, b: &Value) -> Ordering {
 
 fn ext_filters(obj: &Map<String, Value>) -> Vec<String> {
     if let Some(s) = obj.get("ext_filter").and_then(Value::as_str) {
-        return vec![s.trim_start_matches('.').to_ascii_lowercase()];
+        return normalize_ext_filter(s).into_iter().collect();
     }
     obj.get("ext_filter")
         .and_then(Value::as_array)
         .map(|arr| {
             arr.iter()
                 .filter_map(Value::as_str)
-                .map(|v| v.trim_start_matches('.').to_ascii_lowercase())
-                .filter(|v| !v.is_empty())
+                .filter_map(normalize_ext_filter)
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn normalize_ext_filter(value: &str) -> Option<String> {
+    let normalized = value.trim().trim_start_matches('.').to_ascii_lowercase();
+    (!normalized.is_empty()).then_some(normalized)
 }
 
 fn bool_arg(obj: &Map<String, Value>, key: &str, default: bool) -> bool {
@@ -1354,6 +1419,12 @@ fn bool_arg(obj: &Map<String, Value>, key: &str, default: bool) -> bool {
 
 fn u64_arg(obj: &Map<String, Value>, key: &str, default: u64) -> u64 {
     obj.get(key).and_then(Value::as_u64).unwrap_or(default)
+}
+
+fn u64_arg_any(obj: &Map<String, Value>, keys: &[&str], default: u64) -> u64 {
+    keys.iter()
+        .find_map(|key| obj.get(*key).and_then(Value::as_u64))
+        .unwrap_or(default)
 }
 
 fn required_str<'a>(obj: &'a Map<String, Value>, key: &str) -> Result<&'a str, String> {
@@ -1752,6 +1823,125 @@ mod tests {
             .and_then(Value::as_str)
             .is_some_and(|path| path.ends_with("reports/Report.MD")));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn path_batch_facts_resolves_unique_stem_leaf() {
+        let root = temp_root("path_facts_stem_leaf");
+        let dir = root.join("stem_unique");
+        std::fs::create_dir_all(&dir).expect("create stem dir");
+        std::fs::write(dir.join("ABCD.txt"), "ok").expect("write target");
+        let mut obj = Map::new();
+        obj.insert(
+            "paths".to_string(),
+            json!([root.join("stem_unique/abcd").display().to_string()]),
+        );
+
+        let out = path_batch_facts(&root, &obj, true).expect("path facts");
+        let value: Value = serde_json::from_str(&out).expect("json");
+        let fact = value
+            .get("facts")
+            .and_then(Value::as_array)
+            .and_then(|facts| facts.first())
+            .expect("first fact");
+        assert_eq!(fact.get("exists").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            fact.get("resolved_from_stem").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert!(fact
+            .get("fact")
+            .and_then(|inner| inner.get("resolved_path"))
+            .and_then(Value::as_str)
+            .is_some_and(|path| path.ends_with("stem_unique/ABCD.txt")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn path_batch_facts_keeps_ambiguous_stem_missing() {
+        let root = temp_root("path_facts_ambiguous_stem");
+        let dir = root.join("stem_ambiguous");
+        std::fs::create_dir_all(&dir).expect("create stem dir");
+        std::fs::write(dir.join("ABCD.txt"), "one").expect("write first");
+        std::fs::write(dir.join("abcd.md"), "two").expect("write second");
+        let mut obj = Map::new();
+        obj.insert(
+            "paths".to_string(),
+            json!([root.join("stem_ambiguous/abcd").display().to_string()]),
+        );
+
+        let out = path_batch_facts(&root, &obj, true).expect("path facts");
+        let value: Value = serde_json::from_str(&out).expect("json");
+        let fact = value
+            .get("facts")
+            .and_then(Value::as_array)
+            .and_then(|facts| facts.first())
+            .expect("first fact");
+        assert_eq!(fact.get("exists").and_then(Value::as_bool), Some(false));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_range_uses_range_mode_when_line_bounds_are_present() {
+        let root = temp_root("read_range_bounds");
+        let target = root.join("README.md");
+        std::fs::write(&target, "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n").expect("write readme");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("start_line".to_string(), json!(1));
+        obj.insert("end_line".to_string(), json!(8));
+
+        let out = read_range(&root, &obj, true).expect("read range");
+        let value: Value = serde_json::from_str(&out).expect("json");
+
+        assert_eq!(value.get("mode").and_then(Value::as_str), Some("range"));
+        assert_eq!(value.get("requested_n").and_then(Value::as_u64), Some(20));
+        assert_eq!(value.get("start_line").and_then(Value::as_u64), Some(1));
+        assert_eq!(value.get("end_line").and_then(Value::as_u64), Some(8));
+        assert!(value
+            .get("excerpt")
+            .and_then(Value::as_str)
+            .is_some_and(|excerpt| excerpt.contains("8|8") && !excerpt.contains("9|9")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inventory_dir_accepts_limit_alias_for_max_entries() {
+        let root = temp_root("inventory_limit_alias");
+        for name in ["a.log", "b.log", "c.log"] {
+            std::fs::write(root.join(name), name).expect("write file");
+        }
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!("."));
+        obj.insert("names_only".to_string(), json!(true));
+        obj.insert("files_only".to_string(), json!(true));
+        obj.insert("limit".to_string(), json!(2));
+
+        let out = inventory_dir(&root, &obj, true).expect("inventory");
+        let value: Value = serde_json::from_str(&out).expect("json");
+        let names = value.get("names").and_then(Value::as_array).expect("names");
+        assert_eq!(names.len(), 2);
+        assert_eq!(
+            value.pointer("/counts/total").and_then(Value::as_u64),
+            Some(2)
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn ext_filter_blank_string_means_no_filter() {
+        let mut obj = Map::new();
+        obj.insert("ext_filter".to_string(), json!(""));
+
+        assert!(ext_filters(&obj).is_empty());
+    }
+
+    #[test]
+    fn ext_filter_normalizes_arrays_and_ignores_blank_items() {
+        let mut obj = Map::new();
+        obj.insert("ext_filter".to_string(), json!([" .MD ", "", ".toml"]));
+
+        assert_eq!(ext_filters(&obj), vec!["md", "toml"]);
     }
 
     #[test]

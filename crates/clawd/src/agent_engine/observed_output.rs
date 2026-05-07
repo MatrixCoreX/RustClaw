@@ -103,6 +103,26 @@ fn strip_bare_json_language_prefix(raw: &str) -> &str {
     }
 }
 
+fn non_code_markdown_text(raw: &str) -> Option<String> {
+    let mut in_fence = false;
+    let mut lines = Vec::new();
+    for line in raw.lines() {
+        let trimmed_start = line.trim_start();
+        if trimmed_start.starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            lines.push(trimmed.to_string());
+        }
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
 fn latest_successful_step_index<F>(loop_state: &LoopState, predicate: F) -> Option<usize>
 where
     F: Fn(&crate::executor::StepExecutionResult) -> bool,
@@ -333,11 +353,8 @@ fn route_requests_hidden_entries_check(route: &crate::RouteResult) -> bool {
 
 pub(crate) fn route_prefers_direct_observed_answer_for_scalar(route: &crate::RouteResult) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-        && matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::ExistenceWithPath
-                | crate::OutputSemanticKind::HiddenEntriesCheck
-        )
+        && (route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+            || route_requests_hidden_entries_check(route))
 }
 
 pub(crate) fn scalar_route_prefers_structured_observed_answer(
@@ -355,12 +372,51 @@ fn route_requests_scalar_path_only(route: &crate::RouteResult) -> bool {
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
 }
 
+fn recent_file_path_candidate_for_scalar_path(
+    loop_state: &LoopState,
+    route: Option<&crate::RouteResult>,
+) -> Option<String> {
+    if !route.is_some_and(route_requests_scalar_path_only) {
+        return None;
+    }
+    let latest_file_step_idx = latest_successful_step_index(loop_state, |step| {
+        matches!(step.skill.as_str(), "read_file" | "write_file")
+    })?;
+    let latest_effective_step_idx = latest_successful_step_index(loop_state, |step| {
+        !matches!(
+            step.skill.as_str(),
+            "respond" | "synthesize_answer" | "think"
+        )
+    })?;
+    if latest_file_step_idx < latest_effective_step_idx {
+        return None;
+    }
+    loop_state
+        .output_vars
+        .get("last_file_path")
+        .or_else(|| loop_state.output_vars.get("last_written_file_path"))
+        .or_else(|| loop_state.last_written_file_path.as_ref())
+        .or_else(|| loop_state.written_file_aliases.values().next())
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(ToString::to_string)
+}
+
 fn route_prefers_plain_fs_search_paths(route: &crate::RouteResult) -> bool {
     route_requests_scalar_path_only(route)
         || (matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
         ) && route.output_contract.semantic_kind == crate::OutputSemanticKind::FileNames)
+        || (matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
+        ) && route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryNames)
+        || (matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
+        ) && route.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths)
 }
 
 fn looks_like_plain_path_literal(text: &str) -> bool {
@@ -391,7 +447,12 @@ fn route_allows_raw_listing_direct_answer(route: Option<&crate::RouteResult>) ->
         if !route.output_contract.requires_content_evidence {
             return true;
         }
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::FileNames
+        matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::FileNames
+                | crate::OutputSemanticKind::DirectoryNames
+                | crate::OutputSemanticKind::FilePaths
+        )
     })
 }
 
@@ -430,10 +491,10 @@ fn is_user_hidden_entry(entry: &str) -> bool {
 }
 
 fn hidden_entries_direct_answer(
-    state: Option<&AppState>,
+    _state: Option<&AppState>,
     route: &crate::RouteResult,
     loop_state: &LoopState,
-    prefer_english: bool,
+    _prefer_english: bool,
 ) -> Option<String> {
     if !route_requests_hidden_entries_check(route) {
         return None;
@@ -446,29 +507,7 @@ fn hidden_entries_direct_answer(
         .or_else(|| {
             latest_list_dir_listing(loop_state).map(|listing| hidden_entries_from_listing(&listing))
         })?;
-    let examples = hidden_entries
-        .iter()
-        .take(3)
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(", ");
-    if hidden_entries.is_empty() {
-        return Some(observed_t(
-            state,
-            "clawd.msg.hidden_entries_none_scalar",
-            "没有",
-            "No",
-            prefer_english,
-        ));
-    }
-    Some(observed_t_with_vars(
-        state,
-        "clawd.msg.hidden_entries_found_scalar_examples",
-        "有。示例：{examples}",
-        "Yes: {examples}",
-        prefer_english,
-        &[("examples", examples.as_str())],
-    ))
+    Some(hidden_entries.len().to_string())
 }
 
 fn listing_entries(listing: &str) -> Vec<String> {
@@ -646,9 +685,30 @@ fn observed_request_language_hint(user_text: &str) -> &'static str {
 }
 
 fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> String {
+    if agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .is_some_and(route_requires_synthesized_delivery)
+    {
+        return "Use the observed output as evidence to produce the requested final wording. Do not answer by copying only the raw observed output; that would be an incomplete passthrough for this contract.".to_string();
+    }
+    if let Some(count) = agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .and_then(|route| route.output_contract.exact_sentence_count)
+    {
+        let sentence_label = if count == 1 { "sentence" } else { "sentences" };
+        return format!(
+            "Return exactly {count} {sentence_label}. Do not compress the answer into fewer sentences or expand beyond that count."
+        );
+    }
     let response_shape = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .map(|route| route.output_contract.response_shape);
+    let semantic_kind = agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .map(|route| route.output_contract.semantic_kind);
+    if semantic_kind == Some(crate::OutputSemanticKind::ExistenceWithPathSummary) {
+        return "Return whether the target exists, the resolved path when found, and the requested brief content-grounded purpose or summary. Do not answer from path evidence alone if content evidence is available.".to_string();
+    }
     match response_shape {
         Some(crate::OutputResponseShape::Scalar) => {
             "Return only the final scalar value with no label, prefix, suffix, or explanation."
@@ -668,6 +728,17 @@ fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> 
         None => "Return the shortest grounded answer that directly satisfies the user request.",
     }
     .to_string()
+}
+
+pub(crate) fn route_requires_synthesized_delivery(route: &crate::RouteResult) -> bool {
+    route.ask_mode.finalize_chat_wrapped()
+        && route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && !matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
 }
 
 fn db_basic_scalar_candidate(value: &serde_json::Value) -> Option<String> {
@@ -787,6 +858,92 @@ fn service_control_summary_candidate(value: &serde_json::Value) -> Option<String
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(ToString::to_string)
+}
+
+fn service_control_state_value(value: &serde_json::Value) -> Option<&str> {
+    value
+        .get("post_state")
+        .or_else(|| value.get("pre_state"))
+        .or_else(|| value.get("summary"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+}
+
+fn service_control_state_is_running(state: &str) -> bool {
+    state
+        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'))
+        .map(|token| token.to_ascii_lowercase())
+        .any(|token| matches!(token.as_str(), "active" | "running"))
+}
+
+fn service_control_status_direct_answer_candidate(
+    state: Option<&AppState>,
+    value: &serde_json::Value,
+    response_shape: Option<crate::OutputResponseShape>,
+    prefer_english: bool,
+) -> Option<String> {
+    let service_name = value
+        .get("service_name")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("service");
+    let service_state = service_control_state_value(value)?;
+    if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
+        return Some(service_state.to_string());
+    }
+    let manager = value
+        .get("manager_type")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("service manager");
+    let verified = value
+        .get("verified")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if service_control_state_is_running(service_state) {
+        let key = if verified {
+            "clawd.msg.service_status_running_verified"
+        } else {
+            "clawd.msg.service_status_running"
+        };
+        let zh = if verified {
+            "{service} 正在运行：{manager} 返回 `{state}`，验证通过。"
+        } else {
+            "{service} 正在运行：{manager} 返回 `{state}`。"
+        };
+        let en = if verified {
+            "{service} is running: {manager} reports `{state}` and verification passed."
+        } else {
+            "{service} is running: {manager} reports `{state}`."
+        };
+        return Some(observed_t_with_vars(
+            state,
+            key,
+            zh,
+            en,
+            prefer_english,
+            &[
+                ("service", service_name),
+                ("manager", manager),
+                ("state", service_state),
+            ],
+        ));
+    }
+    Some(observed_t_with_vars(
+        state,
+        "clawd.msg.service_status_not_running",
+        "{service} 当前状态是 `{state}`：{manager} 已完成检查，未显示为运行中。",
+        "{service} is currently `{state}`: {manager} completed the check and it is not reported as running.",
+        prefer_english,
+        &[
+            ("service", service_name),
+            ("manager", manager),
+            ("state", service_state),
+        ],
+    ))
 }
 
 fn system_basic_info_scalar_path_candidate(value: &serde_json::Value) -> Option<String> {
@@ -928,6 +1085,41 @@ fn inventory_dir_direct_answer_candidate(value: &serde_json::Value) -> Option<St
     normalized_listing_text(&names.join("\n"))
 }
 
+fn inventory_dir_scalar_path_candidate(
+    value: &serde_json::Value,
+    prefer_full_path: bool,
+) -> Option<String> {
+    let names = inventory_dir_names(value)?;
+    if !prefer_full_path {
+        return Some(names.join("\n"));
+    }
+    let root = value
+        .get("resolved_path")
+        .or_else(|| value.get("path"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let paths = names
+        .into_iter()
+        .map(|name| {
+            let name_path = Path::new(&name);
+            if name_path.is_absolute() {
+                canonical_existing_path(name_path)
+            } else if let Some(root) = root {
+                let candidate = Path::new(root).join(&name);
+                if candidate.exists() {
+                    canonical_existing_path(&candidate)
+                } else {
+                    candidate.display().to_string()
+                }
+            } else {
+                name
+            }
+        })
+        .collect::<Vec<_>>();
+    (!paths.is_empty()).then(|| paths.join("\n"))
+}
+
 fn inventory_dir_observed_candidate(value: &serde_json::Value) -> Option<String> {
     let path = value
         .get("resolved_path")
@@ -995,6 +1187,80 @@ fn inventory_dir_observed_candidate(value: &serde_json::Value) -> Option<String>
             .collect::<Vec<_>>()
             .join("\n")
     ))
+}
+
+fn count_inventory_count_value(value: &serde_json::Value) -> Option<(String, &'static str)> {
+    let counts = value.get("counts")?;
+    let kind_filter = value
+        .get("kind_filter")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_ascii_lowercase());
+    let count_key = if value
+        .get("files_only")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        || matches!(
+            kind_filter.as_deref(),
+            Some("file" | "files" | "regular_file")
+        ) {
+        "files"
+    } else if value
+        .get("dirs_only")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        || matches!(
+            kind_filter.as_deref(),
+            Some("dir" | "dirs" | "directory" | "directories")
+        )
+    {
+        "dirs"
+    } else {
+        "total"
+    };
+    counts
+        .get(count_key)
+        .or_else(|| counts.get("total"))
+        .and_then(value_scalar_text)
+        .map(|count| (count, count_key))
+}
+
+fn count_inventory_direct_answer_candidate(
+    state: Option<&AppState>,
+    value: &serde_json::Value,
+    response_shape: Option<crate::OutputResponseShape>,
+    prefer_english: bool,
+) -> Option<String> {
+    let (count, count_key) = count_inventory_count_value(value)?;
+    if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
+        return Some(count);
+    }
+    let noun = match (prefer_english, count_key) {
+        (true, "files") => "regular files",
+        (true, "dirs") => "directories",
+        (true, _) => "items",
+        (false, "files") => "普通文件",
+        (false, "dirs") => "目录",
+        (false, _) => "项目",
+    };
+    let default = if prefer_english {
+        format!("{count}: there are {count} {noun} in the requested scope.")
+    } else {
+        format!("{count}，当前范围内共有 {count} 个{noun}。")
+    };
+    Some(
+        state
+            .map(|state| {
+                observed_t_with_vars(
+                    Some(state),
+                    "clawd.msg.count_inventory_direct_answer",
+                    &default,
+                    &default,
+                    prefer_english,
+                    &[("count", &count), ("noun", noun)],
+                )
+            })
+            .unwrap_or(default),
+    )
 }
 
 fn is_ignorable_shell_warning(line: &str) -> bool {
@@ -1158,6 +1424,24 @@ fn candidate_not_found_text(state: Option<&AppState>, prefer_english: bool) -> S
     observed_t(state, "clawd.msg.exists_no", "没有", "no", prefer_english)
 }
 
+fn candidate_not_found_with_path_text(
+    state: Option<&AppState>,
+    path: Option<&str>,
+    prefer_english: bool,
+) -> String {
+    match path.map(str::trim).filter(|path| !path.is_empty()) {
+        Some(path) => observed_t_with_vars(
+            state,
+            "clawd.msg.exists_no_path_not_found",
+            "没有，路径不存在：{path}",
+            "no, path not found: {path}",
+            prefer_english,
+            &[("path", path)],
+        ),
+        None => candidate_not_found_text(state, prefer_english),
+    }
+}
+
 fn normalize_system_basic_match_path(
     resolved_root: Option<&str>,
     candidate_path: Option<&str>,
@@ -1293,7 +1577,11 @@ fn system_basic_existence_with_path_candidate(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             if !exists {
-                return Some(candidate_not_found_text(state, prefer_english));
+                return Some(candidate_not_found_with_path_text(
+                    state,
+                    path_batch_fact_preferred_path(entry),
+                    prefer_english,
+                ));
             }
             let path = path_batch_fact_preferred_path(entry);
             Some(candidate_exists_with_path_text(state, path, prefer_english))
@@ -1621,7 +1909,10 @@ fn structured_scalar_candidate(
 ) -> Option<String> {
     if skill == "package_manager" {
         let response_shape = route.map(|route| route.output_contract.response_shape);
-        return package_manager_summary_candidate(body, response_shape);
+        return package_manager_summary_candidate(state, body, response_shape, prefer_english);
+    }
+    if skill == "git_basic" {
+        return git_basic_scalar_candidate(route, body);
     }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     if skill == "db_basic" {
@@ -1638,12 +1929,22 @@ fn structured_scalar_candidate(
         return db_basic_scalar_candidate(&value);
     }
     if skill == "service_control" {
+        let response_shape = route.map(|route| route.output_contract.response_shape);
         return route
             .is_some_and(|route| {
-                route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+                route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+                    || route.output_contract.response_shape == crate::OutputResponseShape::Scalar
             })
-            .then(|| service_control_summary_candidate(&value))
-            .flatten();
+            .then(|| {
+                service_control_status_direct_answer_candidate(
+                    state,
+                    &value,
+                    response_shape,
+                    prefer_english,
+                )
+            })
+            .flatten()
+            .or_else(|| service_control_summary_candidate(&value));
     }
     if skill == "fs_search" {
         return fs_search_scalar_candidate(
@@ -1663,8 +1964,7 @@ fn structured_scalar_candidate(
         "inventory_dir" => {
             let hidden_count_route = route.is_some_and(|route| {
                 route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-                    && route.output_contract.semantic_kind
-                        == crate::OutputSemanticKind::HiddenEntriesCheck
+                    && route_requests_hidden_entries_check(route)
             });
             if hidden_count_route {
                 value
@@ -1675,7 +1975,7 @@ fn structured_scalar_candidate(
                         inventory_dir_names(&value).map(|names| {
                             names
                                 .into_iter()
-                                .filter(|name| name.trim_start().starts_with('.'))
+                                .filter(|name| is_user_hidden_entry(name))
                                 .count()
                                 .to_string()
                         })
@@ -1686,6 +1986,8 @@ fn structured_scalar_candidate(
                     .and_then(|v| v.get("total"))
                     .and_then(value_scalar_text)
                     .or_else(|| inventory_dir_names(&value).map(|names| names.len().to_string()))
+            } else if route.is_some_and(route_requests_scalar_path_only) {
+                inventory_dir_scalar_path_candidate(&value, prefer_full_path)
             } else {
                 None
             }
@@ -1731,17 +2033,16 @@ fn structured_scalar_candidate(
             .is_some_and(route_requests_scalar_path_only)
             .then(|| system_basic_path_batch_scalar_path_candidate(&value))
             .flatten(),
-        "count_inventory" => value
-            .get("counts")
-            .and_then(|v| v.get("total"))
-            .and_then(value_scalar_text),
+        "count_inventory" => count_inventory_count_value(&value).map(|(count, _)| count),
         _ => None,
     }
 }
 
 fn package_manager_summary_candidate(
+    state: Option<&AppState>,
     body: &str,
     response_shape: Option<crate::OutputResponseShape>,
+    prefer_english: bool,
 ) -> Option<String> {
     let manager = body
         .lines()
@@ -1750,8 +2051,52 @@ fn package_manager_summary_candidate(
         .filter(|value| !value.is_empty())?;
     match response_shape {
         Some(crate::OutputResponseShape::Scalar) => Some(manager.to_string()),
+        Some(
+            crate::OutputResponseShape::OneSentence
+            | crate::OutputResponseShape::Free
+            | crate::OutputResponseShape::Strict,
+        ) => Some(observed_t_with_vars(
+            state,
+            "clawd.msg.package_manager_detected",
+            "当前识别到的包管理器是 {manager}。",
+            "Detected package manager: {manager}.",
+            prefer_english,
+            &[("manager", manager)],
+        )),
         _ => None,
     }
+}
+
+fn git_basic_commit_subject_candidate(body: &str) -> Option<String> {
+    static GIT_ONELINE_SUBJECT_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let regex = GIT_ONELINE_SUBJECT_RE.get_or_init(|| {
+        regex::Regex::new(r"^[0-9a-fA-F]{7,40}\s+(.+)$").expect("valid git oneline regex")
+    });
+    body.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| *line != "exit=0")
+        .find_map(|line| regex.captures(line))
+        .and_then(|captures| captures.get(1))
+        .map(|subject| subject.as_str().trim().to_string())
+        .filter(|subject| !subject.is_empty())
+}
+
+fn git_basic_scalar_candidate(route: Option<&crate::RouteResult>, body: &str) -> Option<String> {
+    if route.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::GitCommitSubject
+    }) {
+        return git_basic_commit_subject_candidate(body);
+    }
+    let scalar = normalized_scalar_candidate(body)?;
+    static GIT_ONELINE_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let regex = GIT_ONELINE_RE.get_or_init(|| {
+        regex::Regex::new(r"^[0-9a-fA-F]{7,40}\s+.+$").expect("valid git oneline regex")
+    });
+    if regex.is_match(&scalar) {
+        return None;
+    }
+    Some(scalar)
 }
 
 fn structured_field_display_line(
@@ -1939,12 +2284,14 @@ fn normalize_read_range_excerpt(excerpt: &str) -> Option<String> {
         .lines()
         .map(str::trim_end)
         .map(|line| {
-            line.split_once('|')
+            let content = line
+                .split_once('|')
                 .filter(|(prefix, _)| {
                     !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit())
                 })
                 .map(|(_, rest)| rest.trim_start().to_string())
-                .unwrap_or_else(|| line.trim().to_string())
+                .unwrap_or_else(|| line.trim().to_string());
+            crate::visible_text::sanitize_user_visible_text(&content)
         })
         .collect::<Vec<_>>();
     if lines.is_empty() || lines.iter().all(|line| line.is_empty()) {
@@ -1952,6 +2299,50 @@ fn normalize_read_range_excerpt(excerpt: &str) -> Option<String> {
     } else {
         Some(lines.join("\n"))
     }
+}
+
+fn normalize_read_range_excerpt_for_direct_answer(
+    excerpt: &str,
+    prefer_english: bool,
+) -> Option<String> {
+    let lines = excerpt
+        .lines()
+        .map(str::trim_end)
+        .map(|line| {
+            let content = line
+                .split_once('|')
+                .filter(|(prefix, _)| {
+                    !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit())
+                })
+                .map(|(_, rest)| rest.trim_start().to_string())
+                .unwrap_or_else(|| line.trim().to_string());
+            crate::visible_text::sanitize_user_visible_text(&content)
+        })
+        .collect::<Vec<_>>();
+    if lines.is_empty() || lines.iter().all(|line| line.is_empty()) {
+        return None;
+    }
+    if lines.iter().any(|line| line.is_empty()) {
+        let blank = if prefer_english {
+            "(blank line)"
+        } else {
+            "（空行）"
+        };
+        return Some(
+            lines
+                .into_iter()
+                .map(|line| {
+                    if line.is_empty() {
+                        blank.to_string()
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+    }
+    Some(lines.join("\n"))
 }
 
 fn compare_paths_observed_candidate(body: &str) -> Option<String> {
@@ -2168,9 +2559,12 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
         "fs_search" => fs_search_direct_answer_candidate(None, &value, None, false, true, false),
         "archive_basic" => archive_basic_observed_candidate(&value),
         "log_analyze" => compact_log_analyze_excerpt(&value),
-        "package_manager" => {
-            package_manager_summary_candidate(body, Some(crate::OutputResponseShape::OneSentence))
-        }
+        "package_manager" => package_manager_summary_candidate(
+            None,
+            body,
+            Some(crate::OutputResponseShape::OneSentence),
+            false,
+        ),
         _ => None,
     }
 }
@@ -2184,6 +2578,9 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     prefer_full_path: bool,
     prefer_english: bool,
 ) -> Option<String> {
+    if let Some(path) = recent_file_path_candidate_for_scalar_path(loop_state, route) {
+        return Some(path);
+    }
     if let Some(answer) = latest_successful_list_dir_answer_candidate(
         loop_state,
         Some(crate::OutputResponseShape::Scalar),
@@ -2352,6 +2749,9 @@ fn extract_direct_answer_from_generic_output_impl(
         && !existence_with_path_should_use_llm_synthesis
         && !hidden_entries_should_use_llm_synthesis;
     let health_check_prefers_raw_payload = is_plain_act
+        && route.is_some_and(|route| {
+            route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+        })
         && !matches!(
             response_shape,
             Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar)
@@ -2419,7 +2819,28 @@ fn extract_direct_answer_from_generic_output_impl(
                 }
                 "http_basic" => None,
                 "process_basic" => None,
-                "service_control" => None,
+                "service_control" => {
+                    serde_json::from_str::<serde_json::Value>(&observed_output.body)
+                        .ok()
+                        .and_then(|value| {
+                            route
+                                .is_some_and(|route| {
+                                    route.output_contract.semantic_kind
+                                        == crate::OutputSemanticKind::ServiceStatus
+                                        || route.output_contract.response_shape
+                                            == crate::OutputResponseShape::Scalar
+                                })
+                                .then(|| {
+                                    service_control_status_direct_answer_candidate(
+                                        state,
+                                        &value,
+                                        response_shape,
+                                        prefers_english_free_text,
+                                    )
+                                })
+                                .flatten()
+                        })
+                }
                 "fs_search" => serde_json::from_str::<serde_json::Value>(&observed_output.body)
                     .ok()
                     .and_then(|value| {
@@ -2441,9 +2862,12 @@ fn extract_direct_answer_from_generic_output_impl(
                     )
                 }),
                 "transform" => transform_skill_formatted_output_candidate(&observed_output.body),
-                "package_manager" => {
-                    package_manager_summary_candidate(&observed_output.body, response_shape)
-                }
+                "package_manager" => package_manager_summary_candidate(
+                    state,
+                    &observed_output.body,
+                    response_shape,
+                    prefers_english_free_text,
+                ),
                 "archive_basic" => None,
                 "log_analyze" => None,
                 "system_basic" => {
@@ -2459,13 +2883,24 @@ fn extract_direct_answer_from_generic_output_impl(
                         value
                             .get("excerpt")
                             .and_then(|v| v.as_str())
-                            .and_then(normalize_read_range_excerpt)
-                            .map(|text| text.trim_end().to_string())
+                            .and_then(|excerpt| {
+                                normalize_read_range_excerpt_for_direct_answer(
+                                    excerpt,
+                                    prefers_english_free_text,
+                                )
+                            })
                     } else if action == Some("inventory_dir")
                         && is_plain_act
                         && allow_raw_listing_direct_answer
                     {
                         inventory_dir_direct_answer_candidate(&value)
+                    } else if action == Some("count_inventory") {
+                        count_inventory_direct_answer_candidate(
+                            state,
+                            &value,
+                            response_shape,
+                            prefers_english_free_text,
+                        )
                     } else if action == Some("extract_fields") {
                         extract_fields_direct_answer_candidate(
                             &value,
@@ -2556,13 +2991,15 @@ fn route_allows_read_range_direct_passthrough(
     let Some(route) = route else {
         return false;
     };
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::None {
+        return false;
+    }
     if route.ask_mode.is_plain_act() {
         return true;
     }
     matches!(route.routed_mode, crate::RoutedMode::ChatAct)
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
         && matches!(
             route.output_contract.locator_kind,
             crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
@@ -2574,6 +3011,7 @@ fn allows_normalized_scalar_direct_fallback(
     response_shape: Option<crate::OutputResponseShape>,
 ) -> bool {
     match skill {
+        "git_basic" => false,
         "package_manager" => false,
         "archive_basic" => false,
         "http_basic" => !matches!(
@@ -2617,6 +3055,37 @@ fn replace_internal_missing_sentinel_with_structured_observation(
         .filter(|replacement| !is_internal_missing_scalar_sentinel(replacement))
 }
 
+fn answer_is_direct_observation_passthrough(answer: &str, loop_state: &LoopState) -> bool {
+    let answer = answer.trim();
+    if answer.is_empty() {
+        return false;
+    }
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| {
+            step.is_ok()
+                && !matches!(
+                    step.skill.as_str(),
+                    "respond" | "synthesize_answer" | "think"
+                )
+        })
+        .filter_map(|step| step.output.as_deref().map(str::trim))
+        .filter(|body| !body.is_empty())
+        .any(|body| {
+            answer == body
+                || normalized_observed_listing(body).is_some_and(|listing| {
+                    let listing = listing.trim();
+                    answer == listing
+                        || listing
+                            .lines()
+                            .map(str::trim)
+                            .any(|line| !line.is_empty() && line == answer)
+                })
+        })
+}
+
 fn observed_step_body(step: &crate::executor::StepExecutionResult) -> Option<String> {
     let body = step
         .output
@@ -2624,14 +3093,20 @@ fn observed_step_body(step: &crate::executor::StepExecutionResult) -> Option<Str
         .map(str::trim)
         .filter(|text| !text.is_empty())?;
     if let Some(normalized) = structured_observed_body(&step.skill, body) {
-        return Some(normalized);
+        let sanitized = crate::visible_text::sanitize_user_visible_text(&normalized);
+        return (!sanitized.trim().is_empty()).then_some(sanitized);
     }
     if let Some(normalized) = system_basic_structured_doc_observed_body(&step.skill, body) {
-        return Some(normalized);
+        let sanitized = crate::visible_text::sanitize_user_visible_text(&normalized);
+        return (!sanitized.trim().is_empty()).then_some(sanitized);
     }
-    (crate::finalize::classify_observed_content_status(body)
-        == crate::finalize::ObservedContentStatus::ContentAvailable)
-        .then(|| body.to_string())
+    if crate::finalize::classify_observed_content_status(body)
+        != crate::finalize::ObservedContentStatus::ContentAvailable
+    {
+        return None;
+    }
+    let sanitized = crate::visible_text::sanitize_user_visible_text(body);
+    (!sanitized.trim().is_empty()).then_some(sanitized)
 }
 
 fn observed_step_entry(step: &crate::executor::StepExecutionResult) -> Option<String> {
@@ -2680,6 +3155,97 @@ fn observed_output_entries(loop_state: &LoopState) -> Vec<String> {
         .collect()
 }
 
+fn route_observation_facts_entry(agent_run_context: Option<&AgentRunContext>) -> Option<String> {
+    let ctx = agent_run_context?;
+    let route = ctx.route_result.as_ref()?;
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPathSummary {
+        return None;
+    }
+    let resolved_path = ctx
+        .auto_locator_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (!hint.is_empty()).then_some(hint)
+        })?;
+    Some(format!(
+        "### route_contract_facts\nresolved_target_path: {resolved_path}\npath_rule: use resolved_target_path as the target file path; do not infer the target path from file content fields such as WorkingDirectory."
+    ))
+}
+
+fn cross_turn_synthesis_allowed(agent_run_context: Option<&AgentRunContext>) -> bool {
+    matches!(
+        agent_run_context
+            .and_then(|ctx| ctx.turn_analysis.as_ref())
+            .and_then(|analysis| analysis.target_task_policy),
+        Some(crate::intent_router::TargetTaskPolicy::ReuseActive)
+    )
+}
+
+fn recent_generated_output_from_user_request(user_request: &str) -> Option<String> {
+    const MARKER: &str = "Most recent generated output:\n";
+    let (_, tail) = user_request.split_once(MARKER)?;
+    let stop_idx = [
+        "\n\nContinuity rules:",
+        "\n\nStructured task updates:",
+        "\n\nNew user instruction:",
+        "\n\n### SESSION_ALIAS_BINDINGS",
+    ]
+    .iter()
+    .filter_map(|marker| tail.find(marker))
+    .min()
+    .unwrap_or(tail.len());
+    let output = tail[..stop_idx].trim();
+    if output.is_empty()
+        || output == "<none>"
+        || crate::finalize::looks_like_planner_artifact(output)
+        || crate::finalize::looks_like_internal_trace_artifact(output)
+    {
+        return None;
+    }
+    let sanitized = crate::visible_text::sanitize_user_visible_text(output);
+    (!sanitized.trim().is_empty()).then_some(sanitized)
+}
+
+fn cross_turn_observed_output_entries(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Vec<String> {
+    if !cross_turn_synthesis_allowed(agent_run_context) {
+        return Vec::new();
+    }
+
+    if let Some(recent_output) = agent_run_context
+        .and_then(|ctx| ctx.user_request.as_deref())
+        .and_then(recent_generated_output_from_user_request)
+    {
+        return vec![format!(
+            "### prior_turn_observed_output\n{}",
+            trim_for_observed_prompt(&recent_output, 1800)
+        )];
+    }
+
+    if let Some(cross_turn_context) = loop_state
+        .output_vars
+        .get("cross_turn_recent_execution_context")
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty() && *text != "<none>")
+    {
+        return vec![format!(
+            "### prior_turn_execution_context\n{}",
+            trim_for_observed_prompt(
+                &crate::visible_text::sanitize_user_visible_text(cross_turn_context),
+                1800
+            )
+        )];
+    }
+
+    Vec::new()
+}
+
 pub(crate) fn has_observed_answer_candidates(loop_state: &LoopState) -> bool {
     !observed_output_entries(loop_state).is_empty()
 }
@@ -2688,11 +3254,14 @@ fn observed_contract_json(agent_run_context: Option<&AgentRunContext>) -> String
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return "{}".to_string();
     };
+    let direct_observation_passthrough_allowed = !route_requires_synthesized_delivery(route);
     serde_json::json!({
         "routed_mode": route.routed_mode.as_str(),
         "response_shape": route.output_contract.response_shape.as_str(),
+        "exact_sentence_count": route.output_contract.exact_sentence_count,
         "requires_content_evidence": route.output_contract.requires_content_evidence,
         "delivery_required": route.output_contract.delivery_required,
+        "direct_observation_passthrough_allowed": direct_observation_passthrough_allowed,
         "locator_kind": route.output_contract.locator_kind.as_str(),
         "delivery_intent": route.output_contract.delivery_intent.as_str(),
         "semantic_kind": route.output_contract.semantic_kind.as_str(),
@@ -2732,7 +3301,13 @@ pub(crate) async fn synthesize_answer_from_observed_output(
         task.task_id,
     );
 
-    let observed_entries = observed_output_entries(loop_state);
+    let mut observed_entries = observed_output_entries(loop_state);
+    if let Some(route_facts) = route_observation_facts_entry(agent_run_context) {
+        observed_entries.insert(0, route_facts);
+    }
+    if observed_entries.is_empty() {
+        observed_entries = cross_turn_observed_output_entries(loop_state, agent_run_context);
+    }
     if observed_entries.is_empty() {
         return None;
     }
@@ -2820,7 +3395,13 @@ pub(crate) async fn synthesize_answer_from_observed_output(
             // 同时 publishable=true、qualified=true、confidence=0.7（足以越过下游
             // OBSERVED_SELF_CLASSIFY_CONF_THRESHOLD=0.55，并保留下游 semantic_judge 的
             // meta-instruction 检查仍能拦截 "我会去检查/please confirm" 之类伪答案）。
-            let trimmed = llm_out_for_parse.trim().trim_matches('`').trim();
+            let trimmed_owned;
+            let trimmed = if let Some(non_code_text) = non_code_markdown_text(llm_out_for_parse) {
+                trimmed_owned = non_code_text;
+                trimmed_owned.trim()
+            } else {
+                llm_out_for_parse.trim().trim_matches('`').trim()
+            };
             if trimmed.is_empty() {
                 return None;
             }
@@ -2851,6 +3432,18 @@ pub(crate) async fn synthesize_answer_from_observed_output(
         );
         answer = replacement;
     }
+    let direct_passthrough_disallowed = agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .is_some_and(route_requires_synthesized_delivery)
+        && answer_is_direct_observation_passthrough(&answer, loop_state);
+    if direct_passthrough_disallowed {
+        tracing::info!(
+            "observed_answer_fallback_reject_direct_passthrough task_id={} answer={}",
+            task.task_id,
+            crate::truncate_for_log(&answer)
+        );
+        answer.clear();
+    }
     // §3.4 finalize-tier: 这里属于 observed_answer_fallback 兜底路径（finalize 层
     // 的 fallback 分支），是 semantic_judge LLM 入口的允许调用方之一。
     // Phase 0.2: 复用同一次 LLM 调用已经返回的 `publishable` + `is_meta_instruction`，
@@ -2871,6 +3464,7 @@ pub(crate) async fn synthesize_answer_from_observed_output(
     };
     let qualified = !answer.is_empty()
         && !parsed.needs_clarify
+        && !direct_passthrough_disallowed
         && (parsed.qualified || semantically_publishable);
     Some((
         answer,
@@ -2903,13 +3497,16 @@ pub(crate) fn normalized_observed_listing(observed: &str) -> Option<String> {
 mod tests {
     use super::super::LoopState;
     use super::{
+        answer_is_direct_observation_passthrough, cross_turn_observed_output_entries,
         extract_direct_answer_from_generic_output, extract_direct_scalar_from_generic_output,
         extract_direct_scalar_from_generic_output_i18n,
         extract_direct_scalar_from_generic_output_with_locator_hint,
         has_observed_answer_candidates, normalized_observed_listing, observed_contract_json,
         observed_output_entries, observed_request_language_hint, observed_response_style_hint,
-        replace_internal_missing_sentinel_with_structured_observation, structured_observed_body,
-        AgentRunContext, OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
+        recent_generated_output_from_user_request,
+        replace_internal_missing_sentinel_with_structured_observation,
+        route_observation_facts_entry, route_requires_synthesized_delivery,
+        structured_observed_body, AgentRunContext, OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
     };
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
@@ -2930,6 +3527,88 @@ mod tests {
         }
     }
 
+    fn chat_wrapped_unclassified_route(response_shape: OutputResponseShape) -> RouteResult {
+        RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "Run an observation, then produce the requested final wording."
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::None,
+                locator_hint: "/workspace/project".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        }
+    }
+
+    fn reuse_active_context(user_request: &str) -> AgentRunContext {
+        AgentRunContext {
+            turn_analysis: Some(crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::TaskAppend),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+                should_interrupt_active_run: false,
+                state_patch: None,
+                attachment_processing_required: false,
+            }),
+            user_request: Some(user_request.to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn recent_generated_output_extracts_internal_merge_block() {
+        let merged = "Current task:\nlook at that docs dir\n\nMost recent generated output:\narchive\nrelease_checklist.md\nservice_notes.md\n\nContinuity rules:\n- keep scope\n\nNew user instruction:\ncount only";
+
+        assert_eq!(
+            recent_generated_output_from_user_request(merged).as_deref(),
+            Some("archive\nrelease_checklist.md\nservice_notes.md")
+        );
+    }
+
+    #[test]
+    fn cross_turn_observed_entries_require_reuse_active_context() {
+        let merged = "Current task:\nlook at that docs dir\n\nMost recent generated output:\narchive\nrelease_checklist.md\nservice_notes.md\n\nContinuity rules:\n- keep scope";
+        let loop_state = LoopState::new(1);
+        let allowed = reuse_active_context(merged);
+
+        let entries = cross_turn_observed_output_entries(&loop_state, Some(&allowed));
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].contains("prior_turn_observed_output"));
+        assert!(entries[0].contains("archive"));
+        assert!(!entries[0].contains("Continuity rules"));
+
+        let standalone = AgentRunContext {
+            turn_analysis: Some(crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+                should_interrupt_active_run: false,
+                state_patch: None,
+                attachment_processing_required: false,
+            }),
+            user_request: Some(merged.to_string()),
+            ..Default::default()
+        };
+        assert!(cross_turn_observed_output_entries(&loop_state, Some(&standalone)).is_empty());
+    }
+
     #[test]
     fn direct_scalar_ignores_exit_zero_prefix() {
         let mut loop_state = LoopState::new(2);
@@ -2939,6 +3618,54 @@ mod tests {
         assert_eq!(
             extract_direct_scalar_from_generic_output(&loop_state, None).as_deref(),
             Some("main")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_defers_git_oneline_log_record_to_synthesis() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "git_basic",
+            "exit=0\n09342a6a fix: expose nl execution and locator flows\n",
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "查看当前工作区最近一次 git 提交的标题，并简短告诉我。".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "Self-contained workspace inspection request for git commit title."
+                .to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: ".".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .is_none()
         );
     }
 
@@ -3022,6 +3749,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3072,6 +3800,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3129,6 +3858,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3221,6 +3951,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3262,6 +3993,60 @@ version.workspace = true
             extract_direct_scalar_from_generic_output(&loop_state, None).as_deref(),
             Some("12")
         );
+    }
+
+    #[test]
+    fn direct_count_inventory_answer_uses_file_count_and_explanation_for_one_sentence() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"count_inventory","counts":{"total":53,"files":53,"dirs":0},"kind_filter":"file","path":".","recursive":false}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "数一下当前目录一级有多少个普通文件，只告诉我数字和一句解释"
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "scalar_count".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Low,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ScalarCount,
+                locator_hint: ".".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            original_user_request: Some(
+                "数一下当前目录一级有多少个普通文件，只告诉我数字和一句解释".to_string(),
+            ),
+            ..AgentRunContext::default()
+        };
+
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("count_inventory should produce a direct count answer");
+
+        assert!(answer.contains("53"));
+        assert!(answer.contains("普通文件"));
+        assert!(!answer.contains("无法计数"));
     }
 
     #[test]
@@ -3388,6 +4173,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Strict,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3515,6 +4301,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3567,6 +4354,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3585,6 +4373,13 @@ version.workspace = true
             observed_response_style_hint(Some(&agent_run_context)).contains("exactly one sentence")
         );
 
+        route_result.output_contract.exact_sentence_count = Some(3);
+        agent_run_context.route_result = Some(route_result.clone());
+        assert!(
+            observed_response_style_hint(Some(&agent_run_context)).contains("exactly 3 sentences")
+        );
+        route_result.output_contract.exact_sentence_count = None;
+
         route_result.output_contract.response_shape = OutputResponseShape::Scalar;
         agent_run_context.route_result = Some(route_result.clone());
         assert!(observed_response_style_hint(Some(&agent_run_context))
@@ -3599,6 +4394,96 @@ version.workspace = true
         route_result.output_contract.response_shape = OutputResponseShape::FileToken;
         agent_run_context.route_result = Some(route_result);
         assert!(observed_response_style_hint(Some(&agent_run_context)).contains("delivery token"));
+    }
+
+    #[test]
+    fn chat_wrapped_unclassified_contract_requires_synthesized_delivery() {
+        let route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        assert!(route_requires_synthesized_delivery(&route));
+
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+        let contract = observed_contract_json(Some(&agent_run_context));
+        assert!(contract.contains(r#""direct_observation_passthrough_allowed":false"#));
+        assert!(observed_response_style_hint(Some(&agent_run_context))
+            .contains("Do not answer by copying only the raw observed output"));
+    }
+
+    #[test]
+    fn raw_command_contract_allows_observation_passthrough() {
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+        assert!(!route_requires_synthesized_delivery(&route));
+
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+        let contract = observed_contract_json(Some(&agent_run_context));
+        assert!(contract.contains(r#""direct_observation_passthrough_allowed":true"#));
+    }
+
+    #[test]
+    fn direct_observation_passthrough_detector_matches_raw_output() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "run_cmd",
+            "/home/guagua/rustclaw\n",
+        ));
+
+        assert!(answer_is_direct_observation_passthrough(
+            "/home/guagua/rustclaw",
+            &loop_state
+        ));
+        assert!(!answer_is_direct_observation_passthrough(
+            "Working directory: /home/guagua/rustclaw",
+            &loop_state
+        ));
+    }
+
+    #[test]
+    fn route_observation_facts_pin_resolved_path_for_existence_summary() {
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "check service file and explain purpose".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Filename,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ExistenceWithPathSummary,
+                locator_hint: "rustclaw.service".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let ctx = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/home/guagua/rustclaw/rustclaw.service".to_string()),
+            ..AgentRunContext::default()
+        };
+
+        let facts = route_observation_facts_entry(Some(&ctx)).expect("route facts");
+
+        assert!(facts.contains("resolved_target_path: /home/guagua/rustclaw/rustclaw.service"));
+        assert!(facts.contains("do not infer the target path from file content fields"));
     }
 
     #[test]
@@ -3627,6 +4512,14 @@ version.workspace = true
     }
 
     #[test]
+    fn markdown_non_json_fallback_prefers_text_outside_code_fences() {
+        let answer = super::non_code_markdown_text(
+            "```bash\n#!/usr/bin/env bash\nset -euo pipefail\n```\n\n这个脚本用于重启 clawd 服务。",
+        );
+        assert_eq!(answer.as_deref(), Some("这个脚本用于重启 clawd 服务。"));
+    }
+
+    #[test]
     fn content_excerpt_summary_is_not_hard_summarized_by_observed_output() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -3651,6 +4544,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3696,6 +4590,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3742,6 +4637,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3760,8 +4656,66 @@ version.workspace = true
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
-            Some("# RustClaw\n\n<img src=\"./RustClaw.png\" width=\"420\" />")
+            Some("# RustClaw\n（空行）\n<img src=\"./RustClaw.png\" width=\"420\" />\n（空行）")
         );
+    }
+
+    #[test]
+    fn direct_answer_sanitizes_read_range_log_excerpt_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        let skill_output = serde_json::json!({
+            "action": "read_range",
+            "path": "/tmp/feishud.log",
+            "resolved_path": "/tmp/feishud.log",
+            "excerpt": "1|\u{1b}[32mconnected\u{1b}[0m to wss://host/ws?device_id=123&access_key=abc123&service_id=7&ticket=deadbeef"
+        })
+        .to_string();
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "system_basic", &skill_output));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "看日志最后 1 行".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Filename,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::None,
+                locator_hint: "feishud.log".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/feishud.log".to_string()),
+            ..AgentRunContext::default()
+        };
+
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("read_range direct answer");
+
+        assert!(answer.contains("access_key=[REDACTED]"));
+        assert!(answer.contains("ticket=[REDACTED]"));
+        assert!(!answer.contains('\u{1b}'));
+        assert!(!answer.contains("abc123"));
+        assert!(!answer.contains("deadbeef"));
     }
 
     #[test]
@@ -3790,6 +4744,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3837,6 +4792,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3856,6 +4812,55 @@ version.workspace = true
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .is_none(),
             "summary-style read_range requests should fall back to synthesis instead of raw passthrough"
+        );
+    }
+
+    #[test]
+    fn direct_answer_does_not_passthrough_read_range_for_existence_with_path_contract() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","path":"/tmp/rustclaw.service","resolved_path":"/tmp/rustclaw.service","excerpt":"1|[Unit]\n2|Description=RustClaw Service\n3|[Service]\n4|ExecStart=/bin/bash start-all-bin.sh"}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "检查 rustclaw.service 是否存在，若存在返回路径并解释用途".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Filename,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ExistenceWithPath,
+                locator_hint: "rustclaw.service".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/rustclaw.service".to_string()),
+            ..AgentRunContext::default()
+        };
+
+        assert!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .is_none(),
+            "existence/path contracts with read_range evidence need synthesis, not raw file passthrough"
         );
     }
 
@@ -3884,6 +4889,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3932,6 +4938,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -3979,6 +4986,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -4027,6 +5035,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -4073,6 +5082,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -4119,6 +5129,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Strict,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -4165,6 +5176,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -4211,6 +5223,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -4256,6 +5269,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -4303,6 +5317,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -4352,6 +5367,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -4397,6 +5413,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -4444,6 +5461,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -4490,6 +5508,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -4507,7 +5526,7 @@ version.workspace = true
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
-            Some("有。示例：.git, .env")
+            Some("2")
         );
     }
 
@@ -4537,6 +5556,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Strict,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -4583,6 +5603,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -4629,6 +5650,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -4675,6 +5697,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -4694,6 +5717,56 @@ version.workspace = true
                 .as_deref(),
             Some("有，路径：/tmp/rustclaw-workspace/rustclaw.service")
         );
+    }
+
+    #[test]
+    fn direct_answer_formats_missing_path_batch_facts_with_reason() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":false,"path":"/tmp/missing.txt","error":"not found"}],"include_missing":true}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "检查文件 /tmp/missing.txt 是否存在，如果不存在，简短说明原因。"
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ExistenceWithPath,
+                locator_hint: "/tmp/missing.txt".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("missing path answer");
+
+        assert!(answer.contains("路径不存在"));
+        assert!(answer.contains("/tmp/missing.txt"));
     }
 
     #[test]
@@ -4736,6 +5809,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -4799,6 +5873,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -4862,6 +5937,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -4912,6 +5988,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -4958,6 +6035,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -5009,6 +6087,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -5056,6 +6135,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -5103,6 +6183,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -5150,6 +6231,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -5197,6 +6279,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -5248,6 +6331,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -5299,6 +6383,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -5346,6 +6431,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -5391,6 +6477,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -5409,6 +6496,65 @@ version.workspace = true
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
             Some("/home/guagua/rustclaw")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_path_contract_prefers_recorded_write_file_path() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "run_cmd",
+            "/home/guagua/rustclaw",
+        ));
+        loop_state.executed_step_results.push(ok_step(
+            "step_2",
+            "write_file",
+            "written 40 bytes to /home/guagua/rustclaw/document/pwd_line.txt",
+        ));
+        loop_state.output_vars.insert(
+            "last_file_path".to_string(),
+            "/home/guagua/rustclaw/document/pwd_line.txt".to_string(),
+        );
+        loop_state.last_written_file_path =
+            Some("/home/guagua/rustclaw/document/pwd_line.txt".to_string());
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "create the file and send me the file path only".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "llm_contract:scalar_path_only".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ScalarPathOnly,
+                locator_hint: "pwd_line.txt".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("/home/guagua/rustclaw/document/pwd_line.txt")
         );
     }
 
@@ -5437,6 +6583,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -5501,6 +6648,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -5566,6 +6714,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -5619,6 +6768,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -5666,6 +6816,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -5724,6 +6875,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -5770,6 +6922,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -5792,7 +6945,55 @@ version.workspace = true
     }
 
     #[test]
-    fn direct_scalar_uses_inventory_dir_hidden_count_for_hidden_entries_count_route() {
+    fn direct_scalar_path_lists_inventory_dir_candidates_without_choosing_first() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"inventory_dir","path":"/tmp/stem_multi","resolved_path":"/tmp/stem_multi","names_only":true,"names":["abcd.cpp","abcd.txt"],"counts":{"total":2}}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "find matching paths".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "structured scalar path request".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+                locator_hint: "/tmp/stem_multi".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("/tmp/stem_multi/abcd.cpp\n/tmp/stem_multi/abcd.txt")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_uses_inventory_dir_hidden_count_for_hidden_entries_contract() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -5805,7 +7006,7 @@ version.workspace = true
             resolved_intent: "数一下当前目录里以点开头的隐藏文件有几个，只输出数字".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "llm_contract:current_workspace_hidden_entries_count".to_string(),
+            route_reason: "llm_contract:hidden_entries_check".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -5816,6 +7017,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -5838,7 +7040,7 @@ version.workspace = true
     }
 
     #[test]
-    fn direct_answer_defers_package_manager_detect_summary_to_llm() {
+    fn direct_answer_formats_package_manager_detect_summary() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -5863,6 +7065,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -5880,7 +7083,7 @@ version.workspace = true
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
-            None
+            Some("当前识别到的包管理器是 brew。")
         );
     }
 
@@ -5909,6 +7112,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -5957,6 +7161,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -6004,6 +7209,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -6053,6 +7259,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -6131,6 +7338,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -6178,6 +7386,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6224,6 +7433,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -6267,6 +7477,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -6307,6 +7518,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6324,6 +7536,110 @@ version.workspace = true
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
             None
+        );
+    }
+
+    #[test]
+    fn direct_answer_defers_git_log_release_note_to_synthesis() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "read_file",
+            "RustClaw is a local Rust agent runtime centered on clawd.",
+        ));
+        loop_state.executed_step_results.push(ok_step(
+            "step_2",
+            "system_basic",
+            r#"{"action":"extract_field","field_path":"workspace.package.version","value_text":"0.1.6"}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step(
+            "step_3",
+            "git_basic",
+            "exit=0\n09342a6a fix: expose nl execution and locator flows\n336e8d92 docs: update planner-first architecture diagrams\n",
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "Write a short release note for RustClaw.".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+                locator_hint: "RustClaw".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+            None
+        );
+    }
+
+    #[test]
+    fn direct_scalar_extracts_git_commit_subject_from_oneline_log() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "git_basic",
+            "exit=0\n09342a6a fix: expose nl execution and locator flows\n",
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "return the latest git commit subject only".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::GitCommitSubject,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)),
+            Some("fix: expose nl execution and locator flows".to_string())
         );
     }
 
@@ -6350,6 +7666,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6395,6 +7712,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6445,6 +7763,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6496,6 +7815,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6555,6 +7875,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6602,6 +7923,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6624,7 +7946,7 @@ version.workspace = true
     }
 
     #[test]
-    fn direct_answer_passes_health_check_json_through_for_act_free_shape() {
+    fn direct_answer_defers_health_check_json_for_act_free_shape() {
         let mut loop_state = LoopState::new(2);
         let body = r#"{"clawd_health_port_open":true,"telegramd_process_count":0}"#;
         loop_state
@@ -6647,6 +7969,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6662,14 +7985,13 @@ version.workspace = true
             ..AgentRunContext::default()
         };
         assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .as_deref(),
-            Some(body)
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+            None
         );
     }
 
     #[test]
-    fn direct_answer_does_not_use_health_check_request_text_to_force_summary() {
+    fn direct_answer_defers_health_check_summary_for_act_free_shape() {
         let mut loop_state = LoopState::new(2);
         let body = r#"{"clawd_process_count":7,"telegramd_process_count":0,"clawd_health_port_open":false,"clawd_log":{"exists":false},"telegramd_log":{"exists":false},"system_health":{"os_family":"macos","warnings":[]}}"#;
         loop_state
@@ -6694,12 +8016,58 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: false,
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::None,
                 delivery_intent: OutputDeliveryIntent::None,
                 semantic_kind: Default::default(),
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+            None
+        );
+    }
+
+    #[test]
+    fn direct_answer_passes_health_check_json_only_for_raw_output_contract() {
+        let mut loop_state = LoopState::new(2);
+        let body = r#"{"clawd_health_port_open":true,"telegramd_process_count":0}"#;
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "health_check", body));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "run health_check and return the raw output".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::None,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::RawCommandOutput,
                 locator_hint: String::new(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
@@ -6745,6 +8113,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6790,6 +8159,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6837,6 +8207,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6882,6 +8253,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6927,6 +8299,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -6978,6 +8351,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -7029,6 +8403,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -7079,6 +8454,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
@@ -7125,6 +8501,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -7169,6 +8546,7 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -7191,7 +8569,7 @@ version.workspace = true
     }
 
     #[test]
-    fn direct_answer_defers_service_control_status_summary_to_llm_for_chinese_request() {
+    fn direct_answer_formats_service_control_status_summary_for_chinese_request() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -7215,12 +8593,13 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::None,
                 delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: Default::default(),
+                semantic_kind: OutputSemanticKind::ServiceStatus,
                 locator_hint: "telegramd".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
@@ -7230,13 +8609,14 @@ version.workspace = true
             ..AgentRunContext::default()
         };
         assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
-            None
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("telegramd 当前状态是 `telegramd=stopped`：rustclaw 已完成检查，未显示为运行中。")
         );
     }
 
     #[test]
-    fn direct_answer_defers_service_control_status_summary_to_llm_for_english_request() {
+    fn direct_answer_formats_service_control_status_summary_for_english_request() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -7262,12 +8642,13 @@ version.workspace = true
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::OneSentence,
                 requires_content_evidence: false,
                 delivery_required: false,
                 locator_kind: OutputLocatorKind::None,
                 delivery_intent: OutputDeliveryIntent::None,
-                semantic_kind: Default::default(),
+                semantic_kind: OutputSemanticKind::ServiceStatus,
                 locator_hint: "telegramd".to_string(),
                 self_extension: crate::SelfExtensionContract::default(),
             },
@@ -7277,8 +8658,9 @@ version.workspace = true
             ..AgentRunContext::default()
         };
         assert_eq!(
-            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
-            None
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("telegramd is running: rustclaw reports `telegramd=running` and verification passed.")
         );
     }
 

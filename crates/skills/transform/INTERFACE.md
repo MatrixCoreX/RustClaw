@@ -4,6 +4,11 @@
 
 `transform` is a structured JSON-array transformation engine.
 
+Planner selection guidance:
+- Use `transform` when the request supplies or points to structured records and asks to sort, filter, deduplicate, project fields, group, aggregate, or render the result as JSON, markdown table, or CSV.
+- Inline JSON arrays are valid input; pass them directly as `data` instead of answering from chat when this skill is enabled.
+- Preserve requested output formats such as markdown table by setting `output_format="md_table"`.
+
 Core capabilities:
 - nested path access (`a.b.c`)
 - type-normalized compare/sort

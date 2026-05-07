@@ -54,6 +54,8 @@ struct LlmConfig {
     qwen: Option<VendorConfig>,
     #[serde(default)]
     minimax: Option<VendorConfig>,
+    #[serde(default)]
+    mimo: Option<VendorConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -89,6 +91,8 @@ struct ImageSkillConfig {
     #[serde(default)]
     minimax_models: Option<Vec<String>>,
     #[serde(default)]
+    mimo_models: Option<Vec<String>>,
+    #[serde(default)]
     timeout_seconds: Option<u64>,
     #[serde(default)]
     max_images: Option<usize>,
@@ -116,6 +120,8 @@ struct ImageProviderOverrides {
     qwen: Option<VendorConfig>,
     #[serde(default)]
     minimax: Option<VendorConfig>,
+    #[serde(default)]
+    mimo: Option<VendorConfig>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -127,6 +133,7 @@ enum VendorKind {
     DeepSeek,
     Qwen,
     MiniMax,
+    Mimo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -377,6 +384,7 @@ fn vendor_models<'a>(cfg: &'a ImageSkillConfig, vendor: VendorKind) -> Option<&'
         VendorKind::DeepSeek => cfg.deepseek_models.as_ref(),
         VendorKind::Qwen => cfg.qwen_models.as_ref(),
         VendorKind::MiniMax => cfg.minimax_models.as_ref(),
+        VendorKind::Mimo => cfg.mimo_models.as_ref(),
     }
 }
 
@@ -953,7 +961,8 @@ fn infer_language_from_memory_snippets_llm(
         if model.is_empty() {
             continue;
         }
-        if let Ok(out) = openai_compat_chat_rewrite(vcfg, model, &prompt, t) {
+        if let Ok(out) = openai_compat_chat_rewrite(vcfg, model, &prompt, t, vk == VendorKind::Mimo)
+        {
             if let Some(lang) = parse_language_choice_from_llm(&out) {
                 return Some(lang);
             }
@@ -1022,21 +1031,23 @@ fn openai_compat_chat_rewrite(
     model: &str,
     user_prompt: &str,
     timeout_secs: u64,
+    include_api_key_header: bool,
 ) -> Result<String, String> {
     let client = Client::builder()
         .timeout(Duration::from_secs(timeout_secs.clamp(5, 120)))
         .build()
         .map_err(|e| format!("http client: {e}"))?;
-    let base = vcfg.base_url.trim_end_matches('/');
-    let url = format!("{base}/v1/chat/completions");
+    let url = format!("{}/chat/completions", trim_trailing_slash(&vcfg.base_url));
     let body = json!({
         "model": model,
         "messages": [{"role": "user", "content": user_prompt}],
         "temperature": 0.0
     });
-    let resp = client
-        .post(&url)
-        .bearer_auth(vcfg.api_key.trim())
+    let mut request = client.post(&url).bearer_auth(vcfg.api_key.trim());
+    if include_api_key_header {
+        request = request.header("api-key", vcfg.api_key.trim());
+    }
+    let resp = request
         .json(&body)
         .send()
         .map_err(|e| format!("chat completion request failed: {e}"))?;
@@ -1097,7 +1108,13 @@ fn maybe_rewrite_image_vision_text_for_target_language(
         if model.is_empty() {
             continue;
         }
-        if let Ok(out) = openai_compat_chat_rewrite(vcfg, model, &prompt, rewrite_timeout) {
+        if let Ok(out) = openai_compat_chat_rewrite(
+            vcfg,
+            model,
+            &prompt,
+            rewrite_timeout,
+            vk == VendorKind::Mimo,
+        ) {
             let t = out.trim();
             if !t.is_empty() {
                 return t.to_string();
@@ -1170,6 +1187,7 @@ fn prompt_vendor_name_for_vendor(vendor: VendorKind) -> &'static str {
         VendorKind::DeepSeek => "deepseek",
         VendorKind::Qwen => "qwen",
         VendorKind::MiniMax => "minimax",
+        VendorKind::Mimo => "mimo",
     }
 }
 
@@ -1309,6 +1327,23 @@ fn call_vendor_vision(
             let text = openai_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
             Ok((text, model, "compat"))
         }
+        VendorKind::Mimo => {
+            if mode == AdapterMode::Native {
+                return Err(
+                    "mimo native vision adapter is not implemented; use image_vision.adapter_mode=compat"
+                        .to_string(),
+                );
+            }
+            let model = requested_model.unwrap_or(&vcfg.model).to_string();
+            let client = Client::builder()
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
+                .build()
+                .map_err(|err| format!("build mimo client failed: {err}"))?;
+            let text = mimo_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
+            Ok((text, model, "compat"))
+        }
         VendorKind::MiniMax => {
             if mode == AdapterMode::Native {
                 return Err(
@@ -1369,6 +1404,48 @@ fn openai_vision(
     images: &[ImageSource],
     max_input_bytes: usize,
 ) -> Result<String, String> {
+    openai_compat_vision(
+        client,
+        cfg,
+        model,
+        prompt,
+        images,
+        max_input_bytes,
+        "openai",
+        false,
+    )
+}
+
+fn mimo_vision(
+    client: &Client,
+    cfg: &VendorConfig,
+    model: &str,
+    prompt: &str,
+    images: &[ImageSource],
+    max_input_bytes: usize,
+) -> Result<String, String> {
+    openai_compat_vision(
+        client,
+        cfg,
+        model,
+        prompt,
+        images,
+        max_input_bytes,
+        "mimo",
+        true,
+    )
+}
+
+fn openai_compat_vision(
+    client: &Client,
+    cfg: &VendorConfig,
+    model: &str,
+    prompt: &str,
+    images: &[ImageSource],
+    max_input_bytes: usize,
+    error_label: &str,
+    include_api_key_header: bool,
+) -> Result<String, String> {
     let mut content = vec![json!({"type":"text","text":prompt})];
     for image in images {
         let url = match image {
@@ -1391,19 +1468,21 @@ fn openai_vision(
         "temperature": 0.2
     });
     let url = format!("{}/chat/completions", trim_trailing_slash(&cfg.base_url));
-    let resp = client
-        .post(url)
-        .bearer_auth(&cfg.api_key)
+    let mut request = client.post(url).bearer_auth(&cfg.api_key);
+    if include_api_key_header {
+        request = request.header("api-key", &cfg.api_key);
+    }
+    let resp = request
         .json(&body)
         .send()
-        .map_err(|err| format!("openai request failed: {err}"))?;
+        .map_err(|err| format!("{error_label} request failed: {err}"))?;
     let status = resp.status().as_u16();
     let v: Value = resp
         .json()
         .map_err(|err| format!("parse openai response failed: {err}"))?;
     if status >= 300 {
         return Err(format!(
-            "openai error status={status}: {}",
+            "{error_label} error status={status}: {}",
             truncate(&v.to_string(), 400)
         ));
     }
@@ -1417,7 +1496,7 @@ fn openai_vision(
         return Ok(s.to_string());
     }
     Err(format!(
-        "openai response missing text: {}",
+        "{error_label} response missing text: {}",
         truncate(&v.to_string(), 400)
     ))
 }
@@ -1625,6 +1704,9 @@ fn apply_env_overrides(cfg: &mut RootConfig) {
     apply_vendor_api_key_env(&mut cfg.llm.deepseek, "DEEPSEEK_API_KEY");
     apply_vendor_api_key_env(&mut cfg.llm.qwen, "QWEN_API_KEY");
     apply_vendor_api_key_env(&mut cfg.llm.minimax, "MINIMAX_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.mimo, "MIMO_API_KEY");
+
+    apply_selected_openai_compat_env(cfg);
 
     apply_vendor_api_key_env(
         &mut cfg.image_vision.providers.openai,
@@ -1654,6 +1736,44 @@ fn apply_env_overrides(cfg: &mut RootConfig) {
         &mut cfg.image_vision.providers.minimax,
         "IMAGE_VISION_MINIMAX_API_KEY",
     );
+    apply_vendor_api_key_env(
+        &mut cfg.image_vision.providers.mimo,
+        "IMAGE_VISION_MIMO_API_KEY",
+    );
+}
+
+fn apply_selected_openai_compat_env(cfg: &mut RootConfig) {
+    let Some(vendor) = cfg.llm.selected_vendor.as_deref().and_then(parse_vendor) else {
+        return;
+    };
+    let base_url = env_non_empty("OPENAI_BASE_URL");
+    let model = env_non_empty("OPENAI_MODEL");
+    let api_key = env_non_empty("OPENAI_API_KEY");
+    let Some(target) = llm_vendor_config_mut(&mut cfg.llm, vendor) else {
+        return;
+    };
+    if let Some(value) = base_url {
+        target.base_url = value;
+    }
+    if let Some(value) = model {
+        target.model = value;
+    }
+    if let Some(value) = api_key {
+        target.api_key = value;
+    }
+}
+
+fn llm_vendor_config_mut(cfg: &mut LlmConfig, vendor: VendorKind) -> Option<&mut VendorConfig> {
+    match vendor {
+        VendorKind::OpenAI => cfg.openai.as_mut(),
+        VendorKind::Google => cfg.google.as_mut(),
+        VendorKind::Anthropic => cfg.anthropic.as_mut(),
+        VendorKind::Grok => cfg.grok.as_mut(),
+        VendorKind::DeepSeek => cfg.deepseek.as_mut(),
+        VendorKind::Qwen => cfg.qwen.as_mut(),
+        VendorKind::MiniMax => cfg.minimax.as_mut(),
+        VendorKind::Mimo => cfg.mimo.as_mut(),
+    }
 }
 
 fn workspace_root() -> PathBuf {
@@ -1691,6 +1811,7 @@ fn vendor_order(
         VendorKind::DeepSeek,
         VendorKind::Qwen,
         VendorKind::MiniMax,
+        VendorKind::Mimo,
     ] {
         if seen.insert(v) {
             out.push(v);
@@ -1708,6 +1829,7 @@ fn parse_vendor(name: &str) -> Option<VendorKind> {
         "deepseek" => Some(VendorKind::DeepSeek),
         "qwen" => Some(VendorKind::Qwen),
         "minimax" => Some(VendorKind::MiniMax),
+        "mimo" | "xiaomi" => Some(VendorKind::Mimo),
         _ => None,
     }
 }
@@ -1721,6 +1843,7 @@ fn vendor_name(v: VendorKind) -> &'static str {
         VendorKind::DeepSeek => "deepseek",
         VendorKind::Qwen => "qwen",
         VendorKind::MiniMax => "minimax",
+        VendorKind::Mimo => "mimo",
     }
 }
 
@@ -1772,6 +1895,12 @@ fn resolve_vendor_config<'a>(
             .or(cfg.llm.minimax.as_ref())
             .map(|v| ("minimax", v))
             .ok_or_else(|| "minimax config missing".to_string()),
+        VendorKind::Mimo => section
+            .mimo
+            .as_ref()
+            .or(cfg.llm.mimo.as_ref())
+            .map(|v| ("mimo", v))
+            .ok_or_else(|| "mimo config missing".to_string()),
     }
 }
 
@@ -1846,6 +1975,7 @@ mod tests {
         assert_eq!(parse_vendor("gemini"), Some(VendorKind::Google));
         assert_eq!(parse_vendor("claude"), Some(VendorKind::Anthropic));
         assert_eq!(parse_vendor("qwen"), Some(VendorKind::Qwen));
+        assert_eq!(parse_vendor("xiaomi"), Some(VendorKind::Mimo));
     }
 
     #[test]

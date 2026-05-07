@@ -1,5 +1,7 @@
+use regex::Regex;
 use serde_json::Value;
 use std::path::Path;
+use std::sync::OnceLock;
 
 use super::LoopState;
 
@@ -192,6 +194,7 @@ fn normalize_fs_search_arg_aliases(args: &mut Value) -> bool {
     );
     changed |= move_string_alias_if_missing(obj, "pattern", &["name_pattern"]);
     changed |= move_value_alias_if_missing(obj, "max_results", &["limit"]);
+    changed |= normalize_fs_search_find_path_contract(obj);
     changed |= normalize_fs_search_action_aliases(obj);
     if obj.get("action").and_then(|value| value.as_str()).is_none()
         && (obj
@@ -212,7 +215,8 @@ fn normalize_fs_search_arg_aliases(args: &mut Value) -> bool {
         .and_then(|value| value.as_str())
         .is_some_and(|action| action.eq_ignore_ascii_case("find_name"))
     {
-        changed |= move_string_alias_if_missing(obj, "pattern", &["name", "keyword", "query"]);
+        changed |=
+            move_string_alias_if_missing(obj, "pattern", &["name", "keyword", "query", "target"]);
         changed |= normalize_find_name_pattern_for_fs_search(obj);
     } else if obj
         .get("action")
@@ -222,6 +226,40 @@ fn normalize_fs_search_arg_aliases(args: &mut Value) -> bool {
         changed |= move_string_alias_if_missing(obj, "query", &["pattern", "keyword", "text"]);
     }
     changed
+}
+
+fn normalize_fs_search_find_path_contract(obj: &mut serde_json::Map<String, Value>) -> bool {
+    let Some(action) = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    if !action.eq_ignore_ascii_case("find_path") {
+        return false;
+    }
+    let was_find_name = action.eq_ignore_ascii_case("find_name");
+    let changed_root = move_string_alias_if_missing(obj, "root", &["path", "base_path"]);
+    let changed_pattern = move_string_alias_if_missing(
+        obj,
+        "pattern",
+        &["target", "name", "keyword", "query", "name_pattern"],
+    );
+    obj.insert("action".to_string(), Value::String("find_name".to_string()));
+    for alias in [
+        "path",
+        "base_path",
+        "target",
+        "name",
+        "keyword",
+        "query",
+        "name_pattern",
+    ] {
+        obj.remove(alias);
+    }
+    changed_root || changed_pattern || !was_find_name
 }
 
 fn normalize_fs_search_action_aliases(obj: &mut serde_json::Map<String, Value>) -> bool {
@@ -344,11 +382,16 @@ fn replace_double_brace_placeholders(
     input: &str,
     vars: &std::collections::HashMap<String, String>,
 ) -> String {
-    let mut out = input.to_string();
-    for (k, v) in vars {
-        out = out.replace(&format!("{{{{{k}}}}}"), v);
-    }
-    out
+    static PLACEHOLDER_RE: OnceLock<Regex> = OnceLock::new();
+    let re = PLACEHOLDER_RE.get_or_init(|| {
+        Regex::new(r"\{\{\s*([^{}]+?)\s*\}\}").expect("double brace placeholder regex")
+    });
+    re.replace_all(input, |caps: &regex::Captures<'_>| {
+        let whole = caps.get(0).map(|m| m.as_str()).unwrap_or_default();
+        let key = caps.get(1).map(|m| m.as_str().trim()).unwrap_or_default();
+        vars.get(key).cloned().unwrap_or_else(|| whole.to_string())
+    })
+    .into_owned()
 }
 
 fn single_brace_key(input: &str) -> Option<&str> {
@@ -414,7 +457,9 @@ pub(super) fn resolve_arg_value(value: &Value, loop_state: &LoopState) -> Value 
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_skill_arg_aliases, rewrite_args_with_auto_locator_path};
+    use super::{
+        normalize_skill_arg_aliases, resolve_arg_string, rewrite_args_with_auto_locator_path,
+    };
     use crate::{agent_engine::LoopState, IntentOutputContract, OutputLocatorKind};
     use serde_json::json;
     use std::fs;
@@ -446,6 +491,26 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.path);
         }
+    }
+
+    #[test]
+    fn resolve_arg_string_replaces_trimmed_double_brace_placeholders() {
+        let mut loop_state = LoopState::new(1);
+        loop_state
+            .output_vars
+            .insert("last_output[1]".to_string(), "clawd.log".to_string());
+        loop_state
+            .output_vars
+            .insert("last_output.0".to_string(), "act_plan.log".to_string());
+
+        assert_eq!(
+            resolve_arg_string("/logs/{{ last_output[1] }}", &loop_state),
+            "/logs/clawd.log"
+        );
+        assert_eq!(
+            resolve_arg_string("/logs/{{last_output.0}}", &loop_state),
+            "/logs/act_plan.log"
+        );
     }
 
     #[test]
@@ -525,6 +590,32 @@ mod tests {
     }
 
     #[test]
+    fn fs_search_find_path_contract_normalizes_to_find_name() {
+        let mut args = json!({
+            "action": "find_path",
+            "path": "/tmp/workspace",
+            "target": "archive",
+            "limit": 10
+        });
+
+        assert!(normalize_skill_arg_aliases("fs_search", &mut args));
+        assert_eq!(
+            args.get("action").and_then(|v| v.as_str()),
+            Some("find_name")
+        );
+        assert_eq!(
+            args.get("pattern").and_then(|v| v.as_str()),
+            Some("archive")
+        );
+        assert_eq!(
+            args.get("root").and_then(|v| v.as_str()),
+            Some("/tmp/workspace")
+        );
+        assert!(args.get("path").is_none());
+        assert!(args.get("target").is_none());
+    }
+
+    #[test]
     fn fs_search_globish_find_name_pattern_normalizes_to_contains_pattern() {
         let mut args = json!({
             "action": "find_name",
@@ -571,6 +662,7 @@ mod tests {
             .output_vars
             .insert("auto_locator_path".to_string(), search_root_path.clone());
         loop_state.output_contract = Some(IntentOutputContract {
+            exact_sentence_count: None,
             locator_kind: OutputLocatorKind::Path,
             locator_hint: search_root_path.clone(),
             ..IntentOutputContract::default()
@@ -602,6 +694,7 @@ mod tests {
             .output_vars
             .insert("auto_locator_path".to_string(), search_root_path.clone());
         loop_state.output_contract = Some(IntentOutputContract {
+            exact_sentence_count: None,
             locator_kind: OutputLocatorKind::Path,
             locator_hint: search_root_path.clone(),
             ..IntentOutputContract::default()
@@ -655,6 +748,7 @@ mod tests {
             .output_vars
             .insert("auto_locator_path".to_string(), root_path);
         loop_state.output_contract = Some(IntentOutputContract {
+            exact_sentence_count: None,
             locator_kind: OutputLocatorKind::CurrentWorkspace,
             locator_hint: String::new(),
             ..IntentOutputContract::default()
@@ -688,6 +782,7 @@ mod tests {
             .output_vars
             .insert("auto_locator_path".to_string(), archive_path.clone());
         loop_state.output_contract = Some(IntentOutputContract {
+            exact_sentence_count: None,
             locator_kind: OutputLocatorKind::Path,
             locator_hint: archive_path.clone(),
             ..IntentOutputContract::default()

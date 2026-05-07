@@ -815,6 +815,7 @@ fn looks_like_filename_locator(token: &str) -> bool {
         || token.contains('\\')
         || token.starts_with("http://")
         || token.starts_with("https://")
+        || crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(token)
     {
         return false;
     }
@@ -1136,6 +1137,11 @@ mod tests {
             "读一下那个开头并用一句话总结"
         ));
         assert!(!super::has_concrete_locator_hint("that config please"));
+    }
+
+    #[test]
+    fn concrete_locator_hint_rejects_dotted_version_numbers() {
+        assert!(!super::has_concrete_locator_hint("3.11 3.10"));
     }
 
     #[test]
