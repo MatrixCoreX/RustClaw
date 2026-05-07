@@ -16,9 +16,50 @@ use sha2::Sha256;
 use urlencoding::encode;
 
 type HmacSha256 = Hmac<Sha256>;
+const CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX: &str = "__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:";
+
 static I18N: OnceLock<HashMap<String, TextCatalog>> = OnceLock::new();
 thread_local! {
     static CURRENT_LANG: RefCell<String> = RefCell::new("zh-CN".to_string());
+}
+
+fn crypto_account_access_error(exchange: &str, err: impl AsRef<str>) -> String {
+    if err
+        .as_ref()
+        .trim()
+        .starts_with(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX)
+    {
+        return err.as_ref().trim().to_string();
+    }
+    let detail = sanitize_crypto_account_access_error_detail(err.as_ref());
+    let payload = json!({
+        "exchange": exchange.trim(),
+        "detail": detail,
+    });
+    let encoded = serde_json::to_string(&payload).unwrap_or_else(|_| {
+        json!({
+            "exchange": exchange.trim(),
+            "detail": "private exchange account access failed"
+        })
+        .to_string()
+    });
+    format!("{CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX}{encoded}")
+}
+
+fn sanitize_crypto_account_access_error_detail(raw: &str) -> String {
+    let one_line = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.trim().is_empty() {
+        return "private exchange account access failed".to_string();
+    }
+    let lower = one_line.to_ascii_lowercase();
+    if lower.contains("signature=")
+        || lower.contains("x-mbx-apikey")
+        || lower.contains("ok-access-key")
+    {
+        return "private exchange API request failed before a safe response could be read"
+            .to_string();
+    }
+    truncate(&one_line, 500)
 }
 
 #[derive(Debug, Deserialize)]
@@ -787,6 +828,16 @@ fn normalize_crypto_dispatch_action(raw: &str, obj: &serde_json::Map<String, Val
         }
         "get_price" => "quote".to_string(),
         "get_multi_price" => "multi_quote".to_string(),
+        "technical_indicator" | "technical_indicators" | "ta_indicator" | "ta" => {
+            "indicator".to_string()
+        }
+        "kline" | "klines" | "candlestick" | "candlesticks" | "ohlcv" => {
+            if obj.contains_key("indicator") {
+                "indicator".to_string()
+            } else {
+                "candles".to_string()
+            }
+        }
         "price_monitor" | "monitor_price" | "price_alert" | "volatility_alert" => {
             "price_alert_check".to_string()
         }
@@ -1401,6 +1452,7 @@ fn handle_candles(
     );
     let interval = obj
         .get("timeframe")
+        .or_else(|| obj.get("interval"))
         .and_then(|v| v.as_str())
         .unwrap_or("1h");
     let limit = obj
@@ -2303,8 +2355,11 @@ fn handle_positions(
 ) -> Result<(String, Value), String> {
     let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg)?;
     match exchange.as_str() {
-        "binance" => handle_positions_binance(client, cfg),
-        "okx" => handle_positions_okx(client, cfg),
+        "binance" => handle_positions_binance(client, cfg)
+            .map_err(|err| crypto_account_access_error("binance", err)),
+        "okx" => {
+            handle_positions_okx(client, cfg).map_err(|err| crypto_account_access_error("okx", err))
+        }
         _ => Err(tr_with(
             "crypto.err.unsupported_exchange_for_positions",
             &[("exchange", &exchange)],
@@ -2320,7 +2375,8 @@ fn handle_open_orders(
     let exchange = resolve_exchange(obj.get("exchange").and_then(|v| v.as_str()), cfg)?;
     match exchange.as_str() {
         "binance" => {
-            ensure_binance_config(cfg)?;
+            ensure_binance_config(cfg)
+                .map_err(|err| crypto_account_access_error("binance", err))?;
             let symbol = obj
                 .get("symbol")
                 .and_then(|v| v.as_str())
@@ -2329,13 +2385,9 @@ fn handle_open_orders(
             if let Some(s) = &symbol {
                 params.push(("symbol", s.clone()));
             }
-            let v = binance_signed_request(
-                client,
-                cfg,
-                Method::GET,
-                "/api/v3/openOrders",
-                &mut params,
-            )?;
+            let v =
+                binance_signed_request(client, cfg, Method::GET, "/api/v3/openOrders", &mut params)
+                    .map_err(|err| crypto_account_access_error("binance", err))?;
             let arr = v.as_array().cloned().unwrap_or_default();
             let mut lines = Vec::new();
             for order in &arr {
@@ -2392,7 +2444,7 @@ fn handle_open_orders(
             ))
         }
         "okx" => {
-            ensure_okx_config(cfg)?;
+            ensure_okx_config(cfg).map_err(|err| crypto_account_access_error("okx", err))?;
             let symbol = obj
                 .get("symbol")
                 .and_then(|v| v.as_str())
@@ -2410,7 +2462,8 @@ fn handle_open_orders(
                 "/api/v5/trade/orders-pending",
                 Some(&q),
                 None,
-            )?;
+            )
+            .map_err(|err| crypto_account_access_error("okx", err))?;
             let arr = v
                 .get("data")
                 .and_then(|x| x.as_array())
@@ -2592,7 +2645,8 @@ fn handle_trade_history(
         .clamp(1, 500);
     match exchange.as_str() {
         "binance" => {
-            ensure_binance_config(cfg)?;
+            ensure_binance_config(cfg)
+                .map_err(|err| crypto_account_access_error("binance", err))?;
             let symbol = obj
                 .get("symbol")
                 .and_then(|v| v.as_str())
@@ -2600,7 +2654,8 @@ fn handle_trade_history(
             let sym = normalize_symbol(symbol);
             let mut params = vec![("symbol", sym.clone()), ("limit", limit.to_string())];
             let v =
-                binance_signed_request(client, cfg, Method::GET, "/api/v3/myTrades", &mut params)?;
+                binance_signed_request(client, cfg, Method::GET, "/api/v3/myTrades", &mut params)
+                    .map_err(|err| crypto_account_access_error("binance", err))?;
             let arr = v.as_array().cloned().unwrap_or_default();
             let mut lines = Vec::new();
             for trade in &arr {
@@ -2647,7 +2702,7 @@ fn handle_trade_history(
             ))
         }
         "okx" => {
-            ensure_okx_config(cfg)?;
+            ensure_okx_config(cfg).map_err(|err| crypto_account_access_error("okx", err))?;
             let symbol = obj
                 .get("symbol")
                 .and_then(|v| v.as_str())
@@ -2664,7 +2719,8 @@ fn handle_trade_history(
                 "/api/v5/trade/fills",
                 Some(&q),
                 None,
-            )?;
+            )
+            .map_err(|err| crypto_account_access_error("okx", err))?;
             let arr = v
                 .get("data")
                 .and_then(|x| x.as_array())
@@ -2737,7 +2793,8 @@ fn handle_order_status_binance(
     if let Some(v) = client_order_id {
         params.push(("origClientOrderId", v.to_string()));
     }
-    let v = binance_signed_request(client, cfg, Method::GET, "/api/v3/order", &mut params)?;
+    let v = binance_signed_request(client, cfg, Method::GET, "/api/v3/order", &mut params)
+        .map_err(|err| crypto_account_access_error("binance", err))?;
     let status = v
         .get("status")
         .and_then(|x| x.as_str())
@@ -2790,7 +2847,8 @@ fn handle_cancel_order_binance(
 
 fn handle_positions_binance(client: &Client, cfg: &RootConfig) -> Result<(String, Value), String> {
     let mut params = Vec::<(&str, String)>::new();
-    let v = binance_signed_request(client, cfg, Method::GET, "/api/v3/account", &mut params)?;
+    let v = binance_signed_request(client, cfg, Method::GET, "/api/v3/account", &mut params)
+        .map_err(|err| crypto_account_access_error("binance", err))?;
     let mut items = Vec::new();
     let mut lines = Vec::new();
     if let Some(arr) = v.get("balances").and_then(|x| x.as_array()) {
@@ -2874,7 +2932,8 @@ fn handle_order_status_okx(
         "/api/v5/trade/order",
         Some(&q),
         None,
-    )?;
+    )
+    .map_err(|err| crypto_account_access_error("okx", err))?;
     let data = v
         .get("data")
         .and_then(|x| x.as_array())
@@ -2946,7 +3005,8 @@ fn handle_positions_okx(client: &Client, cfg: &RootConfig) -> Result<(String, Va
         "/api/v5/account/balance",
         None,
         None,
-    )?;
+    )
+    .map_err(|err| crypto_account_access_error("okx", err))?;
     let mut lines = Vec::new();
     let mut items = Vec::new();
     if let Some(details) = v
@@ -3012,8 +3072,7 @@ fn parse_trade_input(
     if !matches!(side.as_str(), "buy" | "sell") {
         return Err(tr("crypto.err.side_invalid"));
     }
-    let order_type = obj
-        .get("order_type")
+    let order_type = trade_order_type_value(obj)
         .and_then(|v| v.as_str())
         .unwrap_or("market")
         .trim()
@@ -3030,15 +3089,15 @@ fn parse_trade_input(
         .or_else(|| obj.get("quote_qty").and_then(value_to_f64))
         .or_else(|| obj.get("amount_usd").and_then(value_to_f64))
         .or_else(|| obj.get("notional_usd").and_then(value_to_f64));
-    let qty_all = obj
-        .get("qty")
+    let qty_value = trade_qty_value(obj);
+    let qty_all = qty_value
         .and_then(|v| v.as_str())
         .map(|s| {
             let n = s.trim().to_ascii_lowercase();
             matches!(n.as_str(), "all" | "max" | "全部" | "全仓")
         })
         .unwrap_or(false);
-    let mut qty = obj.get("qty").and_then(value_to_f64).unwrap_or(0.0);
+    let mut qty = qty_value.and_then(value_to_f64).unwrap_or(0.0);
     if let Some(v) = quote_qty_usd {
         if v <= 0.0 {
             return Err(tr("crypto.err.qty_must_gt_zero"));
@@ -3052,13 +3111,14 @@ fn parse_trade_input(
     } else if qty <= 0.0 {
         return Err(tr("crypto.err.qty_required_number"));
     }
-    let price = obj.get("price").and_then(|v| v.as_f64());
+    let price = obj.get("price").and_then(value_to_f64);
     let stop_price = obj
         .get("stop_price")
         .and_then(value_to_f64)
         .or_else(|| obj.get("stopPrice").and_then(value_to_f64));
     let time_in_force = obj
         .get("time_in_force")
+        .or_else(|| obj.get("timeInForce"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_ascii_uppercase());
     if matches!(order_type.as_str(), "limit" | "limit_maker") && price.unwrap_or(0.0) <= 0.0 {
@@ -3096,6 +3156,20 @@ fn parse_trade_input(
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
     })
+}
+
+fn trade_order_type_value<'a>(obj: &'a serde_json::Map<String, Value>) -> Option<&'a Value> {
+    obj.get("order_type")
+        .or_else(|| obj.get("orderType"))
+        .or_else(|| obj.get("type"))
+}
+
+fn trade_qty_value<'a>(obj: &'a serde_json::Map<String, Value>) -> Option<&'a Value> {
+    obj.get("qty")
+        .or_else(|| obj.get("quantity"))
+        .or_else(|| obj.get("amount"))
+        .or_else(|| obj.get("base_qty"))
+        .or_else(|| obj.get("base_quantity"))
 }
 
 fn risk_checks(
@@ -5107,6 +5181,73 @@ mod tests {
     }
 
     #[test]
+    fn parse_trade_accepts_structured_quantity_and_order_type_aliases() {
+        let cfg = RootConfig::default();
+        let mut m = serde_json::Map::new();
+        m.insert("exchange".to_string(), json!("binance"));
+        m.insert("symbol".to_string(), json!("BTCUSDT"));
+        m.insert("side".to_string(), json!("buy"));
+        m.insert("type".to_string(), json!("market"));
+        m.insert("quantity".to_string(), json!(0.01));
+
+        let trade = parse_trade_input(&m, &cfg).unwrap();
+        assert_eq!(trade.exchange, "binance");
+        assert_eq!(trade.symbol, "BTCUSDT");
+        assert_eq!(trade.order_type, "market");
+        assert_eq!(trade.qty, 0.01);
+    }
+
+    #[test]
+    fn parse_trade_accepts_amount_as_base_quantity_alias() {
+        let cfg = RootConfig::default();
+        let mut m = serde_json::Map::new();
+        m.insert("exchange".to_string(), json!("binance"));
+        m.insert("symbol".to_string(), json!("DOGEUSDT"));
+        m.insert("side".to_string(), json!("sell"));
+        m.insert("amount".to_string(), json!(100));
+
+        let trade = parse_trade_input(&m, &cfg).unwrap();
+        assert_eq!(trade.side, "sell");
+        assert_eq!(trade.order_type, "market");
+        assert_eq!(trade.qty, 100.0);
+        assert_eq!(trade.quote_qty_usd, None);
+    }
+
+    #[test]
+    fn parse_trade_quote_amount_alias_takes_priority_over_base_amount() {
+        let cfg = RootConfig::default();
+        let mut m = serde_json::Map::new();
+        m.insert("exchange".to_string(), json!("binance"));
+        m.insert("symbol".to_string(), json!("DOGEUSDT"));
+        m.insert("side".to_string(), json!("buy"));
+        m.insert("amount".to_string(), json!(100));
+        m.insert("amount_usd".to_string(), json!(10));
+
+        let trade = parse_trade_input(&m, &cfg).unwrap();
+        assert_eq!(trade.qty, 0.0);
+        assert_eq!(trade.quote_qty_usd, Some(10.0));
+    }
+
+    #[test]
+    fn parse_trade_accepts_camel_case_trade_aliases() {
+        let cfg = RootConfig::default();
+        let mut m = serde_json::Map::new();
+        m.insert("exchange".to_string(), json!("okx"));
+        m.insert("symbol".to_string(), json!("BTCUSDT"));
+        m.insert("side".to_string(), json!("buy"));
+        m.insert("orderType".to_string(), json!("limit"));
+        m.insert("base_quantity".to_string(), json!("0.02"));
+        m.insert("price".to_string(), json!("65000"));
+        m.insert("timeInForce".to_string(), json!("gtc"));
+
+        let trade = parse_trade_input(&m, &cfg).unwrap();
+        assert_eq!(trade.order_type, "limit");
+        assert_eq!(trade.qty, 0.02);
+        assert_eq!(trade.price, Some(65000.0));
+        assert_eq!(trade.time_in_force.as_deref(), Some("GTC"));
+    }
+
+    #[test]
     fn quote_symbol_mapping_for_new_exchanges() {
         assert_eq!(to_gateio_pair("BTCUSDT"), "BTC_USDT");
         assert_eq!(to_coinbase_product("BTCUSDT"), "BTC-USD");
@@ -5156,6 +5297,111 @@ mod tests {
         assert_eq!(
             normalize_crypto_dispatch_action("price", &multi),
             "multi_quote"
+        );
+    }
+
+    #[test]
+    fn normalize_crypto_dispatch_action_maps_indicator_aliases() {
+        let empty = serde_json::Map::new();
+        for alias in [
+            "technical_indicator",
+            "technical_indicators",
+            "ta_indicator",
+            "TA",
+        ] {
+            assert_eq!(normalize_crypto_dispatch_action(alias, &empty), "indicator");
+        }
+    }
+
+    #[test]
+    fn normalize_crypto_dispatch_action_maps_klines_by_args_shape() {
+        let empty = serde_json::Map::new();
+        assert_eq!(
+            normalize_crypto_dispatch_action("klines", &empty),
+            "candles"
+        );
+
+        let mut with_indicator = serde_json::Map::new();
+        with_indicator.insert("indicator".to_string(), json!("sma"));
+        assert_eq!(
+            normalize_crypto_dispatch_action("klines", &with_indicator),
+            "indicator"
+        );
+        assert_eq!(
+            normalize_crypto_dispatch_action("OHLCV", &with_indicator),
+            "indicator"
+        );
+    }
+
+    #[test]
+    fn account_access_errors_use_stable_prefix_and_safe_detail() {
+        let err = crypto_account_access_error(
+            "binance",
+            "binance api error code=-2015: Invalid API-key, IP, or permissions for action",
+        );
+
+        assert!(err.starts_with(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX));
+        let payload = err
+            .strip_prefix(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX)
+            .unwrap();
+        let parsed: Value = serde_json::from_str(payload).unwrap();
+        assert_eq!(
+            parsed.get("exchange").and_then(|v| v.as_str()),
+            Some("binance")
+        );
+        assert!(parsed
+            .get("detail")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .contains("Invalid API-key"));
+    }
+
+    #[test]
+    fn account_access_error_sanitizes_signed_url_details() {
+        let err = crypto_account_access_error(
+            "binance",
+            "request failed for https://example.invalid/api/v3/account?timestamp=1&signature=secret",
+        );
+        let payload: Value = serde_json::from_str(
+            err.strip_prefix(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX)
+                .unwrap(),
+        )
+        .unwrap();
+        let detail = payload.get("detail").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(!detail.contains("secret"));
+        assert!(!detail.contains("signature="));
+    }
+
+    #[test]
+    fn candles_accept_interval_alias_for_timeframe() {
+        let cfg = RootConfig::default();
+        let args = json!({
+            "action": "klines",
+            "symbol": "BTCUSDT",
+            "indicator": "SMA",
+            "interval": "1d",
+            "period": 14,
+            "timeout_seconds": 3
+        });
+        let action = args
+            .as_object()
+            .and_then(|obj| obj.get("action").and_then(|v| v.as_str()).map(|a| (obj, a)))
+            .map(|(obj, action)| normalize_crypto_dispatch_action(action, obj))
+            .unwrap();
+        assert_eq!(action, "indicator");
+
+        let obj = args.as_object().unwrap();
+        assert_eq!(
+            obj.get("timeframe")
+                .or_else(|| obj.get("interval"))
+                .and_then(|v| v.as_str()),
+            Some("1d")
+        );
+
+        let out = execute(&cfg, args, None);
+        assert!(
+            !matches!(&out, Err(err) if err == "unsupported action"),
+            "technical_indicator should normalize before dispatch"
         );
     }
 
@@ -5328,6 +5574,7 @@ mod tests {
     #[test]
     fn execute_uses_context_locale_for_binance_not_bound_message() {
         ensure_test_i18n_catalogs();
+        set_current_lang("zh-CN");
         let cfg = RootConfig::default();
         let err = execute(
             &cfg,
@@ -5341,7 +5588,7 @@ mod tests {
             })),
         )
         .unwrap_err();
-        assert!(err.contains("Binance API is not bound"));
+        assert_eq!(err, tr("crypto.err.binance_not_bound"));
         set_current_lang("zh-CN");
     }
 
@@ -5361,8 +5608,9 @@ mod tests {
             })),
         )
         .unwrap_err();
-        assert!(err.contains("还没有绑定 Binance API"));
+        assert_eq!(err, tr("crypto.err.binance_not_bound"));
         assert!(!err.contains("缺少 symbol"));
+        assert!(!err.contains("symbol is required"));
     }
 
     #[test]

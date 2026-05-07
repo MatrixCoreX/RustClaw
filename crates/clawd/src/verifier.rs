@@ -227,9 +227,10 @@ fn verify_step_args(
     state: &AppState,
     step: &PlanStep,
     normalized_skill: &str,
+    template_scope: &TemplatePlaceholderScope,
     issues: &mut Vec<VerifyIssue>,
 ) {
-    let has_unresolved_template = value_contains_unresolved_template(&step.args);
+    let has_unresolved_template = value_contains_unresolved_template(&step.args, template_scope);
     let manifest_required = manifest_required_args(state, normalized_skill);
     let fallback_required = required_args_for_skill(normalized_skill);
     let required: Vec<String> = if manifest_required.is_empty() {
@@ -277,16 +278,98 @@ fn verify_step_args(
     }
 }
 
-fn value_contains_unresolved_template(value: &serde_json::Value) -> bool {
+#[derive(Debug, Clone, Default)]
+struct TemplatePlaceholderScope {
+    exact_refs: HashSet<String>,
+    indexable_refs: HashSet<String>,
+}
+
+impl TemplatePlaceholderScope {
+    fn register_step_output(&mut self, step: &PlanStep, step_number: usize) {
+        self.exact_refs.insert("last_output".to_string());
+        self.exact_refs.insert(format!("s{step_number}.output"));
+        self.exact_refs
+            .insert(format!("{}.last_output", step.step_id.trim()));
+        self.indexable_refs.insert("last_output".to_string());
+        self.indexable_refs.insert(format!("s{step_number}"));
+        self.indexable_refs.insert(step.step_id.trim().to_string());
+    }
+
+    fn allows(&self, raw_ref: &str) -> bool {
+        let reference = raw_ref.trim();
+        if reference.is_empty() {
+            return false;
+        }
+        if self.exact_refs.contains(reference) {
+            return true;
+        }
+        placeholder_indexable_base(reference).is_some_and(|base| self.indexable_refs.contains(base))
+    }
+}
+
+fn placeholder_indexable_base(reference: &str) -> Option<&str> {
+    let dot = reference.find('.');
+    let bracket = reference.find('[');
+    let split_at = match (dot, bracket) {
+        (Some(a), Some(b)) => a.min(b),
+        (Some(a), None) | (None, Some(a)) => a,
+        (None, None) => return None,
+    };
+    let base = reference[..split_at].trim();
+    (!base.is_empty()).then_some(base)
+}
+
+fn extract_template_refs(text: &str) -> Option<Vec<String>> {
+    let mut refs = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("{{") {
+        let after_start = &rest[start + 2..];
+        let Some(end) = after_start.find("}}") else {
+            return None;
+        };
+        let reference = after_start[..end].trim();
+        if reference.is_empty() {
+            return None;
+        }
+        refs.push(reference.to_string());
+        rest = &after_start[end + 2..];
+    }
+    Some(refs)
+}
+
+fn value_contains_unresolved_template(
+    value: &serde_json::Value,
+    template_scope: &TemplatePlaceholderScope,
+) -> bool {
     match value {
         serde_json::Value::String(text) => {
             let text = text.trim();
-            text.contains("{{") && text.contains("}}")
+            if !(text.contains("{{") || text.contains("}}")) {
+                return false;
+            }
+            let Some(refs) = extract_template_refs(text) else {
+                return true;
+            };
+            refs.is_empty()
+                || refs
+                    .iter()
+                    .any(|reference| !template_scope.allows(reference))
         }
-        serde_json::Value::Array(items) => items.iter().any(value_contains_unresolved_template),
-        serde_json::Value::Object(map) => map.values().any(value_contains_unresolved_template),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .any(|item| value_contains_unresolved_template(item, template_scope)),
+        serde_json::Value::Object(map) => map
+            .values()
+            .any(|item| value_contains_unresolved_template(item, template_scope)),
         _ => false,
     }
+}
+
+fn step_can_produce_output_for_template_scope(step: &PlanStep) -> bool {
+    matches!(
+        step.action_type.as_str(),
+        "call_skill" | "call_tool" | "synthesize_answer"
+    )
 }
 
 fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
@@ -819,7 +902,8 @@ pub(crate) fn verify_plan(
         });
     }
 
-    for step in &input.plan_result.steps {
+    let mut template_scope = TemplatePlaceholderScope::default();
+    for (idx, step) in input.plan_result.steps.iter().enumerate() {
         if matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
             let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
             if !visible_skills.contains(&normalized_skill) {
@@ -829,7 +913,7 @@ pub(crate) fn verify_plan(
                     detail: format!("skill `{normalized_skill}` is not in planner visible skills"),
                 });
             }
-            verify_step_args(state, step, &normalized_skill, &mut issues);
+            verify_step_args(state, step, &normalized_skill, &template_scope, &mut issues);
             if !confirmation_already_granted
                 && (state.skill_requires_confirmation_policy(&normalized_skill)
                     || is_confirmation_like_skill(&normalized_skill))
@@ -851,6 +935,9 @@ pub(crate) fn verify_plan(
                     detail: format!("depends_on references missing step `{dep}`"),
                 });
             }
+        }
+        if step_can_produce_output_for_template_scope(step) {
+            template_scope.register_step_output(step, idx + 1);
         }
     }
 
@@ -935,6 +1022,24 @@ auto_invocable = true
 input_schema = { type = "object", required = ["command"], properties = { command = { type = "string" } } }
 
 [[skills]]
+name = "list_dir"
+enabled = true
+kind = "builtin"
+output_kind = "text"
+side_effect = false
+auto_invocable = true
+input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
+
+[[skills]]
+name = "write_file"
+enabled = true
+kind = "builtin"
+output_kind = "text"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", required = ["path", "content"], properties = { path = { type = "string" }, content = { type = "string" } } }
+
+[[skills]]
 name = "primary_reader"
 enabled = true
 kind = "runner"
@@ -965,10 +1070,17 @@ primary_fallback_role = "fallback"
     fn test_state() -> AppState {
         let registry = Arc::new(test_registry());
         let skills_list = Arc::new(
-            ["read_file", "run_cmd", "primary_reader", "fallback_reader"]
-                .into_iter()
-                .map(str::to_string)
-                .collect::<HashSet<_>>(),
+            [
+                "read_file",
+                "run_cmd",
+                "list_dir",
+                "write_file",
+                "primary_reader",
+                "fallback_reader",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<HashSet<_>>(),
         );
         let agents_by_id = HashMap::from([(
             crate::DEFAULT_AGENT_ID.to_string(),
@@ -1120,6 +1232,53 @@ primary_fallback_role = "fallback"
             .and_then(|value| value.as_str())
             .unwrap_or_default()
             .contains("具体内容"));
+    }
+
+    #[test]
+    fn observe_mode_allows_prior_output_template_in_later_args() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(true)),
+                request_text: Some(
+                    "查看 logs 目录，把里面的日志文件名整理到 logs_inventory.txt，然后把文件发给我。",
+                ),
+                context_bundle_summary: Some("auto_locator_path=/home/guagua/rustclaw/logs"),
+                plan_result: &plan_result(vec![
+                    PlanStep {
+                        step_id: "step_1".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "list_dir".to_string(),
+                        args: json!({ "path": "/home/guagua/rustclaw/logs" }),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    PlanStep {
+                        step_id: "step_2".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "write_file".to_string(),
+                        args: json!({
+                            "path": "/home/guagua/rustclaw/logs_inventory.txt",
+                            "content": "{{last_output}}"
+                        }),
+                        depends_on: vec!["step_1".to_string()],
+                        why: String::new(),
+                    },
+                ]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::ObserveOnly,
+        );
+
+        assert!(result.approved);
+        assert!(!result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::UnresolvedTemplateArg)));
+        assert!(result.rewritten_steps.is_empty());
     }
 
     #[test]

@@ -765,7 +765,10 @@ pub(crate) fn render_clarify_fallback_with_language_hint(
     clarify_fallback_text_with_language_hint(state, source, context_hint, language_hint)
 }
 
-fn fallback_prefers_english_for_language_hint(state: &AppState, language_hint: &str) -> bool {
+pub(crate) fn fallback_prefers_english_for_language_hint(
+    state: &AppState,
+    language_hint: &str,
+) -> bool {
     let normalized = language_hint.trim().to_ascii_lowercase();
     if normalized.starts_with("en") {
         true

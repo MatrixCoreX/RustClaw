@@ -114,11 +114,15 @@ pub(crate) fn intercept_response_payload_for_delivery(
         );
     let directory_lookup_candidate = normalized_text.trim();
     let may_replace_with_directory_lookup = directory_lookup_candidate.is_empty()
-        || (!matches!(output_contract.semantic_kind, OutputSemanticKind::FileNames)
-            && looks_like_delivery_locator_literal(
-                directory_lookup_candidate,
-                &output_contract.locator_hint,
-            ));
+        || (!matches!(
+            output_contract.semantic_kind,
+            OutputSemanticKind::FileNames
+                | OutputSemanticKind::DirectoryNames
+                | OutputSemanticKind::FilePaths
+        ) && looks_like_delivery_locator_literal(
+            directory_lookup_candidate,
+            &output_contract.locator_hint,
+        ));
     if may_replace_with_directory_lookup {
         if let Some(directory_lookup_text) = try_handle_directory_lookup_request(
             state,

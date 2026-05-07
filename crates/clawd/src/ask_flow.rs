@@ -143,6 +143,82 @@ fn runtime_scalar_path_direct_answer_candidate(
         .then(|| candidate.to_string())
 }
 
+fn chat_context_execution_summary(language_hint: &str) -> String {
+    if language_hint.to_ascii_lowercase().starts_with("en") {
+        format!(
+            "{}\n1. Used the current request and available conversation context to produce the answer.",
+            crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN
+        )
+    } else {
+        format!(
+            "{}\n1. 使用当前请求和可用会话上下文生成回答。",
+            crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX
+        )
+    }
+}
+
+fn ask_reply_with_chat_process(text: String, language_hint: &str) -> AskReply {
+    let answer = text.trim().to_string();
+    if answer.is_empty() || crate::finalize::is_execution_summary_message(&answer) {
+        AskReply::llm(text)
+    } else {
+        AskReply::llm(answer.clone())
+            .with_messages(vec![chat_context_execution_summary(language_hint), answer])
+    }
+}
+
+fn state_patch_alias_bindings_ack(
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+    language_hint: &str,
+) -> Option<AskReply> {
+    let analysis = agent_run_context?.turn_analysis.as_ref()?;
+    if analysis.turn_type != Some(crate::intent_router::TurnType::PreferenceOrMemory) {
+        return None;
+    }
+    let bindings = analysis
+        .state_patch
+        .as_ref()?
+        .get("alias_bindings")?
+        .as_array()?;
+    let pairs = bindings
+        .iter()
+        .filter_map(|binding| {
+            let alias = binding.get("alias")?.as_str()?.trim();
+            let target = binding.get("target")?.as_str()?.trim();
+            if alias.is_empty() || target.is_empty() {
+                None
+            } else {
+                Some((alias, target))
+            }
+        })
+        .collect::<Vec<_>>();
+    if pairs.is_empty() {
+        return None;
+    }
+    let answer = if language_hint == "en" {
+        if pairs.len() == 1 {
+            format!("Remembered: `{}` -> `{}`.", pairs[0].0, pairs[0].1)
+        } else {
+            let lines = pairs
+                .iter()
+                .map(|(alias, target)| format!("- `{alias}` -> `{target}`"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("Remembered:\n{lines}")
+        }
+    } else if pairs.len() == 1 {
+        format!("已记住：`{}` -> `{}`。", pairs[0].0, pairs[0].1)
+    } else {
+        let lines = pairs
+            .iter()
+            .map(|(alias, target)| format!("- `{alias}` -> `{target}`"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("已记住：\n{lines}")
+    };
+    Some(ask_reply_with_chat_process(answer, language_hint))
+}
+
 pub(crate) fn build_resume_continue_execute_prompt(
     state: &AppState,
     task: &ClaimedTask,
@@ -346,6 +422,22 @@ fn chat_route_resolution_context(
     if !locator_hint.is_empty() {
         lines.push(format!("locator_hint: {locator_hint}"));
     }
+    lines.push(format!(
+        "response_shape: {}",
+        route.output_contract.response_shape.as_str()
+    ));
+    lines.push(format!(
+        "semantic_kind: {}",
+        route.output_contract.semantic_kind.as_str()
+    ));
+    lines.push(format!(
+        "requires_content_evidence: {}",
+        route.output_contract.requires_content_evidence
+    ));
+    lines.push(format!(
+        "delivery_required: {}",
+        route.output_contract.delivery_required
+    ));
     let route_reason = route.route_reason.trim();
     if !route_reason.is_empty() {
         lines.push(format!("route_reason: {route_reason}"));
@@ -363,15 +455,41 @@ fn chat_prompt_context_with_route_resolution(
     chat_prompt_context: &str,
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
 ) -> String {
-    let Some(route_context) = chat_route_resolution_context(agent_run_context) else {
+    let route_context = chat_route_resolution_context(agent_run_context);
+    let recent_execution_context = chat_recent_execution_context(agent_run_context);
+    if route_context.is_none() && recent_execution_context.is_none() {
         return chat_prompt_context.to_string();
     };
     let trimmed_context = chat_prompt_context.trim();
-    if trimmed_context.is_empty() || trimmed_context == "<none>" {
-        route_context
-    } else {
-        format!("{chat_prompt_context}\n\n{route_context}")
+    let mut blocks = Vec::new();
+    if !(trimmed_context.is_empty() || trimmed_context == "<none>") {
+        blocks.push(chat_prompt_context.to_string());
     }
+    if let Some(route_context) = route_context {
+        blocks.push(route_context);
+    }
+    if let Some(recent_execution_context) = recent_execution_context {
+        blocks.push(recent_execution_context);
+    }
+    blocks.join("\n\n")
+}
+
+fn chat_recent_execution_context(
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> Option<String> {
+    let ctx = agent_run_context?;
+    let route = ctx.route_result.as_ref()?;
+    if !route.output_contract.requires_content_evidence {
+        return None;
+    }
+    let context = ctx
+        .cross_turn_recent_execution_context
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "<none>")?;
+    Some(format!(
+        "### RECENT_EXECUTION_CONTEXT\nUse this observed execution context as evidence for this turn when the route contract requires content evidence. Do not invent details beyond it.\n{context}"
+    ))
 }
 
 fn chat_user_request<'a>(resolved_prompt: &'a str, execution_user_request: &'a str) -> &'a str {
@@ -480,6 +598,13 @@ pub(crate) async fn execute_ask_routed(
     {
         return Ok(reply);
     }
+    let current_turn_user_request_for_process =
+        task_payload_text(task).unwrap_or_else(|| execution_user_request.to_string());
+    let process_language_hint = crate::language_policy::task_response_language_hint(
+        state,
+        task,
+        &current_turn_user_request_for_process,
+    );
     if let Some(candidate) =
         runtime_scalar_path_direct_answer_candidate(state, agent_run_context.as_ref())
     {
@@ -489,7 +614,10 @@ pub(crate) async fn execute_ask_routed(
             task.task_id,
             candidate.len()
         );
-        return Ok(AskReply::llm(candidate));
+        return Ok(ask_reply_with_chat_process(
+            candidate,
+            &process_language_hint,
+        ));
     }
     match &ask_mode {
         crate::AskMode::ClarifyOrChat {
@@ -509,7 +637,10 @@ pub(crate) async fn execute_ask_routed(
                     task.task_id,
                     candidate.len()
                 );
-                return Ok(AskReply::llm(candidate));
+                return Ok(ask_reply_with_chat_process(
+                    candidate,
+                    &process_language_hint,
+                ));
             }
             let chat_prompt_context = chat_prompt_context_with_route_resolution(
                 chat_prompt_context,
@@ -541,6 +672,16 @@ pub(crate) async fn execute_ask_routed(
                 task,
                 &current_turn_user_request,
             );
+            if let Some(reply) =
+                state_patch_alias_bindings_ack(agent_run_context.as_ref(), &request_language_hint)
+            {
+                tracing::info!(
+                    "{} worker_once: ask state_patch_alias_bindings_ack task_id={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id
+                );
+                return Ok(reply);
+            }
             let request_for_chat_prompt =
                 chat_request_for_prompt(&current_turn_user_request, chat_user_request);
             let chat_prompt = crate::render_prompt_template(
@@ -563,7 +704,7 @@ pub(crate) async fn execute_ask_routed(
                 &chat_prompt_source,
             )
             .await
-            .map(crate::AskReply::llm)
+            .map(|answer| ask_reply_with_chat_process(answer, &request_language_hint))
             .map_err(|e| e.to_string())
         }
         crate::AskMode::Act { .. } => {
@@ -612,7 +753,7 @@ pub(crate) async fn execute_ask_routed(
                 crate::fallback::ClarifyFallbackSource::IntentUnresolved,
             )
             .await;
-            Ok(AskReply::non_llm(clarify))
+            Ok(ask_reply_with_chat_process(clarify, &process_language_hint))
         }
         // Phase 3.2 Stage C5：execute_ask_routed 入参 normalizer_mode 是 RoutedMode
         // （4 个变体），经 from_routed_mode 派生只会得到上面 4 个 entry，
@@ -680,9 +821,10 @@ pub(crate) async fn analyze_attached_images_for_ask(
 #[cfg(test)]
 mod tests {
     use super::{
-        chat_prompt_context_with_route_resolution, chat_request_for_prompt, chat_user_request,
-        normalizer_chat_direct_answer_candidate, preferred_route_clarify_question,
-        route_structured_clarify_context, runtime_scalar_path_direct_answer_candidate,
+        ask_reply_with_chat_process, chat_prompt_context_with_route_resolution,
+        chat_request_for_prompt, chat_user_request, normalizer_chat_direct_answer_candidate,
+        preferred_route_clarify_question, route_structured_clarify_context,
+        runtime_scalar_path_direct_answer_candidate, state_patch_alias_bindings_ack,
         task_payload_text,
     };
 
@@ -705,6 +847,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 locator_hint: "scripts".to_string(),
                 ..Default::default()
             },
@@ -754,6 +897,45 @@ mod tests {
     }
 
     #[test]
+    fn chat_prompt_context_includes_recent_execution_when_contract_requires_evidence() {
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Chat,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            resolved_intent: "Summarize the observed README excerpt in one sentence".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "prior observed content is available".to_string(),
+            route_confidence: Some(0.94),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                requires_content_evidence: true,
+                ..Default::default()
+            },
+        };
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            cross_turn_recent_execution_context: Some(
+                "read_range path=/tmp/README.md\n# RustClaw\nlocal Rust agent runtime".to_string(),
+            ),
+            ..Default::default()
+        };
+
+        let rendered = chat_prompt_context_with_route_resolution("<none>", Some(&ctx));
+
+        assert!(rendered.contains("### ROUTE_RESOLUTION"));
+        assert!(rendered.contains("### RECENT_EXECUTION_CONTEXT"));
+        assert!(rendered.contains("local Rust agent runtime"));
+    }
+
+    #[test]
     fn chat_user_request_preserves_inline_structured_prompt_when_resolution_dropped_payload() {
         let prompt = r#"sort this JSON array by score descending and render it as a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
         let resolved = "Sort the provided JSON array by score in descending order and output as a markdown table";
@@ -787,6 +969,80 @@ mod tests {
             payload_json: serde_json::json!({"text":"先只看登录模块"}).to_string(),
         };
         assert_eq!(task_payload_text(&task).as_deref(), Some("先只看登录模块"));
+    }
+
+    #[test]
+    fn chat_reply_attaches_context_process_message() {
+        let reply =
+            ask_reply_with_chat_process("RustClaw 是本地 agent 运行时。".to_string(), "zh-CN");
+
+        assert_eq!(reply.text, "RustClaw 是本地 agent 运行时。");
+        assert_eq!(reply.messages.len(), 2);
+        assert!(reply.messages[0].contains("**执行过程**"));
+        assert!(reply.messages[0].contains("可用会话上下文"));
+        assert_eq!(reply.messages[1], "RustClaw 是本地 agent 运行时。");
+    }
+
+    #[test]
+    fn english_chat_reply_attaches_execution_process_message() {
+        let reply =
+            ask_reply_with_chat_process("RustClaw is a local agent runtime.".to_string(), "en");
+
+        assert_eq!(reply.messages.len(), 2);
+        assert!(reply.messages[0].contains("**Execution**"));
+        assert!(reply.messages[0].contains("available conversation context"));
+        assert_eq!(reply.messages[1], "RustClaw is a local agent runtime.");
+    }
+
+    #[test]
+    fn alias_state_patch_uses_structured_ack_without_chat_llm() {
+        let ctx = crate::agent_engine::AgentRunContext {
+            turn_analysis: Some(crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+                should_interrupt_active_run: false,
+                state_patch: Some(serde_json::json!({
+                    "alias_bindings": [
+                        {
+                            "alias": "that docs dir",
+                            "target": "/tmp/docs"
+                        }
+                    ]
+                })),
+                attachment_processing_required: false,
+            }),
+            ..Default::default()
+        };
+
+        let reply = state_patch_alias_bindings_ack(Some(&ctx), "zh-CN").unwrap();
+
+        assert_eq!(reply.messages.len(), 2);
+        assert!(reply.messages[0].contains("**执行过程**"));
+        assert_eq!(reply.text, "已记住：`that docs dir` -> `/tmp/docs`。");
+        assert_eq!(reply.messages[1], reply.text);
+    }
+
+    #[test]
+    fn alias_state_patch_ack_requires_memory_turn() {
+        let ctx = crate::agent_engine::AgentRunContext {
+            turn_analysis: Some(crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::TaskRequest),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+                should_interrupt_active_run: false,
+                state_patch: Some(serde_json::json!({
+                    "alias_bindings": [
+                        {
+                            "alias": "that docs dir",
+                            "target": "/tmp/docs"
+                        }
+                    ]
+                })),
+                attachment_processing_required: false,
+            }),
+            ..Default::default()
+        };
+
+        assert!(state_patch_alias_bindings_ack(Some(&ctx), "zh-CN").is_none());
     }
 
     #[test]
@@ -887,6 +1143,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::Strict,
                 requires_content_evidence: true,
                 semantic_kind: crate::OutputSemanticKind::HiddenEntriesCheck,
@@ -973,6 +1230,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::Scalar,
                 semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
                 locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
@@ -1011,6 +1269,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::Scalar,
                 semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
                 locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
@@ -1048,6 +1307,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::Free,
                 requires_content_evidence: true,
                 locator_kind: crate::OutputLocatorKind::Path,
@@ -1094,6 +1354,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 locator_kind: crate::OutputLocatorKind::Filename,

@@ -380,6 +380,8 @@ RustClaw 当前内置的技能已经比较完整，按类别可大致分为：
 - `crates/skills/*/INTERFACE.md`
 - `prompts/layers/generated/skills/*.md`
 
+Planner 的技能选择必须由 registry 与 interface/prompt 驱动。一个技能完成注册、开启、补齐 `INTERFACE.md` 并执行 `python3 scripts/sync_skill_docs.py` 后，planner 应该通过生成的 skill prompt 学会何时使用它。不要为了让某个新自然语言样例通过，就在 `clawd` 里新增按技能名分支的选择逻辑。若选择准确率不够，优先改 `INTERFACE.md`、生成提示词或必要的 vendor patch；Rust 代码只保留协议校验、权限/安全边界、runner 派发、输出合同校验和确定性的跨平台执行兼容。
+
 技能接入入口：
 
 - 统一说明：`docs/skill_integration_guide.md`

@@ -95,22 +95,20 @@ fn minimax_templates_allow_the_repo_default_model() {
     let root_config = parse_toml(&root.join("configs/config.toml"));
     let docker_config = parse_toml(&root.join("docker/config/config.toml"));
 
-    let selected_model = root_config["llm"]["selected_model"]
-        .as_str()
-        .expect("root selected model");
+    let root_model = minimax_default_model(&root_config);
     let root_models = minimax_models(&root_config);
     let docker_models = minimax_models(&docker_config);
 
     assert!(
-        root_models.iter().any(|model| model == selected_model),
-        "root minimax models should include selected model {selected_model}, got {root_models:?}"
+        root_models.iter().any(|model| model == &root_model),
+        "root minimax models should include default model {root_model}, got {root_models:?}"
     );
     assert!(
-        docker_models.iter().any(|model| model == selected_model),
-        "docker minimax models should include selected model {selected_model}, got {docker_models:?}"
+        docker_models.iter().any(|model| model == &root_model),
+        "docker minimax models should include root default model {root_model}, got {docker_models:?}"
     );
     assert_eq!(
-        minimax_default_model(&root_config),
+        root_model,
         minimax_default_model(&docker_config),
         "root and docker minimax defaults should stay aligned",
     );

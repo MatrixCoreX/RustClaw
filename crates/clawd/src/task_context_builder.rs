@@ -38,6 +38,7 @@ pub(crate) struct ExecutionContextView {
     pub(crate) budget_tier: ExecutionContextBudgetTier,
     pub(crate) memory_ctx: PromptMemoryContext,
     pub(crate) runtime_context: String,
+    pub(crate) session_alias_context: String,
     pub(crate) recent_turns_full: String,
     pub(crate) last_turn_full: String,
     pub(crate) recent_execution_anchor: String,
@@ -441,6 +442,8 @@ fn route_uses_structured_listing(route_result: &RouteResult) -> bool {
     matches!(
         route_result.output_contract.semantic_kind,
         crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::FilePaths
             | crate::OutputSemanticKind::SqliteTableListing
             | crate::OutputSemanticKind::SqliteTableNamesOnly
     ) || matches!(
@@ -683,6 +686,7 @@ pub(crate) fn build_execution_task_context_bundle(
         budget_tier,
         memory_ctx,
         runtime_context: build_runtime_context(state),
+        session_alias_context: build_session_alias_context(&session_snapshot),
         recent_turns_full: if matches!(budget_tier, ExecutionContextBudgetTier::Full)
             && !suppress_execution_text_context
         {
@@ -764,6 +768,14 @@ pub(crate) fn apply_execution_context_to_prompts(
         chat_prompt_context.push_str(&execution_view.runtime_context);
         prompt_with_memory_for_execution.push_str("\n\n");
         prompt_with_memory_for_execution.push_str(&execution_view.runtime_context);
+    }
+    if execution_view.session_alias_context != "<none>" {
+        let alias_context_block = format!(
+            "\n\n{}\nAlias execution rule: when the current goal or request mentions more than one alias, treat each alias target as an independent authoritative concrete target. Do not rebuild a file alias under another directory alias unless that exact alias target says it is inside that directory.",
+            execution_view.session_alias_context
+        );
+        resolved_prompt_for_execution.push_str(&alias_context_block);
+        prompt_with_memory_for_execution.push_str(&alias_context_block);
     }
     if execution_view.recent_turns_full != "<none>" {
         chat_prompt_context.push_str("\n\n");
@@ -1485,6 +1497,7 @@ mod tests {
                     recent_related_events: Vec::new(),
                 },
                 runtime_context: "<none>".to_string(),
+                session_alias_context: "<none>".to_string(),
                 recent_turns_full: "### RECENT_TURNS_FULL\n[TURN -2]\nUser: 请记住测试编号 client-like-continuous-1\nAssistant: 已记住\n[/TURN]".to_string(),
                 last_turn_full: "### LAST_TURN_FULL\n[TURN -1]\nUser: other\nAssistant: other\n[/TURN]".to_string(),
                 recent_execution_anchor: "<none>".to_string(),
@@ -1525,6 +1538,7 @@ mod tests {
                     recent_related_events: Vec::new(),
                 },
                 runtime_context: "### RUNTIME_CONTEXT\ncurrent_process_cwd: /tmp/workspace\nworkspace_root: /tmp/workspace".to_string(),
+                session_alias_context: "<none>".to_string(),
                 recent_turns_full: "<none>".to_string(),
                 last_turn_full: "<none>".to_string(),
                 recent_execution_anchor: "<none>".to_string(),
@@ -1545,6 +1559,51 @@ mod tests {
         assert!(chat_context.contains("current_process_cwd: /tmp/workspace"));
         assert!(execution.contains("### RUNTIME_CONTEXT"));
         assert!(execution.contains("workspace_root: /tmp/workspace"));
+    }
+
+    #[test]
+    fn execution_context_adds_session_alias_bindings_to_planner_prompts() {
+        let bundle = TaskContextBundle {
+            raw_sources: TaskContextRawSources::default(),
+            planner_view: PlannerContextView::default(),
+            route_view: None,
+            execution_view: Some(ExecutionContextView {
+                budget_tier: crate::task_context_builder::ExecutionContextBudgetTier::Full,
+                memory_ctx: crate::memory::service::PromptMemoryContext {
+                    prompt_with_memory: String::new(),
+                    chat_prompt_context: String::new(),
+                    long_term_summary: None,
+                    preferences: Vec::new(),
+                    recalled: Vec::new(),
+                    similar_triggers: Vec::new(),
+                    relevant_facts: Vec::new(),
+                    recent_related_events: Vec::new(),
+                },
+                runtime_context: "<none>".to_string(),
+                session_alias_context:
+                    "### SESSION_ALIAS_BINDINGS\n- alias: 甲目录\n  target: /tmp/docs/archive\n- alias: 乙文件\n  target: /tmp/docs/release_checklist.md"
+                        .to_string(),
+                recent_turns_full: "<none>".to_string(),
+                last_turn_full: "<none>".to_string(),
+                recent_execution_anchor: "<none>".to_string(),
+                recent_execution_context: "<none>".to_string(),
+                image_context: None,
+            }),
+        };
+        let mut chat_context = "### MEMORY_CONTEXT\n<none>".to_string();
+        let mut resolved = "列一下甲目录里的名字，再说明乙文件".to_string();
+        let mut execution = resolved.clone();
+        apply_execution_context_to_prompts(
+            &bundle,
+            &mut chat_context,
+            &mut resolved,
+            &mut execution,
+        );
+        assert!(resolved.contains("### SESSION_ALIAS_BINDINGS"));
+        assert!(resolved.contains("target: /tmp/docs/release_checklist.md"));
+        assert!(resolved.contains("independent authoritative concrete target"));
+        assert!(execution.contains("target: /tmp/docs/archive"));
+        assert!(!chat_context.contains("### SESSION_ALIAS_BINDINGS"));
     }
 
     #[test]

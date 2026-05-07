@@ -23,6 +23,7 @@ CASE_FILE_VALUE=""
 CASE_LIMIT_VALUE=""
 CASE_START_VALUE="${CASE_START:-1}"
 RUN_BUILTIN_SMOKE=1
+CASE_GROUP_ISOLATION="${CASE_GROUP_ISOLATION:-1}"
 RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
 TEST_ID="${CLIENT_LIKE_TEST_ID:-client-like-continuous-${RUN_STAMP}}"
 
@@ -54,6 +55,8 @@ Options:
   --case-start N             start from the Nth appended case. Use with --skip-smoke and the same
                              --external-chat-id/--external-user-id to resume after provider failure.
   --skip-smoke               run only the case file prompts, without the built-in 5-turn memory smoke
+  --shared-case-chat         append all case-file prompts into one external_chat_id. By default,
+                             independent case groups are isolated while turns in the same group share context.
   --prompt-reply-only        print only prompt and reply snippets. Default: on
   --verbose-turn-output      print compact turn status/reply fields instead of prompt/reply blocks
   --quality-guard            fail on common soft failures, not only terminal task status
@@ -132,6 +135,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-smoke)
       RUN_BUILTIN_SMOKE=0
+      shift
+      ;;
+    --shared-case-chat)
+      CASE_GROUP_ISOLATION=0
       shift
       ;;
     --prompt-reply-only)
@@ -389,15 +396,11 @@ strict_prompt_markers = [
     "do not summarize",
     "with no summary",
 ]
-delivery_markers = [
-    "发给我",
-    "发送给我",
-    "把文件发",
-    "直接发",
-    "send me",
-    "deliver",
-]
-delivery_requested = any(marker in prompt_l or marker in prompt for marker in delivery_markers)
+output_contract = route_result.get("output_contract") or {}
+delivery_intent = str(output_contract.get("delivery_intent") or "").strip().lower()
+delivery_requested = bool(route_result.get("wants_file_delivery")) or bool(
+    output_contract.get("delivery_required")
+) or delivery_intent not in ("", "none")
 missing_or_clarify = any(
     marker in text_l
     for marker in [
@@ -490,6 +493,70 @@ if "调用技能 `schedule`（action=compile" in text and re.search(r"已成功(
     raise SystemExit(0)
 
 print("__NO_QUALITY_VIOLATION__")
+raise SystemExit(0)
+PY
+}
+
+assert_expected_skill_from_tags() {
+  local file="$1"
+  local tags="${2:-}"
+  python3 - "$file" "$tags" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+tags = sys.argv[2]
+
+def expected_skill_from_tags(raw_tags: str) -> str:
+    suffixes = [
+        "_local_side_effect_client_like_aggregate",
+        "_local_conditional_client_like_aggregate",
+        "_network_side_effect_client_like_aggregate",
+        "_network_client_like_aggregate",
+        "_local_client_like_aggregate",
+        "_client_like_aggregate",
+    ]
+    for token in re.split(r"[\s,]+", raw_tags.strip()):
+        if token.startswith("builtin_skill:"):
+            raw = token[len("builtin_skill:"):]
+        elif token.startswith("skill:"):
+            raw = token[len("skill:"):]
+        else:
+            continue
+        for suffix in suffixes:
+            if raw.endswith(suffix):
+                raw = raw[: -len(suffix)]
+                break
+        if raw and raw != "chat":
+            return raw
+    return ""
+
+expected = expected_skill_from_tags(tags)
+if not expected:
+    raise SystemExit(0)
+
+data = obj.get("data") or {}
+result = data.get("result_json") or {}
+journal = result.get("task_journal") or {}
+trace = journal.get("trace") or {}
+executed = []
+for item in trace.get("step_results") or []:
+    skill = str((item or {}).get("skill") or "").strip()
+    if skill:
+        executed.append(skill)
+for round_item in trace.get("rounds") or []:
+    plan = (round_item or {}).get("plan_result") or {}
+    for step in plan.get("steps") or []:
+        skill = str((step or {}).get("skill") or "").strip()
+        if skill:
+            executed.append(skill)
+
+if expected not in set(executed):
+    actual = ",".join(dict.fromkeys(executed)) or "<none>"
+    print(f"expected_skill_not_executed expected={expected} actual={actual}")
+    raise SystemExit(1)
 raise SystemExit(0)
 PY
 }
@@ -602,9 +669,11 @@ submit_turn() {
   local prompt="$2"
   local out_file="$3"
   local expected_marker="${4:-}"
+  local case_tags="${5:-}"
+  local turn_external_chat_id="${6:-$EXTERNAL_CHAT_ID_VALUE}"
   local submit_raw task_id status text messages error
 
-  submit_raw="$(submit_client_like_telegram_task "$prompt" "true" "" "$EXTERNAL_USER_ID_VALUE" "$EXTERNAL_CHAT_ID_VALUE")"
+  submit_raw="$(submit_client_like_telegram_task "$prompt" "true" "" "$EXTERNAL_USER_ID_VALUE" "$turn_external_chat_id")"
   task_id="$(extract_submit_task_id "$submit_raw")"
   TASK_IDS+=("$task_id")
   echo "[TURN ${turn}] task_id=${task_id}"
@@ -703,6 +772,13 @@ PY
       print_log_hints "$task_id" >&2
       return 1
     fi
+    local skill_guard_reason
+    if ! skill_guard_reason="$(assert_expected_skill_from_tags "$out_file" "$case_tags" 2>&1)"; then
+      echo "Turn ${turn} failed quality guard: ${skill_guard_reason}" >&2
+      echo "  reply=${text:-${error:-<empty>}}" >&2
+      print_log_hints "$task_id" >&2
+      return 1
+    fi
   fi
   if [[ -n "$expected_marker" ]] && ! result_text_contains "$out_file" "$expected_marker"; then
     echo "Turn ${turn} did not include expected marker: ${expected_marker}" >&2
@@ -717,6 +793,8 @@ load_case_rows() {
   local case_limit="$2"
   local case_start="$3"
   python3 - "$case_file" "$case_limit" "$case_start" <<'PY'
+import hashlib
+import re
 import sys
 from pathlib import Path
 
@@ -729,6 +807,17 @@ if start < 1:
     raise SystemExit(f"case_start must be >= 1, got {start}")
 seen = 0
 emitted = 0
+def case_group_for_name(name: str) -> str:
+    base = name.strip() or "unnamed_case"
+    stripped = re.sub(r"_turn[0-9]+$", "", base)
+    return stripped or base
+
+def group_key_for_name(name: str) -> str:
+    group = case_group_for_name(name)
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", group).strip("-")[:72]
+    digest = hashlib.sha1(group.encode("utf-8")).hexdigest()[:12]
+    return f"{safe or 'case'}-{digest}"
+
 for raw in case_file.read_text(encoding="utf-8").splitlines():
     line = raw.strip()
     if not line or line.startswith("#"):
@@ -748,7 +837,9 @@ for raw in case_file.read_text(encoding="utf-8").splitlines():
     emitted += 1
     print("\t".join([
         str(seen),
+        group_key_for_name(name),
         name.replace("\t", " "),
+        tags.replace("\t", " "),
         prompt.replace("\t", " "),
         expect.replace("\t", " "),
     ]))
@@ -787,56 +878,92 @@ if len(rows) != len(task_ids):
 
 first = rows[0]
 user_id = first["user_id"]
-chat_id = first["chat_id"]
 user_key = str(first["user_key"] or "")
-channel = first["channel"]
-if channel != "telegram":
-    raise SystemExit(f"expected telegram channel, got {channel}")
+if any(row["channel"] != "telegram" for row in rows):
+    channels = sorted({str(row["channel"]) for row in rows})
+    raise SystemExit(f"expected telegram channel, got {channels}")
+
+conversation_keys = sorted({(row["user_id"], row["chat_id"]) for row in rows})
 for row in rows:
-    if row["user_id"] != user_id or row["chat_id"] != chat_id:
-        raise SystemExit("turns did not land in the same effective conversation")
+    if row["user_id"] != user_id:
+        raise SystemExit("turns did not land under the same effective user")
 
 def count(sql, params=()):
     return int(conn.execute(sql, params).fetchone()[0])
 
-tasks_count = count("SELECT COUNT(*) FROM tasks WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
-memories_count = count("SELECT COUNT(*) FROM memories WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
-conversation_states_count = count(
-    "SELECT COUNT(*) FROM conversation_states WHERE chat_id = ? AND user_id = ?",
-    (chat_id, user_id),
-)
-retrieval_count = count(
-    "SELECT COUNT(*) FROM memory_retrieval_index WHERE chat_id = ? AND user_id = ?",
-    (chat_id, user_id),
-)
-long_term_count = count("SELECT COUNT(*) FROM long_term_memories WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
-preference_count = count("SELECT COUNT(*) FROM user_preferences WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
-
-if memories_count <= 0:
-    raise SystemExit("expected memories to be written for client-like continuous conversation")
-if conversation_states_count <= 0:
-    raise SystemExit("expected conversation_states to be written for client-like continuous conversation")
+total_tasks_count = 0
+total_memories_count = 0
+total_conversation_states_count = 0
+total_retrieval_count = 0
+total_long_term_count = 0
+total_preference_count = 0
+effective_chat_ids = []
+for group_user_id, group_chat_id in conversation_keys:
+    tasks_count = count(
+        "SELECT COUNT(*) FROM tasks WHERE chat_id = ? AND user_id = ?",
+        (group_chat_id, group_user_id),
+    )
+    memories_count = count(
+        "SELECT COUNT(*) FROM memories WHERE chat_id = ? AND user_id = ?",
+        (group_chat_id, group_user_id),
+    )
+    conversation_states_count = count(
+        "SELECT COUNT(*) FROM conversation_states WHERE chat_id = ? AND user_id = ?",
+        (group_chat_id, group_user_id),
+    )
+    retrieval_count = count(
+        "SELECT COUNT(*) FROM memory_retrieval_index WHERE chat_id = ? AND user_id = ?",
+        (group_chat_id, group_user_id),
+    )
+    long_term_count = count(
+        "SELECT COUNT(*) FROM long_term_memories WHERE chat_id = ? AND user_id = ?",
+        (group_chat_id, group_user_id),
+    )
+    preference_count = count(
+        "SELECT COUNT(*) FROM user_preferences WHERE chat_id = ? AND user_id = ?",
+        (group_chat_id, group_user_id),
+    )
+    if memories_count <= 0:
+        raise SystemExit(f"expected memories for effective_chat_id={group_chat_id}")
+    if conversation_states_count <= 0:
+        raise SystemExit(f"expected conversation_states for effective_chat_id={group_chat_id}")
+    total_tasks_count += tasks_count
+    total_memories_count += memories_count
+    total_conversation_states_count += conversation_states_count
+    total_retrieval_count += retrieval_count
+    total_long_term_count += long_term_count
+    total_preference_count += preference_count
+    effective_chat_ids.append(str(group_chat_id))
 
 test_id_memory_count = 0
 if require_test_id_memory:
-    test_id_memory_count = count(
-        "SELECT COUNT(*) FROM memories WHERE chat_id = ? AND user_id = ? AND content LIKE ?",
-        (chat_id, user_id, f"%{test_id}%"),
+    test_id_memory_count = sum(
+        count(
+            "SELECT COUNT(*) FROM memories WHERE chat_id = ? AND user_id = ? AND content LIKE ?",
+            (group_chat_id, group_user_id, f"%{test_id}%"),
+        )
+        for group_user_id, group_chat_id in conversation_keys
     )
     if test_id_memory_count <= 0:
         raise SystemExit("expected short-term memory to contain the suite test id")
-execution_summary_leak_count = count(
-    "SELECT COUNT(*) FROM memories WHERE chat_id = ? AND user_id = ? AND content LIKE ?",
-    (chat_id, user_id, "%**执行过程**%"),
+execution_summary_leak_count = sum(
+    count(
+        "SELECT COUNT(*) FROM memories WHERE chat_id = ? AND user_id = ? AND content LIKE ?",
+        (group_chat_id, group_user_id, "%**执行过程**%"),
+    )
+    for group_user_id, group_chat_id in conversation_keys
 )
 if execution_summary_leak_count > 0:
     raise SystemExit("execution summary leaked into short-term memory")
 
 print(
     "DB_VERIFY_OK "
-    f"effective_user_id={user_id} effective_chat_id={chat_id} user_key_present={bool(user_key)} "
-    f"tasks={tasks_count} memories={memories_count} conversation_states={conversation_states_count} "
-    f"retrieval_index={retrieval_count} long_term={long_term_count} preferences={preference_count} "
+    f"effective_user_id={user_id} effective_chat_groups={len(conversation_keys)} "
+    f"effective_chat_ids={','.join(effective_chat_ids[:8])}{'...' if len(effective_chat_ids) > 8 else ''} "
+    f"user_key_present={bool(user_key)} "
+    f"tasks={total_tasks_count} memories={total_memories_count} "
+    f"conversation_states={total_conversation_states_count} retrieval_index={total_retrieval_count} "
+    f"long_term={total_long_term_count} preferences={total_preference_count} "
     f"test_id_memory_checked={require_test_id_memory} test_id_memory_count={test_id_memory_count}"
 )
 PY
@@ -894,6 +1021,7 @@ echo "log_dir=${RUN_DIR}"
 echo "case_file=${CASE_FILE_VALUE:-<none>}"
 echo "case_limit=${CASE_LIMIT_VALUE:-<none>}"
 echo "case_start=${CASE_START_VALUE:-1}"
+echo "case_group_isolation=${CASE_GROUP_ISOLATION}"
 echo "quality_guard=${QUALITY_GUARD}"
 
 read -r -d '' HEAVY_CONTEXT_PROMPT <<'EOF' || true
@@ -933,16 +1061,24 @@ if [[ "$RUN_BUILTIN_SMOKE" -eq 1 ]]; then
 fi
 
 if [[ -n "${CASE_FILE_VALUE:-}" ]]; then
-  while IFS=$'\t' read -r case_index case_name case_prompt case_expect; do
+  while IFS=$'\t' read -r case_index case_group_key case_name case_tags case_prompt case_expect; do
     [[ -n "${case_index:-}" ]] || continue
     turn=$((turn + 1))
-    echo "[CASE ${case_index}] name=${case_name}"
-    if ! submit_turn "$turn" "$case_prompt" "${RUN_DIR}/turn_${turn}_case_${case_index}.json" "${case_expect:-}"; then
+    case_external_chat_id="$EXTERNAL_CHAT_ID_VALUE"
+    if [[ "$CASE_GROUP_ISOLATION" -eq 1 ]]; then
+      case_external_chat_id="${EXTERNAL_CHAT_ID_VALUE}--${case_group_key}"
+    fi
+    echo "[CASE ${case_index}] name=${case_name} group=${case_group_key} external_chat_id=${case_external_chat_id}"
+    if ! submit_turn "$turn" "$case_prompt" "${RUN_DIR}/turn_${turn}_case_${case_index}.json" "${case_expect:-}" "${case_tags:-}" "$case_external_chat_id"; then
       quality_guard_arg=""
       if [[ "$QUALITY_GUARD" -eq 1 ]]; then
         quality_guard_arg=" --quality-guard"
       fi
-      echo "RESUME_HINT bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file ${CASE_FILE_VALUE} --case-start ${case_index} --skip-smoke --external-user-id ${EXTERNAL_USER_ID_VALUE} --external-chat-id ${EXTERNAL_CHAT_ID_VALUE} --prompt-reply-only${quality_guard_arg}" >&2
+      shared_chat_arg=""
+      if [[ "$CASE_GROUP_ISOLATION" -eq 0 ]]; then
+        shared_chat_arg=" --shared-case-chat"
+      fi
+      echo "RESUME_HINT bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file ${CASE_FILE_VALUE} --case-start ${case_index} --skip-smoke --external-user-id ${EXTERNAL_USER_ID_VALUE} --external-chat-id ${EXTERNAL_CHAT_ID_VALUE} --prompt-reply-only${quality_guard_arg}${shared_chat_arg}" >&2
       exit 1
     fi
   done < <(load_case_rows "$CASE_FILE_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE")

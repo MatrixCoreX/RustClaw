@@ -27,6 +27,9 @@ const LLM_POOL_IDLE_TIMEOUT_SECS: u64 = 90;
 /// TCP keep-alive 心跳间隔；对长 idle 的 LLM 流式/长文本请求能降低 NAT
 /// 或中间网关静默断链导致的"首次失败 + 再 retry"开销。
 const LLM_TCP_KEEPALIVE_SECS: u64 = 60;
+const LLM_RATE_LIMIT_RETRY_TIMES_ENV: &str = "RUSTCLAW_LLM_RATE_LIMIT_RETRY_TIMES";
+const DEFAULT_LLM_RATE_LIMIT_RETRY_TIMES: usize = 4;
+const MAX_LLM_RATE_LIMIT_RETRY_TIMES: usize = 8;
 
 /// 所有 LLM provider 共享的 `reqwest::Client` 构造器：
 /// 统一设置超时 + 连接池 + TCP keep-alive，避免 `Client::new()` 裸建导致
@@ -92,6 +95,10 @@ impl std::fmt::Display for ProviderError {
 }
 
 impl ProviderError {
+    pub(crate) fn is_rate_limited(&self) -> bool {
+        self.observability_kind() == "rate_limited"
+    }
+
     pub(super) fn retryable(message: String, request_payload: Value) -> Self {
         Self {
             retryable: true,
@@ -262,14 +269,59 @@ pub(crate) async fn call_provider_with_retry_with_hints(
         match call_provider(provider.clone(), prompt, hints).await {
             Ok(output) => return Ok(output),
             Err(err) if err.retryable => {
-                if attempts > LLM_RETRY_TIMES {
+                let retry_limit = retry_limit_for_provider_error(&err);
+                if attempts > retry_limit {
                     return Err(err);
                 }
-                tokio::time::sleep(Duration::from_millis(250 * attempts as u64)).await;
+                let delay = retry_delay_for_provider_error(&err, attempts);
+                tokio::time::sleep(delay).await;
             }
             Err(err) => return Err(err),
         }
     }
+}
+
+fn retry_limit_for_provider_error(err: &ProviderError) -> usize {
+    retry_limit_for_provider_error_with_rate_limit_retries(err, configured_rate_limit_retry_times())
+}
+
+fn retry_limit_for_provider_error_with_rate_limit_retries(
+    err: &ProviderError,
+    rate_limit_retries: usize,
+) -> usize {
+    if err.is_rate_limited() {
+        rate_limit_retries.min(MAX_LLM_RATE_LIMIT_RETRY_TIMES)
+    } else {
+        LLM_RETRY_TIMES
+    }
+}
+
+fn configured_rate_limit_retry_times() -> usize {
+    let raw = std::env::var(LLM_RATE_LIMIT_RETRY_TIMES_ENV).ok();
+    effective_rate_limit_retry_times(raw.as_deref())
+}
+
+fn effective_rate_limit_retry_times(raw: Option<&str>) -> usize {
+    raw.and_then(|value| value.trim().parse::<usize>().ok())
+        .map(|value| value.min(MAX_LLM_RATE_LIMIT_RETRY_TIMES))
+        .unwrap_or(DEFAULT_LLM_RATE_LIMIT_RETRY_TIMES)
+}
+
+fn retry_delay_for_provider_error(err: &ProviderError, attempts: usize) -> Duration {
+    if err.is_rate_limited() {
+        return rate_limit_retry_delay(attempts);
+    }
+    Duration::from_millis(250 * attempts as u64)
+}
+
+fn rate_limit_retry_delay(attempts: usize) -> Duration {
+    const SECONDS_BY_ATTEMPT: &[u64] = &[5, 15, 30, 60];
+    let index = attempts.saturating_sub(1);
+    let seconds = SECONDS_BY_ATTEMPT
+        .get(index)
+        .copied()
+        .unwrap_or(*SECONDS_BY_ATTEMPT.last().unwrap_or(&60));
+    Duration::from_secs(seconds)
 }
 
 /// Phase 2.3 完整版：LLM provider 抽象。
@@ -440,6 +492,7 @@ mod tests {
         );
         assert!(!rate_limited.should_trip_breaker());
         assert!(rate_limited.should_reset_breaker());
+        assert!(rate_limited.is_rate_limited());
         assert_eq!(rate_limited.observability_kind(), "rate_limited");
 
         let quota = ProviderError::quota_exhausted_with_response(
@@ -448,6 +501,7 @@ mod tests {
             "{}".to_string(),
             None,
         );
+        assert!(!quota.is_rate_limited());
         assert_eq!(quota.observability_kind(), "quota_exhausted");
 
         let business = ProviderError::non_retryable_with_response(
@@ -484,5 +538,53 @@ mod tests {
         assert!(!is_quota_exhausted_429(
             "{\"error\":\"rate limit exceeded, retry later\"}"
         ));
+    }
+
+    #[test]
+    fn rate_limit_retry_policy_uses_longer_structured_backoff() {
+        let rate_limited = ProviderError::rate_limited_with_response(
+            "http 429".to_string(),
+            Value::Null,
+            "{}".to_string(),
+            None,
+        );
+        let timeout = ProviderError::retryable("timeout".to_string(), Value::Null);
+
+        assert_eq!(
+            super::retry_limit_for_provider_error_with_rate_limit_retries(&rate_limited, 4),
+            4
+        );
+        assert_eq!(
+            super::retry_limit_for_provider_error_with_rate_limit_retries(&rate_limited, 99),
+            super::MAX_LLM_RATE_LIMIT_RETRY_TIMES
+        );
+        assert_eq!(
+            super::retry_limit_for_provider_error_with_rate_limit_retries(&timeout, 4),
+            crate::LLM_RETRY_TIMES
+        );
+
+        assert_eq!(
+            super::retry_delay_for_provider_error(&rate_limited, 1),
+            std::time::Duration::from_secs(5)
+        );
+        assert_eq!(
+            super::retry_delay_for_provider_error(&rate_limited, 4),
+            std::time::Duration::from_secs(60)
+        );
+        assert_eq!(
+            super::retry_delay_for_provider_error(&timeout, 2),
+            std::time::Duration::from_millis(500)
+        );
+    }
+
+    #[test]
+    fn rate_limit_retry_times_env_parser_is_bounded() {
+        assert_eq!(super::effective_rate_limit_retry_times(None), 4);
+        assert_eq!(super::effective_rate_limit_retry_times(Some("6")), 6);
+        assert_eq!(
+            super::effective_rate_limit_retry_times(Some("999")),
+            super::MAX_LLM_RATE_LIMIT_RETRY_TIMES
+        );
+        assert_eq!(super::effective_rate_limit_retry_times(Some("bad")), 4);
     }
 }

@@ -35,8 +35,9 @@
 ## Error Contract (from interface)
 - Missing required `container` for container-specific actions.
 - Unsupported action names.
-- Docker daemon/CLI errors must be returned with readable output.
-- Non-zero `docker` command exit codes are returned as `status=error` with `error_text=docker command failed: exit=<code>\n<stdout/stderr>`.
+- Read-only inspection actions (`ps`, `images`) return `status=ok` with `available=false` and readable output when the Docker CLI or daemon is unavailable, because that is still an environment observation.
+- Container-specific lifecycle/log/inspect actions return Docker daemon/CLI errors with readable output.
+- For mutating/container-specific actions, non-zero `docker` command exit codes are returned as `status=error` with `error_text=docker command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including `action`, `exit_code`, `docker_args`, and `output`.
 
 ## Request/Response Examples (from interface)

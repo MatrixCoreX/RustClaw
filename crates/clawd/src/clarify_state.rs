@@ -374,6 +374,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 requires_content_evidence: true,
                 locator_kind: crate::OutputLocatorKind::Path,
                 ..crate::IntentOutputContract::default()
@@ -416,6 +417,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 locator_kind: crate::OutputLocatorKind::Path,
@@ -521,6 +523,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::FileToken,
                 delivery_required: true,
                 locator_kind: crate::OutputLocatorKind::Path,

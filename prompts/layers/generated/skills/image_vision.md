@@ -10,27 +10,15 @@
 ## Capability Summary (from interface)
 - `image_vision` analyzes one or more images for description, extraction, comparison, and screenshot summaries.
 - It returns textual understanding without mutating source images.
+- It supports Mimo image understanding through OpenAI-compatible chat completions (`mimo-v2.5` / `mimo-v2-omni`); this is image understanding, not image generation.
 - **Output language is owned by this skill end-to-end.** The host (`clawd`) does **not** rewrite `image_vision` result text after the skill returns.
 
 ## Config Entry Points (from interface)
-- No dedicated config entry points declared.
-
-## Actions (from interface)
-- `describe`
-- `extract`
-- `compare`
-- `screenshot_summary`
-
-## Parameter Contract (from interface)
-| Action | Param | Required | Type | Default | Description |
-|---|---|---|---|---|---|
-| all | `action` | yes | string | - | Must be one of supported actions. |
-| all | `images` | yes | array | - | Image inputs: objects with `path`, `url`, or `base64`, or string shorthand. |
-| all | `instruction` / `query` / `text` | no | string | - | Optional user instruction or question to guide the image analysis. |
-| all | `response_language` | no | string | - | Preferred language tag or name for the **final** user-visible text (e.g. `zh-CN`, `English`). |
-| all | `language` | no | string | - | Used only when `response_language` is absent or empty (not a parallel alias on the same tier). |
-| all | `detail_level` | no | string | `normal` | For `describe`, controls verbosity. |
-| all | `schema` | no | JSON | - | For `extract`, optional extraction schema hint. |
+- Default vision provider/model: `configs/image.toml` -> `[image_vision].default_vendor` / `default_model`.
+- Current default: `mimo` + `mimo-v2.5`.
+- Recommended shared key: `configs/config.toml` -> `[llm.mimo].api_key`, or environment `MIMO_API_KEY`.
+- Optional dedicated image-vision key: `configs/image.toml` -> `[image_vision.providers.mimo].api_key`, or environment `IMAGE_VISION_MIMO_API_KEY`.
+- Mimo supports remote image URLs and local/base64 images through the OpenAI-compatible `image_url` message part.
 
 ### Language behavior (skill-side only)
 1. **Host vs skill (target language):**
@@ -51,6 +39,23 @@
 6. **`extract`:** Relies on the vision prompt + language hints only (no separate rewrite pass), so structured extraction stays stable.
 
 **Note:** Steps that read `args._memory` require `[memory].skill_memory_enabled` and a runner skill that supports generic memory injection so the host injects the `_memory` blob; when memory injection is off, only explicit args, runner `context`, and defaults apply.
+
+## Actions (from interface)
+- `describe`
+- `extract`
+- `compare`
+- `screenshot_summary`
+
+## Parameter Contract (from interface)
+| Action | Param | Required | Type | Default | Description |
+|---|---|---|---|---|---|
+| all | `action` | yes | string | - | Must be one of supported actions. |
+| all | `images` | yes | array | - | Image inputs: objects with `path`, `url`, or `base64`, or string shorthand. |
+| all | `instruction` / `query` / `text` | no | string | - | Optional user instruction or question to guide the image analysis. |
+| all | `response_language` | no | string | - | Preferred language tag or name for the **final** user-visible text (e.g. `zh-CN`, `English`). |
+| all | `language` | no | string | - | Used only when `response_language` is absent or empty (not a parallel alias on the same tier). |
+| all | `detail_level` | no | string | `normal` | For `describe`, controls verbosity. |
+| all | `schema` | no | JSON | - | For `extract`, optional extraction schema hint. |
 
 ## Error Contract (from interface)
 - Missing/empty `images` input array.

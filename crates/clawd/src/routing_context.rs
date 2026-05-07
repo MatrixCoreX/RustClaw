@@ -365,7 +365,7 @@ fn task_result_summary(result_json: &str) -> String {
 }
 
 fn sanitize_result_summary(text: &str) -> String {
-    text.to_string()
+    crate::visible_text::sanitize_user_visible_text(text)
 }
 
 fn truncate_snippet(text: &str, max_chars: usize) -> String {

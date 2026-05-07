@@ -53,6 +53,7 @@ Natural-language intent mapping:
 | `ingest` | `action` | yes | string | - | Must be `ingest`. |
 | `ingest` | `namespace` | yes | string | - | Namespace to build/update. |
 | `ingest` | `paths` | yes | string[] | - | File or directory paths to index. |
+| `ingest` | `path` | no | string | - | Single-path compatibility alias; normalized as `paths: [path]` by the skill. |
 | `ingest` | `chunk_size` | no | integer | `1200` | Chunk size for splitting documents. |
 | `ingest` | `chunk_overlap` | no | integer | `180` | Overlap between adjacent chunks. |
 | `ingest` | `overwrite` | no | bool | `false` | Rebuild namespace from scratch. |
@@ -74,6 +75,7 @@ Natural-language intent mapping:
 
 - `overwrite=true`: rebuild namespace from scratch
 - `overwrite=false`: incremental update by path + mtime + size
+- `paths` may be a single string or an array. Prefer `paths[]` in new plans; `path` exists only as a protocol compatibility alias for one source path.
 - per-doc metadata: `path`, `file_type`, `mtime_epoch`, `size`, `chunks`
 - per-chunk metadata: `chunk_id`, `offset`, `path`, `file_type`, `mtime_epoch`
 - `ingest` prefers Markdown heading / paragraph boundaries when chunking, then falls back to bounded overlapping windows.

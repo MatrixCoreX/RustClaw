@@ -37,6 +37,8 @@ CANONICAL_SUITES = {
     "regression",
 }
 
+AUTH_CONTEXT_VALUES = {"user", "admin"}
+
 RISKY_FILE_NAMES = {
     "nl_cases_sensitive_flows.txt",
     "nl_cases_ops_http_repair.txt",
@@ -110,6 +112,10 @@ def split_columns(line: str) -> list[str]:
 
 
 def split_canonical(line: str) -> list[str]:
+    return [part.strip() for part in line.split("|", 4)]
+
+
+def split_five_column(line: str) -> list[str]:
     return [part.strip() for part in line.split("|", 4)]
 
 
@@ -235,21 +241,47 @@ def parse_line(source: Path, line: str, index: int, preserve_expects: bool) -> l
             )
         ]
 
-    if len(cols) >= 4:
-        # Last-resort legacy shape. Treat the final field as the prompt and
-        # preserve earlier fields as tags/source metadata rather than dropping it.
-        name = cols[0]
-        prompt = cols[-1]
-        tags = ",".join(["legacy_shape", "client_like", "aggregate", sanitize_field(cols[1])])
+    five = split_five_column(line)
+    if len(five) == 5 and five[1].strip().lower() in AUTH_CONTEXT_VALUES:
+        # Structured assertion shape:
+        #   name|auth|assertion|expected|prompt
+        # `auth`, `assertion`, and `expected` are harness metadata, not user
+        # turns. Keep the real prompt as a single client-like case.
+        name, auth, assertion, expected, prompt = five
+        expect = expected if preserve_expects else ""
         return [
             CaseRow(
-                suite="legacy",
-                name=sanitize_field(f"{source_stem}_{name}_{index:04d}"),
-                tags=tags,
+                suite="single",
+                name=sanitize_field(f"{source_stem}_{name}"),
+                tags=",".join(
+                    part
+                    for part in [
+                        f"auth:{sanitize_field(auth)}",
+                        f"assertion:{sanitize_field(assertion)}",
+                        "structured_assertion",
+                        "client_like",
+                        "aggregate",
+                    ]
+                    if part
+                ),
                 prompt=prompt,
+                expect=expect,
                 source=str(source),
             )
         ]
+
+    if len(cols) >= 4:
+        # Legacy multi-turn shape:
+        #   case_name|turn1|turn2|turn3[|turn4]
+        # Expand every turn so client-like aggregate tests preserve the
+        # semantic setup instead of running only the final refinement.
+        name, *turns = cols
+        return expand_turns(
+            source,
+            f"{source_stem}_{name}",
+            turns,
+            "legacy_shape,turn_chain,client_like,aggregate",
+        )
 
     return []
 
@@ -295,11 +327,12 @@ def build_rows(
                 if should_skip_prompt(row.prompt, include_risky):
                     stats["rows_skipped_risky"] += 1
                     continue
-                key = (canonical_prompt_key(row.prompt), row.expect.strip())
-                if key in seen:
-                    stats["rows_deduped"] += 1
-                    continue
-                seen.add(key)
+                if row.suite != "continuous":
+                    key = (canonical_prompt_key(row.prompt), row.expect.strip())
+                    if key in seen:
+                        stats["rows_deduped"] += 1
+                        continue
+                    seen.add(key)
                 rows.append(row)
     stats["rows_emitted"] = len(rows)
     return rows, stats
@@ -313,7 +346,7 @@ def render_aggregate(out_path: Path, rows: list[CaseRow], stats: dict[str, int],
     lines = [
         "# Generated client-like continuous NL aggregate.",
         "# Do not edit by hand; regenerate with scripts/nl_tests/build_client_like_case_aggregate.py.",
-        "# Deduplication: global prompt text, after whitespace normalization.",
+        "# Deduplication: global prompt text for non-continuous cases; continuous chains keep duplicate prompts.",
         "# Run:",
         f"#   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file {out_path.as_posix()} --prompt-reply-only --quality-guard",
         f"# include_risky={include_risky}",

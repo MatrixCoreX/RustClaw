@@ -2,10 +2,10 @@
 # Audio Synthesize / 语音合成（TTS）
 # =========================
 # Quick guide / 快速说明：
-# - current default: qwen + qwen3-tts-flash + Cherry
-#   / 当前默认：qwen + qwen3-tts-flash + Cherry
-# - recommended API key location: configs/config.toml -> [llm.qwen].api_key
-#   / 推荐把 key 填到 configs/config.toml 的 [llm.qwen].api_key
+# - current default: mimo + mimo-v2.5-tts + mimo_default
+#   / 当前默认：mimo + mimo-v2.5-tts + mimo_default
+# - recommended API key location: configs/config.toml -> [llm.mimo].api_key
+#   / 推荐把 key 填到 configs/config.toml 的 [llm.mimo].api_key
 # - if you want TTS to use its own separate key, uncomment
 #   [audio_synthesize.providers.qwen] below
 #   / 如果想让 TTS 单独用一套 key，再取消下面 [audio_synthesize.providers.qwen] 注释
@@ -13,7 +13,7 @@
 #   / 当前 qwen TTS 原生不使用 OSS
 #
 # Routing / 路由：
-# - google/qwen: support native + compat dual channels / 支持 native + compat 双通道
+# - mimo/google/qwen: support native adapters / 支持原生适配
 # - openai/anthropic/grok/custom/minimax: compat channel / 走 compat 通道
 #
 # adapter_mode / 模式：
@@ -25,7 +25,7 @@
 # request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
 [audio_synthesize]
 # Routing & mode / 路由与模式
-default_vendor = "qwen"
+default_vendor = "mimo"
 adapter_mode = "auto"
 allow_compat_adapters = true
 qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
@@ -35,14 +35,15 @@ qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
 # - OpenAI compat (`gpt-4o-mini-tts`, `gpt-4o-realtime-preview`): `alloy` / `coral` / `shimmer`
 # - Google native (`gemini-2.5-flash-preview-tts`): `Kore` / `Puck` / `Aoede`
 # - Qwen native (`qwen3-tts-instruct-flash`, `qwen3-tts-flash`): `Cherry` / `Serena` / `Ethan`
+# - Mimo native (`mimo-v2.5-tts`): `mimo_default` / `Mia` / `Chloe` / `冰糖`
 # - MiniMax native (`speech-2.8-*`, `speech-2.6-*`, `speech-02-*`): `male-qn-qingse`
 # Fault-tolerant fallback / vendor-default fallback
 # - request.voice > default_voice > vendor builtin default
 # - unsupported / mismatched voice names fall back to the selected vendor default
-# - current vendor defaults: OpenAI compat=`alloy`, Google=`Kore`, Qwen=`Cherry`, MiniMax=`male-qn-qingse`
-default_model = "qwen3-tts-flash"
-default_voice = "Cherry"
-default_format = "opus"
+# - current vendor defaults: OpenAI compat=`alloy`, Google=`Kore`, Qwen=`Cherry`, MiniMax=`male-qn-qingse`, Mimo=`mimo_default`
+default_model = "mimo-v2.5-tts"
+default_voice = "mimo_default"
+default_format = "wav"
 default_output_dir = "audio/download"
 
 # Vendor models / 按厂商模型
@@ -52,9 +53,10 @@ anthropic_models = []
 grok_models = []
 qwen_models = ["qwen3-tts-instruct-flash", "qwen3-tts-flash"]
 minimax_models = ["speech-2.8-turbo", "speech-2.8-hd", "speech-2.6-turbo", "speech-2.6-hd", "speech-02-turbo", "speech-02-hd"]
+mimo_models = ["mimo-v2.5-tts", "mimo-v2.5-tts-voiceclone", "mimo-v2.5-tts-voicedesign"]
 native_models = ["qwen3-tts-instruct-flash", "qwen3-tts-flash"]
 custom_models = []
-models = ["qwen3-tts-instruct-flash", "qwen3-tts-flash"]
+models = ["mimo-v2.5-tts", "qwen3-tts-instruct-flash", "qwen3-tts-flash"]
 
 # Runtime limits / 运行限制
 max_concurrency = 1
@@ -66,9 +68,9 @@ timeout_seconds = 60
 # 2. [llm.<vendor>] in configs/config.toml     <- shared fallback / 全局共享回退
 #
 # Current recommendation / 当前推荐：
-# - because TTS is now using qwen by default, fill one shared key in:
-#   configs/config.toml -> [llm.qwen].api_key
-#   / 由于当前默认 TTS 走 qwen，推荐只在 configs/config.toml -> [llm.qwen].api_key 填一次
+# - because TTS is now using mimo by default, fill one shared key in:
+#   configs/config.toml -> [llm.mimo].api_key
+#   / 由于当前默认 TTS 走 mimo，推荐只在 configs/config.toml -> [llm.mimo].api_key 填一次
 # - leave [audio_synthesize.providers.qwen] commented unless you need a dedicated TTS key
 #   / 如果不需要 TTS 单独 key，就不要取消 [audio_synthesize.providers.qwen] 注释
 #
@@ -80,6 +82,12 @@ timeout_seconds = 60
 # timeout_seconds = 60
 #
 # Other provider examples / 其它厂商示例
+# [audio_synthesize.providers.mimo]
+# base_url = "https://token-plan-sgp.xiaomimimo.com/v1"
+# api_key = ""
+# model = "mimo-v2.5-tts"
+# timeout_seconds = 120
+#
 # [audio_synthesize.providers.openai]
 # base_url = "https://api.openai.com/v1"
 # api_key = ""
@@ -186,4 +194,3 @@ oss_url_ttl_seconds = 3600
 # api_key = ""
 # model = "speech-01"
 # timeout_seconds = 90
-

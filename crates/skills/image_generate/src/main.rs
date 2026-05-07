@@ -1547,4 +1547,17 @@ mod tests {
             Some("https://example.com/demo.png")
         );
     }
+
+    #[test]
+    fn resolve_output_path_uses_requested_workspace_path() {
+        let workspace = PathBuf::from("/tmp/rustclaw");
+        let out = resolve_output_path(
+            &workspace,
+            "image",
+            Some("document/skill_generate_smoke.png"),
+        )
+        .expect("requested output path");
+
+        assert_eq!(out, workspace.join("document/skill_generate_smoke.png"));
+    }
 }

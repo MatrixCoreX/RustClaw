@@ -238,7 +238,10 @@ pub(crate) fn extract_filename_candidates(text: &str) -> Vec<String> {
             continue;
         };
         let token = trim_path_token(m.as_str());
-        if !looks_like_filename_token(&token) || out.iter().any(|v| v == &token) {
+        if !looks_like_filename_token(&token)
+            || crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(&token)
+            || out.iter().any(|v| v == &token)
+        {
             continue;
         }
         out.push(token);

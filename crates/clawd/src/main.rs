@@ -65,6 +65,7 @@ mod system_health;
 mod task_context_builder;
 mod task_journal;
 mod verifier;
+mod visible_text;
 mod worker;
 
 pub(crate) use app_helpers::{

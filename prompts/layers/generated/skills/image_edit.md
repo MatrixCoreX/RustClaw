@@ -14,7 +14,10 @@
 - Successful responses include machine-readable `extra` metadata such as `provider`, `model`, normalized `action`, and `outputs`.
 
 ## Config Entry Points (from interface)
-- No dedicated config entry points declared.
+- Default edit provider/model: `configs/image.toml` -> `[image_edit].default_vendor` / `default_model`.
+- Current default: `minimax` + `image-01`.
+- Preferred dedicated keys: `IMAGE_EDIT_<VENDOR>_API_KEY` or `[image_edit.providers.<vendor>].api_key`.
+- If a provider override exists but its dedicated key is empty, the skill may reuse the same vendor's global key (for example `MINIMAX_API_KEY`) from `[llm.<vendor>]` / environment.
 
 ## Actions (from interface)
 - `edit`

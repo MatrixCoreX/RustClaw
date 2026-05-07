@@ -140,14 +140,14 @@ fn main() -> Result<()> {
             .and_then(Value::as_str)
             .unwrap_or("unknown")
             .to_string();
-        let action = req
+        let raw_action = req
             .get("args")
             .and_then(|a| a.get("action"))
             .or_else(|| req.get("action"))
             .and_then(Value::as_str)
             .unwrap_or("parse_doc");
 
-        let payload = if action != "parse_doc" {
+        let payload = if normalize_action(raw_action).is_none() {
             ParsePayload {
                 text: String::new(),
                 tables: vec![],
@@ -155,17 +155,29 @@ fn main() -> Result<()> {
                 metadata: None,
                 status: "error".to_string(),
                 error_code: Some("INVALID_ACTION".to_string()),
-                error: Some(format!("unsupported action: {action}")),
+                error: Some(format!("unsupported action: {raw_action}")),
             }
         } else {
             handle_parse_doc(&req)
         };
+        let outer_status = payload.status.clone();
+        let error_text = if outer_status == "error" {
+            Value::String(
+                payload
+                    .error
+                    .clone()
+                    .or_else(|| payload.error_code.clone())
+                    .unwrap_or_else(|| "doc_parse failed".to_string()),
+            )
+        } else {
+            Value::Null
+        };
 
         let out = json!({
             "request_id": request_id,
-            "status": "ok",
+            "status": outer_status,
             "text": serde_json::to_string(&payload)?,
-            "error_text": Value::Null,
+            "error_text": error_text,
             "extra": { "action": "parse_doc" }
         });
         writeln!(stdout, "{}", serde_json::to_string(&out)?)?;
@@ -173,6 +185,13 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn normalize_action(action: &str) -> Option<&'static str> {
+    match action.trim().to_ascii_lowercase().as_str() {
+        "parse_doc" | "parse" => Some("parse_doc"),
+        _ => None,
+    }
 }
 
 fn handle_parse_doc(req: &Value) -> ParsePayload {
@@ -821,4 +840,16 @@ fn html_unescape(s: &str) -> String {
 
 fn xml_unescape(s: &str) -> String {
     html_unescape(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_action;
+
+    #[test]
+    fn normalize_action_accepts_parse_alias() {
+        assert_eq!(normalize_action("parse_doc"), Some("parse_doc"));
+        assert_eq!(normalize_action("parse"), Some("parse_doc"));
+        assert_eq!(normalize_action("unknown"), None);
+    }
 }

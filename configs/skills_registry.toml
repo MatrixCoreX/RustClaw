@@ -216,12 +216,12 @@ output_kind = "image"
 # §P4.1 / §P4.4 E1.d：image_vision 调远端多模态 vendor 读图返回描述，
 # 不写盘 → 只声明 llm + net + secrets。命名遵守 <用途>_<vendor>_api_key
 # 规范，保持与 image_edit / image_generation / chat 四套 LLM 配置完全独立。
-# 当前默认 default_vendor=minimax（见 configs/image.toml [image_vision]），
-# 启用别的 vendor 段时同步追加 secrets.image_vision_<vendor>_api_key。
+# 当前默认 default_vendor=mimo（见 configs/image.toml [image_vision]），默认复用
+# 主 LLM provider 注入的 OPENAI_* / MIMO_API_KEY；启用独立 vendor 段时再同步追加
+# secrets.image_vision_<vendor>_api_key。
 capabilities = [
     "llm",
     "net",
-    "secrets.image_vision_minimax_api_key",
 ]
 
 [[skills]]
@@ -263,14 +263,13 @@ timeout_seconds = 180
 prompt_file = "prompts/skills/image_edit.md"
 output_kind = "image"
 # §P4.1 / §P4.4 E1.d：image_edit 调远端 vendor 编辑图，落盘到 workspace。
-# 命名遵守 <用途>_<vendor>_api_key 规范（不能与 image_generation / image_vision
-# / chat 串货）。当前默认 default_vendor=minimax（见 configs/image.toml
-# [image_edit]），启用别的 vendor 段时同步追加 secrets.image_edit_<vendor>_api_key。
+# 默认 default_vendor=minimax（见 configs/image.toml [image_edit]）。运行时优先使用
+# IMAGE_EDIT_<VENDOR>_API_KEY；未配置专用 key 时，技能可复用同厂商全局 key
+# （如 MINIMAX_API_KEY），避免默认能力被空专用 secret 门禁挡住。
 capabilities = [
     "llm",
     "net",
     "fs.write",
-    "secrets.image_edit_minimax_api_key",
 ]
 # §P4.2 shape consistency R3：fs.write 隐含写盘副作用 → 必须 side_effect=true。
 side_effect = true
@@ -397,6 +396,7 @@ name = "doc_parse"
 enabled = true
 kind = "runner"
 aliases = ["parse_doc", "document_parse", "doc_reader"]
+description = "Parse supported local documents and expose text, sections, tables, and metadata for summaries or key-point extraction."
 timeout_seconds = 20
 prompt_file = "prompts/skills/doc_parse.md"
 output_kind = "text"
@@ -406,6 +406,7 @@ name = "transform"
 enabled = true
 kind = "runner"
 aliases = ["transform_data", "data_transform", "table_transform"]
+description = "Transform structured JSON-array records: sort, filter, project, group, aggregate, and render JSON, markdown tables, or CSV."
 timeout_seconds = 20
 prompt_file = "prompts/skills/transform.md"
 output_kind = "text"
