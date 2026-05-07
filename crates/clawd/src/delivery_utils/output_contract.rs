@@ -112,9 +112,25 @@ pub(super) fn enforce_output_contract(
 ) {
     *normalized_text = strip_preamble_before_markdown_table(normalized_text);
     match output_contract.response_shape {
+        OutputResponseShape::OneSentence
+            if output_contract
+                .exact_sentence_count
+                .is_some_and(|count| count > 1) =>
+        {
+            // The normalizer can occasionally mislabel an exact counted-sentence
+            // contract as one_sentence. Preserve the synthesized answer when a
+            // structured count says the user requested more than one sentence.
+        }
         OutputResponseShape::OneSentence => {
             if output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary {
-                *normalized_text = take_first_sentence(normalized_text);
+                *normalized_text = if output_contract.semantic_kind
+                    == crate::OutputSemanticKind::ContentExcerptSummary
+                {
+                    take_tail_sentence(normalized_text)
+                        .unwrap_or_else(|| take_first_sentence(normalized_text))
+                } else {
+                    take_first_sentence(normalized_text)
+                };
             }
         }
         OutputResponseShape::Scalar => {
@@ -350,6 +366,20 @@ fn looks_like_leading_label_line(line: &str) -> bool {
             .any(|ch| matches!(ch, '.' | '。' | '!' | '?' | '！' | '？'))
 }
 
+fn looks_like_ordered_list_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let mut chars = trimmed.chars().peekable();
+    let mut saw_digit = false;
+    while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+        saw_digit = true;
+        chars.next();
+    }
+    if !saw_digit {
+        return false;
+    }
+    matches!(chars.next(), Some('.' | ')' | '、' | '．'))
+}
+
 pub(crate) fn take_first_sentence(text: &str) -> String {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -383,6 +413,16 @@ pub(crate) fn take_first_sentence(text: &str) -> String {
             source_idx = idx;
         }
     }
+    if looks_like_ordered_list_line(lines[source_idx]) {
+        if let Some((idx, _)) = lines
+            .iter()
+            .enumerate()
+            .skip(source_idx + 1)
+            .find(|(_, line)| !line.starts_with('#') && !looks_like_ordered_list_line(line))
+        {
+            source_idx = idx;
+        }
+    }
     let source = lines[source_idx];
     let chars: Vec<char> = source.chars().collect();
     let mut buf = String::new();
@@ -412,11 +452,29 @@ pub(crate) fn take_first_sentence(text: &str) -> String {
     }
 }
 
+fn take_tail_sentence(text: &str) -> Option<String> {
+    text.lines()
+        .rev()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| !line.starts_with('#'))
+        .filter(|line| !looks_like_leading_label_line(line))
+        .filter(|line| !looks_like_ordered_list_line(line))
+        .find(|line| {
+            line.chars()
+                .any(|ch| matches!(ch, '。' | '!' | '?' | '！' | '？'))
+        })
+        .map(take_first_sentence)
+        .filter(|line| !line.trim().is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{IntentOutputContract, OutputResponseShape, OutputSemanticKind};
 
-    use super::{enforce_output_contract, looks_like_delivery_locator_literal};
+    use super::{
+        enforce_output_contract, looks_like_delivery_locator_literal, take_first_sentence,
+    };
 
     #[test]
     fn delivery_locator_literal_accepts_hint_and_path_shapes() {
@@ -448,9 +506,69 @@ mod tests {
     }
 
     #[test]
+    fn one_sentence_contract_skips_leading_ordered_list() {
+        let text = "最后5行日志：\n1. ts:1775000025, status:ok\n2. ts:1775000030, status:ok\n现象：所有任务执行成功，状态均为ok。";
+
+        assert_eq!(
+            take_first_sentence(text),
+            "现象：所有任务执行成功，状态均为ok。"
+        );
+    }
+
+    #[test]
+    fn content_excerpt_one_sentence_prefers_tail_summary_over_code_excerpt() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::OneSentence,
+            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            ..Default::default()
+        };
+        let mut text = "脚本的前15行内容为：\n#!/usr/bin/env bash\nset -euo pipefail\n\n该脚本主要用于为重启 clawd 服务准备环境和运行目录。".to_string();
+        let mut messages = vec![text.clone()];
+
+        enforce_output_contract(
+            &state,
+            "读脚本并一句话说明",
+            &contract,
+            &mut text,
+            &mut messages,
+        );
+
+        assert_eq!(text, "该脚本主要用于为重启 clawd 服务准备环境和运行目录。");
+        assert_eq!(messages, vec![text.clone()]);
+    }
+
+    #[test]
+    fn exact_sentence_count_overrides_mislabelled_one_sentence_contract() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let contract = IntentOutputContract {
+            exact_sentence_count: Some(3),
+            response_shape: OutputResponseShape::OneSentence,
+            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            ..Default::default()
+        };
+        let expected = "第一句概括背景。第二句说明重点。第三句给出结论。";
+        let mut text = expected.to_string();
+        let mut messages = vec![text.clone()];
+
+        enforce_output_contract(
+            &state,
+            "读文档后用三句话概括重点",
+            &contract,
+            &mut text,
+            &mut messages,
+        );
+
+        assert_eq!(text, expected);
+        assert_eq!(messages, vec![expected.to_string()]);
+    }
+
+    #[test]
     fn scalar_contract_extracts_single_machine_token_from_sentence() {
         let state = crate::AppState::test_default_with_fixture_provider();
         let contract = IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             ..Default::default()
         };
@@ -466,6 +584,7 @@ mod tests {
     fn scalar_contract_preserves_natural_language_summary_with_single_ascii_token() {
         let state = crate::AppState::test_default_with_fixture_provider();
         let contract = IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             semantic_kind: OutputSemanticKind::None,
             ..Default::default()
@@ -490,6 +609,7 @@ mod tests {
     fn scalar_count_contract_still_extracts_count_from_sentence() {
         let state = crate::AppState::test_default_with_fixture_provider();
         let contract = IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             semantic_kind: OutputSemanticKind::ScalarCount,
             ..Default::default()
@@ -507,6 +627,7 @@ mod tests {
     fn scalar_contract_preserves_missing_sentinel() {
         let state = crate::AppState::test_default_with_fixture_provider();
         let contract = IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             ..Default::default()
         };
@@ -522,6 +643,7 @@ mod tests {
     fn scalar_contract_preserves_structured_missing_field_line() {
         let state = crate::AppState::test_default_with_fixture_provider();
         let contract = IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             ..Default::default()
         };

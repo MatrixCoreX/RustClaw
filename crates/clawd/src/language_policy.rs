@@ -15,6 +15,34 @@ pub(crate) fn text_contains_ascii_alpha(text: &str) -> bool {
     text.chars().any(|ch| ch.is_ascii_alphabetic())
 }
 
+fn text_language_counts(text: &str) -> (usize, usize) {
+    let mut cjk = 0usize;
+    let mut ascii_alpha = 0usize;
+    for ch in text.chars() {
+        if matches!(
+            ch as u32,
+            0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
+        ) {
+            cjk += 1;
+        } else if ch.is_ascii_alphabetic() {
+            ascii_alpha += 1;
+        }
+    }
+    (cjk, ascii_alpha)
+}
+
+pub(crate) fn text_language_conflicts_with_hint(text: &str, language_hint: &str) -> bool {
+    let (cjk, ascii_alpha) = text_language_counts(text);
+    let hint = language_hint.trim().to_ascii_lowercase();
+    if hint.starts_with("en") {
+        return cjk > 0 && cjk.saturating_mul(2) > ascii_alpha;
+    }
+    if hint.starts_with("zh") {
+        return cjk == 0 && ascii_alpha > 16;
+    }
+    false
+}
+
 pub(crate) fn request_language_hint(user_text: &str) -> &'static str {
     let trimmed = user_text.trim();
     if trimmed.is_empty() {
@@ -142,7 +170,7 @@ pub(crate) fn task_response_language_hint(
 mod tests {
     use super::{
         preferred_response_language_hint, request_language_hint, task_language_source_text,
-        task_user_request_for_prompt,
+        task_user_request_for_prompt, text_language_conflicts_with_hint,
     };
 
     #[test]
@@ -154,6 +182,22 @@ mod tests {
         );
         assert_eq!(request_language_hint("用 English 解释 README"), "mixed");
         assert_eq!(request_language_hint("12345"), "config_default");
+    }
+
+    #[test]
+    fn generated_text_language_conflict_allows_embedded_names() {
+        assert!(text_language_conflicts_with_hint(
+            "请具体说明您想继续什么任务或操作？",
+            "en"
+        ));
+        assert!(!text_language_conflicts_with_hint(
+            "Please confirm the target file 新加卷 before I continue.",
+            "en"
+        ));
+        assert!(text_language_conflicts_with_hint(
+            "I couldn't determine the requested action.",
+            "zh-CN"
+        ));
     }
 
     #[test]

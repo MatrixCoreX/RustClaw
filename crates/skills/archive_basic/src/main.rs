@@ -66,7 +66,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
 
     match action {
         "list" => {
-            let archive = required_str(obj, "archive")?;
+            let archive = required_str_any(obj, &["archive", "archive_path"])?;
             let archive = resolve_path(&root, archive, false)?;
             list_archive(&archive).map(|text| {
                 (
@@ -77,8 +77,16 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         }
         "pack" => {
             let format = obj.get("format").and_then(|v| v.as_str()).unwrap_or("zip");
-            let source = resolve_path(&root, required_str(obj, "source")?, false)?;
-            let archive = resolve_path(&root, required_str(obj, "archive")?, true)?;
+            let source = resolve_path(
+                &root,
+                required_str_any(obj, &["source", "source_path"])?,
+                false,
+            )?;
+            let archive = resolve_path(
+                &root,
+                required_str_any(obj, &["archive", "archive_path"])?,
+                true,
+            )?;
             pack_archive(format, &source, &archive).map(|text| {
                 (
                     text.clone(),
@@ -93,8 +101,12 @@ fn execute(args: Value) -> Result<(String, Value), String> {
             })
         }
         "unpack" => {
-            let archive = resolve_path(&root, required_str(obj, "archive")?, false)?;
-            let dest = resolve_path(&root, required_str(obj, "dest")?, true)?;
+            let archive = resolve_path(
+                &root,
+                required_str_any(obj, &["archive", "archive_path"])?,
+                false,
+            )?;
+            let dest = resolve_path(&root, required_str_any(obj, &["dest", "dest_path"])?, true)?;
             unpack_archive(&archive, &dest).map(|text| {
                 (
                     text.clone(),
@@ -180,10 +192,24 @@ fn format_command_output(stdout: &[u8], stderr: &[u8]) -> String {
     text
 }
 
-fn required_str<'a>(obj: &'a serde_json::Map<String, Value>, key: &str) -> Result<&'a str, String> {
-    obj.get(key)
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("{key} is required"))
+fn required_str_any<'a>(
+    obj: &'a serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Result<&'a str, String> {
+    for key in keys {
+        if let Some(value) = obj
+            .get(*key)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return Ok(value);
+        }
+    }
+    Err(format!(
+        "{} is required",
+        keys.first().copied().unwrap_or("value")
+    ))
 }
 
 fn workspace_root() -> PathBuf {

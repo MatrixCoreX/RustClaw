@@ -1439,11 +1439,17 @@ mod tests {
         let state = crate::AppState::test_default_with_fixture_provider()
             .with_prompt_layers_installed()
             .with_real_runtime_policy();
+        let config_path = state.skill_rt.workspace_root.join("configs/config.toml");
+        let config = claw_core::config::AppConfig::load(config_path.to_string_lossy().as_ref())
+            .expect("load real configs/config.toml for fixture-replay vendor assertion");
+        let expected_vendor = crate::bootstrap::prompts::prompt_vendor_name_from_selected_vendor(
+            config.llm.selected_vendor.as_deref(),
+        );
 
         assert_eq!(
             crate::active_prompt_vendor_name(&state),
-            "minimax",
-            "fixture replay should reuse the real selected vendor so layered prompt patches match recorded prompts"
+            expected_vendor,
+            "fixture replay should reuse the normalized real selected vendor so layered prompt patches match recorded prompts"
         );
         assert!(
             !state.policy.persona_prompt_string().trim().is_empty(),

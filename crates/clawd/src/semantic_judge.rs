@@ -17,6 +17,7 @@
 //! 用 grep 校验只有白名单文件 import 这两个 LLM 入口；新增调用方需先评审 §3.4。
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use serde::Deserialize;
@@ -84,6 +85,21 @@ fn normalize_classifier_text(text: &str) -> String {
 
 fn delivery_text_cache_key(task: &ClaimedTask, text: &str) -> String {
     format!("{}\n{}", task.task_id, normalize_classifier_text(text))
+}
+
+fn looks_like_concrete_delivery_artifact(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.contains('\n') {
+        return false;
+    }
+    if crate::finalize::parse_delivery_file_token(trimmed).is_some() {
+        return true;
+    }
+    Path::new(trimmed).is_absolute()
+        || (trimmed.len() >= 3
+            && trimmed.as_bytes()[1] == b':'
+            && matches!(trimmed.as_bytes()[2], b'/' | b'\\')
+            && trimmed.as_bytes()[0].is_ascii_alphabetic())
 }
 
 async fn classify_delivery_text_with_llm(
@@ -193,6 +209,9 @@ pub(crate) async fn is_meta_respond_instruction(
     if trimmed.chars().count() > 600 {
         return false;
     }
+    if looks_like_concrete_delivery_artifact(trimmed) {
+        return false;
+    }
     classify_delivery_text_with_llm(state, task, trimmed)
         .await
         .map(|out| out.is_meta_instruction && out.meta_confidence >= 0.55)
@@ -230,6 +249,9 @@ pub(crate) async fn is_publishable_raw(state: &AppState, task: &ClaimedTask, s: 
         return false;
     }
     let trimmed = s.trim();
+    if looks_like_concrete_delivery_artifact(trimmed) {
+        return true;
+    }
     if trimmed.chars().count() > 180 {
         return true;
     }
@@ -247,7 +269,9 @@ pub(crate) async fn is_publishable_raw(state: &AppState, task: &ClaimedTask, s: 
 
 #[cfg(test)]
 mod tests {
-    use super::{is_publishable_raw_local, normalize_classifier_text};
+    use super::{
+        is_publishable_raw_local, looks_like_concrete_delivery_artifact, normalize_classifier_text,
+    };
     use serde_json::Value;
 
     #[test]
@@ -334,5 +358,22 @@ mod tests {
             "The result is 42 with confidence 0.97."
         ));
         assert!(is_publishable_raw_local("没找到该文件"));
+    }
+
+    #[test]
+    fn local_delivery_artifact_guard_accepts_paths_and_file_tokens() {
+        assert!(looks_like_concrete_delivery_artifact(
+            "/home/guagua/rustclaw/document/pwd_line.txt"
+        ));
+        assert!(looks_like_concrete_delivery_artifact(
+            "FILE:/home/guagua/rustclaw/document/pwd_line.txt"
+        ));
+        assert!(looks_like_concrete_delivery_artifact(
+            "C:\\Users\\demo\\pwd_line.txt"
+        ));
+        assert!(!looks_like_concrete_delivery_artifact("pwd_line.txt"));
+        assert!(!looks_like_concrete_delivery_artifact(
+            "read pwd_line.txt and summarize it"
+        ));
     }
 }

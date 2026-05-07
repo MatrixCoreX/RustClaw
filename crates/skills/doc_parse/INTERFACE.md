@@ -4,6 +4,12 @@
 
 `doc_parse` parses local documents into structured output.
 
+Planner selection guidance:
+- Use `doc_parse` when the request needs semantic evidence from a local document: extracting key points, summarizing sections, judging excerpt meaning, collecting paragraphs, reading document structure, or preparing grounded synthesis from a supported document file.
+- Prefer `doc_parse` over generic line-range reading for supported document files when the user wants content understanding rather than an exact line slice.
+- Use generic filesystem/text tools only when the request is explicitly about raw bytes, exact line ranges, path facts, file listings, or structured JSON/TOML/YAML field extraction.
+- `doc_parse` only parses and exposes grounded document evidence. It does not have separate `summarize`, `extract`, `judge`, or rewrite actions; perform those user-facing transformations in the agent response or a later synthesis step using the parsed output.
+
 Supported formats:
 - `md`, `txt`, `html`
 - `pdf` (via `pdftotext`/`pdfinfo` when available)
@@ -13,11 +19,15 @@ Supported formats:
 
 - `parse_doc`
 
+Backward-compatible action aliases:
+- `parse` is accepted by the skill and normalized to `parse_doc`.
+
 Parse one local file and return:
 - normalized plain text
 - `sections` (`id/title/level/content`)
 - `tables` (`id/header/rows`)
 - `metadata` (optional)
+- For summary/extraction/judgment requests, call `parse_doc` first, then synthesize the requested answer from the returned `text` / `sections` / `tables`.
 
 ## Parameter Contract
 

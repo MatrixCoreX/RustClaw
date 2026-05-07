@@ -115,6 +115,69 @@ fn merged_prompt_from_task_turn_analysis(
     }
 }
 
+fn task_turn_merge_prior_context(
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> (Option<&str>, Option<&str>) {
+    if let Some(clarify_state) = session_snapshot.active_clarify_state.as_ref() {
+        let prompt = non_empty_str(&clarify_state.source_request);
+        let output = non_empty_str(&clarify_state.pending_question);
+        if prompt.is_some() || output.is_some() {
+            return (prompt, output);
+        }
+    }
+    (
+        session_snapshot
+            .conversation_state
+            .as_ref()
+            .and_then(|state| state.last_primary_task_prompt.as_deref()),
+        session_snapshot
+            .conversation_state
+            .as_ref()
+            .and_then(|state| state.last_primary_task_output.as_deref()),
+    )
+}
+
+fn non_empty_str(value: &str) -> Option<&str> {
+    (!value.trim().is_empty()).then_some(value)
+}
+
+fn active_clarify_run_control_prompt(
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    current_prompt: &str,
+) -> Option<String> {
+    if !matches!(route_result.routed_mode, crate::RoutedMode::Chat)
+        || route_result.output_contract.delivery_required
+        || !matches!(
+            turn_analysis.and_then(|analysis| analysis.turn_type),
+            Some(crate::intent_router::TurnType::RunControl)
+        )
+    {
+        return None;
+    }
+    let clarify_state = session_snapshot.active_clarify_state.as_ref()?;
+    if !matches!(
+        clarify_state.missing_slot,
+        crate::clarify_state::ClarifyMissingSlot::Locator
+    ) {
+        return None;
+    }
+    let source_request = clarify_state.source_request.trim();
+    let pending_question = clarify_state.pending_question.trim();
+    if source_request.is_empty() && pending_question.is_empty() {
+        return None;
+    }
+    let candidate_targets = if clarify_state.candidate_targets.is_empty() {
+        "<none>".to_string()
+    } else {
+        clarify_state.candidate_targets.join("\n")
+    };
+    Some(format!(
+        "Previous request is waiting for clarification:\n{source_request}\n\nMissing information to confirm:\n{pending_question}\n\nCandidate targets from that clarification only:\n{candidate_targets}\n\nThe new user instruction changes this into a chat-only response and asks not to execute or deliver anything:\n{current_prompt}\n\nAnswer in the user's language by restating the missing information to confirm. Do not select a concrete file, alias, or path unless it is listed under Candidate targets from that clarification only."
+    ))
+}
+
 fn should_apply_task_turn_merge(
     clarify_followup_resolution: &crate::intent::continuation_resolver::ClarifyFollowupResolution,
 ) -> bool {
@@ -156,7 +219,7 @@ fn merged_reuse_active_prompt(
     let recent_output_block = prior_output
         .map(|output| format!("\n\nMost recent generated output:\n{output}"))
         .unwrap_or_default();
-    let continuity_rules = "\n\nContinuity rules:\n- Preserve all active prior subject, scope, audience, tone, key facts, and safety constraints unless the new instruction explicitly overrides them.\n- Treat the latest output-shape constraints as highest priority: exact bullet/table row counts, word/character limits, and output-only/body-only requests must be followed.\n- For table requests, row counts mean data rows only, excluding the header and separator. A two-row table must contain exactly two data rows.\n- When the latest instruction specifies a table, bullet count, final sentence, body-only, or another exact output shape, emit only that requested shape; do not append explanatory notes or summaries outside it.\n- A format/count-only change must not broaden a narrowed scope. If an exact count needs more items than the recent output has, split, combine, or elaborate within the current scope instead of adding unrelated categories.\n- Style or quality feedback means rewrite the deliverable itself. Do not answer with meta-commentary like \"it already meets that\" unless the user explicitly asks for evaluation.\n- Do not invent unobserved project setup commands, package names, dependency lines, version numbers, paths, or configuration values. If such details are not provided or observed, keep them neutral/generic or say to follow the repo's documented setup path.\n- For a project-specific setup/deployment note with no observed setup evidence, do not include command blocks, backticked command invocations, package names, fake CLI steps, settings-file claims, or assigned installer roles. If recent output already contains unsupported setup commands or setup artifacts, remove or replace them with neutral documented-path wording instead of preserving them.\n- When rewriting setup/deployment/onboarding text for a simpler audience, do not introduce alternate OS scripts, download methods, websites, ports, Bot platforms, API-key locations, installer roles, or launch commands unless they already appear in recent output or authoritative context. Do not present shell scripts (.sh) as GUI-only actions unless that GUI flow was explicitly observed. Simplify by replacing commands with neutral documented-step wording, not by inventing easier-looking steps.\n- When shortening, reformatting, or asking for the final sentence/body, synthesize a complete standalone answer from the current task and recent output. Do not return only a heading, label, dangling fragment, or trailing sentence if that would drop required facts.\n- If the recent output is a clarification question and the new instruction only adds constraints without answering the missing slot, do not repeat the same clarification indefinitely. For low-risk writing or chat-only drafting tasks, produce a best-effort draft using a neutral, reasonable assumption. For file, code, command, system, credential, delivery, or other concrete-action tasks, keep clarifying instead of guessing.";
+    let continuity_rules = "\n\nContinuity rules:\n- Preserve all active prior subject, scope, audience, tone, key facts, and safety constraints unless the new instruction explicitly overrides them.\n- Continuity does not preserve reply language when the current turn has a clear language. The current user instruction's language hint remains authoritative; translate or rewrite the prior deliverable into that language while preserving facts, scope, and format.\n- Treat the latest output-shape constraints as highest priority: exact bullet/table row counts, word/character limits, and output-only/body-only requests must be followed.\n- For table requests, row counts mean data rows only, excluding the header and separator. A two-row table must contain exactly two data rows.\n- When the latest instruction specifies a table, bullet count, final sentence, body-only, or another exact output shape, emit only that requested shape; do not append explanatory notes or summaries outside it.\n- For a latest length limit, compress the deliverable body comfortably below the stated limit instead of preserving all prior coverage. Runtime-visible process/execution framing is separate from the deliverable body and must not be used as an excuse to exceed the requested body length.\n- A format/count-only change must not broaden a narrowed scope. If an exact count needs more items than the recent output has, split, combine, or elaborate within the current scope instead of adding unrelated categories.\n- If the most recent generated output is a clarification question, visibly incomplete, starts mid-document, or relies on a continued marker, do not preserve its question shape, broken numbering, continuation marker, or fragment boundary. Rebuild a coherent compact deliverable for the current task scope and latest instruction, while preserving valid facts and constraints.\n- Style or quality feedback means rewrite the deliverable itself. Do not answer with meta-commentary like \"it already meets that\" unless the user explicitly asks for evaluation.\n- Do not invent unobserved project setup commands, package names, dependency lines, version numbers, paths, or configuration values. If such details are not provided or observed, keep them neutral/generic or say to follow the repo's documented setup path.\n- For a project-specific setup/deployment note with no observed setup evidence, do not include command blocks, backticked command invocations, package names, fake CLI steps, settings-file claims, or assigned installer roles. If recent output already contains unsupported setup commands or setup artifacts, remove or replace them with neutral documented-path wording instead of preserving them.\n- When rewriting setup/deployment/onboarding text for a simpler audience, do not introduce alternate OS scripts, download methods, websites, ports, Bot platforms, API-key locations, installer roles, or launch commands unless they already appear in recent output or authoritative context. Do not present shell scripts (.sh) as GUI-only actions unless that GUI flow was explicitly observed. Simplify by replacing commands with neutral documented-step wording, not by inventing easier-looking steps.\n- When shortening, reformatting, or asking for the final sentence/body, synthesize a complete standalone answer from the current task and recent output. Do not return only a heading, label, dangling fragment, or trailing sentence if that would drop required facts.\n- If the recent output is a clarification question and the new instruction only adds constraints without answering the missing slot, do not repeat the same clarification indefinitely. For low-risk writing or chat-only drafting tasks, produce a best-effort draft using a neutral, reasonable assumption. For file, code, command, system, credential, delivery, or other concrete-action tasks, keep clarifying instead of guessing.";
     match structured_patch {
         Some(patch) => format!(
             "Current task:\n{prior}{recent_output_block}{continuity_rules}\n\nStructured task updates:\n{patch}\n\n{merge_instruction}\nNew user instruction:\n{current}"
@@ -453,16 +516,24 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
         "scalar_path_only" => Some(crate::OutputSemanticKind::ScalarPathOnly),
         "raw_command_output" => Some(crate::OutputSemanticKind::RawCommandOutput),
         "file_names" => Some(crate::OutputSemanticKind::FileNames),
+        "directory_names" => Some(crate::OutputSemanticKind::DirectoryNames),
+        "file_paths" => Some(crate::OutputSemanticKind::FilePaths),
         "existence_with_path" => Some(crate::OutputSemanticKind::ExistenceWithPath),
+        "existence_with_path_summary" => Some(crate::OutputSemanticKind::ExistenceWithPathSummary),
         "hidden_entries_check" => Some(crate::OutputSemanticKind::HiddenEntriesCheck),
+        "execution_failed_step" => Some(crate::OutputSemanticKind::ExecutionFailedStep),
+        "generated_file_delivery" => Some(crate::OutputSemanticKind::GeneratedFileDelivery),
         "recent_scalar_equality_check" => {
             Some(crate::OutputSemanticKind::RecentScalarEqualityCheck)
         }
+        "git_commit_subject" => Some(crate::OutputSemanticKind::GitCommitSubject),
+        "structured_keys" => Some(crate::OutputSemanticKind::StructuredKeys),
         "sqlite_table_listing" => Some(crate::OutputSemanticKind::SqliteTableListing),
         "sqlite_table_names_only" => Some(crate::OutputSemanticKind::SqliteTableNamesOnly),
         "sqlite_database_kind_judgment" => {
             Some(crate::OutputSemanticKind::SqliteDatabaseKindJudgment)
         }
+        "sqlite_schema_version" => Some(crate::OutputSemanticKind::SqliteSchemaVersion),
         "service_status" => Some(crate::OutputSemanticKind::ServiceStatus),
         _ => None,
     }
@@ -477,34 +548,269 @@ fn route_requests_file_delivery(route_result: &crate::RouteResult) -> bool {
         )
 }
 
-fn deictic_file_delivery_from_read_context_needs_clarify(
-    route_result: &crate::RouteResult,
-    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
-) -> bool {
-    route_requests_file_delivery(route_result)
-        && surface.has_deictic_reference()
-        && !surface.has_any_locator_reference()
-        && session_snapshot
-            .active_followup_frame
-            .as_ref()
-            .is_some_and(|frame| {
-                matches!(frame.op_kind, crate::followup_frame::FollowupOpKind::Read)
-            })
+fn file_delivery_has_concrete_locator(route_result: &crate::RouteResult) -> bool {
+    !route_result.output_contract.locator_hint.trim().is_empty()
+        || matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::Url
+        )
 }
 
-fn force_deictic_file_delivery_from_read_context_clarify(
+fn generated_file_delivery_can_choose_target(route_result: &crate::RouteResult) -> bool {
+    route_requests_file_delivery(route_result)
+        && route_result.output_contract.semantic_kind
+            == crate::OutputSemanticKind::GeneratedFileDelivery
+        && route_result.output_contract.delivery_intent == crate::OutputDeliveryIntent::FileSingle
+        && route_result.output_contract.response_shape == crate::OutputResponseShape::FileToken
+}
+
+fn normalize_output_shape_text(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect::<String>()
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+fn json_value_requests_filename_only_output(value: &Value) -> bool {
+    match value {
+        Value::String(text) => matches!(
+            normalize_output_shape_text(text).as_str(),
+            "filename"
+                | "file_name"
+                | "basename"
+                | "filename_only"
+                | "file_name_only"
+                | "basename_only"
+        ),
+        Value::Array(items) => items.iter().any(json_value_requests_filename_only_output),
+        Value::Object(map) => map.iter().any(|(key, value)| {
+            matches!(
+                normalize_output_shape_text(key).as_str(),
+                "output_format" | "output_shape" | "format" | "answer_format" | "delivery_format"
+            ) && json_value_requests_filename_only_output(value)
+        }),
+        _ => false,
+    }
+}
+
+fn turn_analysis_requests_filename_only_output(
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    turn_analysis
+        .and_then(|analysis| analysis.state_patch.as_ref())
+        .is_some_and(json_value_requests_filename_only_output)
+}
+
+fn clear_file_delivery_contract_for_filename_only(
     route_result: &mut crate::RouteResult,
-    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) {
-    if !deictic_file_delivery_from_read_context_needs_clarify(
-        route_result,
-        surface,
-        session_snapshot,
-    ) {
+    if !turn_analysis_requests_filename_only_output(turn_analysis) {
         return;
     }
+    route_result.wants_file_delivery = false;
+    route_result.output_contract.delivery_required = false;
+    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    if matches!(
+        route_result.output_contract.response_shape,
+        crate::OutputResponseShape::FileToken
+    ) {
+        route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    }
+    route_result
+        .route_reason
+        .push_str("; filename_only_output_clears_file_delivery_contract");
+}
+
+fn json_usize(value: &Value) -> Option<usize> {
+    value
+        .as_u64()
+        .and_then(|raw| usize::try_from(raw).ok())
+        .or_else(|| value.as_i64().and_then(|raw| usize::try_from(raw).ok()))
+}
+
+fn json_i64(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_u64().and_then(|raw| i64::try_from(raw).ok()))
+}
+
+fn ordered_entry_index_from_state_patch(
+    state_patch: Option<&Value>,
+    frame: &crate::followup_frame::FollowupFrame,
+) -> Option<usize> {
+    let len = frame.ordered_entries.len();
+    if len == 0 {
+        return None;
+    }
+    let reference = state_patch?
+        .get("ordered_entry_ref")
+        .or_else(|| state_patch?.get("ordered_entry_reference"))?;
+    let reference = reference.as_object()?;
+    if let Some(index_value) = reference.get("index") {
+        let index = json_usize(index_value)?;
+        let index_base = reference
+            .get("index_base")
+            .and_then(json_usize)
+            .unwrap_or(1);
+        let zero_based_index = index.checked_sub(index_base)?;
+        return (zero_based_index < len).then_some(zero_based_index);
+    }
+
+    let offset = reference
+        .get("relative_offset")
+        .or_else(|| reference.get("offset_from_selected"))
+        .and_then(json_i64)?;
+    let selected = i64::try_from(frame.selected_entry_index?).ok()?;
+    let target = selected.checked_add(offset)?;
+    usize::try_from(target).ok().filter(|index| *index < len)
+}
+
+fn ordered_entry_state_patch(
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> Option<&Value> {
+    turn_analysis.and_then(|analysis| analysis.state_patch.as_ref())
+}
+
+fn has_ordered_entry_state_patch(
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    ordered_entry_state_patch(turn_analysis).is_some_and(|state_patch| {
+        state_patch.get("ordered_entry_ref").is_some()
+            || state_patch.get("ordered_entry_reference").is_some()
+    })
+}
+
+fn ordered_entry_reference_from_active_frame_index(
+    route_result: &mut crate::RouteResult,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    index: usize,
+) -> bool {
+    let Some(frame) = session_snapshot.active_followup_frame.as_ref() else {
+        return false;
+    };
+    let Some(target) = crate::followup_frame::ordered_entry_target_at(frame, index) else {
+        return false;
+    };
+    if target.trim().is_empty() {
+        return false;
+    }
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route_result.output_contract.locator_hint = target.clone();
+    if route_result.route_reason.trim().is_empty() {
+        route_result.route_reason = "ordered_entry_reference_bound_from_active_frame".to_string();
+    } else if !route_result
+        .route_reason
+        .contains("ordered_entry_reference_bound_from_active_frame")
+    {
+        route_result
+            .route_reason
+            .push_str("; ordered_entry_reference_bound_from_active_frame");
+    }
+    if route_result.resolved_intent.trim().is_empty() {
+        route_result.resolved_intent = format!("Use ordered entry {}: {target}", index + 1);
+    } else if !route_result.resolved_intent.contains(&target) {
+        route_result
+            .resolved_intent
+            .push_str(&format!("\nordered_entry_target: {target}"));
+    }
+    true
+}
+
+fn bind_ordered_entry_reference_from_active_frame(
+    route_result: &mut crate::RouteResult,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    if route_result.needs_clarify
+        || !route_result.is_execute_gate()
+        || (!route_result.output_contract.requires_content_evidence
+            && !route_result.output_contract.delivery_required)
+        || !has_ordered_entry_state_patch(turn_analysis)
+    {
+        return false;
+    }
+    let Some(frame) = session_snapshot.active_followup_frame.as_ref() else {
+        return false;
+    };
+    let Some(index) =
+        ordered_entry_index_from_state_patch(ordered_entry_state_patch(turn_analysis), frame)
+    else {
+        return false;
+    };
+    ordered_entry_reference_from_active_frame_index(route_result, session_snapshot, index)
+}
+
+fn active_read_bound_target(
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> Option<String> {
+    session_snapshot
+        .active_observed_facts
+        .as_ref()
+        .and_then(|facts| facts.bound_target.as_deref())
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            session_snapshot
+                .active_followup_frame
+                .as_ref()
+                .filter(|frame| {
+                    matches!(frame.op_kind, crate::followup_frame::FollowupOpKind::Read)
+                })
+                .and_then(|frame| frame.bound_target.as_deref())
+                .map(str::trim)
+                .filter(|target| !target.is_empty())
+                .map(ToString::to_string)
+        })
+}
+
+fn bind_structural_file_delivery_to_recent_read_target(
+    route_result: &mut crate::RouteResult,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> bool {
+    if !route_requests_file_delivery(route_result)
+        || route_result.needs_clarify
+        || file_delivery_has_concrete_locator(route_result)
+    {
+        return false;
+    }
+    let Some(bound_target) = active_read_bound_target(session_snapshot) else {
+        return false;
+    };
+    route_result.needs_clarify = false;
+    route_result.set_routed_mode(crate::RoutedMode::Act);
+    if route_result.resolved_intent.trim().is_empty() {
+        route_result.resolved_intent = format!("file_delivery_target: {bound_target}");
+    } else if !route_result.resolved_intent.contains(&bound_target) {
+        route_result
+            .resolved_intent
+            .push_str(&format!("\nfile_delivery_target: {bound_target}"));
+    }
+    route_result.clarify_question.clear();
+    route_result.wants_file_delivery = true;
+    route_result.output_contract.delivery_required = true;
+    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route_result.output_contract.requires_content_evidence = false;
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route_result.output_contract.locator_hint = bound_target;
+    route_result
+        .route_reason
+        .push_str("; structural_file_delivery_bound_to_recent_read_target");
+    true
+}
+
+fn force_unresolved_file_delivery_clarify(route_result: &mut crate::RouteResult) {
     route_result.needs_clarify = true;
     route_result.set_routed_mode(crate::RoutedMode::AskClarify);
     route_result.clarify_question = "请提供要发送的文件路径或文件名。".to_string();
@@ -518,7 +824,49 @@ fn force_deictic_file_delivery_from_read_context_clarify(
     route_result.output_contract.locator_hint.clear();
     route_result
         .route_reason
-        .push_str("; deictic_file_delivery_from_read_context_requires_clarify");
+        .push_str("; unresolved_file_delivery_requires_clarify");
+}
+
+fn allow_generated_file_delivery_without_locator(route_result: &mut crate::RouteResult) {
+    route_result.needs_clarify = false;
+    if route_result.is_clarify_gate() {
+        route_result.set_routed_mode(crate::RoutedMode::Act);
+    }
+    route_result.clarify_question.clear();
+    route_result.wants_file_delivery = true;
+    route_result.output_contract.delivery_required = true;
+    route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route_result.output_contract.requires_content_evidence = true;
+    if matches!(
+        route_result.output_contract.locator_kind,
+        crate::OutputLocatorKind::None
+    ) {
+        route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    }
+    route_result
+        .route_reason
+        .push_str("; generated_file_delivery_allows_runtime_target");
+}
+
+fn repair_structural_file_delivery_resolution(
+    route_result: &mut crate::RouteResult,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) {
+    if !route_requests_file_delivery(route_result) {
+        return;
+    }
+    if generated_file_delivery_can_choose_target(route_result) {
+        allow_generated_file_delivery_without_locator(route_result);
+        return;
+    }
+    if file_delivery_has_concrete_locator(route_result) {
+        return;
+    }
+    if bind_structural_file_delivery_to_recent_read_target(route_result, session_snapshot) {
+        return;
+    }
+    force_unresolved_file_delivery_clarify(route_result);
 }
 
 fn preserve_active_clarify_output_contract_for_locator_reply(
@@ -681,11 +1029,13 @@ pub(super) async fn prepare_ask_routing(
         &clarify_followup_resolution,
         &session_snapshot,
     );
-    force_deictic_file_delivery_from_read_context_clarify(
+    clear_file_delivery_contract_for_filename_only(&mut route_result, turn_analysis.as_ref());
+    bind_ordered_entry_reference_from_active_frame(
         &mut route_result,
-        &routed_prompt_surface,
         &session_snapshot,
+        turn_analysis.as_ref(),
     );
+    repair_structural_file_delivery_resolution(&mut route_result, &session_snapshot);
     let resume_runtime_binding = crate::intent::resume_policy::select_resume_runtime_binding(
         &route_result,
         resume_binding.as_ref(),
@@ -707,15 +1057,11 @@ pub(super) async fn prepare_ask_routing(
     );
     let mut runtime_prompt = resume_runtime.runtime_prompt;
     if should_apply_task_turn_merge(&clarify_followup_resolution) {
+        let (merge_prior_prompt, merge_prior_output) =
+            task_turn_merge_prior_context(&session_snapshot);
         if let Some(merged_prompt) = merged_prompt_from_task_turn_analysis(
-            session_snapshot
-                .conversation_state
-                .as_ref()
-                .and_then(|state| state.last_primary_task_prompt.as_deref()),
-            session_snapshot
-                .conversation_state
-                .as_ref()
-                .and_then(|state| state.last_primary_task_output.as_deref()),
+            merge_prior_prompt,
+            merge_prior_output,
             prompt,
             turn_analysis.as_ref(),
         ) {
@@ -732,6 +1078,21 @@ pub(super) async fn prepare_ask_routing(
             runtime_prompt = merged_prompt;
             route_result.resolved_intent = runtime_prompt.clone();
         }
+    }
+    if let Some(clarify_control_prompt) = active_clarify_run_control_prompt(
+        &route_result,
+        turn_analysis.as_ref(),
+        &session_snapshot,
+        prompt,
+    ) {
+        info!(
+            "{} worker_once: ask active_clarify_run_control_prompt task_id={} prompt={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            crate::truncate_for_log(&clarify_control_prompt)
+        );
+        runtime_prompt = clarify_control_prompt;
+        route_result.resolved_intent = runtime_prompt.clone();
     }
     info!(
         "worker_once: ask received_message task_id={} user_id={} chat_id={} text={}",
@@ -804,10 +1165,11 @@ pub(super) async fn prepare_ask_routing(
 #[cfg(test)]
 mod tests {
     use super::{
-        force_deictic_file_delivery_from_read_context_clarify,
+        active_clarify_run_control_prompt, bind_ordered_entry_reference_from_active_frame,
         merged_prompt_from_task_turn_analysis,
-        preserve_active_clarify_output_contract_for_locator_reply, should_apply_task_turn_merge,
-        should_probe_transcript_for_clarify_fallback,
+        preserve_active_clarify_output_contract_for_locator_reply,
+        repair_structural_file_delivery_resolution, should_apply_task_turn_merge,
+        should_probe_transcript_for_clarify_fallback, task_turn_merge_prior_context,
     };
 
     use serde_json::json;
@@ -838,6 +1200,105 @@ mod tests {
                 .and_then(|v| v.as_bool()),
             Some(true)
         );
+    }
+
+    #[test]
+    fn task_turn_merge_prior_prefers_active_clarify_over_stale_primary_task() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some(
+                    "读取 scripts/nl_tests/fixtures/device_local/package.json 的 name 字段"
+                        .to_string(),
+                ),
+                last_primary_task_output: Some("rustclaw-nl-fixture".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_clarify_state: Some(crate::clarify_state::ClarifyState {
+                missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
+                pending_question: "请提供要发送的文件路径或文件名。".to_string(),
+                candidate_targets: Vec::new(),
+                delivery_required: true,
+                output_shape: Some(crate::OutputResponseShape::FileToken.as_str().to_string()),
+                semantic_kind: None,
+                source_request: "把那个最大的发给我。".to_string(),
+                source_task_id: "task-clarify".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+            }),
+            active_followup_frame: None,
+            active_observed_facts: None,
+        };
+
+        let (prompt, output) = task_turn_merge_prior_context(&snapshot);
+
+        assert_eq!(prompt, Some("把那个最大的发给我。"));
+        assert_eq!(output, Some("请提供要发送的文件路径或文件名。"));
+    }
+
+    #[test]
+    fn active_clarify_run_control_prompt_blocks_unrelated_alias_selection() {
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Chat,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        let turn_analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::RunControl),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReplaceActive),
+            should_interrupt_active_run: true,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                alias_bindings: vec![crate::conversation_state::SessionAliasBinding {
+                    alias: "甲文件".to_string(),
+                    target: "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+                        .to_string(),
+                    updated_at_ts: 1,
+                }],
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_clarify_state: Some(crate::clarify_state::ClarifyState {
+                missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
+                pending_question: "请提供要发送的文件路径或文件名。".to_string(),
+                candidate_targets: Vec::new(),
+                delivery_required: true,
+                output_shape: Some(crate::OutputResponseShape::FileToken.as_str().to_string()),
+                semantic_kind: None,
+                source_request: "把那个最大的发给我。".to_string(),
+                source_task_id: "task-clarify".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+            }),
+            active_followup_frame: None,
+            active_observed_facts: None,
+        };
+
+        let prompt = active_clarify_run_control_prompt(
+            &route,
+            Some(&turn_analysis),
+            &snapshot,
+            "停一下，不要发文件，改为只告诉我你需要我确认哪个文件。",
+        )
+        .expect("clarify control prompt");
+
+        assert!(prompt.contains("Missing information to confirm"));
+        assert!(prompt.contains("Candidate targets from that clarification only:\n<none>"));
+        assert!(!prompt.contains("release_checklist.md"));
     }
 
     #[test]
@@ -892,6 +1353,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::FileToken,
                 requires_content_evidence: true,
                 delivery_required: true,
@@ -978,6 +1440,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::Strict,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -1042,11 +1505,11 @@ mod tests {
     }
 
     #[test]
-    fn deictic_file_delivery_after_read_context_requires_clarify_without_locator() {
+    fn file_delivery_with_structured_locator_is_preserved() {
         let mut route = crate::RouteResult {
             routed_mode: crate::RoutedMode::Act,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
-            resolved_intent: "send the referenced file".to_string(),
+            resolved_intent: "send the routed file".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
             route_confidence: Some(0.9),
@@ -1060,6 +1523,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::FileToken,
                 requires_content_evidence: false,
                 delivery_required: true,
@@ -1084,10 +1548,63 @@ mod tests {
             active_clarify_state: None,
             active_observed_facts: None,
         };
-        let surface =
-            crate::intent::surface_signals::analyze_prompt_surface("把那个文件发给我，不要贴内容");
 
-        force_deictic_file_delivery_from_read_context_clarify(&mut route, &surface, &snapshot);
+        repair_structural_file_delivery_resolution(&mut route, &snapshot);
+
+        assert!(!route.needs_clarify);
+        assert!(route.is_execute_gate());
+        assert!(route.wants_file_delivery);
+        assert!(route.output_contract.delivery_required);
+        assert_eq!(
+            route.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::FileSingle
+        );
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+        );
+        assert_eq!(route.output_contract.locator_hint, "/tmp/model_io.log");
+        assert!(route.clarify_question.is_empty());
+    }
+
+    #[test]
+    fn unresolved_file_delivery_without_locator_requires_clarify() {
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "send the file".to_string(),
+            needs_clarify: false,
+            route_reason: String::new(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::FileToken,
+                requires_content_evidence: true,
+                delivery_required: true,
+                locator_kind: crate::OutputLocatorKind::None,
+                delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        repair_structural_file_delivery_resolution(&mut route, &snapshot);
 
         assert!(route.needs_clarify);
         assert!(route.is_clarify_gate());
@@ -1097,19 +1614,333 @@ mod tests {
             route.output_contract.delivery_intent,
             crate::OutputDeliveryIntent::None
         );
-        assert!(!route.output_contract.requires_content_evidence);
         assert_eq!(
             route.output_contract.locator_kind,
             crate::OutputLocatorKind::None
         );
-        assert_eq!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-        );
         assert!(route.clarify_question.contains("文件路径"));
         assert!(route
             .route_reason
-            .contains("deictic_file_delivery_from_read_context_requires_clarify"));
+            .contains("unresolved_file_delivery_requires_clarify"));
+    }
+
+    #[test]
+    fn generated_file_delivery_without_locator_can_choose_runtime_target() {
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::AskClarify,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
+            resolved_intent: "create a shell script, save it, and deliver the generated file"
+                .to_string(),
+            needs_clarify: true,
+            route_reason: String::new(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: "please provide a filename".to_string(),
+            schedule_intent: None,
+            wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::FileToken,
+                requires_content_evidence: true,
+                delivery_required: true,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+                semantic_kind: crate::OutputSemanticKind::GeneratedFileDelivery,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        repair_structural_file_delivery_resolution(&mut route, &snapshot);
+
+        assert!(!route.needs_clarify);
+        assert!(route.is_execute_gate());
+        assert!(route.wants_file_delivery);
+        assert!(route.output_contract.delivery_required);
+        assert_eq!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::GeneratedFileDelivery
+        );
+        assert_eq!(
+            route.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::FileSingle
+        );
+        assert!(route.clarify_question.is_empty());
+        assert!(route
+            .route_reason
+            .contains("generated_file_delivery_allows_runtime_target"));
+    }
+
+    #[test]
+    fn structurally_resolved_file_delivery_binds_recent_read_target_without_text_match() {
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "deliver the active file target".to_string(),
+            needs_clarify: false,
+            route_reason: "normalizer resolved delivery from immediate context".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::FileToken,
+                requires_content_evidence: true,
+                delivery_required: true,
+                locator_kind: crate::OutputLocatorKind::None,
+                delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+                source_request: "read README.md head".to_string(),
+                op_kind: crate::followup_frame::FollowupOpKind::Read,
+                bound_target: Some("/tmp/README.md".to_string()),
+                source_task_id: "task-1".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+                ..Default::default()
+            }),
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        repair_structural_file_delivery_resolution(&mut route, &snapshot);
+
+        assert!(!route.needs_clarify);
+        assert!(route.is_execute_gate());
+        assert!(route.wants_file_delivery);
+        assert!(route.output_contract.delivery_required);
+        assert_eq!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        );
+        assert_eq!(
+            route.output_contract.locator_hint,
+            "/tmp/README.md".to_string()
+        );
+        assert!(route.resolved_intent.contains("/tmp/README.md"));
+        assert!(route
+            .route_reason
+            .contains("structural_file_delivery_bound_to_recent_read_target"));
+    }
+
+    #[test]
+    fn ordered_entry_reference_binds_third_delivery_from_active_frame() {
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "deliver the third listed file".to_string(),
+            needs_clarify: false,
+            route_reason: "normalizer selected an ordinal follow-up".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::FileToken,
+                requires_content_evidence: true,
+                delivery_required: true,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: "/home/guagua/rustclaw/logs/clawd.log".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+                source_request: "先列出 logs 目录下前 4 个文件名".to_string(),
+                op_kind: crate::followup_frame::FollowupOpKind::List,
+                bound_target: Some("logs".to_string()),
+                ordered_entries: vec![
+                    "act_plan.log".to_string(),
+                    "clawd.log".to_string(),
+                    "clawd.run.log".to_string(),
+                    "clawd.test.log".to_string(),
+                ],
+                source_task_id: "task-list".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+                ..Default::default()
+            }),
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskAppend),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+            should_interrupt_active_run: false,
+            state_patch: Some(json!({"ordered_entry_ref":{"index":3,"index_base":1}})),
+            attachment_processing_required: false,
+        };
+
+        assert!(bind_ordered_entry_reference_from_active_frame(
+            &mut route,
+            &snapshot,
+            Some(&analysis)
+        ));
+
+        assert_eq!(route.output_contract.locator_hint, "logs/clawd.run.log");
+        assert!(route
+            .route_reason
+            .contains("ordered_entry_reference_bound_from_active_frame"));
+        assert!(route.resolved_intent.contains("logs/clawd.run.log"));
+    }
+
+    #[test]
+    fn ordered_entry_reference_binds_previous_from_selected_entry() {
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "read previous selected file tail".to_string(),
+            needs_clarify: false,
+            route_reason: "normalizer selected a relative ordinal follow-up".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "/home/guagua/rustclaw/logs/clawd.run.log".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+                source_request: "把第三个发给我".to_string(),
+                op_kind: crate::followup_frame::FollowupOpKind::Delivery,
+                bound_target: Some("logs/clawd.run.log".to_string()),
+                ordered_entries: vec![
+                    "act_plan.log".to_string(),
+                    "clawd.log".to_string(),
+                    "clawd.run.log".to_string(),
+                    "clawd.test.log".to_string(),
+                ],
+                selected_entry_index: Some(2),
+                source_task_id: "task-delivery".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+                ..Default::default()
+            }),
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskCorrect),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+            should_interrupt_active_run: false,
+            state_patch: Some(json!({"ordered_entry_ref":{"relative_offset":-1}})),
+            attachment_processing_required: false,
+        };
+
+        assert!(bind_ordered_entry_reference_from_active_frame(
+            &mut route,
+            &snapshot,
+            Some(&analysis)
+        ));
+
+        assert_eq!(route.output_contract.locator_hint, "logs/clawd.log");
+        assert!(route.resolved_intent.contains("logs/clawd.log"));
+    }
+
+    #[test]
+    fn filename_only_output_patch_clears_file_delivery_contract() {
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "only output the basename of the previously delivered file"
+                .to_string(),
+            needs_clarify: false,
+            route_reason: String::new(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::FileToken,
+                requires_content_evidence: false,
+                delivery_required: true,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: "/tmp/README.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskAppend),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+            should_interrupt_active_run: false,
+            state_patch: Some(json!({"output_format": "filename_only"})),
+            attachment_processing_required: false,
+        };
+
+        super::clear_file_delivery_contract_for_filename_only(&mut route, Some(&analysis));
+
+        assert!(!route.wants_file_delivery);
+        assert!(!route.output_contract.delivery_required);
+        assert_eq!(
+            route.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::None
+        );
+        assert_eq!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar
+        );
+        assert!(route
+            .route_reason
+            .contains("filename_only_output_clears_file_delivery_contract"));
     }
 
     #[test]
@@ -1262,6 +2093,8 @@ mod tests {
         assert!(merged.contains("\"audience\":\"boss\""));
         assert!(merged.contains("append this new instruction"));
         assert!(merged.contains("Continuity rules"));
+        assert!(merged.contains("Continuity does not preserve reply language"));
+        assert!(merged.contains("do not preserve its question shape"));
         assert!(merged.contains("do not repeat the same clarification indefinitely"));
     }
 

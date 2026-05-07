@@ -1,6 +1,6 @@
 use crate::{
-    IntentOutputContract, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
-    RoutedMode,
+    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
+    OutputSemanticKind, RouteResult, RoutedMode,
 };
 use std::path::Path;
 
@@ -40,6 +40,15 @@ pub(crate) fn enforce_content_evidence_execution_mode(
     if needs_clarify || !mode.eq(&RoutedMode::Chat) || !contract.requires_content_evidence {
         return mode;
     }
+    if matches!(contract.locator_kind, OutputLocatorKind::None)
+        && !contract.delivery_required
+        && !matches!(
+            contract.response_shape,
+            OutputResponseShape::Scalar | OutputResponseShape::FileToken
+        )
+    {
+        return mode;
+    }
     if matches!(
         contract.response_shape,
         OutputResponseShape::Scalar | OutputResponseShape::FileToken
@@ -64,6 +73,26 @@ fn locator_kind_requires_path_binding(kind: OutputLocatorKind) -> bool {
 fn semantic_locator_hint_satisfies_non_path_binding(route_result: &RouteResult) -> bool {
     route_result.output_contract.semantic_kind == OutputSemanticKind::ServiceStatus
         && !route_result.output_contract.locator_hint.trim().is_empty()
+}
+
+fn file_delivery_can_materialize_target_without_existing_locator(
+    route_result: &RouteResult,
+) -> bool {
+    // New-file delivery may choose a filename during planning; an empty locator
+    // hint is not necessarily a missing existing-file target.
+    route_result.is_execute_gate()
+        && !route_result.needs_clarify
+        && route_result.wants_file_delivery
+        && route_result.output_contract.delivery_required
+        && route_result.output_contract.response_shape == OutputResponseShape::FileToken
+        && route_result.output_contract.delivery_intent == OutputDeliveryIntent::FileSingle
+        && route_result.output_contract.requires_content_evidence
+        && route_result.output_contract.semantic_kind == OutputSemanticKind::GeneratedFileDelivery
+        && matches!(
+            route_result.output_contract.locator_kind,
+            OutputLocatorKind::Path | OutputLocatorKind::Filename
+        )
+        && route_result.output_contract.locator_hint.trim().is_empty()
 }
 
 fn path_is_existing_directory(path: &str) -> bool {
@@ -136,9 +165,12 @@ pub(crate) fn apply_post_route_policy(
     let mut fuzzy_locator_suggestions = Vec::new();
     let normalizer_locator_hint_present =
         !route_result.output_contract.locator_hint.trim().is_empty();
+    let file_delivery_can_materialize_target =
+        file_delivery_can_materialize_target_without_existing_locator(&route_result);
     let mut missing_locator_for_path_scoped_content = path_scoped_content_request
         && !locator_kind_is_current_workspace(route_result.output_contract.locator_kind)
-        && !normalizer_locator_hint_present;
+        && !normalizer_locator_hint_present
+        && !file_delivery_can_materialize_target;
 
     match locator_resolution {
         LocatorResolution::Direct(path) => {
@@ -266,8 +298,8 @@ pub(crate) fn apply_post_route_policy(
 mod tests {
     use super::*;
     use crate::{
-        IntentOutputContract, OutputLocatorKind, OutputResponseShape, ResumeBehavior, RiskCeiling,
-        ScheduleKind,
+        IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
+        ResumeBehavior, RiskCeiling, ScheduleKind,
     };
 
     fn route_result() -> RouteResult {
@@ -288,6 +320,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: OutputResponseShape::Scalar,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -324,6 +357,54 @@ mod tests {
     }
 
     #[test]
+    fn generated_file_delivery_without_locator_hint_can_execute() {
+        let mut route = route_result();
+        route.resolved_intent =
+            "Create a shell script, save it as a file, and deliver the generated file".to_string();
+        route.wants_file_delivery = true;
+        route.output_contract.response_shape = OutputResponseShape::FileToken;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = true;
+        route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+        route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
+        route.output_contract.locator_kind = OutputLocatorKind::Filename;
+        route.output_contract.locator_hint.clear();
+
+        let result = apply_post_route_policy(route, LocatorResolution::None);
+
+        assert!(matches!(
+            result.execution_route_result.routed_mode,
+            RoutedMode::Act
+        ));
+        assert!(!result.execution_route_result.needs_clarify);
+        assert!(!result.missing_locator_for_path_scoped_content);
+    }
+
+    #[test]
+    fn generated_file_delivery_misclassified_as_path_without_hint_can_execute() {
+        let mut route = route_result();
+        route.resolved_intent =
+            "Create a shell script, save it as a file, and deliver the generated file".to_string();
+        route.wants_file_delivery = true;
+        route.output_contract.response_shape = OutputResponseShape::FileToken;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = true;
+        route.output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+        route.output_contract.semantic_kind = OutputSemanticKind::GeneratedFileDelivery;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint.clear();
+
+        let result = apply_post_route_policy(route, LocatorResolution::None);
+
+        assert!(matches!(
+            result.execution_route_result.routed_mode,
+            RoutedMode::Act
+        ));
+        assert!(!result.execution_route_result.needs_clarify);
+        assert!(!result.missing_locator_for_path_scoped_content);
+    }
+
+    #[test]
     fn current_workspace_scope_does_not_force_missing_locator_clarify() {
         let mut route = route_result();
         route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
@@ -355,6 +436,42 @@ mod tests {
         ));
         assert!(!result.execution_route_result.needs_clarify);
         assert!(!result.missing_locator_for_path_scoped_content);
+    }
+
+    #[test]
+    fn content_evidence_without_runtime_locator_stays_chat() {
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: Default::default(),
+            semantic_kind: OutputSemanticKind::None,
+            ..IntentOutputContract::default()
+        };
+
+        assert_eq!(
+            enforce_content_evidence_execution_mode(RoutedMode::Chat, &contract, false),
+            RoutedMode::Chat
+        );
+    }
+
+    #[test]
+    fn content_excerpt_summary_without_runtime_locator_stays_chat() {
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::OneSentence,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: Default::default(),
+            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            ..IntentOutputContract::default()
+        };
+
+        assert_eq!(
+            enforce_content_evidence_execution_mode(RoutedMode::Chat, &contract, false),
+            RoutedMode::Chat
+        );
     }
 
     #[test]

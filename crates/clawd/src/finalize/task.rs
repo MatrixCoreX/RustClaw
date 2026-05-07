@@ -44,7 +44,12 @@ fn assistant_memory_source_text(answer_text: &str, answer_messages: &[String]) -
         .filter(|message| !crate::finalize::is_execution_summary_message(message))
         .collect::<Vec<_>>();
     if publishable_messages.is_empty() {
-        answer_text.trim().to_string()
+        let answer = answer_text.trim();
+        if crate::finalize::is_execution_summary_message(answer) {
+            String::new()
+        } else {
+            answer.to_string()
+        }
     } else {
         publishable_messages.join("\n")
     }
@@ -271,6 +276,9 @@ fn insert_ask_memory_pair(
         state.policy.memory.item_max_chars.max(256),
     );
     let assistant_source_text = assistant_memory_source_text(answer_text, answer_messages);
+    if assistant_source_text.trim().is_empty() {
+        return;
+    }
     let assistant_memory_text = if is_llm_reply && state.policy.memory.mark_llm_reply_in_short_term
     {
         format!(
@@ -947,6 +955,22 @@ mod tests {
         assert_eq!(
             assistant_memory_source_text("最终答案", &messages),
             "最终答案"
+        );
+    }
+
+    #[test]
+    fn assistant_memory_source_text_drops_execution_summary_only_answers() {
+        let messages = vec![
+            "**执行过程**\n1. 调用技能 `rss_fetch`\n   输出：ok".to_string(),
+            "**执行过程**\n1. 调用技能 `rss_fetch`\n   输出：ok".to_string(),
+        ];
+
+        assert_eq!(
+            assistant_memory_source_text(
+                "**执行过程**\n1. 调用技能 `rss_fetch`\n   输出：ok",
+                &messages
+            ),
+            ""
         );
     }
 

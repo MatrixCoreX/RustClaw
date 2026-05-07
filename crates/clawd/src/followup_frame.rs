@@ -300,6 +300,14 @@ fn resolve_ordered_entry_target(frame: &FollowupFrame, entry: &str) -> String {
     join_root.join(trimmed).display().to_string()
 }
 
+pub(crate) fn ordered_entry_target_at(frame: &FollowupFrame, index: usize) -> Option<String> {
+    frame
+        .ordered_entries
+        .get(index)
+        .map(|entry| resolve_ordered_entry_target(frame, entry))
+        .filter(|target| !target.trim().is_empty())
+}
+
 pub(crate) fn selected_entry_index_for_target(
     frame: &FollowupFrame,
     target: &str,
@@ -395,6 +403,8 @@ fn output_contract_prefers_listing_followup(route_result: &crate::RouteResult) -
     matches!(
         route_result.output_contract.semantic_kind,
         crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::FilePaths
             | crate::OutputSemanticKind::SqliteTableListing
             | crate::OutputSemanticKind::SqliteTableNamesOnly
     ) || matches!(
@@ -1004,6 +1014,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -1072,6 +1083,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -1152,6 +1164,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -1253,6 +1266,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -1327,6 +1341,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::FileToken,
                 requires_content_evidence: false,
                 delivery_required: true,
@@ -1401,6 +1416,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::FileToken,
                 requires_content_evidence: false,
                 delivery_required: true,
@@ -1462,6 +1478,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
@@ -1520,6 +1537,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: IntentOutputContract {
+                exact_sentence_count: None,
                 response_shape: crate::OutputResponseShape::OneSentence,
                 requires_content_evidence: true,
                 delivery_required: false,
