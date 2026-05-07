@@ -125,6 +125,7 @@ use crate::{AppState, ClaimedTask, RuntimeChannel};
 
 const READ_FILE_NOT_FOUND_PREFIX: &str = "__RC_READ_FILE_NOT_FOUND__:";
 const POLICY_BLOCK_ERROR_PREFIX: &str = "__RC_POLICY_BLOCK__:";
+const CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX: &str = "__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PolicyBlockError {
@@ -183,6 +184,37 @@ fn policy_fact_value<'a>(facts: &'a [String], key: &str) -> Option<&'a str> {
         .iter()
         .find_map(|fact| fact.trim().strip_prefix(&prefix).map(str::trim))
         .filter(|value| !value.is_empty())
+}
+
+fn parse_crypto_account_access_error(err: &str) -> Option<(String, String)> {
+    let payload = err
+        .trim()
+        .strip_prefix(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX)?;
+    if let Ok(value) = serde_json::from_str::<Value>(payload) {
+        let exchange = value
+            .get("exchange")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .unwrap_or("")
+            .to_string();
+        let detail = value
+            .get("detail")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .unwrap_or("private exchange account access failed")
+            .to_string();
+        return Some((exchange, detail));
+    }
+    let detail = payload.trim();
+    Some((
+        String::new(),
+        if detail.is_empty() {
+            "private exchange account access failed".to_string()
+        } else {
+            detail.to_string()
+        },
+    ))
 }
 
 pub(crate) fn policy_block_default_text(
@@ -291,7 +323,17 @@ pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
     {
         return true;
     }
+    if skill_name.eq_ignore_ascii_case("crypto")
+        && err.starts_with(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX)
+    {
+        return true;
+    }
     false
+}
+
+pub(crate) fn error_looks_like_os_permission_denied(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("permission denied") || lower.contains("os error 13")
 }
 
 pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> String {
@@ -322,6 +364,14 @@ pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> Str
             if trimmed.contains("No such file") || trimmed.contains("(os error 2)") {
                 return "read file failed: file not found".to_string();
             }
+        }
+    }
+    if skill_name.eq_ignore_ascii_case("crypto") {
+        if let Some((exchange, detail)) = parse_crypto_account_access_error(err) {
+            if exchange.is_empty() {
+                return format!("crypto account access failed: {detail}");
+            }
+            return format!("crypto account access failed on {exchange}: {detail}");
         }
     }
     err.trim().to_string()
@@ -898,7 +948,8 @@ mod tests {
         normalize_skill_error_for_user, parse_policy_block_error, policy_block_default_text,
         policy_block_error, request_reply_language, skill_runner_env_strict_enabled,
         task_allows_path_outside_workspace, task_allows_sudo, task_request_locale_tag,
-        RequestReplyLanguage, READ_FILE_NOT_FOUND_PREFIX, SKILL_RUNNER_ENV_WHITELIST,
+        RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX, READ_FILE_NOT_FOUND_PREFIX,
+        SKILL_RUNNER_ENV_WHITELIST,
     };
     use crate::{
         runtime::state::ClaimedTask, AgentRuntimeConfig, AppState, CommandIntentRuntime,
@@ -934,6 +985,8 @@ mod tests {
             policy: crate::PolicyConfig {
                 command_intent: CommandIntentRuntime {
                     all_result_suffixes: Vec::new(),
+                    execute_prefixes: Vec::new(),
+                    negative_markers: Vec::new(),
                     default_locale: locale.to_string(),
                     verify_enforce_enabled: false,
                 },
@@ -1104,6 +1157,21 @@ mod tests {
     }
 
     #[test]
+    fn crypto_account_access_errors_are_recoverable() {
+        let payload = json!({
+            "exchange": "binance",
+            "detail": "binance api error code=-2015: Invalid API-key, IP, or permissions for action"
+        });
+        let err = format!("{CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX}{payload}");
+
+        assert!(is_recoverable_skill_error("crypto", &err));
+        assert!(is_recoverable_skill_error("CRYPTO", &err));
+        let normalized = normalize_skill_error_for_user("crypto", &err);
+        assert!(normalized.contains("crypto account access failed on binance"));
+        assert!(normalized.contains("Invalid API-key"));
+    }
+
+    #[test]
     fn other_skill_errors_are_not_recoverable() {
         assert!(!is_recoverable_skill_error(
             "git_basic",
@@ -1116,6 +1184,10 @@ mod tests {
         assert!(!is_recoverable_skill_error(
             "read_file",
             "some random error"
+        ));
+        assert!(!is_recoverable_skill_error(
+            "crypto",
+            "binance api error code=-2015: Invalid API-key, IP, or permissions for action"
         ));
     }
 

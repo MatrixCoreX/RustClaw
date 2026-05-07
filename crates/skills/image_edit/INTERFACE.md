@@ -19,6 +19,12 @@
 - `args`: object — parameters below.
 - `context`: optional object — host may include **`recent_image_paths`**: string array of workspace-relative image paths (generic delivery; the skill may ignore it when `image` is already set).
 
+## Config Entry Points
+- Default edit provider/model: `configs/image.toml` -> `[image_edit].default_vendor` / `default_model`.
+- Current default: `minimax` + `image-01`.
+- Preferred dedicated keys: `IMAGE_EDIT_<VENDOR>_API_KEY` or `[image_edit.providers.<vendor>].api_key`.
+- If a provider override exists but its dedicated key is empty, the skill may reuse the same vendor's global key (for example `MINIMAX_API_KEY`) from `[llm.<vendor>]` / environment.
+
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|

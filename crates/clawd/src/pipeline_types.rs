@@ -75,6 +75,8 @@ pub(crate) enum OutputSemanticKind {
     ServiceStatus,
     HiddenEntriesCheck,
     FileNames,
+    DirectoryNames,
+    FilePaths,
     DirectoryPurposeSummary,
     ContentExcerptSummary,
     ExcerptKindJudgment,
@@ -82,12 +84,18 @@ pub(crate) enum OutputSemanticKind {
     WorkspaceProjectSummary,
     ScalarCount,
     QuantityComparison,
+    ExecutionFailedStep,
+    GeneratedFileDelivery,
     ScalarPathOnly,
     ExistenceWithPath,
+    ExistenceWithPathSummary,
     RecentScalarEqualityCheck,
+    GitCommitSubject,
+    StructuredKeys,
     SqliteTableListing,
     SqliteTableNamesOnly,
     SqliteDatabaseKindJudgment,
+    SqliteSchemaVersion,
 }
 
 impl OutputSemanticKind {
@@ -98,6 +106,8 @@ impl OutputSemanticKind {
             Self::ServiceStatus => "service_status",
             Self::HiddenEntriesCheck => "hidden_entries_check",
             Self::FileNames => "file_names",
+            Self::DirectoryNames => "directory_names",
+            Self::FilePaths => "file_paths",
             Self::DirectoryPurposeSummary => "directory_purpose_summary",
             Self::ContentExcerptSummary => "content_excerpt_summary",
             Self::ExcerptKindJudgment => "excerpt_kind_judgment",
@@ -105,12 +115,18 @@ impl OutputSemanticKind {
             Self::WorkspaceProjectSummary => "workspace_project_summary",
             Self::ScalarCount => "scalar_count",
             Self::QuantityComparison => "quantity_comparison",
+            Self::ExecutionFailedStep => "execution_failed_step",
+            Self::GeneratedFileDelivery => "generated_file_delivery",
             Self::ScalarPathOnly => "scalar_path_only",
             Self::ExistenceWithPath => "existence_with_path",
+            Self::ExistenceWithPathSummary => "existence_with_path_summary",
             Self::RecentScalarEqualityCheck => "recent_scalar_equality_check",
+            Self::GitCommitSubject => "git_commit_subject",
+            Self::StructuredKeys => "structured_keys",
             Self::SqliteTableListing => "sqlite_table_listing",
             Self::SqliteTableNamesOnly => "sqlite_table_names_only",
             Self::SqliteDatabaseKindJudgment => "sqlite_database_kind_judgment",
+            Self::SqliteSchemaVersion => "sqlite_schema_version",
         }
     }
 }
@@ -161,6 +177,7 @@ pub(crate) struct SelfExtensionContract {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct IntentOutputContract {
     pub(crate) response_shape: OutputResponseShape,
+    pub(crate) exact_sentence_count: Option<usize>,
     pub(crate) requires_content_evidence: bool,
     pub(crate) delivery_required: bool,
     pub(crate) locator_kind: OutputLocatorKind,

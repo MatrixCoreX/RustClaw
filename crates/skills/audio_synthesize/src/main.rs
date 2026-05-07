@@ -50,6 +50,8 @@ struct LlmConfig {
     #[serde(default)]
     minimax: Option<VendorConfig>,
     #[serde(default)]
+    mimo: Option<VendorConfig>,
+    #[serde(default)]
     custom: Option<VendorConfig>,
 }
 
@@ -87,6 +89,8 @@ struct AudioSynthesizeConfig {
     qwen_models: Option<Vec<String>>,
     #[serde(default)]
     minimax_models: Option<Vec<String>>,
+    #[serde(default)]
+    mimo_models: Option<Vec<String>>,
     #[serde(default)]
     native_models: Option<Vec<String>>,
     #[serde(default)]
@@ -126,6 +130,8 @@ struct AudioProviderOverrides {
     #[serde(default)]
     minimax: Option<VendorConfig>,
     #[serde(default)]
+    mimo: Option<VendorConfig>,
+    #[serde(default)]
     custom: Option<VendorConfig>,
 }
 
@@ -138,6 +144,7 @@ enum VendorKind {
     DeepSeek,
     Qwen,
     MiniMax,
+    Mimo,
     Custom,
 }
 
@@ -239,6 +246,7 @@ fn execute(
     );
     let actual_format = match vendor {
         VendorKind::MiniMax => minimax_audio_format(&normalized_format).to_string(),
+        VendorKind::Mimo => mimo_audio_format(&normalized_format).to_string(),
         _ => normalized_format.clone(),
     };
     let voice = resolve_voice_for_vendor(
@@ -377,6 +385,18 @@ fn synthesize_by_vendor(
             )?;
             Ok("native")
         }
+        VendorKind::Mimo => {
+            mimo_native_synthesize(
+                client,
+                cfg,
+                model,
+                voice,
+                response_format,
+                input,
+                output_path,
+            )?;
+            Ok("native")
+        }
         VendorKind::Qwen => {
             if should_use_qwen_native_tts(audio_cfg, model, mode, allow_compat_adapters) {
                 qwen_native_synthesize(
@@ -413,7 +433,10 @@ fn synthesize_by_vendor(
 }
 
 fn resolve_adapter_mode(cfg: &AudioSynthesizeConfig, vendor: VendorKind) -> AdapterMode {
-    if matches!(vendor, VendorKind::OpenAI | VendorKind::Google) {
+    if matches!(
+        vendor,
+        VendorKind::OpenAI | VendorKind::Google | VendorKind::Mimo
+    ) {
         return AdapterMode::Compat;
     }
     parse_adapter_mode(cfg.adapter_mode.as_deref())
@@ -468,6 +491,7 @@ const OPENAI_COMPAT_DEFAULT_VOICE: &str = "alloy";
 const GOOGLE_DEFAULT_VOICE: &str = "Kore";
 const QWEN_DEFAULT_VOICE: &str = "Cherry";
 const MINIMAX_DEFAULT_VOICE_ID: &str = "male-qn-qingse";
+const MIMO_DEFAULT_VOICE: &str = "mimo_default";
 
 const OPENAI_COMPAT_VOICES: &[&str] = &[
     "alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer",
@@ -538,12 +562,33 @@ const QWEN_TTS_VOICES: &[&str] = &[
     "Stella",
 ];
 
+const MIMO_TTS_VOICES: &[&str] = &[
+    "mimo_default",
+    "冰糖",
+    "茉莉",
+    "苏打",
+    "白桦",
+    "Mia",
+    "Chloe",
+    "Milo",
+    "Dean",
+];
+
 fn minimax_audio_format(response_format: &str) -> &'static str {
     match response_format.trim().to_ascii_lowercase().as_str() {
         "wav" => "wav",
         "flac" => "flac",
         "pcm" => "pcm",
         _ => "mp3",
+    }
+}
+
+fn mimo_audio_format(response_format: &str) -> &'static str {
+    match response_format.trim().to_ascii_lowercase().as_str() {
+        "mp3" => "mp3",
+        "wav" => "wav",
+        "pcm16" | "pcm" => "pcm16",
+        _ => "wav",
     }
 }
 
@@ -568,6 +613,7 @@ fn default_voice_for_vendor(vendor: VendorKind) -> &'static str {
         VendorKind::Google => GOOGLE_DEFAULT_VOICE,
         VendorKind::Qwen => QWEN_DEFAULT_VOICE,
         VendorKind::MiniMax => MINIMAX_DEFAULT_VOICE_ID,
+        VendorKind::Mimo => MIMO_DEFAULT_VOICE,
     }
 }
 
@@ -587,6 +633,7 @@ fn normalize_voice_for_vendor(vendor: VendorKind, voice: &str) -> Option<String>
         VendorKind::Google => canonical_voice_name(GOOGLE_TTS_VOICES, trimmed).map(str::to_string),
         VendorKind::Qwen => canonical_voice_name(QWEN_TTS_VOICES, trimmed).map(str::to_string),
         VendorKind::MiniMax => Some(minimax_voice_id(trimmed)),
+        VendorKind::Mimo => canonical_voice_name(MIMO_TTS_VOICES, trimmed).map(str::to_string),
     }
 }
 
@@ -761,6 +808,69 @@ fn minimax_native_synthesize(
     Ok(())
 }
 
+fn mimo_native_synthesize(
+    client: &Client,
+    cfg: &VendorConfig,
+    model: &str,
+    voice: &str,
+    response_format: &str,
+    input: &str,
+    output_path: &Path,
+) -> Result<(), String> {
+    let url = format!("{}/chat/completions", trim_trailing_slash(&cfg.base_url));
+    let body = json!({
+        "model": model,
+        "messages": [
+            {
+                "role": "assistant",
+                "content": input
+            }
+        ],
+        "audio": {
+            "format": mimo_audio_format(response_format),
+            "voice": voice
+        }
+    });
+    let resp = client
+        .post(url)
+        .header("api-key", &cfg.api_key)
+        .bearer_auth(&cfg.api_key)
+        .json(&body)
+        .send()
+        .map_err(|err| format!("mimo tts request failed: {err}"))?;
+    let status = resp.status().as_u16();
+    let v: Value = resp
+        .json()
+        .map_err(|err| format!("parse mimo tts response failed: {err}"))?;
+    if status >= 300 {
+        return Err(format!(
+            "mimo tts failed status={status}: {}",
+            truncate(&v.to_string(), 400)
+        ));
+    }
+    let data = v
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("audio"))
+        .and_then(|audio| audio.get("data"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            format!(
+                "mimo tts response missing choices[0].message.audio.data: {}",
+                truncate(&v.to_string(), 400)
+            )
+        })?;
+    let bytes = STANDARD
+        .decode(data)
+        .map_err(|err| format!("decode mimo tts audio failed: {err}"))?;
+    ensure_parent_dir(output_path)?;
+    std::fs::write(output_path, &bytes)
+        .map_err(|err| format!("write audio output failed: {err}"))?;
+    Ok(())
+}
+
 fn openai_compatible_synthesize(
     client: &Client,
     cfg: &VendorConfig,
@@ -879,6 +989,7 @@ fn parse_vendor(name: &str) -> Option<VendorKind> {
         "deepseek" => Some(VendorKind::DeepSeek),
         "qwen" => Some(VendorKind::Qwen),
         "minimax" => Some(VendorKind::MiniMax),
+        "mimo" | "xiaomi" => Some(VendorKind::Mimo),
         "custom" => Some(VendorKind::Custom),
         _ => None,
     }
@@ -944,6 +1055,12 @@ fn resolve_vendor_config<'a>(
             .or(cfg.llm.minimax.as_ref())
             .map(|v| ("minimax", v))
             .ok_or_else(|| "minimax config missing".to_string()),
+        VendorKind::Mimo => section
+            .mimo
+            .as_ref()
+            .or(cfg.llm.mimo.as_ref())
+            .map(|v| ("mimo", v))
+            .ok_or_else(|| "mimo config missing".to_string()),
         VendorKind::Custom => section
             .custom
             .as_ref()
@@ -1002,6 +1119,7 @@ fn apply_env_overrides(cfg: &mut RootConfig) {
     apply_vendor_api_key_env(&mut cfg.llm.deepseek, "DEEPSEEK_API_KEY");
     apply_vendor_api_key_env(&mut cfg.llm.qwen, "QWEN_API_KEY");
     apply_vendor_api_key_env(&mut cfg.llm.minimax, "MINIMAX_API_KEY");
+    apply_vendor_api_key_env(&mut cfg.llm.mimo, "MIMO_API_KEY");
     apply_vendor_api_key_env(&mut cfg.llm.custom, "CUSTOM_API_KEY");
 
     apply_vendor_api_key_env(
@@ -1031,6 +1149,10 @@ fn apply_env_overrides(cfg: &mut RootConfig) {
     apply_vendor_api_key_env(
         &mut cfg.audio_synthesize.providers.minimax,
         "AUDIO_SYNTHESIZE_MINIMAX_API_KEY",
+    );
+    apply_vendor_api_key_env(
+        &mut cfg.audio_synthesize.providers.mimo,
+        "AUDIO_SYNTHESIZE_MIMO_API_KEY",
     );
     apply_vendor_api_key_env(
         &mut cfg.audio_synthesize.providers.custom,
@@ -1066,6 +1188,7 @@ fn vendor_models<'a>(
         VendorKind::DeepSeek => cfg.deepseek_models.as_ref(),
         VendorKind::Qwen => cfg.qwen_models.as_ref(),
         VendorKind::MiniMax => cfg.minimax_models.as_ref(),
+        VendorKind::Mimo => cfg.mimo_models.as_ref(),
         VendorKind::Custom => cfg.custom_models.as_ref(),
     }
 }
@@ -1184,6 +1307,7 @@ mod tests {
     fn normalize_and_ext() {
         assert_eq!(normalize_format("mp3"), "mp3");
         assert_eq!(normalize_format("unknown"), "opus");
+        assert_eq!(mimo_audio_format("mp3"), "mp3");
         assert_eq!(google_audio_encoding("mp3"), "MP3");
         assert_eq!(output_ext("opus"), "ogg");
     }

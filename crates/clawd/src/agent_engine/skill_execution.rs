@@ -118,6 +118,319 @@ fn remember_skill_metadata(loop_state: &mut LoopState, normalized_skill: &str) {
         .insert("last_skill_name".to_string(), normalized_skill.to_string());
 }
 
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn command_already_requests_sudo(command: &str) -> bool {
+    command
+        .split_whitespace()
+        .any(|part| part == "sudo" || part.ends_with("/sudo"))
+}
+
+fn bounded_u64_arg(args: &Value, names: &[&str], default: u64, min: u64, max: u64) -> u64 {
+    names
+        .iter()
+        .find_map(|name| args.get(*name).and_then(Value::as_u64))
+        .unwrap_or(default)
+        .clamp(min, max)
+}
+
+fn sudo_list_dir_command(args: &Value) -> Option<String> {
+    let path = args.get("path").and_then(Value::as_str).unwrap_or(".");
+    let max_entries = bounded_u64_arg(args, &["limit", "max_entries"], 200, 1, 1000);
+    Some(format!(
+        "sudo -n sh -c {} sh {} | sort | head -n {}",
+        shell_single_quote(
+            r#"dir=$1; for item in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do [ -e "$item" ] || continue; basename "$item"; done"#
+        ),
+        shell_single_quote(path),
+        max_entries
+    ))
+}
+
+fn sudo_read_range_command(args: &Value) -> Option<String> {
+    let path = args.get("path").and_then(Value::as_str)?;
+    let quoted_path = shell_single_quote(path);
+    let n = bounded_u64_arg(args, &["n"], 20, 1, 500);
+    let has_start_or_end = args.get("start_line").is_some() || args.get("end_line").is_some();
+    let mode = args
+        .get("mode")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| {
+            if has_start_or_end {
+                "range".to_string()
+            } else {
+                "head".to_string()
+            }
+        });
+    match mode.as_str() {
+        "tail" => Some(format!("sudo -n tail -n {n} {quoted_path}")),
+        "range" => {
+            let start = args
+                .get("start_line")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                .max(1);
+            let end = args
+                .get("end_line")
+                .and_then(Value::as_u64)
+                .unwrap_or_else(|| start.saturating_add(n).saturating_sub(1))
+                .max(start);
+            Some(format!(
+                "sudo -n sed -n {} {}",
+                shell_single_quote(&format!("{start},{end}p")),
+                quoted_path
+            ))
+        }
+        _ => Some(format!(
+            "sudo -n sed -n {} {}",
+            shell_single_quote(&format!("1,{n}p")),
+            quoted_path
+        )),
+    }
+}
+
+fn sudo_structured_read_command(normalized_skill: &str, args: &Value) -> Option<String> {
+    match normalized_skill {
+        "read_file" => args
+            .get("path")
+            .and_then(Value::as_str)
+            .map(|path| format!("sudo -n cat {}", shell_single_quote(path))),
+        "list_dir" => sudo_list_dir_command(args),
+        "system_basic" => {
+            let action = args
+                .get("action")
+                .and_then(Value::as_str)
+                .unwrap_or("info")
+                .trim()
+                .to_ascii_lowercase();
+            match action.as_str() {
+                "read_range" => sudo_read_range_command(args),
+                "inventory_dir" => sudo_list_dir_command(args),
+                "count_inventory" => args.get("path").and_then(Value::as_str).map(|path| {
+                    format!(
+                        "sudo -n sh -c {} sh {}",
+                        shell_single_quote(
+                            r#"dir=$1; count=0; for item in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do [ -e "$item" ] || continue; count=$((count + 1)); done; printf '%s\n' "$count""#
+                        ),
+                        shell_single_quote(path)
+                    )
+                }),
+                "extract_field" | "extract_fields" | "structured_keys" => args
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .map(|path| format!("sudo -n cat {}", shell_single_quote(path))),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn build_auto_sudo_retry_args(
+    state: &AppState,
+    task: &ClaimedTask,
+    normalized_skill: &str,
+    recovery_args: Option<&Value>,
+    err: &str,
+) -> Option<Value> {
+    if !crate::skills::error_looks_like_os_permission_denied(err)
+        || !crate::skills::task_allows_sudo(state, Some(task))
+        || !state.get_skills_list().contains("run_cmd")
+        || !state.task_allows_skill(task, "run_cmd")
+    {
+        return None;
+    }
+    let args = recovery_args?;
+    if normalized_skill == "run_cmd" {
+        let command = args.get("command").and_then(Value::as_str)?.trim();
+        if command.is_empty() || command_already_requests_sudo(command) {
+            return None;
+        }
+        let mut retry_args = args.clone();
+        let obj = retry_args.as_object_mut()?;
+        obj.remove(super::CLAWD_CONTINUE_ON_ERROR_ARG);
+        obj.insert(
+            "command".to_string(),
+            Value::String(format!("sudo -n bash -lc {}", shell_single_quote(command))),
+        );
+        return Some(retry_args);
+    }
+    let command = sudo_structured_read_command(normalized_skill, args)?;
+    Some(json!({
+        "command": command,
+        "cwd": ".",
+        "timeout_seconds": 10,
+        "idle_timeout_seconds": 3,
+        "max_output_bytes": 32768
+    }))
+}
+
+fn auto_sudo_retry_failed_delivery(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    err: &str,
+) -> String {
+    let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
+    let detail = crate::truncate_for_agent_trace(err.trim());
+    if language_hint.to_ascii_lowercase().starts_with("en") {
+        format!(
+            "The first attempt was denied by the operating system, so this admin-authorized task retried with `sudo -n`, but the retry still failed: {detail}. Confirm that the `clawd` process user has passwordless sudo or run the service with the required OS permission."
+        )
+    } else {
+        format!(
+            "首次执行被操作系统拒绝后，当前 admin 授权任务已自动用 `sudo -n` 重试，但重试仍失败：{detail}。请确认 `clawd` 进程用户具备免密 sudo，或用具备目标系统权限的服务用户运行。"
+        )
+    }
+}
+
+async fn try_auto_sudo_retry_after_permission_denied(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    goal: &str,
+    user_text: &str,
+    normalized_skill: &str,
+    recovery_args: Option<&Value>,
+    err: &str,
+) -> Result<Option<Option<String>>, String> {
+    let Some(retry_args) =
+        build_auto_sudo_retry_args(state, task, normalized_skill, recovery_args, err)
+    else {
+        return Ok(None);
+    };
+    let retry_action = crate::AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: retry_args.clone(),
+    };
+    info!(
+        "auto_sudo_retry task_id={} round={} step={} from_skill={} args={}",
+        task.task_id,
+        loop_state.round_no,
+        step_in_round,
+        normalized_skill,
+        crate::truncate_for_log(&retry_args.to_string())
+    );
+    let retry_step = crate::executor::execute_step(
+        &format!("step_{global_step}_sudo_retry"),
+        &retry_action,
+        || async {
+            run_skill_with_runner_outcome(state, task, "run_cmd", retry_args.clone())
+                .await
+                .map(|outcome| outcome.text)
+        },
+    )
+    .await;
+
+    match retry_step.output.as_deref() {
+        Some(out) => {
+            loop_state.history_compact.push(format!(
+                "round={} step={} skill={} permission_denied_auto_sudo_retry ok",
+                loop_state.round_no, step_in_round, normalized_skill
+            ));
+            let raw_effect = crate::execution_recipe::classify_skill_action_effect(
+                state,
+                "run_cmd",
+                &retry_args,
+            );
+            let action_effect = crate::execution_recipe::effective_action_effect_for_recipe(
+                loop_state.execution_recipe,
+                raw_effect,
+            );
+            let args_summary = super::build_safe_skill_args_summary(
+                &retry_args,
+                super::PROGRESS_ARGS_SUMMARY_MAX_LEN,
+            );
+            let outcome = handle_skill_step_success(
+                state,
+                task,
+                loop_state,
+                &format!("skill:run_cmd:auto_sudo_retry:{}", retry_args),
+                &retry_step,
+                global_step,
+                step_in_round,
+                "run_cmd",
+                "call_skill(auto_sudo_retry)",
+                &args_summary,
+                &retry_args,
+                out,
+                action_effect,
+                crate::execution_recipe::ValidationObservation::Passed,
+                None,
+                None,
+            )
+            .await?;
+            Ok(Some(outcome.stop_signal))
+        }
+        None => {
+            let retry_err = retry_step.error.clone().unwrap_or_default();
+            let user_visible_retry_err =
+                crate::skills::normalize_skill_error_for_user("run_cmd", &retry_err);
+            crate::append_subtask_result(
+                &mut loop_state.subtask_results,
+                global_step,
+                "skill(run_cmd:auto_sudo_retry)",
+                false,
+                &user_visible_retry_err,
+            );
+            register_failed_step_output(
+                loop_state,
+                global_step,
+                step_in_round,
+                "skill.run_cmd",
+                "skill(run_cmd:auto_sudo_retry)",
+                &user_visible_retry_err,
+            );
+            loop_state.executed_step_results.push(retry_step.clone());
+            log_step_journal_summary(
+                task,
+                loop_state.round_no,
+                step_in_round,
+                "call_skill(auto_sudo_retry)",
+                loop_state
+                    .execution_recipe
+                    .is_active()
+                    .then(|| loop_state.execution_recipe.phase_summary_line())
+                    .as_deref(),
+                &retry_step,
+            );
+            if let Some(policy_block) = crate::skills::parse_policy_block_error(&retry_err) {
+                let message =
+                    compose_policy_block_delivery(state, task, goal, user_text, &policy_block)
+                        .await;
+                super::append_delivery_message(
+                    &task.task_id,
+                    &mut loop_state.delivery_messages,
+                    message,
+                );
+                return Ok(Some(Some("policy_block_user_visible".to_string())));
+            }
+            let message =
+                auto_sudo_retry_failed_delivery(state, task, user_text, &user_visible_retry_err);
+            super::append_delivery_message(
+                &task.task_id,
+                &mut loop_state.delivery_messages,
+                message,
+            );
+            loop_state.history_compact.push(format!(
+                "round={} step={} skill={} permission_denied_auto_sudo_retry failed error={}",
+                loop_state.round_no,
+                step_in_round,
+                normalized_skill,
+                crate::truncate_for_agent_trace(&user_visible_retry_err)
+            ));
+            Ok(Some(Some(
+                "auto_sudo_retry_failed_user_visible".to_string(),
+            )))
+        }
+    }
+}
+
 async fn handle_skill_step_success(
     state: &AppState,
     task: &ClaimedTask,
@@ -421,6 +734,22 @@ async fn handle_skill_step_failure(
         ));
         return Ok(Some("policy_block_user_visible".to_string()));
     }
+    if let Some(stop_reason) = try_auto_sudo_retry_after_permission_denied(
+        state,
+        task,
+        loop_state,
+        global_step,
+        step_in_round,
+        goal,
+        user_text,
+        normalized_skill,
+        recovery_args,
+        err,
+    )
+    .await?
+    {
+        return Ok(stop_reason);
+    }
     if let Some(stop_reason) = classify_skill_failure_recovery(
         state,
         actions,
@@ -626,13 +955,15 @@ mod tests {
     use std::sync::{Arc, RwLock};
 
     use super::{
-        handle_skill_step_failure, handle_skill_step_success, AgentLoopGuardPolicy, LoopState,
+        build_auto_sudo_retry_args, handle_skill_step_failure, handle_skill_step_success,
+        AgentLoopGuardPolicy, LoopState,
     };
     use crate::{
         AgentRuntimeConfig, AppState, ClaimedTask, SkillViewsSnapshot, ToolsPolicy,
         DEFAULT_AGENT_ID,
     };
     use claw_core::config::{AgentConfig, ToolsConfig};
+    use rusqlite::params;
 
     fn test_state() -> AppState {
         let db_pool = crate::db_init::test_pool();
@@ -697,6 +1028,39 @@ mod tests {
         }
     }
 
+    fn insert_auth_key(state: &AppState, user_key: &str, role: &str) {
+        let db = state.core.db.get().expect("db pool");
+        db.execute_batch(crate::KEY_AUTH_UPGRADE_SQL)
+            .expect("create auth schema");
+        db.execute(
+            "INSERT INTO auth_keys (user_key, role, enabled, created_at, last_used_at)
+             VALUES (?1, ?2, 1, '123', NULL)",
+            params![user_key, role],
+        )
+        .expect("insert auth key");
+    }
+
+    fn enable_test_skills(state: &AppState, skills: &[&str]) {
+        let set = skills
+            .iter()
+            .map(|skill| skill.to_string())
+            .collect::<HashSet<_>>();
+        *state
+            .core
+            .skill_views_snapshot
+            .write()
+            .expect("write skill snapshot") = Arc::new(SkillViewsSnapshot {
+            registry: None,
+            skills_list: Arc::new(set),
+        });
+    }
+
+    fn admin_task() -> ClaimedTask {
+        let mut task = test_task();
+        task.user_key = Some("rk-admin".to_string());
+        task
+    }
+
     fn test_policy() -> AgentLoopGuardPolicy {
         AgentLoopGuardPolicy {
             max_steps: 16,
@@ -706,6 +1070,101 @@ mod tests {
             multi_round_enabled: true,
             ops_closed_loop: Default::default(),
         }
+    }
+
+    #[test]
+    fn auto_sudo_retry_builds_structured_read_range_retry_for_admin_permission_denied() {
+        let mut state = test_state();
+        state.policy.allow_sudo = true;
+        enable_test_skills(&state, &["run_cmd", "system_basic"]);
+        insert_auth_key(&state, "rk-admin", "admin");
+        let task = admin_task();
+
+        let retry = build_auto_sudo_retry_args(
+            &state,
+            &task,
+            "system_basic",
+            Some(&serde_json::json!({
+                "action": "read_range",
+                "path": "/etc/shadow",
+                "n": 1
+            })),
+            "read file failed: Permission denied (os error 13)",
+        )
+        .expect("admin permission denial should trigger sudo retry");
+
+        let command = retry
+            .get("command")
+            .and_then(|value| value.as_str())
+            .expect("retry command");
+        assert!(command.starts_with("sudo -n "), "got: {command}");
+        assert!(command.contains("/etc/shadow"), "got: {command}");
+        assert!(command.contains("sed"), "got: {command}");
+        assert!(!command.contains(" -- "), "got: {command}");
+        assert!(!command.contains("-printf"), "got: {command}");
+    }
+
+    #[test]
+    fn auto_sudo_retry_uses_posix_directory_listing_for_cross_platform_hosts() {
+        let mut state = test_state();
+        state.policy.allow_sudo = true;
+        enable_test_skills(&state, &["run_cmd", "system_basic"]);
+        insert_auth_key(&state, "rk-admin", "admin");
+        let task = admin_task();
+
+        let retry = build_auto_sudo_retry_args(
+            &state,
+            &task,
+            "system_basic",
+            Some(&serde_json::json!({
+                "action": "inventory_dir",
+                "path": "/var/log",
+                "max_entries": 5
+            })),
+            "read_dir failed: Permission denied (os error 13)",
+        )
+        .expect("admin permission denial should trigger sudo retry");
+
+        let command = retry
+            .get("command")
+            .and_then(|value| value.as_str())
+            .expect("retry command");
+        assert!(command.starts_with("sudo -n sh -c "), "got: {command}");
+        assert!(command.contains("basename"), "got: {command}");
+        assert!(command.contains("/var/log"), "got: {command}");
+        assert!(!command.contains("-printf"), "got: {command}");
+        assert!(!command.contains("-maxdepth"), "got: {command}");
+    }
+
+    #[test]
+    fn auto_sudo_retry_does_not_trigger_for_non_admin_or_existing_sudo() {
+        let mut state = test_state();
+        state.policy.allow_sudo = true;
+        enable_test_skills(&state, &["run_cmd"]);
+        insert_auth_key(&state, "rk-user", "user");
+        let mut user_task = test_task();
+        user_task.user_key = Some("rk-user".to_string());
+        let err = "Command failed with exit code 1\nstderr:\nPermission denied";
+
+        assert!(build_auto_sudo_retry_args(
+            &state,
+            &user_task,
+            "run_cmd",
+            Some(&serde_json::json!({"command": "cat /root/secret"})),
+            err,
+        )
+        .is_none());
+
+        insert_auth_key(&state, "rk-admin", "admin");
+        let task = admin_task();
+        assert!(build_auto_sudo_retry_args(
+            &state,
+            &task,
+            "run_cmd",
+            Some(&serde_json::json!({"command": "sudo cat /root/secret"})),
+            err,
+        )
+        .is_none());
     }
 
     fn ok_step(step_id: &str, skill: &str, output: &str) -> crate::executor::StepExecutionResult {

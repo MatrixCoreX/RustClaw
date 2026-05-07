@@ -634,6 +634,7 @@ mod tests {
             should_refresh_long_term_memory: false,
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
                 self_extension: crate::SelfExtensionContract {
                     mode: crate::SelfExtensionMode::PermanentExtension,
                     trigger: crate::SelfExtensionTrigger::ExplicitUserRequest,

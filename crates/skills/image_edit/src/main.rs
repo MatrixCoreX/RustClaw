@@ -269,36 +269,37 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn first_image_path_from_images_array(obj: &serde_json::Map<String, Value>) -> Option<String> {
+fn object_has_image_source(obj: &serde_json::Map<String, Value>) -> bool {
+    ["path", "url", "base64"].iter().any(|key| {
+        obj.get(*key)
+            .and_then(|v| v.as_str())
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+    })
+}
+
+fn first_image_from_images_array(obj: &serde_json::Map<String, Value>) -> Option<Value> {
     let arr = obj.get("images")?.as_array()?;
     for it in arr {
-        if let Some(p) = it
-            .as_object()
-            .and_then(|m| m.get("path"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-        {
-            return Some(p);
+        if let Some(source) = it.as_object().filter(|m| object_has_image_source(m)) {
+            return Some(Value::Object(source.clone()));
         }
         if let Some(p) = it
             .as_str()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
         {
-            return Some(p);
+            return Some(Value::String(p));
         }
     }
     None
 }
 
 fn image_edit_args_has_image(obj: &serde_json::Map<String, Value>) -> bool {
-    let image_obj_has_path = obj
+    let image_obj_has_source = obj
         .get("image")
         .and_then(|v| v.as_object())
-        .and_then(|m| m.get("path"))
-        .and_then(|v| v.as_str())
-        .map(|s| !s.trim().is_empty())
+        .map(object_has_image_source)
         .unwrap_or(false);
     let image_str = obj
         .get("image")
@@ -310,16 +311,12 @@ fn image_edit_args_has_image(obj: &serde_json::Map<String, Value>) -> bool {
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter().any(|it| {
-                it.as_object()
-                    .and_then(|m| m.get("path"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| !s.trim().is_empty())
-                    .unwrap_or(false)
+                it.as_object().map(object_has_image_source).unwrap_or(false)
                     || it.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false)
             })
         })
         .unwrap_or(false);
-    image_obj_has_path || image_str || images_array_has_path
+    image_obj_has_source || image_str || images_array_has_path
 }
 
 fn recent_image_paths_from_context(ctx: Option<&Value>) -> Vec<String> {
@@ -613,8 +610,8 @@ fn execute(
             resolve_image_path_from_context(cfg, workspace_root, &instruction, &obj, context)?;
         obj.insert("image".to_string(), json!({ "path": path }));
     } else if obj.get("image").is_none() {
-        if let Some(p) = first_image_path_from_images_array(&obj) {
-            obj.insert("image".to_string(), json!({ "path": p }));
+        if let Some(image) = first_image_from_images_array(&obj) {
+            obj.insert("image".to_string(), image);
         }
     }
 
@@ -1920,6 +1917,25 @@ fn apply_vendor_api_key_env(target: &mut Option<VendorConfig>, key: &str) {
     }
 }
 
+fn inherit_provider_api_key_from_llm(
+    target: &mut Option<VendorConfig>,
+    source: &Option<VendorConfig>,
+) {
+    let Some(target) = target.as_mut() else {
+        return;
+    };
+    if !target.api_key.trim().is_empty() {
+        return;
+    }
+    if let Some(value) = source
+        .as_ref()
+        .map(|cfg| cfg.api_key.trim())
+        .filter(|value| !value.is_empty())
+    {
+        target.api_key = value.to_string();
+    }
+}
+
 fn apply_option_string_env(target: &mut Option<String>, key: &str) {
     if let Some(value) = env_non_empty(key) {
         *target = Some(value);
@@ -1963,6 +1979,13 @@ fn apply_env_overrides(cfg: &mut RootConfig) {
         &mut cfg.image_edit.providers.minimax,
         "IMAGE_EDIT_MINIMAX_API_KEY",
     );
+    inherit_provider_api_key_from_llm(&mut cfg.image_edit.providers.openai, &cfg.llm.openai);
+    inherit_provider_api_key_from_llm(&mut cfg.image_edit.providers.google, &cfg.llm.google);
+    inherit_provider_api_key_from_llm(&mut cfg.image_edit.providers.anthropic, &cfg.llm.anthropic);
+    inherit_provider_api_key_from_llm(&mut cfg.image_edit.providers.grok, &cfg.llm.grok);
+    inherit_provider_api_key_from_llm(&mut cfg.image_edit.providers.deepseek, &cfg.llm.deepseek);
+    inherit_provider_api_key_from_llm(&mut cfg.image_edit.providers.qwen, &cfg.llm.qwen);
+    inherit_provider_api_key_from_llm(&mut cfg.image_edit.providers.minimax, &cfg.llm.minimax);
     apply_option_string_env(
         &mut cfg.image_edit.oss_access_key_id,
         "IMAGE_EDIT_OSS_ACCESS_KEY_ID",
@@ -2261,6 +2284,37 @@ mod tests {
         let (mime, data) = split_image_data("data:image/png;base64,abc");
         assert_eq!(mime, "image/png");
         assert_eq!(data, "abc");
+    }
+
+    #[test]
+    fn image_args_accept_remote_url_object() {
+        let obj = json!({
+            "image": {"url": "https://example.com/logo.png"}
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+
+        assert!(image_edit_args_has_image(&obj));
+    }
+
+    #[test]
+    fn first_image_preserves_url_from_images_array() {
+        let obj = json!({
+            "images": [{"url": "https://example.com/logo.png"}]
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+
+        let image = first_image_from_images_array(&obj).expect("image source");
+        assert_eq!(
+            image
+                .get("url")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default(),
+            "https://example.com/logo.png"
+        );
     }
 
     #[test]

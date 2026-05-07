@@ -192,6 +192,7 @@ mod tests {
 
     fn contract_existence(hint: &str) -> IntentOutputContract {
         IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::OneSentence,
             semantic_kind: OutputSemanticKind::ExistenceWithPath,
             locator_hint: hint.to_string(),
@@ -234,6 +235,7 @@ mod tests {
     #[test]
     fn recent_scalar_equality_is_not_verified_by_local_text_tokens() {
         let contract = IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::OneSentence,
             semantic_kind: OutputSemanticKind::RecentScalarEqualityCheck,
             ..IntentOutputContract::default()
@@ -251,6 +253,7 @@ mod tests {
     #[test]
     fn pass_scalar_path_only_for_pure_path() {
         let contract = IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             semantic_kind: OutputSemanticKind::ScalarPathOnly,
             ..IntentOutputContract::default()
@@ -262,6 +265,7 @@ mod tests {
     #[test]
     fn reshape_scalar_path_only_extracts_path_structurally() {
         let contract = IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             semantic_kind: OutputSemanticKind::ScalarPathOnly,
             ..IntentOutputContract::default()
@@ -279,6 +283,7 @@ mod tests {
     #[test]
     fn reject_scalar_path_only_when_no_path_or_locator() {
         let contract = IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             semantic_kind: OutputSemanticKind::ScalarPathOnly,
             ..IntentOutputContract::default()
@@ -290,6 +295,7 @@ mod tests {
     #[test]
     fn pass_scalar_count_for_pure_integer() {
         let contract = IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             semantic_kind: OutputSemanticKind::ScalarCount,
             ..IntentOutputContract::default()
@@ -301,6 +307,7 @@ mod tests {
     #[test]
     fn reshape_scalar_count_extracts_sole_int_from_multiline_candidate() {
         let contract = IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             semantic_kind: OutputSemanticKind::ScalarCount,
             ..IntentOutputContract::default()
@@ -316,6 +323,7 @@ mod tests {
     #[test]
     fn reject_scalar_count_when_no_integer_at_all() {
         let contract = IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::Scalar,
             semantic_kind: OutputSemanticKind::ScalarCount,
             ..IntentOutputContract::default()
@@ -327,6 +335,7 @@ mod tests {
     #[test]
     fn hidden_entries_check_no_longer_uses_yes_no_or_hidden_word_dictionary() {
         let contract = IntentOutputContract {
+            exact_sentence_count: None,
             response_shape: OutputResponseShape::OneSentence,
             semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
             ..IntentOutputContract::default()

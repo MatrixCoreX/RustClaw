@@ -561,6 +561,9 @@ fn resolve_manager(input: &SkillInput, effective_target: Option<&str>) -> String
             .unwrap_or("unknown")
             .to_string();
     }
+    if input.action == "status" {
+        return "rustclaw".to_string();
+    }
     "unknown".to_string()
 }
 
@@ -1871,6 +1874,12 @@ mod tests {
         let args = json!({"action": "status", "target": "clawd"});
         let out = execute("req-m1".to_string(), args, None).unwrap();
         assert_eq!(out.manager_type, "rustclaw");
+    }
+
+    #[test]
+    fn status_without_target_defaults_to_rustclaw_manager() {
+        let input = parse_input(&json!({"action": "status"})).unwrap();
+        assert_eq!(resolve_manager(&input, None), "rustclaw");
     }
 
     #[test]
