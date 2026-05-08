@@ -412,6 +412,36 @@ Skill integration entry points:
 - standard `runner` skills: `skill_develop/README.md`
 - external skill example: `external_skills/example/README.md`
 
+### Local STT With whisper.cpp
+
+`audio_transcribe` can use a local whisper.cpp server through the `custom` OpenAI-compatible provider. Use a dedicated local port such as `8178` so it does not collide with `clawd` or UI ports.
+
+```bash
+./build/bin/whisper-server -m models/ggml-small.bin \
+  --host 127.0.0.1 --port 8178 \
+  --request-path /v1 --inference-path /audio/transcriptions \
+  --convert --language auto
+```
+
+Use a multilingual Whisper model for Chinese, for example `ggml-small.bin`, `ggml-medium.bin`, or `ggml-large-v3*.bin`; avoid English-only `.en` models for Chinese audio.
+
+```toml
+[audio_transcribe]
+default_vendor = "custom"
+adapter_mode = "compat"
+allow_compat_adapters = true
+default_model = "local-whisper"
+custom_models = ["local-whisper", "whisper-1"]
+
+[audio_transcribe.providers.custom]
+base_url = "http://127.0.0.1:8178/v1"
+api_key = ""
+model = "local-whisper"
+timeout_seconds = 120
+```
+
+The empty `api_key` is accepted only for loopback `custom` providers (`localhost`, `127.0.0.1`, `::1`). Remote custom providers still require a real key.
+
 ## Directory Guide
 
 - `configs/`: runtime, channel, model, memory, and skill configuration
