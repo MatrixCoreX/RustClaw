@@ -143,27 +143,12 @@ fn runtime_scalar_path_direct_answer_candidate(
         .then(|| candidate.to_string())
 }
 
-fn chat_context_execution_summary(language_hint: &str) -> String {
-    if language_hint.to_ascii_lowercase().starts_with("en") {
-        format!(
-            "{}\n1. Used the current request and available conversation context to produce the answer.",
-            crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN
-        )
-    } else {
-        format!(
-            "{}\n1. 使用当前请求和可用会话上下文生成回答。",
-            crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX
-        )
-    }
-}
-
-fn ask_reply_with_chat_process(text: String, language_hint: &str) -> AskReply {
+fn ask_reply_with_chat_process(text: String, _language_hint: &str) -> AskReply {
     let answer = text.trim().to_string();
     if answer.is_empty() || crate::finalize::is_execution_summary_message(&answer) {
         AskReply::llm(text)
     } else {
-        AskReply::llm(answer.clone())
-            .with_messages(vec![chat_context_execution_summary(language_hint), answer])
+        AskReply::llm(answer)
     }
 }
 
@@ -972,26 +957,21 @@ mod tests {
     }
 
     #[test]
-    fn chat_reply_attaches_context_process_message() {
+    fn chat_reply_does_not_attach_context_process_message() {
         let reply =
             ask_reply_with_chat_process("RustClaw 是本地 agent 运行时。".to_string(), "zh-CN");
 
         assert_eq!(reply.text, "RustClaw 是本地 agent 运行时。");
-        assert_eq!(reply.messages.len(), 2);
-        assert!(reply.messages[0].contains("**执行过程**"));
-        assert!(reply.messages[0].contains("可用会话上下文"));
-        assert_eq!(reply.messages[1], "RustClaw 是本地 agent 运行时。");
+        assert!(reply.messages.is_empty());
     }
 
     #[test]
-    fn english_chat_reply_attaches_execution_process_message() {
+    fn english_chat_reply_does_not_attach_execution_process_message() {
         let reply =
             ask_reply_with_chat_process("RustClaw is a local agent runtime.".to_string(), "en");
 
-        assert_eq!(reply.messages.len(), 2);
-        assert!(reply.messages[0].contains("**Execution**"));
-        assert!(reply.messages[0].contains("available conversation context"));
-        assert_eq!(reply.messages[1], "RustClaw is a local agent runtime.");
+        assert_eq!(reply.text, "RustClaw is a local agent runtime.");
+        assert!(reply.messages.is_empty());
     }
 
     #[test]
@@ -1016,10 +996,8 @@ mod tests {
 
         let reply = state_patch_alias_bindings_ack(Some(&ctx), "zh-CN").unwrap();
 
-        assert_eq!(reply.messages.len(), 2);
-        assert!(reply.messages[0].contains("**执行过程**"));
         assert_eq!(reply.text, "已记住：`that docs dir` -> `/tmp/docs`。");
-        assert_eq!(reply.messages[1], reply.text);
+        assert!(reply.messages.is_empty());
     }
 
     #[test]
