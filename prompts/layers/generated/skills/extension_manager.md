@@ -9,7 +9,7 @@
 
 ## Capability Summary (from interface)
 - `extension_manager` is a guarded developer-facing skill for extension planning, scaffold generation, and first-pass external skill implementation.
-- It does not change the live runtime path by default: the skill itself is disabled in registry/config until explicitly enabled.
+- It keeps new skills unregistered while they are being scaffolded and tested; after validation, `register_external_skill` builds the release binary and writes the config switch enabled.
 - The current MVP supports safe gap assessment, bounded temporary-fix planning/execution, and external skill scaffold generation under `external_skills/`.
 
 ## Config Entry Points (from interface)
@@ -17,9 +17,9 @@
 
 ## Actions (from interface)
 - `assess_gap`: summarize whether a request should stay a one-off temporary fix or become a reusable new capability.
-- `enable_external_skill`: after explicit confirmation, flip `skill_switches` on and build the release binary for an already registered external skill.
+- `enable_external_skill`: after explicit confirmation, rebuild the release binary and ensure `skill_switches` is on for an already registered external skill.
 - `implement_external_skill`: fill an already scaffolded external skill with the first generated `README.md`, `INTERFACE.md`, and `src/main.rs`.
-- `register_external_skill`: after explicit confirmation, add an existing external skill scaffold into `Cargo.toml`, `configs/skills_registry.toml`, and disabled `skill_switches`.
+- `register_external_skill`: after explicit confirmation and release build success, add an existing external skill scaffold into `Cargo.toml`, `configs/skills_registry.toml`, and enabled `skill_switches`.
 - `validate_external_skill`: run `sync_skill_docs.py`, `cargo check`, and a protocol-level smoke test against an existing external skill scaffold.
 - `permanent_extension_plan`: ask the configured LLM to turn a reusable capability request into a scaffold-ready external skill plan.
 - `temporary_fix_plan`: ask the configured LLM to produce a bounded temporary script/package plan for the current task.
@@ -34,7 +34,7 @@
 | `assess_gap` | `mode_hint` | no | string(enum) | `auto` | One of `auto`, `temporary_fix`, `permanent_extension`, `manual_review`. `auto` stays conservative and returns `manual_review`. |
 | `enable_external_skill` | `action` | yes | string | - | Must be `enable_external_skill`. |
 | `enable_external_skill` | `skill_name` | yes | string(snake_case) | - | Existing registered external skill directory name under `external_skills/`. |
-| `enable_external_skill` | `confirm` | yes | bool | - | Must be `true` before touching config and building a release binary. |
+| `enable_external_skill` | `confirm` | yes | bool | - | Must be `true` before rebuilding the release binary and touching config. |
 | `implement_external_skill` | `action` | yes | string | - | Must be `implement_external_skill`. |
 | `implement_external_skill` | `request` | yes | string | - | Original reusable capability request used to generate the first implementation bundle. |
 | `implement_external_skill` | `skill_name` | yes | string(snake_case) | - | Existing scaffold directory name under `external_skills/`. |
@@ -42,7 +42,7 @@
 | `implement_external_skill` | `actions` | no | string or string[] | `["todo_action"]` | Action list that the generated implementation must support. |
 | `register_external_skill` | `action` | yes | string | - | Must be `register_external_skill`. |
 | `register_external_skill` | `skill_name` | yes | string(snake_case) | - | Existing external skill directory name under `external_skills/`. |
-| `register_external_skill` | `confirm` | yes | bool | - | Must be `true` before touching workspace/config files. |
+| `register_external_skill` | `confirm` | yes | bool | - | Must be `true` before building the release binary and touching workspace/config files. |
 | `validate_external_skill` | `action` | yes | string | - | Must be `validate_external_skill`. |
 | `validate_external_skill` | `skill_name` | yes | string(snake_case) | - | Existing external skill directory name under `external_skills/`. |
 | `validate_external_skill` | `actions` | no | string or string[] | `["todo_action"]` | Candidate action names used for the smoke-test request. |
@@ -109,7 +109,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"Recommend a permanent extension: scaffold a new isolated skill and keep it disabled until tested.","extra":{"action":"assess_gap","request":"Add a reusable PDF compare skill","recommended_mode":"permanent_extension","default_enabled":false},"error_text":null}
+{"request_id":"demo-1","status":"ok","text":"Recommend a permanent extension: scaffold a new isolated skill, keep it unregistered while testing, then register it after validation.","extra":{"action":"assess_gap","request":"Add a reusable PDF compare skill","recommended_mode":"permanent_extension","default_enabled":false},"error_text":null}
 ```
 
 ### Example 2
@@ -149,7 +149,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-5","status":"ok","text":"Implemented initial files for external_skills/pdf_compare. The skill is still not registered or enabled.","extra":{"action":"implement_external_skill","skill_name":"pdf_compare","default_enabled":false},"error_text":null}
+{"request_id":"demo-5","status":"ok","text":"Implemented initial files for external_skills/pdf_compare. The skill is still unregistered and unavailable at runtime.","extra":{"action":"implement_external_skill","skill_name":"pdf_compare","default_enabled":false},"error_text":null}
 ```
 
 ### Example 6
@@ -169,7 +169,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-7","status":"ok","text":"Registered external skill `pdf_compare` in workspace/config metadata, but kept it disabled.","extra":{"action":"register_external_skill","skill_name":"pdf_compare","default_enabled":false},"error_text":null}
+{"request_id":"demo-7","status":"ok","text":"Registered external skill `pdf_compare`, built its release binary, and enabled it in config. Reload skills or restart clawd before using it.","extra":{"action":"register_external_skill","skill_name":"pdf_compare","default_enabled":true,"release_build_ok":true,"reload_required":true},"error_text":null}
 ```
 
 ### Example 8

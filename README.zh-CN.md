@@ -34,11 +34,15 @@ flowchart TD
     C --> D[绑定 / 恢复 / 活跃任务上下文]
     D --> E[意图归一化 LLM]
     E --> E2[路由后策略<br/>locator + 契约护栏]
-    E2 --> F{Ask 门控}
+    E2 -->|调度直达| SD[调度直达收尾]
+    E2 -->|恢复讨论| RD[恢复讨论提示词]
+    E2 -->|恢复执行| H
+    E2 -->|标准 ask| F{Ask 门控}
     F -->|AskClarify| G[澄清问句]
     F -->|chat| CH[构建聊天上下文与提示词]
     CH --> CR[聊天回复 LLM]
     F -->|execute| H[构建执行上下文<br/>状态 + 记忆 + 附件]
+    SK[技能注册表 + 生成技能文档<br/>configs/skills_registry.toml] --> I
     H --> I[规划器 / 运行时循环]
     I --> L{规划动作}
     L -->|respond| M[直接回复]
@@ -51,10 +55,14 @@ flowchart TD
     SS --> P
     P -->|继续规划| I
     P -->|观测后收尾| OF[观测输出收尾<br/>直接答案或合成]
-    M --> Q[最终交付 / 输出契约护栏]
-    CR --> Q
-    G --> Q
-    OF --> Q
+    M --> VP[可见执行过程<br/>脱敏后的 messages]
+    CR --> VP
+    G --> VP
+    OF --> VP
+    SD --> VP
+    RD --> RDL[恢复讨论 LLM]
+    RDL --> VP
+    VP --> Q[最终交付 / 输出契约护栏]
     Q --> R[收尾结果<br/>text + messages]
     R --> S[通道发送<br/>单条或多条消息]
     R --> T[更新会话 / 任务日志<br/>持久化观测事实]
@@ -66,12 +74,15 @@ flowchart TD
 - **意图归一化 LLM**：一次调用产出 `routed_mode`、`needs_clarify`、`output_contract` 以及可选的 `turn_type` / `target_task_policy` 等字段——**澄清 / 聊天 / 执行**在此处分流，**不是**规划器 JSON 里的 `clarify` 动作。
 - **任务队列**：HTTP 调用通过 `POST /v1/tasks` 入队；各通道守护进程也复用同一 worker 任务路径。
 - **路由后策略**：归一化之后、分发之前处理 locator 解析、缺 locator 澄清和契约护栏；它可以细化门控，但不是语义快路径。
+- **调度 / 恢复支路**：调度直达请求可在进入规划器前完成收尾；恢复讨论走恢复提示词；恢复执行回到正常执行运行时。
 - **Ask 门控**：只保留 `AskClarify / chat / execute` 的薄分流。代码分发走 `AskMode`（`ClarifyOrChat` 与 `Act`），`RoutedMode`（`AskClarify`、`Chat`、`Act`、`ChatAct`）仍是面向 normalizer 的兼容形状。
 - **聊天回复 LLM**：`mode=chat` 直接走聊天回复，不进入执行规划器循环。
 - **规划器 / 运行时循环**：在 act / chat_act 下多轮执行；规划步骤类型为 `think`、`call_tool`、`call_skill`、`synthesize_answer`、`respond`（当前**没有** `delegate` 类型；子任务前缀多用于日志与追踪，而非独立的子循环委派）。
 - **执行上下文**：整合运行态、当前任务上下文、附件、最近执行记录与持久记忆，避免记忆压过最新用户指令。
+- **技能注册表 + 生成技能文档**：规划器可见技能来自运行时 skill views 与生成接口文档，主要由 `configs/skills_registry.toml`、`crates/skills/*/INTERFACE.md`、`prompts/layers/generated/skills/*` 提供。新增技能应扩展这些契约，而不是新增特定语言的规划分支。
 - **call_skill**：经过 `run_skill_with_runner` 拉起 `skill-runner`，再启动具体技能二进制。
 - **循环内观测与观测输出收尾**：工具、技能与合成步骤输出作为循环内证据；如果计划只完成观测，也可以通过结构化直答或运行时合成完成交付。
+- **可见执行过程**：用户可见的过程块作为脱敏后的 `messages` 组装，并与最终交付正文分离；这样既能外露执行过程，也不会暴露原始 prompt、堆栈或密钥。
 - **最终交付 / 输出契约护栏**：在保存结果前规范文件 token、`messages`、精确标量/严格输出形状与交付一致性。
 - **收尾结果**：可同时包含 `text` 和 `messages` 数组；通道适配器在有多条可发布消息时会分别发送。
 
@@ -84,10 +95,15 @@ flowchart TD
     C --> D[解析 JSON]
     D --> E{结构化结果}
     E --> E2[路由后策略<br/>locator + 契约护栏]
+    E2 -->|调度直达| Fs[调度直达收尾<br/>证据足够时不进规划器]
+    E2 -->|恢复讨论| Fr[恢复讨论提示词]
+    E2 -->|恢复执行| H
     E2 -->|needs_clarify=true| F[澄清问句]
     E2 -->|mode=chat| G[构建聊天提示词]
     E2 -->|mode=act 或 chat_act| H[构建规划提示词]
+    SK[技能注册表 + 生成技能文档] --> H
     G --> Ic[LLM 请求2<br/>聊天回复]
+    Fr --> Ir[LLM 请求2<br/>恢复讨论]
     H --> Ip[LLM 请求2+<br/>每轮规划]
     Ip --> J[解析规划步骤]
     J --> K{步骤类型}
@@ -101,10 +117,13 @@ flowchart TD
     O --> P{是否再规划一轮?}
     P -->|是| H
     P -->|否| Q[观测输出收尾<br/>必要时直答或合成]
-    L --> R[最终交付 / 输出契约护栏]
-    Q --> R
-    Ic --> R
-    F --> R
+    L --> VP[可见执行过程<br/>脱敏后的 messages]
+    Q --> VP
+    Ic --> VP
+    Ir --> VP
+    F --> VP
+    Fs --> VP
+    VP --> R[最终交付 / 输出契约护栏]
     R --> S[收尾 / 用户可见回复]
     S -. 可选后台 .-> T[长期摘要 LLM]
     S -. 可选后台 .-> U[记忆偏好抽取 LLM]
@@ -112,10 +131,12 @@ flowchart TD
 
 - **LLM 请求1 / 意图归一化**：只做结构化理解，不产出最终答案。
 - **构建聊天 / 规划提示词**：把模式、会话态、工作上下文与输出约定拼进后续请求。
+- **技能注册表 + 生成技能文档**：规划提示词从已启用技能视图与生成接口文档构建，技能能力增长应由数据/契约驱动。
 - **LLM 请求2**：**Chat** 模式通常只需**一次**聊天补全后进入收尾。**Act / chat_act** 则按循环进行**一轮或多轮**规划 LLM；规划 JSON 只包含 `{think, call_tool, call_skill, synthesize_answer, respond}`（**没有** `clarify`、`delegate` 步骤类型）。
 - **执行工具或技能**：跑真实能力，避免模型假装已执行。
 - **synthesize_answer**：当规划里包含该步骤时会**额外**触发合成 LLM；可与执行交错，**不一定**是「全部规划结束后的固定第三次 LLM」。
 - **观测输出收尾**：如果计划在观测步骤后没有终端 `respond`，运行时仍可发布结构化直答，或走观测答案合成路径。
+- **可见执行过程**：普通回复、澄清和执行结果都会在最终交付前经过脱敏的可见过程消息层。
 - **最终交付 / 输出契约护栏**：在最终任务持久化前执行交付规范化与输出契约验证。
 - **收尾**：保存用户可见结果后，还可能启动后台记忆任务，包括长期摘要刷新，以及受 `configs/memory.toml` 控制的可选偏好抽取。
 
