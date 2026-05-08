@@ -5850,6 +5850,79 @@ mod tests {
     }
 
     #[test]
+    fn direct_scalar_finalize_preserves_planned_count_inventory_breakdown() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "count files and directories".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "system_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": "count_inventory",
+                        "path": ".",
+                        "count_files": true,
+                        "count_dirs": true
+                    }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "system_basic",
+            r#"{"action":"count_inventory","counts":{"total":66,"files":40,"dirs":26}}"#,
+        ));
+        let mut route = scalar_route_result();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            original_user_request: Some(
+                "帮我检查一下当前目录底下有多少个文件和文件夹。".to_string(),
+            ),
+            ..Default::default()
+        };
+
+        let (answer, summary) =
+            direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
+                .expect("planned component counts should be preserved");
+
+        assert!(answer.contains("40"));
+        assert!(answer.contains("26"));
+        assert_ne!(answer.trim(), "66");
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
+    fn direct_scalar_finalize_defers_ambiguous_count_inventory_without_component_plan() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "system_basic",
+            r#"{"action":"count_inventory","counts":{"total":66,"files":40,"dirs":26}}"#,
+        ));
+        let mut route = scalar_route_result();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            original_user_request: Some("当前目录有多少个项目？只回复数字。".to_string()),
+            ..Default::default()
+        };
+
+        assert!(
+            direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context)).is_none()
+        );
+    }
+
+    #[test]
     fn direct_structured_finalize_answers_existence_with_path_from_single_observation() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(StepExecutionResult {

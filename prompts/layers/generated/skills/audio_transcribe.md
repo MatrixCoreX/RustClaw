@@ -13,7 +13,16 @@
 - Successful responses include machine-readable `extra` metadata such as `provider`, `model`, `model_kind`, `audio_path`, and `outputs`.
 
 ## Config Entry Points (from interface)
-- No dedicated config entry points declared.
+- Main STT config: `configs/audio.toml` -> `[audio_transcribe]`.
+- Local whisper.cpp uses the OpenAI-compatible custom provider:
+  - set `default_vendor = "custom"`
+  - set `adapter_mode = "compat"` and `allow_compat_adapters = true`
+  - set `default_model = "local-whisper"` or another configured custom model name
+  - enable `[audio_transcribe.providers.custom]` with `base_url = "http://127.0.0.1:8178/v1"`
+- Loopback `custom` providers (`localhost`, `127.0.0.1`, `::1`) may leave `api_key = ""`.
+- Remote `custom` providers still require a real API key.
+- Chinese transcription is supported when the local whisper.cpp server runs a multilingual Whisper model, not an English-only `.en` model.
+- For multilingual agents, start whisper.cpp with `--language auto`; the server default may otherwise bias recognition toward English.
 
 ## Actions (from interface)
 - No explicit action is required.
@@ -56,6 +65,16 @@ Request:
 Response:
 ```json
 {"request_id":"demo-2","status":"ok","text":"Transcription: ...","extra":{"provider":"qwen","model":"qwen-asr","model_kind":"native","audio_path":"https://example.com/audio/demo.mp3","outputs":[{"type":"text","preview":"Transcription: ..."}],"latency_ms":0},"error_text":null}
+```
+
+### Example 3
+Request:
+```json
+{"request_id":"demo-3","args":{"audio":{"path":"recordings/chinese.wav"},"vendor":"custom","model":"local-whisper","transcribe_hint":"中文普通话，保留标点"}}
+```
+Response:
+```json
+{"request_id":"demo-3","status":"ok","text":"转写文本……","extra":{"provider":"custom","model":"local-whisper","model_kind":"compat","audio_path":"recordings/chinese.wav","outputs":[{"type":"text","preview":"转写文本……"}],"latency_ms":0},"error_text":null}
 ```
 
 ## Output Contract
