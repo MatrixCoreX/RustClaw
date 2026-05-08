@@ -34,11 +34,15 @@ flowchart TD
     C --> D[Binding / resume / active-task context]
     D --> E[Intent normalizer LLM]
     E --> E2[Post-route policy<br/>locator + contract guards]
-    E2 --> F{Ask gate}
+    E2 -->|schedule direct| SD[Schedule direct finalize]
+    E2 -->|resume discussion| RD[Resume discussion prompt]
+    E2 -->|resume execution| H
+    E2 -->|standard ask| F{Ask gate}
     F -->|AskClarify| G[Clarify question]
     F -->|chat| CH[Build chat context + prompt]
     CH --> CR[Chat response LLM]
     F -->|execute| H[Build execution context<br/>state + memory + attachments]
+    SK[Skill registry + generated skill docs<br/>configs/skills_registry.toml] --> I
     H --> I[Planner / runtime loop]
     I --> L{Planner action}
     L -->|respond| M[Respond]
@@ -51,10 +55,14 @@ flowchart TD
     SS --> P
     P -->|next round| I
     P -->|observation-only finish| OF[Observed-output finalizer<br/>direct answer or synthesis]
-    M --> Q[Final delivery / output-contract guard]
-    CR --> Q
-    G --> Q
-    OF --> Q
+    M --> VP[Visible process summary<br/>sanitized messages]
+    CR --> VP
+    G --> VP
+    OF --> VP
+    SD --> VP
+    RD --> RDL[Resume discussion LLM]
+    RDL --> VP
+    VP --> Q[Final delivery / output-contract guard]
     Q --> R[Finalize result<br/>text + messages]
     R --> S[Channel delivery<br/>single or multi-message]
     R --> T[Update session state / task journal<br/>persist observed facts]
@@ -66,12 +74,15 @@ flowchart TD
 - `Intent normalizer LLM`: one call that emits `routed_mode`, `needs_clarify`, `output_contract`, and optional `turn_type` / `target_task_policy` style fields—**clarify vs chat vs act is decided here**, not via a `clarify` action inside the planner JSON.
 - `Task queue`: HTTP callers submit `POST /v1/tasks`; channel daemons also hand work to the same queued worker path.
 - `Post-route policy`: applies locator resolution, missing-locator clarification, and contract guards after normalization and before dispatch. It can refine the gate, but it is not a semantic fast path.
+- `Schedule / resume branches`: schedule-direct requests can finalize before the planner; resume-discussion uses a recovery prompt; resume-execution returns to the normal execution runtime.
 - `Ask gate`: keeps only a thin `AskClarify / chat / execute` split. Code dispatches through `AskMode` (`ClarifyOrChat` vs `Act`), while `RoutedMode` (`AskClarify`, `Chat`, `Act`, `ChatAct`) remains the normalizer-facing compatibility shape.
 - `Chat response LLM`: handles `mode=chat` directly; chat requests do not enter the execution planner loop.
 - `Planner / runtime loop`: for act / chat_act, runs multiple rounds; planner steps are `think`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today—execution steps are traced as subtasks in logs, not a nested child loop).
 - `Execution context`: combines run state, current working context, attachments, recent execution context, and durable memory so memory cannot override the latest user instruction.
+- `Skill registry + generated skill docs`: planner-visible skills come from runtime skill views and generated interface docs, primarily `configs/skills_registry.toml`, `crates/skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`. New skills should extend those contracts instead of adding language-specific planner branches.
 - `call_skill`: goes through `run_skill_with_runner`, which launches `skill-runner` and then the concrete skill binary.
 - `Loop observations` and `Observed-output finalizer`: tool, skill, and synthesis outputs remain grounded evidence inside the loop; observation-only plans can still finish through direct structured answers or runtime-owned synthesis.
+- `Visible process summary`: the user-visible process block is assembled as sanitized `messages`, separate from the final deliverable body, so execution stays visible without exposing raw prompts, stack traces, or secrets.
 - `Final delivery / output-contract guard`: normalizes file tokens, `messages`, exact scalar/strict output shapes, and delivery consistency before the result is saved.
 - `Finalize result`: can emit one `text` field and a `messages` array; channel adapters send each publishable message separately when present.
 
@@ -84,10 +95,15 @@ flowchart TD
     C --> D[Parse JSON]
     D --> E{Structured result}
     E --> E2[Post-route policy<br/>locator + contract guards]
+    E2 -->|schedule direct| Fs[Schedule direct finalize<br/>no planner if already grounded]
+    E2 -->|resume discussion| Fr[Resume discussion prompt]
+    E2 -->|resume execution| H
     E2 -->|needs_clarify=true| F[Clarify question]
     E2 -->|mode=chat| G[Build chat prompt]
     E2 -->|mode=act or chat_act| H[Build planner prompt]
+    SK[Skill registry + generated skill docs] --> H
     G --> Ic[LLM request 2<br/>Chat response]
+    Fr --> Ir[LLM request 2<br/>Resume discussion]
     H --> Ip[LLM request 2+<br/>Planner per round]
     Ip --> J[Parse plan steps]
     J --> K{Step type}
@@ -101,10 +117,13 @@ flowchart TD
     O --> P{Need another planner round?}
     P -->|yes| H
     P -->|no| Q[Observed-output finalizer<br/>direct answer or synthesis if needed]
-    L --> R[Final delivery / output-contract guard]
-    Q --> R
-    Ic --> R
-    F --> R
+    L --> VP[Visible process summary<br/>sanitized messages]
+    Q --> VP
+    Ic --> VP
+    Ir --> VP
+    F --> VP
+    Fs --> VP
+    VP --> R[Final delivery / output-contract guard]
     R --> S[Finalize / user-visible reply]
     S -. optional background .-> T[Long-term summary LLM]
     S -. optional background .-> U[Memory preference extraction LLM]
@@ -112,10 +131,12 @@ flowchart TD
 
 - `LLM request 1 / Intent normalizer`: performs structured understanding only; it does not produce the final answer.
 - `Build chat / planner prompt`: combines mode, session state, working context, and output contract for follow-on requests.
+- `Skill registry + generated skill docs`: planner prompts are built from enabled skill views and generated interface documents, so skill capability growth should be data/contract driven.
 - `LLM request 2`: **Chat** mode uses one chat-completion call, then finalize. **Act / chat_act** uses one-or-more **planner** calls per loop round; the planner emits JSON steps in `{think, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types).
 - `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened.
 - `synthesize_answer`: an extra LLM call **scheduled inside the planner loop** when the plan includes that step—**not** always a single fixed “LLM 3 after all planning is done”; rounds can interleave execution, synthesis, and further planning.
 - `Observed-output finalizer`: if a plan ends after observation steps without a terminal `respond`, runtime can still publish a grounded direct answer or run the observed-answer synthesis path.
+- `Visible process summary`: normal replies, clarifications, and execution results all pass through a sanitized visible-process message layer before final delivery.
 - `Final delivery / output-contract guard`: applies delivery normalization and output-contract verification before final task persistence.
 - `Finalize`: may also start background memory work after the user-visible result is saved, including long-term summary refresh and optional preference extraction controlled by `configs/memory.toml`.
 

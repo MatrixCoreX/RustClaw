@@ -519,15 +519,16 @@ Skill behavior notes (file/path):
   - `temporary_fix_execute`: `allow_package_install` (default false)
   - `scaffold_external_skill`: `actions` (string or string array)
 - default state:
-  - disabled by default; enable explicitly before use
+  - scaffolded skills stay unregistered while being implemented and tested
+  - `register_external_skill` builds the release binary and records `skill_switches.<skill>=true` after confirmation
   - intended for developer-controlled extension scaffolding, not normal end-user tasks
 
 #### extension_manager JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"extension_manager","args":{...}}`
 - `assess_gap` is advisory only; it must not change runtime state.
-- `enable_external_skill` may only flip `configs/config.toml` `skill_switches`, build the external skill release binary, and report that a reload/restart is still required.
+- `enable_external_skill` may only ensure `configs/config.toml` `skill_switches.<skill>=true`, build the external skill release binary, and report that a reload/restart is still required.
 - `implement_external_skill` may call the configured LLM, but it may only overwrite scaffold-owned `README.md`, `INTERFACE.md`, and `src/main.rs` under an existing `external_skills/<skill_name>/`.
-- `register_external_skill` may only touch root `Cargo.toml`, `configs/skills_registry.toml`, and disabled `skill_switches` state for that skill.
+- `register_external_skill` may only build the external skill release binary, touch root `Cargo.toml`, `configs/skills_registry.toml`, and record enabled `skill_switches` state for that skill.
 - `validate_external_skill` may only run `python3 scripts/sync_skill_docs.py`, `cargo check --manifest-path external_skills/<skill_name>/Cargo.toml`, and a bounded stdin/stdout smoke run for that same manifest.
 - `permanent_extension_plan` may call the configured LLM, but it must return only scaffold metadata (`skill_name`, `capability_summary`, `actions`, `rationale`).
 - `temporary_fix_plan` may call the configured LLM, but it must return a bounded structured plan only.

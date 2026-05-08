@@ -133,7 +133,7 @@ struct ExternalSkillValidationReport {
 struct ExternalSkillRegistrationReport {
     workspace_member_added: bool,
     registry_entry_added: bool,
-    switch_recorded_disabled: bool,
+    switch_recorded_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -240,11 +240,11 @@ fn assess_gap(obj: &Map<String, Value>) -> Result<(String, Value), String> {
             ],
         ),
         "permanent_extension" => (
-            "Recommend a permanent extension: scaffold a new isolated skill and keep it disabled until tested.",
+            "Recommend a permanent extension: scaffold a new isolated skill, keep it unregistered while testing, then register it after validation.",
             vec![
                 "Generate a dedicated skill scaffold under external_skills/.",
                 "Fill INTERFACE.md before registering the skill.",
-                "Run sync_skill_docs.py and compile/smoke-test before enabling.",
+                "Run sync_skill_docs.py and compile/smoke-test before registration writes the enabled config switch.",
             ],
         ),
         _ => (
@@ -352,7 +352,7 @@ async fn implement_external_skill_action(
 
     Ok((
         format!(
-            "Implemented initial files for external_skills/{skill_name}. The skill is still not registered or enabled."
+            "Implemented initial files for external_skills/{skill_name}. The skill is still unregistered and unavailable at runtime."
         ),
         json!({
             "action": "implement_external_skill",
@@ -362,7 +362,7 @@ async fn implement_external_skill_action(
             "next_steps": [
                 "Run python3 scripts/sync_skill_docs.py.",
                 "Compile and smoke-test the generated skill.",
-                "Register and enable it explicitly only after verification passes."
+                "Register it with confirm=true only after verification passes; registration enables it in config."
             ]
         }),
     ))
@@ -385,7 +385,7 @@ fn validate_external_skill_action(obj: &Map<String, Value>) -> Result<(String, V
             "default_enabled": false,
             "next_steps": [
                 "Review the generated files before registration.",
-                "Register and enable the skill explicitly only after human approval."
+                "Register the skill with confirm=true after human approval; registration enables it in config."
             ]
         }),
     ))
@@ -400,20 +400,38 @@ fn register_external_skill_action(
     validate_identifier("skill_name", &skill_name)?;
     ensure_external_skill_scaffold_ready(&repo_root, &skill_name)?;
 
-    let report = register_external_skill(&repo_root, &skill_name)?;
+    let release_binary_path = external_skill_release_binary_path(&repo_root, &skill_name);
+    let original_release_binary = fs::read(&release_binary_path).ok();
+    let release_binary_path = build_external_skill_release_binary(&repo_root, &skill_name)?;
+    let report = match register_external_skill(&repo_root, &skill_name) {
+        Ok(report) => report,
+        Err(err) => {
+            match original_release_binary {
+                Some(bytes) => {
+                    let _ = fs::write(&release_binary_path, bytes);
+                }
+                None => {
+                    let _ = fs::remove_file(&release_binary_path);
+                }
+            }
+            return Err(err);
+        }
+    };
     Ok((
         format!(
-            "Registered external skill `{skill_name}` in workspace/config metadata, but kept it disabled."
+            "Registered external skill `{skill_name}`, built its release binary, and enabled it in config. Reload skills or restart clawd before using it."
         ),
         json!({
             "action": "register_external_skill",
             "skill_name": skill_name,
             "report": report,
-            "default_enabled": false,
+            "default_enabled": true,
+            "release_build_ok": true,
+            "release_binary_path": path_string(&release_binary_path),
+            "reload_required": true,
             "next_steps": [
-                "Review the generated files and registry entry.",
-                "Run enable_external_skill with confirm=true only after explicit approval.",
-                "Reload skills or restart clawd after enablement."
+                "Reload skills via admin endpoint or restart clawd.",
+                "Run a run_skill happy path before normal runtime use."
             ]
         }),
     ))
@@ -1293,10 +1311,10 @@ fn register_external_skill(
     let config_raw = fs::read_to_string(&config_path)
         .map_err(|err| format!("read config.toml failed: {err}"))?;
     let mut switches = collect_skill_switches_from_text(&config_raw);
-    let (config_updated, switch_recorded_disabled) = match switches.get(skill_name).copied() {
-        Some(false) => (config_raw.clone(), false),
+    let (config_updated, switch_recorded_enabled) = match switches.get(skill_name).copied() {
+        Some(true) => (config_raw.clone(), false),
         _ => {
-            switches.insert(skill_name.to_string(), false);
+            switches.insert(skill_name.to_string(), true);
             let rendered = render_switches_inline_table(&switches);
             (upsert_skill_switches_line(&config_raw, &rendered), true)
         }
@@ -1318,7 +1336,7 @@ fn register_external_skill(
         }
     }
 
-    if switch_recorded_disabled {
+    if switch_recorded_enabled {
         if let Err(err) = fs::write(&config_path, &config_updated) {
             if registry_entry_added {
                 let _ = fs::write(&registry_path, &registry_raw);
@@ -1335,36 +1353,32 @@ fn register_external_skill(
     Ok(ExternalSkillRegistrationReport {
         workspace_member_added,
         registry_entry_added,
-        switch_recorded_disabled,
+        switch_recorded_enabled,
     })
 }
 
-fn enable_external_skill(
+fn external_skill_binary_name(skill_name: &str) -> String {
+    format!("{}-skill", skill_name.replace('_', "-"))
+}
+
+fn external_skill_release_binary_path(repo_root: &Path, skill_name: &str) -> PathBuf {
+    repo_root
+        .join("target/release")
+        .join(external_skill_binary_name(skill_name))
+}
+
+fn build_external_skill_release_binary(
     repo_root: &Path,
     skill_name: &str,
-) -> Result<ExternalSkillEnableReport, String> {
-    let config_path = repo_root.join("configs/config.toml");
-    let config_raw = fs::read_to_string(&config_path)
-        .map_err(|err| format!("read config.toml failed: {err}"))?;
-    let mut switches = collect_skill_switches_from_text(&config_raw);
-    let (config_updated, switch_enabled) = match switches.get(skill_name).copied() {
-        Some(true) => (config_raw.clone(), false),
-        _ => {
-            switches.insert(skill_name.to_string(), true);
-            let rendered = render_switches_inline_table(&switches);
-            (upsert_skill_switches_line(&config_raw, &rendered), true)
-        }
-    };
-
-    let binary_name = format!("{}-skill", skill_name.replace('_', "-"));
+) -> Result<PathBuf, String> {
+    let binary_name = external_skill_binary_name(skill_name);
     let skill_dir = repo_root.join("external_skills").join(skill_name);
     let staging_root = prepare_staging_dir("enable", skill_name)?;
     copy_dir_recursive(&skill_dir, &staging_root)?;
     let staged_manifest = staging_root.join("Cargo.toml");
     let manifest_string = path_string(&staged_manifest);
+    let release_binary_path = external_skill_release_binary_path(repo_root, skill_name);
 
-    let release_binary_path = repo_root.join("target/release").join(&binary_name);
-    let original_release_binary = fs::read(&release_binary_path).ok();
     let build_result = (|| -> Result<(), String> {
         let build = run_command_capture(
             &staging_root,
@@ -1395,6 +1409,30 @@ fn enable_external_skill(
     })();
     let _ = fs::remove_dir_all(&staging_root);
     build_result?;
+
+    Ok(release_binary_path)
+}
+
+fn enable_external_skill(
+    repo_root: &Path,
+    skill_name: &str,
+) -> Result<ExternalSkillEnableReport, String> {
+    let config_path = repo_root.join("configs/config.toml");
+    let config_raw = fs::read_to_string(&config_path)
+        .map_err(|err| format!("read config.toml failed: {err}"))?;
+    let mut switches = collect_skill_switches_from_text(&config_raw);
+    let (config_updated, switch_enabled) = match switches.get(skill_name).copied() {
+        Some(true) => (config_raw.clone(), false),
+        _ => {
+            switches.insert(skill_name.to_string(), true);
+            let rendered = render_switches_inline_table(&switches);
+            (upsert_skill_switches_line(&config_raw, &rendered), true)
+        }
+    };
+
+    let release_binary_path = external_skill_release_binary_path(repo_root, skill_name);
+    let original_release_binary = fs::read(&release_binary_path).ok();
+    let release_binary_path = build_external_skill_release_binary(repo_root, skill_name)?;
 
     if switch_enabled {
         if let Err(err) = fs::write(&config_path, &config_updated) {
@@ -1815,7 +1853,7 @@ fn scaffold_external_skill(
                 "Fill external_skills/<skill>/INTERFACE.md with the real contract.",
                 "Implement the actual logic in src/main.rs.",
                 "Run python3 scripts/sync_skill_docs.py.",
-                "Register and enable the skill explicitly only after compile and smoke tests."
+                "Compile and smoke-test the skill, then register it with confirm=true to enable it in config."
             ]
         }),
     ))
@@ -2268,7 +2306,7 @@ fn readme_template(skill_name: &str, actions: &[String]) -> String {
         format!("# {skill_name} External Skill Scaffold"),
         String::new(),
         "This scaffold was generated by `extension_manager`.".to_string(),
-        "It is intentionally isolated under `external_skills/` and is not registered or enabled by default.".to_string(),
+        "It is intentionally isolated under `external_skills/` and stays unregistered until validation passes.".to_string(),
         String::new(),
         "## Proposed Actions".to_string(),
     ];
@@ -2281,7 +2319,7 @@ fn readme_template(skill_name: &str, actions: &[String]) -> String {
         "1. Complete `INTERFACE.md` with the real action contract.".to_string(),
         "2. Implement the action logic in `src/main.rs`.".to_string(),
         "3. Run `python3 scripts/sync_skill_docs.py`.".to_string(),
-        "4. Register the skill explicitly only after compile and smoke tests pass.".to_string(),
+        "4. Register the skill explicitly only after compile and smoke tests pass; registration enables it in config.".to_string(),
         String::new(),
     ]);
     lines.join("\n")
@@ -2325,7 +2363,7 @@ fn interface_template(skill_name: &str, capability_summary: &str, actions: &[Str
         .join("\n\n");
 
     format!(
-        "# {skill_name} Interface Spec\n\n> This file was scaffolded by `extension_manager`.\n> Keep it aligned with `external_skills/{skill_name}/src/main.rs`.\n\n## Capability Summary\n- {capability_summary}\n- This scaffold is intentionally generated in a disabled state; registration and enablement must be explicit.\n\n## Config Entry Points\n- If this skill has dedicated setup, list the real entry points here: config file, environment variable, local DB/API, login/session state, or dependency.\n- If it does not need dedicated setup, state that explicitly.\n\n## Actions\n{action_lines}\n\n## Parameter Contract\n| Action | Param | Required | Type | Default | Description |\n|---|---|---|---|---|---|\n{param_rows}\n\n## Error Contract\n- Return `status=error` with readable `error_text` when required params are missing.\n- Return `unsupported action: <name>` for unknown actions.\n- Keep request/response payloads as single-line JSON objects over stdin/stdout.\n\n## Request/Response Examples\n{request_examples}\n"
+        "# {skill_name} Interface Spec\n\n> This file was scaffolded by `extension_manager`.\n> Keep it aligned with `external_skills/{skill_name}/src/main.rs`.\n\n## Capability Summary\n- {capability_summary}\n- This scaffold stays unregistered until validation passes; registration enables it in config.\n\n## Config Entry Points\n- If this skill has dedicated setup, list the real entry points here: config file, environment variable, local DB/API, login/session state, or dependency.\n- If it does not need dedicated setup, state that explicitly.\n\n## Actions\n{action_lines}\n\n## Parameter Contract\n| Action | Param | Required | Type | Default | Description |\n|---|---|---|---|---|---|\n{param_rows}\n\n## Error Contract\n- Return `status=error` with readable `error_text` when required params are missing.\n- Return `unsupported action: <name>` for unknown actions.\n- Keep request/response payloads as single-line JSON objects over stdin/stdout.\n\n## Request/Response Examples\n{request_examples}\n"
     )
 }
 
@@ -2755,7 +2793,7 @@ mod tests {
         let first = register_external_skill(&root, "demo_skill").expect("register should succeed");
         assert!(first.workspace_member_added);
         assert!(first.registry_entry_added);
-        assert!(first.switch_recorded_disabled);
+        assert!(first.switch_recorded_enabled);
 
         let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).expect("read Cargo.toml");
         assert!(cargo_toml.contains("\"external_skills/demo_skill\","));
@@ -2766,13 +2804,13 @@ mod tests {
         assert!(registry.contains("requires_confirmation = true"));
 
         let config = fs::read_to_string(root.join("configs/config.toml")).expect("read config");
-        assert!(config.contains("demo_skill = false"));
+        assert!(config.contains("demo_skill = true"));
 
         let second =
             register_external_skill(&root, "demo_skill").expect("second register should succeed");
         assert!(!second.workspace_member_added);
         assert!(!second.registry_entry_added);
-        assert!(!second.switch_recorded_disabled);
+        assert!(!second.switch_recorded_enabled);
 
         let _ = fs::remove_dir_all(root);
     }
@@ -2812,13 +2850,7 @@ mod tests {
         let _guard = WORKSPACE_ROOT_ENV_LOCK.lock().expect("env lock");
         let root = temp_test_root();
         write_repo_baseline(&root, &[], false);
-        let scaffold_args = json!({
-            "skill_name": "env_demo_skill",
-            "capability_summary": "Summarize one narrow capability.",
-            "actions": ["inspect"]
-        });
-        scaffold_external_skill(root.clone(), scaffold_args.as_object().unwrap())
-            .expect("scaffold should succeed");
+        write_protocol_smoke_skill(&root, "env_demo_skill");
 
         let previous = env::var("WORKSPACE_ROOT").ok();
         env::set_var("WORKSPACE_ROOT", &root);
@@ -2831,10 +2863,12 @@ mod tests {
             .expect("register action should succeed");
 
         assert_eq!(extra["skill_name"], "env_demo_skill");
+        assert_eq!(extra["default_enabled"], true);
+        assert_eq!(extra["release_build_ok"], true);
         let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).expect("read Cargo.toml");
         assert!(cargo_toml.contains("\"external_skills/env_demo_skill\","));
         let config = fs::read_to_string(root.join("configs/config.toml")).expect("read config");
-        assert!(config.contains("env_demo_skill = false"));
+        assert!(config.contains("env_demo_skill = true"));
 
         restore_workspace_root(previous);
         let _ = fs::remove_dir_all(root);
@@ -2954,6 +2988,7 @@ mod tests {
             register_external_skill(&root, "flow_demo_skill").expect("register should succeed");
         assert!(registration.workspace_member_added);
         assert!(registration.registry_entry_added);
+        assert!(registration.switch_recorded_enabled);
 
         let enable_result = enable_external_skill(&root, "flow_demo_skill");
         restore_env_var("CARGO_NET_OFFLINE", previous_offline);
@@ -3010,6 +3045,22 @@ mod tests {
 
     fn write_protocol_smoke_skill(root: &Path, skill_name: &str) {
         let binary_name = format!("{}-skill", skill_name.replace('_', "-"));
+        write_text(
+            &root
+                .join("external_skills")
+                .join(skill_name)
+                .join("README.md"),
+            &format!("# {skill_name}\n\nProtocol smoke-test external skill.\n"),
+        );
+        write_text(
+            &root
+                .join("external_skills")
+                .join(skill_name)
+                .join("INTERFACE.md"),
+            &format!(
+                "# {skill_name} Interface Spec\n\n## Capability Summary\n- Protocol smoke-test external skill.\n\n## Actions\n- `inspect`: smoke action.\n"
+            ),
+        );
         write_text(
             &root.join("external_skills").join(skill_name).join("Cargo.toml"),
             &format!(
