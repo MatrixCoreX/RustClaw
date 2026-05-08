@@ -112,7 +112,7 @@ INTERFACE_TEMPLATE = """# {skill} Interface Spec
 ### Example 1
 Request:
 ```json
-{{"request_id":"demo-1","args":{{}}}}
+{{"request_id":"demo-1","context":null,"user_id":1,"chat_id":1,"args":{{"action":"TODO"}}}}
 ```
 Response:
 ```json
@@ -210,12 +210,28 @@ def add_workspace_member(skill_name: str) -> bool:
     if target in content:
         return False
 
-    marker = "\n]"
-    insert_at = content.find(marker)
-    if insert_at < 0:
-        raise SystemExit("cannot find workspace members block in Cargo.toml")
+    workspace_match = re.search(r"(?m)^\[workspace\]\s*$", content)
+    if not workspace_match:
+        raise SystemExit("cannot find [workspace] section in Cargo.toml")
 
-    updated = content[:insert_at] + f'{target}' + content[insert_at:]
+    next_section_match = re.search(r"(?m)^\[", content[workspace_match.end() :])
+    workspace_end = (
+        workspace_match.end() + next_section_match.start()
+        if next_section_match
+        else len(content)
+    )
+    workspace_block = content[workspace_match.end() : workspace_end]
+    members_match = re.search(r"(?m)^members[ \t]*=[ \t]*\[[ \t]*$", workspace_block)
+    if not members_match:
+        raise SystemExit("cannot find workspace members array in Cargo.toml")
+
+    members_body_start = workspace_match.end() + members_match.end()
+    close_match = re.search(r"(?m)^\s*\]", content[members_body_start:workspace_end])
+    if not close_match:
+        raise SystemExit("cannot find end of workspace members array in Cargo.toml")
+
+    insert_at = members_body_start + close_match.start()
+    updated = content[:insert_at] + f"{target}\n" + content[insert_at:]
     CARGO_TOML.write_text(updated, encoding="utf-8")
     return True
 
