@@ -1869,7 +1869,7 @@ fn normalize_intent_normalizer_raw_for_schema(raw: &str, req: &str) -> String {
         }
     }
     normalize_output_contract_for_schema(obj);
-    normalize_missing_mode_from_output_contract(obj, mode_was_missing);
+    normalize_mode_from_executable_output_contract(obj, mode_was_missing);
     serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string())
 }
 
@@ -2461,11 +2461,23 @@ fn normalize_state_patch_for_schema(obj: &mut serde_json::Map<String, Value>) {
     }
 }
 
-fn normalize_missing_mode_from_output_contract(
+fn normalize_mode_from_executable_output_contract(
     obj: &mut serde_json::Map<String, Value>,
     mode_was_missing: bool,
 ) {
-    if !mode_was_missing {
+    if obj
+        .get("needs_clarify")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let current_mode = obj
+        .get("mode")
+        .and_then(Value::as_str)
+        .map(normalize_schema_token)
+        .unwrap_or_default();
+    if !mode_was_missing && current_mode != "chat" {
         return;
     }
     let Some(contract) = obj
@@ -2487,34 +2499,22 @@ fn normalize_missing_mode_from_output_contract(
         || contract
             .get("delivery_required")
             .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+        || contract
+            .get("requires_content_evidence")
+            .and_then(|value| value.as_bool())
             .unwrap_or(false);
     if has_executable_contract {
         obj.insert("mode".to_string(), Value::String("act".to_string()));
     }
 }
 
-fn normalize_execution_recipe_for_schema(obj: &mut serde_json::Map<String, Value>, req: &str) {
+fn normalize_execution_recipe_for_schema(obj: &mut serde_json::Map<String, Value>, _req: &str) {
     promote_misnested_turn_analysis_from_execution_recipe(obj);
-    let req_surface = crate::intent::surface_signals::analyze_prompt_surface(req);
     let execution_recipe_value = obj.get("execution_recipe").cloned();
     let execution_recipe = execution_recipe_value.as_ref();
-    if execution_recipe_value_declares_hidden_entries_check(execution_recipe) {
-        mark_output_contract_hidden_entries_if_compatible(obj);
-        mark_mode_act_from_execution_recipe(obj);
-    } else if execution_recipe_value_declares_file_listing(execution_recipe) {
-        mark_output_contract_file_names_if_compatible(obj);
-        mark_mode_act_from_execution_recipe(obj);
-    } else if execution_recipe_value_declares_file_existence(execution_recipe) {
-        mark_output_contract_existence_with_path_if_compatible(obj);
-        mark_mode_act_from_execution_recipe(obj);
-    } else if execution_recipe_value_declares_command_payload(execution_recipe) {
+    if execution_recipe_value_declares_command_payload(execution_recipe) {
         mark_output_contract_requires_content_evidence(obj);
-        mark_mode_act_from_execution_recipe(obj);
-    } else if malformed_recipe_declares_locator_observation(execution_recipe, &req_surface) {
-        mark_output_contract_requires_content_evidence(obj);
-        if let Some(locator) = malformed_recipe_locator_hint(execution_recipe) {
-            mark_output_contract_locator(obj, locator.locator_kind, locator.locator_hint);
-        }
         mark_mode_act_from_execution_recipe(obj);
     } else if output_recipe_value_declares_execution(obj.get("execution_recipe")) {
         mark_output_contract_requires_content_evidence(obj);
@@ -2554,9 +2554,7 @@ fn normalize_execution_recipe_for_schema(obj: &mut serde_json::Map<String, Value
 }
 
 fn output_recipe_value_declares_execution(value: Option<&Value>) -> bool {
-    execution_recipe_value_has_text(value, |text| {
-        schema_text_declares_execution_recipe(text) || schema_text_declares_custom_execution(text)
-    })
+    execution_recipe_value_has_text(value, schema_text_declares_execution_recipe)
 }
 
 fn execution_recipe_value_has_text(value: Option<&Value>, predicate: fn(&str) -> bool) -> bool {
@@ -2582,149 +2580,6 @@ fn execution_recipe_value_has_text(value: Option<&Value>, predicate: fn(&str) ->
         Some(other) => scalar_json_value_text(other).is_some_and(|text| predicate(&text)),
         None => false,
     }
-}
-
-fn malformed_recipe_declares_locator_observation(
-    value: Option<&Value>,
-    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-) -> bool {
-    if malformed_recipe_locator_hint(value).is_some() {
-        return true;
-    };
-    surface_has_concrete_locator_or_filename_cue(req_surface)
-        && matches!(
-            value,
-            Some(Value::Array(items)) if items.iter().any(malformed_recipe_step_has_action_shape)
-        )
-}
-
-fn surface_has_concrete_locator_or_filename_cue(
-    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
-) -> bool {
-    surface.has_concrete_locator_hint()
-        || surface.has_explicit_path_or_url()
-        || surface.has_single_filename_candidate()
-        || !surface
-            .filename_candidates_excluding_field_selectors()
-            .is_empty()
-        || surface.locator_target_pair.is_some()
-        || surface.has_delivery_token_reference()
-}
-
-fn malformed_recipe_locator_hint(
-    value: Option<&Value>,
-) -> Option<crate::intent::locator_extractor::ExtractedLocator> {
-    match value {
-        Some(Value::String(raw)) => extract_recipe_locator_hint(raw),
-        Some(Value::Array(items)) => items
-            .iter()
-            .find_map(|item| malformed_recipe_locator_hint(Some(item))),
-        Some(Value::Object(map)) => map
-            .values()
-            .find_map(|item| malformed_recipe_locator_hint(Some(item))),
-        Some(other) => {
-            scalar_json_value_text(other).and_then(|text| extract_recipe_locator_hint(&text))
-        }
-        None => None,
-    }
-}
-
-fn extract_recipe_locator_hint(
-    raw: &str,
-) -> Option<crate::intent::locator_extractor::ExtractedLocator> {
-    for segment in raw.split(|ch: char| {
-        matches!(
-            ch,
-            ',' | '，'
-                | ';'
-                | '；'
-                | '['
-                | ']'
-                | '('
-                | ')'
-                | '{'
-                | '}'
-                | '"'
-                | '\''
-                | '\n'
-                | '\r'
-                | '\t'
-                | ' '
-        )
-    }) {
-        let trimmed = segment.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if let Some((_, suffix)) = trimmed.rsplit_once(':') {
-            if let Some(locator) =
-                crate::intent::locator_extractor::extract_explicit_locator_for_fallback(suffix)
-            {
-                return Some(locator);
-            }
-        }
-        if let Some(locator) =
-            crate::intent::locator_extractor::extract_explicit_locator_for_fallback(trimmed)
-        {
-            return Some(locator);
-        }
-    }
-    if let Some(locator) =
-        crate::intent::locator_extractor::extract_explicit_locator_for_fallback(raw)
-    {
-        return Some(locator);
-    }
-    None
-}
-
-fn malformed_recipe_step_has_action_shape(value: &Value) -> bool {
-    match value {
-        Value::String(raw) => malformed_recipe_text_has_action_shape(raw),
-        Value::Array(items) => items.iter().any(malformed_recipe_step_has_action_shape),
-        Value::Object(map) => map.values().any(malformed_recipe_step_has_action_shape),
-        other => scalar_json_value_text(other)
-            .is_some_and(|text| malformed_recipe_text_has_action_shape(&text)),
-    }
-}
-
-fn malformed_recipe_text_has_action_shape(raw: &str) -> bool {
-    let normalized = normalize_schema_token(raw);
-    if normalized.is_empty() || normalized.len() > 48 {
-        return false;
-    }
-    if normalized.chars().any(char::is_whitespace) {
-        return false;
-    }
-    !matches!(
-        normalized.as_str(),
-        "none"
-            | "null"
-            | "no"
-            | "false"
-            | "unknown"
-            | "not_applicable"
-            | "n_a"
-            | "na"
-            | "chat"
-            | "response"
-            | "respond"
-            | "direct_response"
-            | "reply"
-            | "answer"
-            | "confirm"
-    )
-}
-
-fn execution_recipe_value_declares_hidden_entries_check(value: Option<&Value>) -> bool {
-    execution_recipe_value_has_text(value, schema_text_declares_hidden_entries_check_execution)
-}
-
-fn execution_recipe_value_declares_file_listing(value: Option<&Value>) -> bool {
-    execution_recipe_value_has_text(value, schema_text_declares_file_listing_execution)
-}
-
-fn execution_recipe_value_declares_file_existence(value: Option<&Value>) -> bool {
-    execution_recipe_value_has_text(value, schema_text_declares_file_existence_execution)
 }
 
 fn execution_recipe_value_declares_command_payload(value: Option<&Value>) -> bool {
@@ -2758,37 +2613,6 @@ fn schema_text_declares_execution_recipe(raw: &str) -> bool {
     )
 }
 
-fn schema_text_declares_custom_execution(raw: &str) -> bool {
-    let normalized = normalize_schema_token(raw);
-    if normalized.is_empty()
-        || matches!(
-            normalized.as_str(),
-            "none"
-                | "null"
-                | "no"
-                | "false"
-                | "unknown"
-                | "not_applicable"
-                | "n_a"
-                | "na"
-                | "chat"
-                | "response"
-                | "respond"
-                | "direct_response"
-        )
-        || normalized.starts_with("respond")
-        || normalized.starts_with("reply")
-        || normalized.starts_with("answer")
-        || normalized.starts_with("confirm")
-    {
-        return false;
-    }
-    schema_text_declares_hidden_entries_check_execution(raw)
-        || schema_text_declares_file_listing_execution(raw)
-        || schema_text_declares_file_existence_execution(raw)
-        || (raw.contains('(') && raw.contains(')'))
-}
-
 fn mark_output_contract_requires_content_evidence(obj: &mut serde_json::Map<String, Value>) {
     let value = obj
         .entry("output_contract".to_string())
@@ -2798,26 +2622,6 @@ fn mark_output_contract_requires_content_evidence(obj: &mut serde_json::Map<Stri
     }
     if let Some(contract) = value.as_object_mut() {
         contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
-    }
-}
-
-fn mark_output_contract_locator(
-    obj: &mut serde_json::Map<String, Value>,
-    locator_kind: OutputLocatorKind,
-    locator_hint: String,
-) {
-    let value = obj
-        .entry("output_contract".to_string())
-        .or_insert_with(|| serde_json::json!({}));
-    if !value.is_object() {
-        coerce_output_contract_value_for_schema(value);
-    }
-    if let Some(contract) = value.as_object_mut() {
-        contract.insert(
-            "locator_kind".to_string(),
-            Value::String(locator_kind.as_str().to_string()),
-        );
-        contract.insert("locator_hint".to_string(), Value::String(locator_hint));
     }
 }
 
@@ -2836,320 +2640,6 @@ fn mark_mode_act_from_execution_recipe(obj: &mut serde_json::Map<String, Value>)
     if current.is_none() || matches!(current, Some("chat")) {
         obj.insert("mode".to_string(), Value::String("act".to_string()));
     }
-}
-
-fn schema_text_declares_file_listing_execution(raw: &str) -> bool {
-    let normalized = normalize_schema_token(raw);
-    if matches!(
-        normalized.as_str(),
-        "list_files"
-            | "list_file"
-            | "list_directory"
-            | "list_dir"
-            | "directory_listing"
-            | "file_listing"
-            | "files_listing"
-            | "file_names_only"
-            | "file_name_only"
-            | "filename_only"
-            | "filenames_only"
-            | "names_only"
-            | "directory_names_only"
-            | "dir_names_only"
-            | "folder_names_only"
-            | "folders_only"
-            | "filename_listing"
-            | "list_filenames"
-            | "list_file_names"
-    ) {
-        return true;
-    }
-    [
-        "list_files",
-        "list_directory",
-        "list_dir",
-        "directory_listing",
-        "file_listing",
-        "files_listing",
-        "file_names_only",
-        "file_name_only",
-        "filename_only",
-        "filenames_only",
-        "names_only",
-        "directory_names_only",
-        "dir_names_only",
-        "folder_names_only",
-        "folders_only",
-        "filename_listing",
-        "list_filenames",
-        "list_file_names",
-    ]
-    .iter()
-    .any(|prefix| normalized.starts_with(prefix))
-        || schema_text_declares_shell_file_listing_execution(raw)
-}
-
-fn schema_text_declares_shell_file_listing_execution(raw: &str) -> bool {
-    let lower = raw.to_ascii_lowercase();
-    let command_tokens = lower
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'))
-        .filter(|token| !token.is_empty())
-        .collect::<Vec<_>>();
-    let has_listing_command = command_tokens
-        .iter()
-        .any(|token| matches!(*token, "ls" | "dir" | "find" | "fd"));
-    if !has_listing_command {
-        return false;
-    }
-    if command_tokens
-        .iter()
-        .any(|token| matches!(*token, "ls" | "dir"))
-    {
-        return true;
-    }
-    let normalized = normalize_schema_token(raw);
-    let has_names_only_hint = normalized.contains("file_name")
-        || normalized.contains("filename")
-        || normalized.contains("filenames")
-        || normalized.contains("names_only")
-        || normalized.contains("name_list")
-        || raw.contains("文件名")
-        || raw.contains("文件列表")
-        || raw.contains("目录列表");
-    let has_one_per_line_flag = command_tokens
-        .iter()
-        .any(|token| matches!(*token, "-1" | "1"));
-    has_names_only_hint || has_one_per_line_flag
-}
-
-fn schema_text_declares_file_existence_execution(raw: &str) -> bool {
-    let normalized = normalize_schema_token(raw);
-    if matches!(
-        normalized.as_str(),
-        "check_file"
-            | "check_path"
-            | "find_file"
-            | "find_path"
-            | "file_exists"
-            | "path_exists"
-            | "exists_file"
-            | "exists_path"
-            | "locate_file"
-            | "locate_path"
-            | "search_file"
-            | "search_path"
-            | "stat_file"
-            | "stat_path"
-            | "test_file"
-            | "test_path"
-    ) {
-        return true;
-    }
-    let has_file_marker = normalized.contains("file") || normalized.contains("path");
-    let has_existence_marker = normalized.starts_with("check_")
-        || normalized.starts_with("find_")
-        || normalized.starts_with("locate_")
-        || normalized.starts_with("search_")
-        || normalized.starts_with("stat_")
-        || normalized.starts_with("test_")
-        || normalized.contains("_exists")
-        || normalized.contains("_existence")
-        || normalized.contains("_check_")
-        || normalized.contains("_find_")
-        || normalized.contains("_locate_")
-        || normalized.contains("_search_");
-    (has_file_marker && has_existence_marker)
-        || schema_text_declares_shell_file_existence_execution(raw)
-}
-
-fn schema_text_declares_shell_file_existence_execution(raw: &str) -> bool {
-    let lower = raw.to_ascii_lowercase();
-    let command_tokens = lower
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.'))
-        .filter(|token| !token.is_empty())
-        .collect::<Vec<_>>();
-    let has_existence_command = command_tokens
-        .iter()
-        .any(|token| matches!(*token, "find" | "fd" | "stat" | "test"));
-    if !has_existence_command {
-        return false;
-    }
-    let has_existence_flag = command_tokens
-        .iter()
-        .any(|token| matches!(*token, "-name" | "-path" | "-e" | "-f" | "-d"));
-    let has_specific_target = command_tokens
-        .iter()
-        .any(|token| token.contains('.') && !matches!(*token, "." | ".."));
-    has_existence_flag || has_specific_target
-}
-
-fn schema_text_declares_hidden_entries_check_execution(raw: &str) -> bool {
-    let normalized = normalize_schema_token(raw);
-    if matches!(
-        normalized.as_str(),
-        "hidden_files"
-            | "hidden_entries"
-            | "hidden_file_check"
-            | "hidden_files_check"
-            | "hidden_entry_check"
-            | "hidden_entries_check"
-            | "list_hidden_files"
-            | "list_hidden_entries"
-            | "check_hidden_files"
-            | "check_hidden_entries"
-            | "find_hidden_files"
-            | "find_hidden_entries"
-            | "scan_hidden_files"
-            | "scan_hidden_entries"
-    ) {
-        return true;
-    }
-
-    let has_hidden_marker = normalized.contains("hidden")
-        || normalized.contains("dotfile")
-        || normalized.contains("dot_file")
-        || normalized.contains("dot_prefixed");
-    let has_entry_marker = normalized.contains("file")
-        || normalized.contains("entry")
-        || normalized.contains("entries")
-        || normalized.contains("dirent");
-    let has_observation_marker = normalized.starts_with("list_")
-        || normalized.starts_with("check_")
-        || normalized.starts_with("find_")
-        || normalized.starts_with("scan_")
-        || normalized.starts_with("inspect_")
-        || normalized.starts_with("detect_")
-        || normalized.contains("_list_")
-        || normalized.contains("_check_")
-        || normalized.contains("_find_")
-        || normalized.contains("_scan_")
-        || normalized.contains("_inspect_")
-        || normalized.contains("_detect_");
-    has_hidden_marker && has_entry_marker && has_observation_marker
-}
-
-fn mark_output_contract_hidden_entries_if_compatible(obj: &mut serde_json::Map<String, Value>) {
-    let value = obj
-        .entry("output_contract".to_string())
-        .or_insert_with(|| serde_json::json!({}));
-    let raw_scalar_token = value.as_str().map(normalize_schema_token);
-    if !value.is_object() {
-        coerce_output_contract_value_for_schema(value);
-    }
-    let Some(contract) = value.as_object_mut() else {
-        return;
-    };
-    let semantic_kind = contract
-        .get("semantic_kind")
-        .and_then(Value::as_str)
-        .map(normalize_output_semantic_kind_for_schema)
-        .unwrap_or("none");
-    let response_shape = contract
-        .get("response_shape")
-        .and_then(Value::as_str)
-        .map(normalize_output_response_shape_for_schema)
-        .unwrap_or("free");
-    let raw_scalar_is_hidden = raw_scalar_token.as_deref().is_some_and(|token| {
-        matches!(
-            normalize_output_semantic_kind_for_schema(token),
-            "hidden_entries_check"
-        )
-    });
-
-    if matches!(
-        semantic_kind,
-        "none" | "hidden_entries_check" | "existence_with_path"
-    ) || raw_scalar_is_hidden
-    {
-        if matches!(response_shape, "free" | "one_sentence") {
-            contract.insert(
-                "response_shape".to_string(),
-                Value::String("strict".to_string()),
-            );
-        }
-        contract.insert(
-            "semantic_kind".to_string(),
-            Value::String(OutputSemanticKind::HiddenEntriesCheck.as_str().to_string()),
-        );
-        contract.insert("delivery_required".to_string(), Value::Bool(false));
-    }
-    contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
-}
-
-fn mark_output_contract_existence_with_path_if_compatible(
-    obj: &mut serde_json::Map<String, Value>,
-) {
-    let value = obj
-        .entry("output_contract".to_string())
-        .or_insert_with(|| serde_json::json!({}));
-    if !value.is_object() {
-        coerce_output_contract_value_for_schema(value);
-    }
-    let Some(contract) = value.as_object_mut() else {
-        return;
-    };
-    let semantic_kind = contract
-        .get("semantic_kind")
-        .and_then(Value::as_str)
-        .map(normalize_output_semantic_kind_for_schema)
-        .unwrap_or("none");
-    if matches!(semantic_kind, "none" | "existence_with_path") {
-        let response_shape = contract
-            .get("response_shape")
-            .and_then(Value::as_str)
-            .map(normalize_output_response_shape_for_schema)
-            .unwrap_or("free");
-        if matches!(response_shape, "free" | "one_sentence") {
-            contract.insert(
-                "response_shape".to_string(),
-                Value::String("strict".to_string()),
-            );
-        }
-        contract.insert(
-            "semantic_kind".to_string(),
-            Value::String(OutputSemanticKind::ExistenceWithPath.as_str().to_string()),
-        );
-        contract.insert("delivery_required".to_string(), Value::Bool(false));
-    }
-    contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
-}
-
-fn mark_output_contract_file_names_if_compatible(obj: &mut serde_json::Map<String, Value>) {
-    let value = obj
-        .entry("output_contract".to_string())
-        .or_insert_with(|| serde_json::json!({}));
-    let raw_scalar_token = value.as_str().map(normalize_schema_token);
-    if !value.is_object() {
-        coerce_output_contract_value_for_schema(value);
-    }
-    let Some(contract) = value.as_object_mut() else {
-        return;
-    };
-    let semantic_kind = contract
-        .get("semantic_kind")
-        .and_then(Value::as_str)
-        .map(normalize_output_semantic_kind_for_schema)
-        .unwrap_or("none");
-    let raw_scalar_is_list_shape = raw_scalar_token.as_deref().is_some_and(|token| {
-        matches!(
-            token,
-            "list" | "array" | "string_list" | "strings_list" | "list_of_strings"
-        )
-    });
-    if matches!(semantic_kind, "none" | "file_names" | "scalar_path_only")
-        || raw_scalar_is_list_shape
-    {
-        contract.insert(
-            "response_shape".to_string(),
-            Value::String("strict".to_string()),
-        );
-        contract.insert(
-            "semantic_kind".to_string(),
-            Value::String(OutputSemanticKind::FileNames.as_str().to_string()),
-        );
-        contract.insert("delivery_required".to_string(), Value::Bool(false));
-    }
-    contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
 }
 
 fn promote_misnested_turn_analysis_from_execution_recipe(obj: &mut serde_json::Map<String, Value>) {
@@ -3407,6 +2897,7 @@ fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>
         "semantic_kind".to_string(),
         Value::String(semantic_kind.to_string()),
     );
+    let semantic_kind_enum = parse_output_semantic_kind(semantic_kind);
     if matches!(
         semantic_kind,
         kind if kind == OutputSemanticKind::FileNames.as_str()
@@ -3425,6 +2916,18 @@ fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>
         || semantic_kind == OutputSemanticKind::GitCommitSubject.as_str()
     {
         contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
+    }
+    if output_semantic_kind_requires_fresh_evidence(semantic_kind_enum) {
+        contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
+    }
+    if semantic_kind == OutputSemanticKind::HiddenEntriesCheck.as_str() {
+        if matches!(response_shape, "free" | "one_sentence") {
+            contract.insert(
+                "response_shape".to_string(),
+                Value::String("strict".to_string()),
+            );
+        }
+        contract.insert("delivery_required".to_string(), Value::Bool(false));
     }
     if semantic_kind == OutputSemanticKind::ExistenceWithPath.as_str()
         || semantic_kind == OutputSemanticKind::ExistenceWithPathSummary.as_str()
@@ -4761,7 +4264,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_recovers_malformed_locator_recipe_array() {
+    fn normalizer_schema_normalization_does_not_infer_malformed_recipe_array() {
         let raw = r#"{
           "resolved_user_intent":"用户请求读取 README 文件的开头内容，并用通俗易懂的非技术语言进行一句话总结",
           "answer_candidate":"",
@@ -4790,12 +4293,12 @@ mod tests {
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat"));
         assert_eq!(
             value
                 .pointer("/output_contract/requires_content_evidence")
                 .and_then(|v| v.as_bool()),
-            Some(true)
+            Some(false)
         );
         crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
             &normalized,
@@ -4805,7 +4308,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_recovers_string_recipe_locator() {
+    fn normalizer_schema_normalization_does_not_infer_string_recipe_locator() {
         let raw = r#"{
           "resolved_user_intent":"读取 README.md 开头部分并用非技术语言一句话总结其核心含义",
           "answer_candidate":"",
@@ -4834,24 +4337,24 @@ mod tests {
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat"));
         assert_eq!(
             value
                 .pointer("/output_contract/requires_content_evidence")
                 .and_then(|v| v.as_bool()),
-            Some(true)
+            Some(false)
         );
         assert_eq!(
             value
                 .pointer("/output_contract/locator_kind")
                 .and_then(|v| v.as_str()),
-            Some("path")
+            Some("none")
         );
         assert_eq!(
             value
                 .pointer("/output_contract/locator_hint")
                 .and_then(|v| v.as_str()),
-            Some("/home/guagua/rustclaw/README.md")
+            Some("")
         );
     }
 
@@ -4979,7 +4482,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_recovers_custom_execution_recipe_signal() {
+    fn normalizer_schema_normalization_does_not_infer_custom_recipe_text() {
         let raw = r#"{
           "resolved_user_intent":"列出 document 目录下的所有文件名，仅输出文件名列表。",
           "answer_candidate":"",
@@ -5018,13 +4521,13 @@ mod tests {
             value
                 .pointer("/output_contract/requires_content_evidence")
                 .and_then(|v| v.as_bool()),
-            Some(true)
+            Some(false)
         );
         assert_eq!(
             value
                 .pointer("/output_contract/semantic_kind")
                 .and_then(|v| v.as_str()),
-            Some("file_names")
+            Some("none")
         );
         crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
             &normalized,
@@ -5034,7 +4537,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_recovers_shell_file_listing_recipe_text() {
+    fn normalizer_schema_normalization_does_not_infer_shell_file_listing_recipe_text() {
         let raw = r#"{
           "resolved_user_intent":"列出 document 目录下所有文件的文件名列表",
           "answer_candidate":"",
@@ -5062,24 +4565,24 @@ mod tests {
             "列出 document 目录下有哪些文件，只输出文件名列表",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat"));
         assert_eq!(
             value
                 .pointer("/output_contract/response_shape")
                 .and_then(|v| v.as_str()),
-            Some("strict")
+            Some("free")
         );
         assert_eq!(
             value
                 .pointer("/output_contract/semantic_kind")
                 .and_then(|v| v.as_str()),
-            Some("file_names")
+            Some("none")
         );
         assert_eq!(
             value
                 .pointer("/output_contract/requires_content_evidence")
                 .and_then(|v| v.as_bool()),
-            Some(true)
+            Some(false)
         );
         crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
             &normalized,
@@ -5089,7 +4592,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_recovers_hidden_entries_recipe_contract() {
+    fn normalizer_schema_normalization_does_not_infer_hidden_entries_recipe_text() {
         let raw = r#"{
           "resolved_user_intent":"检查当前工作目录是否存在隐藏文件，回答有或没有，并提供3个具体例子",
           "answer_candidate":"",
@@ -5122,19 +4625,19 @@ mod tests {
             value
                 .pointer("/output_contract/response_shape")
                 .and_then(|v| v.as_str()),
-            Some("strict")
+            Some("free")
         );
         assert_eq!(
             value
                 .pointer("/output_contract/semantic_kind")
                 .and_then(|v| v.as_str()),
-            Some("hidden_entries_check")
+            Some("none")
         );
         assert_eq!(
             value
                 .pointer("/output_contract/requires_content_evidence")
                 .and_then(|v| v.as_bool()),
-            Some(true)
+            Some(false)
         );
         crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
             &normalized,
@@ -5144,7 +4647,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_recovers_hidden_entries_array_recipe_contract() {
+    fn normalizer_schema_normalization_does_not_infer_hidden_entries_recipe_array() {
         let raw = r#"{
           "resolved_user_intent":"检查当前工作目录是否存在隐藏文件，只回答有或没有，并提供3个具体例子",
           "answer_candidate":"有",
@@ -5169,19 +4672,19 @@ mod tests {
             value
                 .pointer("/output_contract/response_shape")
                 .and_then(|v| v.as_str()),
-            Some("strict")
+            Some("free")
         );
         assert_eq!(
             value
                 .pointer("/output_contract/semantic_kind")
                 .and_then(|v| v.as_str()),
-            Some("hidden_entries_check")
+            Some("none")
         );
         assert_eq!(
             value
                 .pointer("/output_contract/requires_content_evidence")
                 .and_then(|v| v.as_bool()),
-            Some(true)
+            Some(false)
         );
         crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
             &normalized,
@@ -5191,7 +4694,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_prefers_hidden_recipe_over_existence_contract() {
+    fn normalizer_schema_normalization_keeps_structured_contract_over_recipe_text() {
         let raw = r#"{
           "resolved_user_intent":"检查当前目录 /home/guagua/rustclaw 是否有隐藏文件（以点开头的文件），若存在则回答“有”并提供3个示例",
           "answer_candidate":"",
@@ -5217,7 +4720,7 @@ mod tests {
             value
                 .pointer("/output_contract/semantic_kind")
                 .and_then(|v| v.as_str()),
-            Some("hidden_entries_check")
+            Some("existence_with_path")
         );
         assert_eq!(
             value
@@ -5233,7 +4736,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_recovers_shell_file_listing_object_recipe_contract() {
+    fn normalizer_schema_normalization_keeps_command_payload_as_execution_without_semantic_guess() {
         let raw = r#"{
           "resolved_user_intent":"列出 logs 目录下前 10 个文件名，不读取内容",
           "answer_candidate":"",
@@ -5258,13 +4761,13 @@ mod tests {
             value
                 .pointer("/output_contract/response_shape")
                 .and_then(|v| v.as_str()),
-            Some("strict")
+            Some("free")
         );
         assert_eq!(
             value
                 .pointer("/output_contract/semantic_kind")
                 .and_then(|v| v.as_str()),
-            Some("file_names")
+            Some("none")
         );
         assert_eq!(
             value
@@ -5280,7 +4783,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_recovers_check_file_recipe_contract() {
+    fn normalizer_schema_normalization_does_not_infer_check_file_recipe_text() {
         let raw = r#"{
           "resolved_user_intent":"检查仓库中是否存在 rustclaw.service 文件",
           "answer_candidate":"没有",
@@ -5296,7 +4799,7 @@ mod tests {
             "检查仓库里有没有 rustclaw.service",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat"));
         assert_eq!(
             value
                 .pointer("/output_contract/response_shape")
@@ -5307,13 +4810,13 @@ mod tests {
             value
                 .pointer("/output_contract/semantic_kind")
                 .and_then(|v| v.as_str()),
-            Some("existence_with_path")
+            Some("none")
         );
         assert_eq!(
             value
                 .pointer("/output_contract/requires_content_evidence")
                 .and_then(|v| v.as_bool()),
-            Some(true)
+            Some(false)
         );
         crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
             &normalized,
@@ -5323,7 +4826,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_recovers_shell_find_existence_recipe_contract() {
+    fn normalizer_schema_normalization_does_not_infer_shell_find_recipe_text() {
         let raw = r#"{
           "resolved_user_intent":"检查仓库目录是否存在 rustclaw.service 文件，报告有或没有，并给出找到的路径",
           "answer_candidate":"有: /home/guagua/rustclaw/rustclaw.service",
@@ -5346,19 +4849,19 @@ mod tests {
             value
                 .pointer("/output_contract/response_shape")
                 .and_then(|v| v.as_str()),
-            Some("strict")
+            Some("free")
         );
         assert_eq!(
             value
                 .pointer("/output_contract/semantic_kind")
                 .and_then(|v| v.as_str()),
-            Some("existence_with_path")
+            Some("none")
         );
         assert_eq!(
             value
                 .pointer("/output_contract/requires_content_evidence")
                 .and_then(|v| v.as_bool()),
-            Some(true)
+            Some(false)
         );
         crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
             &normalized,
@@ -5410,7 +4913,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_repairs_file_listing_recipe_path_only_drift() {
+    fn normalizer_schema_normalization_does_not_repair_file_listing_from_recipe_text() {
         let raw = r#"{
           "resolved_user_intent":"列出 /home/guagua/rustclaw/document 目录下的所有文件名",
           "answer_candidate":null,
@@ -5432,19 +4935,19 @@ mod tests {
             value
                 .pointer("/output_contract/response_shape")
                 .and_then(|v| v.as_str()),
-            Some("strict")
+            Some("scalar")
         );
         assert_eq!(
             value
                 .pointer("/output_contract/semantic_kind")
                 .and_then(|v| v.as_str()),
-            Some("file_names")
+            Some("scalar_path_only")
         );
         assert_eq!(
             value
                 .pointer("/output_contract/requires_content_evidence")
                 .and_then(|v| v.as_bool()),
-            Some(true)
+            Some(false)
         );
         crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
             &normalized,
@@ -7021,7 +6524,7 @@ mod tests {
         );
         assert_eq!(
             contract.get("response_shape").and_then(|v| v.as_str()),
-            Some("free")
+            Some("strict")
         );
         crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
             &normalized,
