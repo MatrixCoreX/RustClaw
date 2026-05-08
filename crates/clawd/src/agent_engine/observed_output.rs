@@ -6564,7 +6564,7 @@ version.workspace = true
         loop_state.executed_step_results.push(ok_step(
             "step_1",
             "list_dir",
-            "Cargo.toml\ncrates/\nUI/\nconfigs/\nREADME.md\nREADME.zh-CN.md\nprompts/\nrustclaw.service\nstart-telegramd.sh\nstart-wechatd.sh\nstart-whatsappd.sh\n",
+            "Cargo.toml\ncrates/\nUI/\nconfigs/\nREADME.md\nREADME.zh-CN.md\nprompts/\nrustclaw.service\ncomponent_start/start-telegramd.sh\ncomponent_start/start-wechatd.sh\ncomponent_start/start-whatsappd.sh\n",
         ));
         let route_result = RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,

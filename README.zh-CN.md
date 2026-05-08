@@ -287,19 +287,19 @@ rustclaw -start release all --with-ui
 如果你想按服务精细控制，也可以直接用单服务脚本：
 
 ```bash
-./start-clawd.sh
-./start-telegramd.sh
-./start-wechatd.sh
-./start-feishud.sh
-./start-larkd.sh
-./start-whatsappd.sh
-./start-whatsapp-webd.sh
-./start-clawd-ui.sh
+./component_start/start-clawd.sh
+./component_start/start-telegramd.sh
+./component_start/start-wechatd.sh
+./component_start/start-feishud.sh
+./component_start/start-larkd.sh
+./component_start/start-whatsappd.sh
+./component_start/start-whatsapp-webd.sh
+./component_start/start-clawd-ui.sh
 ```
 
 单独启动 `clawd` 时：
 
-- `./start-clawd.sh` 会检查 `target/release/clawd` 和 `target/release/skill-runner`
+- `./component_start/start-clawd.sh` 会检查 `target/release/clawd` 和 `target/release/skill-runner`
 - 如果 `configs/config.toml` 里还没有 `selected_vendor` / `selected_model`，会在首次启动时要求交互选择
 - 若当前厂商的 `api_key` 为空或还是 `REPLACE_ME...`，也会要求在终端里补齐后再启动
 

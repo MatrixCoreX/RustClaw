@@ -280,19 +280,19 @@ Equivalent script-based flow is still available:
 Single-service scripts are also available when you want finer control:
 
 ```bash
-./start-clawd.sh
-./start-telegramd.sh
-./start-wechatd.sh
-./start-feishud.sh
-./start-larkd.sh
-./start-whatsappd.sh
-./start-whatsapp-webd.sh
-./start-clawd-ui.sh
+./component_start/start-clawd.sh
+./component_start/start-telegramd.sh
+./component_start/start-wechatd.sh
+./component_start/start-feishud.sh
+./component_start/start-larkd.sh
+./component_start/start-whatsappd.sh
+./component_start/start-whatsapp-webd.sh
+./component_start/start-clawd-ui.sh
 ```
 
 When starting `clawd` alone:
 
-- `./start-clawd.sh` checks for both `target/release/clawd` and `target/release/skill-runner`
+- `./component_start/start-clawd.sh` checks for both `target/release/clawd` and `target/release/skill-runner`
 - on first startup, if `selected_vendor` / `selected_model` are empty in `configs/config.toml`, it prompts for an interactive selection
 - if the current vendor `api_key` is empty or still uses a `REPLACE_ME...` placeholder, it asks for the key before launch
 

@@ -2,7 +2,7 @@
 # zh: 启动 clawd 并使用已构建的 UI 资源；适合本地快速打开 Web 控制台。
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/version_info.sh"
@@ -19,7 +19,7 @@ case "$PROFILE" in
     ;;
   *)
     # zh: 目前只支持 release 模式，避免用户误以为会自动构建 debug 产物。
-    echo "Usage: ./start-clawd-ui.sh [release]"
+    echo "Usage: ./component_start/start-clawd-ui.sh [release]"
     exit 1
     ;;
 esac
@@ -36,4 +36,4 @@ fi
 export RUSTCLAW_UI_DIST="$SCRIPT_DIR/UI/dist"
 echo "Using UI assets at: $RUSTCLAW_UI_DIST"
 echo "Starting clawd ($PROFILE)..."
-exec "$SCRIPT_DIR/start-clawd.sh" "$PROFILE"
+exec "$SCRIPT_DIR/component_start/start-clawd.sh" "$PROFILE"

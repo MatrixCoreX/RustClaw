@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
+# zh: 单独启动 WeChat 渠道服务；通常由 start-all.sh 统一调度。
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/version_info.sh"
@@ -11,7 +12,6 @@ if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
 fi
 
-# Enable colored log tags on interactive terminals unless overridden.
 if [[ -t 1 && -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
   export RUSTCLAW_LOG_COLOR=1
 fi
@@ -21,12 +21,13 @@ case "$PROFILE" in
   release)
     ;;
   *)
-    echo "Usage: ./start-whatsappd.sh [release]" # zh: 用法：./start-whatsappd.sh [release]
+    # zh: 目前只支持 release 模式启动已编译二进制。
+    echo "Usage: ./component_start/start-wechatd.sh [release]"
     exit 1
     ;;
 esac
 
-BIN_NAME="whatsappd"
+BIN_NAME="wechatd"
 BIN_PATH="$SCRIPT_DIR/target/$PROFILE/$BIN_NAME"
 if [[ ! -x "$BIN_PATH" ]]; then
   echo "Binary missing: $BIN_PATH"
@@ -34,8 +35,10 @@ if [[ ! -x "$BIN_PATH" ]]; then
   exit 1
 fi
 
-if pgrep -f 'target/release/whatsappd|cargo run -p whatsappd' >/dev/null 2>&1; then
-  echo "Detected whatsappd already running on this host. Stop old instance first." # zh: 检测到本机已有 whatsappd 在运行，请先停止旧实例。
+export WECHAT_CONFIG_PATH="${WECHAT_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/wechat.toml}"
+
+if pgrep -f 'target/release/wechatd|cargo run -p wechatd' >/dev/null 2>&1; then
+  echo "Detected wechatd already running on this host. Stop old instance first."
   exit 1
 fi
 

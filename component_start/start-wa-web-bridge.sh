@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/version_info.sh"
@@ -40,7 +40,7 @@ if [[ "$enabled" != "1" ]]; then
   exit 0
 fi
 
-if pgrep -f 'services/wa-web-bridge/index.js|start-wa-web-bridge.sh' >/dev/null 2>&1; then
+if pgrep -f 'services/wa-web-bridge/index.js|component_start/start-wa-web-bridge.sh' >/dev/null 2>&1; then
   echo "wa-web-bridge is already running, skip." # zh: wa-web-bridge 已在运行，跳过。
   exit 0
 fi

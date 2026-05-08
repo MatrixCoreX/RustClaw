@@ -2,7 +2,7 @@
 # zh: 单独启动 Lark 渠道服务；通常由 start-all.sh 统一调度。
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/version_info.sh"
@@ -22,7 +22,7 @@ case "$PROFILE" in
     ;;
   *)
     # zh: 目前只支持 release 模式启动已编译二进制。
-    echo "Usage: ./start-larkd.sh [release]"
+    echo "Usage: ./component_start/start-larkd.sh [release]"
     exit 1
     ;;
 esac

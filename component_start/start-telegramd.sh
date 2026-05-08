@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/version_info.sh"
@@ -21,7 +21,7 @@ case "$PROFILE" in
   release)
     ;;
   *)
-    echo "Usage: ./start-telegramd.sh [release]" # zh: 用法：./start-telegramd.sh [release]
+    echo "Usage: ./component_start/start-telegramd.sh [release]" # zh: 用法：./component_start/start-telegramd.sh [release]
     exit 1
     ;;
 esac
