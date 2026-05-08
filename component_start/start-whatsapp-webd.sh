@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/scripts/version_info.sh"
@@ -11,6 +11,7 @@ if [[ -f "$HOME/.cargo/env" ]]; then
   . "$HOME/.cargo/env"
 fi
 
+# Enable colored log tags on interactive terminals unless overridden.
 if [[ -t 1 && -z "${RUSTCLAW_LOG_COLOR:-}" ]]; then
   export RUSTCLAW_LOG_COLOR=1
 fi
@@ -20,12 +21,12 @@ case "$PROFILE" in
   release)
     ;;
   *)
-    echo "Usage: ./start-feishud.sh [release]" # zh: 用法：./start-feishud.sh [release]
+    echo "Usage: ./component_start/start-whatsapp-webd.sh [release]" # zh: 用法：./component_start/start-whatsapp-webd.sh [release]
     exit 1
     ;;
 esac
 
-BIN_NAME="feishud"
+BIN_NAME="whatsapp_webd"
 BIN_PATH="$SCRIPT_DIR/target/$PROFILE/$BIN_NAME"
 if [[ ! -x "$BIN_PATH" ]]; then
   echo "Binary missing: $BIN_PATH"
@@ -33,11 +34,8 @@ if [[ ! -x "$BIN_PATH" ]]; then
   exit 1
 fi
 
-# Config path: same as feishud default, explicit for scripts
-export FEISHU_CONFIG_PATH="${FEISHU_CONFIG_PATH:-$SCRIPT_DIR/configs/channels/feishu.toml}"
-
-if pgrep -f 'target/release/feishud|cargo run -p feishud' >/dev/null 2>&1; then
-  echo "Detected feishud already running on this host. Stop old instance first." # zh: 检测到本机已有 feishud 在运行，请先停止旧实例。
+if pgrep -f 'target/release/whatsapp_webd|cargo run -p whatsapp_webd' >/dev/null 2>&1; then
+  echo "Detected whatsapp_webd already running on this host. Stop old instance first." # zh: 检测到本机已有 whatsapp_webd 在运行，请先停止旧实例。
   exit 1
 fi
 

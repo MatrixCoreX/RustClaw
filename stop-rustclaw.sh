@@ -97,8 +97,8 @@ fi
 if ! stop_by_pid_file "$PID_DIR/whatsappd.pid" "whatsappd" 'target/release/whatsappd|cargo run -p whatsappd'; then
   stop_by_name 'target/release/whatsappd|cargo run -p whatsappd'
 fi
-if ! stop_by_pid_file "$PID_DIR/whatsapp_webd.pid" "whatsapp_webd" 'target/release/whatsapp_webd|cargo run -p whatsapp_webd|services/wa-web-bridge/index.js|start-whatsapp-webd.sh|start-wa-web-bridge.sh'; then
-  stop_by_name 'target/release/whatsapp_webd|cargo run -p whatsapp_webd|services/wa-web-bridge/index.js|start-whatsapp-webd.sh|start-wa-web-bridge.sh'
+if ! stop_by_pid_file "$PID_DIR/whatsapp_webd.pid" "whatsapp_webd" 'target/release/whatsapp_webd|cargo run -p whatsapp_webd|services/wa-web-bridge/index.js|component_start/start-whatsapp-webd.sh|component_start/start-wa-web-bridge.sh'; then
+  stop_by_name 'target/release/whatsapp_webd|cargo run -p whatsapp_webd|services/wa-web-bridge/index.js|component_start/start-whatsapp-webd.sh|component_start/start-wa-web-bridge.sh'
 fi
 # Always cleanup bridge process even when whatsapp_webd was stopped via pid file.
 stop_by_name 'services/wa-web-bridge/index.js'

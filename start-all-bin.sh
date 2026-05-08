@@ -310,7 +310,7 @@ PY
 }
 
 start_future_adapters_placeholder() {
-  "$SCRIPT_DIR/start-future-adapters.sh" || true
+  "$SCRIPT_DIR/component_start/start-future-adapters.sh" || true
 }
 
 start_clawd
