@@ -30,7 +30,11 @@ flowchart TD
     A[用户输入] --> B[通道 / API 入口]
     B --> B1[任务队列<br/>POST /v1/tasks]
     B1 --> B2[worker_once / 处理任务]
-    B2 --> C[会话快照与本地表面信号]
+    B2 --> B3{任务类型}
+    B3 -->|run_skill| RS[直接技能任务<br/>绕过归一化 / 规划器]
+    B3 -->|ask| C0{调度直达文本?}
+    C0 -->|是| SD0[调度直达文本收尾<br/>早于归一化]
+    C0 -->|否| C[会话快照与本地表面信号]
     C --> D[绑定 / 恢复 / 活跃任务上下文]
     D --> E[意图归一化 LLM]
     E --> E2[路由后策略<br/>locator + 契约护栏]
@@ -49,12 +53,14 @@ flowchart TD
     L -->|synthesize_answer| SS[基于证据的合成 LLM]
     L -->|tool| N[工具执行]
     L -->|call_skill| N1[run_skill_with_runner]
+    RS --> N1
     N1 --> N2[skill-runner 子进程]
     N2 --> P
     N --> P[循环内观测]
     SS --> P
     P -->|继续规划| I
     P -->|观测后收尾| OF[观测输出收尾<br/>直接答案或合成]
+    P -->|直接 run_skill 收尾| RSK[run_skill 收尾<br/>任务结果 + journal]
     M --> VP[可见执行过程<br/>脱敏后的 messages]
     CR --> VP
     G --> VP
@@ -64,6 +70,8 @@ flowchart TD
     RDL --> VP
     VP --> Q[最终交付 / 输出契约护栏]
     Q --> R[收尾结果<br/>text + messages]
+    SD0 --> R
+    RSK --> R
     R --> S[通道发送<br/>单条或多条消息]
     R --> T[更新会话 / 任务日志<br/>持久化观测事实]
     R -. 后台 .-> U[长期记忆刷新]
@@ -73,14 +81,15 @@ flowchart TD
 - **会话快照与本地表面信号**：把每一轮话绑定到当前对话，并在路由前抽取有限的本地事实；**不是**单独的「轮次分类」LLM 阶段。
 - **意图归一化 LLM**：一次调用产出 `routed_mode`、`needs_clarify`、`output_contract` 以及可选的 `turn_type` / `target_task_policy` 等字段——**澄清 / 聊天 / 执行**在此处分流，**不是**规划器 JSON 里的 `clarify` 动作。
 - **任务队列**：HTTP 调用通过 `POST /v1/tasks` 入队；各通道守护进程也复用同一 worker 任务路径。
+- **任务类型**：`kind=ask` 进入归一化 / 路由后策略 / ask 分发流程；`kind=run_skill` 不跑 LLM 路由，直接通过共享 runner 路径执行指定技能。
 - **路由后策略**：归一化之后、分发之前处理 locator 解析、缺 locator 澄清和契约护栏；它可以细化门控，但不是语义快路径。
-- **调度 / 恢复支路**：调度直达请求可在进入规划器前完成收尾；恢复讨论走恢复提示词；恢复执行回到正常执行运行时。
+- **调度 / 恢复支路**：调度器触发的直达文本任务可在归一化前收尾；普通调度直达请求可在路由后、进入规划器前完成收尾；恢复讨论走恢复提示词；恢复执行回到正常执行运行时。
 - **Ask 门控**：只保留 `AskClarify / chat / execute` 的薄分流。代码分发走 `AskMode`（`ClarifyOrChat` 与 `Act`），`RoutedMode`（`AskClarify`、`Chat`、`Act`、`ChatAct`）仍是面向 normalizer 的兼容形状。
 - **聊天回复 LLM**：`mode=chat` 直接走聊天回复，不进入执行规划器循环。
 - **规划器 / 运行时循环**：在 act / chat_act 下多轮执行；规划步骤类型为 `think`、`call_tool`、`call_skill`、`synthesize_answer`、`respond`（当前**没有** `delegate` 类型；子任务前缀多用于日志与追踪，而非独立的子循环委派）。
 - **执行上下文**：整合运行态、当前任务上下文、附件、最近执行记录与持久记忆，避免记忆压过最新用户指令。
 - **技能注册表 + 生成技能文档**：规划器可见技能来自运行时 skill views 与生成接口文档，主要由 `configs/skills_registry.toml`、`crates/skills/*/INTERFACE.md`、`prompts/layers/generated/skills/*` 提供。新增技能应扩展这些契约，而不是新增特定语言的规划分支。
-- **call_skill**：经过 `run_skill_with_runner` 拉起 `skill-runner`，再启动具体技能二进制。
+- **call_skill / 直接 run_skill**：都经过 `run_skill_with_runner` 拉起 `skill-runner`，再启动具体技能二进制。
 - **循环内观测与观测输出收尾**：工具、技能与合成步骤输出作为循环内证据；如果计划只完成观测，也可以通过结构化直答或运行时合成完成交付。
 - **可见执行过程**：用户可见的过程块作为脱敏后的 `messages` 组装，并与最终交付正文分离；这样既能外露执行过程，也不会暴露原始 prompt、堆栈或密钥。
 - **最终交付 / 输出契约护栏**：在保存结果前规范文件 token、`messages`、精确标量/严格输出形状与交付一致性。
@@ -130,6 +139,7 @@ flowchart TD
 ```
 
 - **LLM 请求1 / 意图归一化**：只做结构化理解，不产出最终答案。
+- 本图只覆盖常规 `kind=ask` 的 LLM 路径。`kind=run_skill` 和调度器触发的直达文本 ask 不发生归一化 / 规划器 LLM 请求，会走各自的直接任务路径收尾。
 - **构建聊天 / 规划提示词**：把模式、会话态、工作上下文与输出约定拼进后续请求。
 - **技能注册表 + 生成技能文档**：规划提示词从已启用技能视图与生成接口文档构建，技能能力增长应由数据/契约驱动。
 - **LLM 请求2**：**Chat** 模式通常只需**一次**聊天补全后进入收尾。**Act / chat_act** 则按循环进行**一轮或多轮**规划 LLM；规划 JSON 只包含 `{think, call_tool, call_skill, synthesize_answer, respond}`（**没有** `clarify`、`delegate` 步骤类型）。
