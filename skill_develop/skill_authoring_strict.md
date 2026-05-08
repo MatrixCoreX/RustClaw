@@ -7,15 +7,15 @@
 
 ## 强约束
 - 默认实现为 `runner` 技能，不要实现成 `builtin`。
-- 技能目录必须使用 `crates/skills/<skill_name>`。
+- 仓内技能目录必须使用 `crates/skills/<skill_name>`；外部提交技能目录使用 `external_skills/<skill_name>`。
 - `<skill_name>` 只允许小写字母、数字、下划线。
 - 二进制名默认遵循约定：`foo_bar -> foo-bar-skill`。
 - 优先通过 `configs/skills_registry.toml`、`INTERFACE.md`、prompt 文件和配置文件完成接入。
 - 不要为了新增普通 runner 技能去添加主程序特判、fallback、硬编码映射、兼容分支。
 - 如果你发现自己要修改 `clawd`、`skill-runner`、`agent_engine`，先停止并重新检查：是否其实只需要改 registry、workspace、prompt、接口文档和技能 crate。
 
-## 必须完成的接入项
-0. 优先先运行 `python3 skill_develop/create_skill.py <skill_name>` 生成基础脚手架，再在其结果上继续补全。
+## 仓内 runner 必须完成的接入项
+0. 仅当目标是仓内 `crates/skills/<skill_name>` 时，优先先运行 `python3 skill_develop/create_skill.py <skill_name>` 生成基础脚手架，再在其结果上继续补全。
 1. 新建 `crates/skills/<skill_name>/Cargo.toml`。
 2. 新建 `crates/skills/<skill_name>/src/main.rs`。
 3. 新建 `crates/skills/<skill_name>/INTERFACE.md`。
@@ -26,6 +26,17 @@
 8. 在 `prompts/layers/overlays/agent_tool_spec.md` 中补充该技能的参数契约。
 9. 运行 `python3 scripts/sync_skill_docs.py`，生成或更新 `prompts/layers/generated/skills/<skill_name>.md`。
 10. 如需模型特化，只新增 `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`，不要再维护旧的 vendor skill 全量副本。
+
+## 外部提交技能必须完成的接入项
+0. 适用于用户上传、外部目录提交，或不希望把新能力放进 `crates/skills` 的场景。
+1. 使用 `external_skills/<skill_name>`，目录内必须有 `Cargo.toml`、`README.md`、`INTERFACE.md`、`src/main.rs`。
+2. 优先通过 `extension_manager` 的 `scaffold_external_skill` / `implement_external_skill` 补全外部技能。
+3. `INTERFACE.md` 必须写清 action、参数、错误和请求/响应示例，供 LLM 判断和路由使用。
+4. 注册前必须运行 `validate_external_skill`，通过 `sync_skill_docs.py`、`cargo check` 和协议级 smoke test。
+5. 验证/编译通过后，运行 `register_external_skill` 且 `confirm=true`。
+6. `register_external_skill` 成功后会构建 release binary，写入根 `Cargo.toml`、`configs/skills_registry.toml`，并自动把 `configs/config.toml` 的 `skill_switches.<skill_name>` 写成 `true`。
+7. reload skills 或重启 `clawd` 后，必须通过 `run_skill` 路径跑一次 happy path。
+8. 不要为外部新技能修改 `clawd` 主流程代码；registry、workspace、prompt、接口文档和技能 crate 应覆盖普通接入需求。
 
 ## `skills_registry.toml` 最低要求
 - `name`
@@ -81,14 +92,17 @@
 
 ## 执行顺序
 1. 先列出计划修改的文件。
-2. 优先运行 `python3 skill_develop/create_skill.py <skill_name>` 生成脚手架。
-3. 只新增技能 crate、registry、prompt、接口文档、必要配置。
-4. 最后再补验证步骤。
+2. 判断目标是仓内 runner 还是外部提交 skill。
+3. 仓内 runner 才运行 `python3 skill_develop/create_skill.py <skill_name>` 生成脚手架。
+4. 外部提交 skill 走 `extension_manager` 的 scaffold / validate / register 流程。
+5. 只新增技能 crate、registry、prompt、接口文档、必要配置。
+6. 最后再补验证步骤。
 
 ## 验证步骤
 - `python3 skill_develop/create_skill.py <skill_name> --help`
 - `python3 scripts/sync_skill_docs.py`
 - `cargo check -p clawd -p skill-runner -p <new-skill-package>`
+- 外部 skill 还需要 `validate_external_skill` 通过，并在 `register_external_skill(confirm=true)` 后确认 `configs/config.toml` 出现 `skill_switches.<skill_name>=true`
 
 ## 输出要求
 - 先输出“本次将修改的文件列表”。
