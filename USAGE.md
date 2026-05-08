@@ -134,19 +134,19 @@ rustclaw -stop
 按服务单独启动：
 
 ```bash
-./start-clawd.sh
-./start-telegramd.sh
-./start-wechatd.sh
-./start-feishud.sh
-./start-larkd.sh
-./start-whatsappd.sh
-./start-whatsapp-webd.sh
-./start-clawd-ui.sh
+./component_start/start-clawd.sh
+./component_start/start-telegramd.sh
+./component_start/start-wechatd.sh
+./component_start/start-feishud.sh
+./component_start/start-larkd.sh
+./component_start/start-whatsappd.sh
+./component_start/start-whatsapp-webd.sh
+./component_start/start-clawd-ui.sh
 ```
 
 ### 4.3 首次启动的注意事项
 
-`start-clawd.sh` 当前有一套首启保护逻辑：
+`component_start/start-clawd.sh` 当前有一套首启保护逻辑：
 
 - 如果 `configs/config.toml` 里的 `llm.selected_vendor` 或 `llm.selected_model` 为空，首次启动会要求交互选择
 - 如果当前选中的厂商 `api_key` 为空，也会要求交互输入

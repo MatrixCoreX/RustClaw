@@ -4095,13 +4095,13 @@ fn parse_service_action(raw: &str) -> Option<ServiceAction> {
 
 fn service_start_script(service: &str) -> Option<&'static str> {
     match service {
-        "channel-gateway" | "channel_gateway" => Some("start-channel-gateway.sh"),
-        "telegramd" => Some("start-telegramd.sh"),
-        "whatsappd" => Some("start-whatsappd.sh"),
-        "whatsapp_webd" => Some("start-whatsapp-webd.sh"),
-        "wechatd" => Some("start-wechatd.sh"),
-        "feishud" => Some("start-feishud.sh"),
-        "larkd" => Some("start-larkd.sh"),
+        "channel-gateway" | "channel_gateway" => Some("component_start/start-channel-gateway.sh"),
+        "telegramd" => Some("component_start/start-telegramd.sh"),
+        "whatsappd" => Some("component_start/start-whatsappd.sh"),
+        "whatsapp_webd" => Some("component_start/start-whatsapp-webd.sh"),
+        "wechatd" => Some("component_start/start-wechatd.sh"),
+        "feishud" => Some("component_start/start-feishud.sh"),
+        "larkd" => Some("component_start/start-larkd.sh"),
         _ => None,
     }
 }
@@ -6480,8 +6480,10 @@ async fn restart_clawd(
     }
     let workspace = state.skill_rt.workspace_root.to_string_lossy();
     let pid = std::process::id();
-    let script =
-        format!("sleep 2; kill {pid} 2>/dev/null; sleep 1; cd {workspace} && ./start-clawd.sh");
+    let script = format!(
+        "sleep 2; kill {pid} 2>/dev/null; sleep 1; cd {} && ./component_start/start-clawd.sh",
+        shell_escape_arg(workspace.as_ref())
+    );
     let mut cmd = StdCommand::new("nohup");
     cmd.arg("bash")
         .arg("-c")

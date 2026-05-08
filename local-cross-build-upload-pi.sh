@@ -673,16 +673,7 @@ copy_runtime_base_paths() {
 		"install-rustclaw-cmd.sh"
 		"start-all.sh"
 		"start-all-bin.sh"
-		"start-clawd.sh"
-		"start-clawd-ui.sh"
-		"start-feishud.sh"
-		"start-larkd.sh"
-		"start-wa-web-bridge.sh"
-		"start-telegramd.sh"
-		"start-wechatd.sh"
-		"start-whatsappd.sh"
-		"start-whatsapp-webd.sh"
-		"start-future-adapters.sh"
+		"component_start"
 		"stop-rustclaw.sh"
 	)
 	local path

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/scripts/shell_compat.sh"
 # shellcheck source=/dev/null
@@ -34,7 +34,7 @@ case "$PROFILE" in
   release)
     ;;
   *)
-    echo "Usage: ./start-clawd.sh [release]" # zh: 用法：./start-clawd.sh [release]
+    echo "Usage: ./component_start/start-clawd.sh [release]" # zh: 用法：./component_start/start-clawd.sh [release]
     exit 1
     ;;
 esac
