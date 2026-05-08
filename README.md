@@ -30,7 +30,11 @@ flowchart TD
     A[User input] --> B[Channel / API ingress]
     B --> B1[Task queue<br/>POST /v1/tasks]
     B1 --> B2[worker_once / process task]
-    B2 --> C[Session snapshot + local surface hints]
+    B2 --> B3{Task kind}
+    B3 -->|run_skill| RS[Direct skill task<br/>bypass normalizer / planner]
+    B3 -->|ask| C0{Scheduled direct text?}
+    C0 -->|yes| SD0[Schedule direct-text finalize<br/>before normalizer]
+    C0 -->|no| C[Session snapshot + local surface hints]
     C --> D[Binding / resume / active-task context]
     D --> E[Intent normalizer LLM]
     E --> E2[Post-route policy<br/>locator + contract guards]
@@ -49,12 +53,14 @@ flowchart TD
     L -->|synthesize_answer| SS[Grounded synthesis LLM]
     L -->|tool| N[Tool execution]
     L -->|call_skill| N1[run_skill_with_runner]
+    RS --> N1
     N1 --> N2[skill-runner subprocess]
     N2 --> P
     N --> P[Loop observations]
     SS --> P
     P -->|next round| I
     P -->|observation-only finish| OF[Observed-output finalizer<br/>direct answer or synthesis]
+    P -->|direct run_skill finalize| RSK[run_skill finalize<br/>task result + journal]
     M --> VP[Visible process summary<br/>sanitized messages]
     CR --> VP
     G --> VP
@@ -64,6 +70,8 @@ flowchart TD
     RDL --> VP
     VP --> Q[Final delivery / output-contract guard]
     Q --> R[Finalize result<br/>text + messages]
+    SD0 --> R
+    RSK --> R
     R --> S[Channel delivery<br/>single or multi-message]
     R --> T[Update session state / task journal<br/>persist observed facts]
     R -. background .-> U[Long-term memory refresh]
@@ -73,14 +81,15 @@ flowchart TD
 - `Session snapshot + local surface hints`: attaches each turn to the active conversation and extracts bounded local facts before routing; this is not a separate “taxonomy engine” LLM.
 - `Intent normalizer LLM`: one call that emits `routed_mode`, `needs_clarify`, `output_contract`, and optional `turn_type` / `target_task_policy` style fields—**clarify vs chat vs act is decided here**, not via a `clarify` action inside the planner JSON.
 - `Task queue`: HTTP callers submit `POST /v1/tasks`; channel daemons also hand work to the same queued worker path.
+- `Task kind`: `kind=ask` enters the normalizer / post-route / ask dispatch flow; `kind=run_skill` bypasses LLM routing and runs the named skill directly through the shared runner path.
 - `Post-route policy`: applies locator resolution, missing-locator clarification, and contract guards after normalization and before dispatch. It can refine the gate, but it is not a semantic fast path.
-- `Schedule / resume branches`: schedule-direct requests can finalize before the planner; resume-discussion uses a recovery prompt; resume-execution returns to the normal execution runtime.
+- `Schedule / resume branches`: scheduler-triggered direct-text tasks can finalize before the normalizer; normal schedule-direct requests can finalize after routing but before the planner; resume-discussion uses a recovery prompt; resume-execution returns to the normal execution runtime.
 - `Ask gate`: keeps only a thin `AskClarify / chat / execute` split. Code dispatches through `AskMode` (`ClarifyOrChat` vs `Act`), while `RoutedMode` (`AskClarify`, `Chat`, `Act`, `ChatAct`) remains the normalizer-facing compatibility shape.
 - `Chat response LLM`: handles `mode=chat` directly; chat requests do not enter the execution planner loop.
 - `Planner / runtime loop`: for act / chat_act, runs multiple rounds; planner steps are `think`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today—execution steps are traced as subtasks in logs, not a nested child loop).
 - `Execution context`: combines run state, current working context, attachments, recent execution context, and durable memory so memory cannot override the latest user instruction.
 - `Skill registry + generated skill docs`: planner-visible skills come from runtime skill views and generated interface docs, primarily `configs/skills_registry.toml`, `crates/skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`. New skills should extend those contracts instead of adding language-specific planner branches.
-- `call_skill`: goes through `run_skill_with_runner`, which launches `skill-runner` and then the concrete skill binary.
+- `call_skill` / direct `run_skill`: both go through `run_skill_with_runner`, which launches `skill-runner` and then the concrete skill binary.
 - `Loop observations` and `Observed-output finalizer`: tool, skill, and synthesis outputs remain grounded evidence inside the loop; observation-only plans can still finish through direct structured answers or runtime-owned synthesis.
 - `Visible process summary`: the user-visible process block is assembled as sanitized `messages`, separate from the final deliverable body, so execution stays visible without exposing raw prompts, stack traces, or secrets.
 - `Final delivery / output-contract guard`: normalizes file tokens, `messages`, exact scalar/strict output shapes, and delivery consistency before the result is saved.
@@ -130,6 +139,7 @@ flowchart TD
 ```
 
 - `LLM request 1 / Intent normalizer`: performs structured understanding only; it does not produce the final answer.
+- This diagram covers the normal `kind=ask` LLM path. `kind=run_skill` and scheduler-triggered direct-text asks have no normalizer / planner LLM request and are finalized by their direct task paths.
 - `Build chat / planner prompt`: combines mode, session state, working context, and output contract for follow-on requests.
 - `Skill registry + generated skill docs`: planner prompts are built from enabled skill views and generated interface documents, so skill capability growth should be data/contract driven.
 - `LLM request 2`: **Chat** mode uses one chat-completion call, then finalize. **Act / chat_act** uses one-or-more **planner** calls per loop round; the planner emits JSON steps in `{think, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types).
