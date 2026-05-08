@@ -42,39 +42,17 @@ fn clarify_fallback_source_or_default(
     source.unwrap_or(crate::fallback::ClarifyFallbackSource::IntentUnresolved)
 }
 
-fn visible_process_summary_for_prompt(
-    state: &crate::AppState,
-    task: &crate::ClaimedTask,
-    prompt: &str,
-) -> String {
-    let language_hint = crate::language_policy::task_response_language_hint(state, task, prompt);
-    if language_hint.to_ascii_lowercase().starts_with("en") {
-        format!(
-            "{}\n1. Used the current request and available conversation context to produce the answer.",
-            crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN
-        )
-    } else {
-        format!(
-            "{}\n1. 使用当前请求和可用会话上下文生成回答。",
-            crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX
-        )
-    }
-}
-
 fn ask_reply_with_visible_process(
-    state: &crate::AppState,
-    task: &crate::ClaimedTask,
-    prompt: &str,
+    _state: &crate::AppState,
+    _task: &crate::ClaimedTask,
+    _prompt: &str,
     text: String,
 ) -> crate::AskReply {
     let answer = text.trim().to_string();
     if answer.is_empty() || crate::finalize::is_execution_summary_message(&answer) {
         crate::AskReply::non_llm(text)
     } else {
-        crate::AskReply::non_llm(answer.clone()).with_messages(vec![
-            visible_process_summary_for_prompt(state, task, prompt),
-            answer,
-        ])
+        crate::AskReply::non_llm(answer)
     }
 }
 
