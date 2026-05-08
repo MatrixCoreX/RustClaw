@@ -251,7 +251,7 @@ fn execute(
     );
     let transcribe_prompt = render_transcribe_prompt(&transcribe_prompt_template, transcribe_hint);
     let (vendor_name, provider_cfg) = resolve_vendor_config(cfg, vendor)?;
-    check_api_key(vendor_name, &provider_cfg.api_key)?;
+    let auth_token = provider_auth_token(vendor_name, provider_cfg)?;
     let requested_model = args_obj
         .and_then(|v| v.get("model"))
         .and_then(|v| v.as_str());
@@ -282,6 +282,7 @@ fn execute(
         &model,
         &audio_input,
         &transcribe_prompt,
+        auth_token.as_deref(),
     )?;
     let audio_source = match &audio_input {
         AudioInput::LocalPath(p) => p.to_string_lossy().to_string(),
@@ -308,6 +309,7 @@ fn transcribe_by_vendor(
     model: &str,
     audio_input: &AudioInput,
     prompt: &str,
+    auth_token: Option<&str>,
 ) -> Result<(String, &'static str), String> {
     let mode = resolve_adapter_mode(audio_cfg, vendor);
     match vendor {
@@ -321,7 +323,15 @@ fn transcribe_by_vendor(
         VendorKind::OpenAI => {
             let audio_path = require_local_audio(audio_input)?;
             Ok((
-                openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)?,
+                openai_compatible_transcribe(
+                    client,
+                    cfg,
+                    vendor_name,
+                    model,
+                    audio_path,
+                    prompt,
+                    auth_token,
+                )?,
                 "compat",
             ))
         }
@@ -340,7 +350,15 @@ fn transcribe_by_vendor(
             }
             let audio_path = require_local_audio(audio_input)?;
             Ok((
-                openai_compatible_transcribe(client, cfg, vendor_name, model, audio_path, prompt)?,
+                openai_compatible_transcribe(
+                    client,
+                    cfg,
+                    vendor_name,
+                    model,
+                    audio_path,
+                    prompt,
+                    auth_token,
+                )?,
                 "compat",
             ))
         }
@@ -351,7 +369,7 @@ fn transcribe_by_vendor(
                         client,
                         audio_cfg,
                         audio_cfg.qwen_native_base_url.as_deref(),
-                        &cfg.api_key,
+                        auth_token.unwrap_or(cfg.api_key.as_str()),
                         model,
                         audio_input,
                         prompt,
@@ -374,6 +392,7 @@ fn transcribe_by_vendor(
                         model,
                         audio_path,
                         prompt,
+                        auth_token,
                     )?,
                     "compat",
                 ))
@@ -801,6 +820,7 @@ fn openai_compatible_transcribe(
     model: &str,
     audio_path: &Path,
     prompt: &str,
+    auth_token: Option<&str>,
 ) -> Result<String, String> {
     if !audio_path.exists() || !audio_path.is_file() {
         return Err("audio file does not exist".to_string());
@@ -814,10 +834,11 @@ fn openai_compatible_transcribe(
         .text("prompt", prompt.to_string())
         .file("file", audio_path)
         .map_err(|err| format!("attach audio file failed: {err}"))?;
-    let resp = client
-        .post(url)
-        .bearer_auth(&cfg.api_key)
-        .multipart(form)
+    let mut request = client.post(url).multipart(form);
+    if let Some(token) = auth_token.map(str::trim).filter(|v| !v.is_empty()) {
+        request = request.bearer_auth(token);
+    }
+    let resp = request
         .send()
         .map_err(|err| format!("{vendor_name} transcription request failed: {err}"))?;
     let status = resp.status().as_u16();
@@ -923,7 +944,9 @@ fn parse_vendor(name: &str) -> Option<VendorKind> {
         "deepseek" => Some(VendorKind::DeepSeek),
         "qwen" => Some(VendorKind::Qwen),
         "minimax" => Some(VendorKind::MiniMax),
-        "custom" => Some(VendorKind::Custom),
+        "custom" | "local" | "local_whisper" | "whisper" | "whisper_cpp" | "whisper.cpp" => {
+            Some(VendorKind::Custom)
+        }
         _ => None,
     }
 }
@@ -1198,12 +1221,22 @@ fn guess_audio_mime(path: &Path) -> &'static str {
     }
 }
 
-fn check_api_key(vendor: &str, key: &str) -> Result<(), String> {
-    let t = key.trim();
+fn provider_auth_token(vendor: &str, cfg: &VendorConfig) -> Result<Option<String>, String> {
+    let t = cfg.api_key.trim();
     if t.is_empty() || t.starts_with("REPLACE_ME_") {
+        if vendor == "custom" && is_loopback_base_url(&cfg.base_url) {
+            return Ok(None);
+        }
         return Err(format!("{vendor} api key is not configured"));
     }
-    Ok(())
+    Ok(Some(t.to_string()))
+}
+
+fn is_loopback_base_url(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url.trim()) else {
+        return false;
+    };
+    matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1"))
 }
 
 fn trim_trailing_slash(v: &str) -> String {
@@ -1237,6 +1270,38 @@ mod tests {
             Some(VendorKind::Anthropic)
         ));
         assert!(matches!(parse_vendor("xai"), Some(VendorKind::Grok)));
+        assert!(matches!(parse_vendor("local"), Some(VendorKind::Custom)));
+        assert!(matches!(
+            parse_vendor("whisper.cpp"),
+            Some(VendorKind::Custom)
+        ));
+    }
+
+    fn vendor_cfg(base_url: &str, api_key: &str) -> VendorConfig {
+        VendorConfig {
+            base_url: base_url.to_string(),
+            api_key: api_key.to_string(),
+            model: "local-whisper".to_string(),
+            timeout_seconds: None,
+        }
+    }
+
+    #[test]
+    fn local_custom_provider_allows_missing_api_key() {
+        let cfg = vendor_cfg("http://127.0.0.1:8178/v1", "");
+        assert_eq!(provider_auth_token("custom", &cfg).unwrap(), None);
+
+        let placeholder = vendor_cfg("http://localhost:8178/v1", "REPLACE_ME_CUSTOM_API_KEY");
+        assert_eq!(provider_auth_token("custom", &placeholder).unwrap(), None);
+    }
+
+    #[test]
+    fn remote_or_non_custom_provider_requires_api_key() {
+        let remote = vendor_cfg("https://example.com/v1", "");
+        assert!(provider_auth_token("custom", &remote).is_err());
+
+        let qwen = vendor_cfg("http://127.0.0.1:8178/v1", "");
+        assert!(provider_auth_token("qwen", &qwen).is_err());
     }
 
     #[test]

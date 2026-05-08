@@ -131,13 +131,13 @@ timeout_seconds = 60
 # request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
 [audio_transcribe]
 # Routing & mode / 路由与模式
-default_vendor = "qwen"
+default_vendor = "custom"
 adapter_mode = "compat"
 allow_compat_adapters = true
 qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
 
 # Default model / 默认模型
-default_model = "qwen3-asr-flash"
+default_model = "local-whisper"
 
 # Vendor models / 按厂商模型
 openai_models = ["whisper-1", "gpt-4o-mini-transcribe"]
@@ -147,8 +147,8 @@ grok_models = []
 qwen_models = ["qwen3-asr-flash", "fun-asr", "fun-asr-mtl", "qwen3-asr-flash-filetrans"]
 minimax_models = ["speech-01"]
 native_models = ["fun-asr", "fun-asr-mtl", "qwen3-asr-flash-filetrans"]
-custom_models = []
-models = ["qwen3-asr-flash", "fun-asr", "fun-asr-mtl", "qwen3-asr-flash-filetrans"]
+custom_models = ["local-whisper", "whisper-1"]
+models = ["local-whisper", "whisper-1", "qwen3-asr-flash", "fun-asr", "fun-asr-mtl", "qwen3-asr-flash-filetrans"]
 
 # Runtime limits / 运行限制
 max_concurrency = 1
@@ -187,6 +187,22 @@ oss_url_ttl_seconds = 3600
 # api_key = ""
 # model = "qwen3-asr-flash"
 # timeout_seconds = 90
+#
+# Local whisper.cpp example / 本地 whisper.cpp 示例：
+# 1. Start whisper-server with an OpenAI-compatible route / 先启动兼容 OpenAI 路由的 whisper-server：
+#    ./build/bin/whisper-server -m models/ggml-small.bin --host 127.0.0.1 --port 8178 --request-path /v1 --inference-path /audio/transcriptions --convert --language auto
+# 2. To use local STT, change the active values above / 要选用本地 STT，把上面的实际值改成：
+#    default_vendor = "custom"
+#    adapter_mode = "compat"
+#    allow_compat_adapters = true
+#    default_model = "local-whisper"
+#    custom_models = ["local-whisper", "whisper-1"]
+# 3. Then enable this provider block / 再启用这个 provider 配置块：
+[audio_transcribe.providers.custom]
+base_url = "http://127.0.0.1:8178/v1"
+api_key = "" # allowed only for loopback local custom providers / 只允许本机 custom provider 留空
+model = "local-whisper"
+timeout_seconds = 120
 #
 # Historical MiniMax example (commented keep) / 历史 MiniMax 示例（注释保留）
 # [audio_transcribe.providers.minimax]
