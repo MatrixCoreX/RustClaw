@@ -98,6 +98,9 @@ Skill binaries must use “single-line JSON stdin -> single-line JSON stdout”.
 新增技能 `foo_bar` 时，必须同时改这些点：  
 When adding a new skill `foo_bar`, all of the following are required:
 
+外部提交技能（`external_skills/foo_bar`）走 `extension_manager` 时，验证/编译通过后的注册流程必须自动写入工作区、技能 registry，并把 `configs/config.toml` 的 `skill_switches.foo_bar` 记录为 `true`；普通新增 skill 不应再为了接入去改 `clawd` 主流程代码。
+For externally submitted skills (`external_skills/foo_bar`) handled by `extension_manager`, registration after validation/compilation must automatically write the workspace entry, skill registry entry, and `configs/config.toml` `skill_switches.foo_bar = true`; normal new skills should not require changes to the `clawd` main flow.
+
 1. 新建 crate：`crates/skills/foo_bar`（二进制名建议 `foo-bar-skill`）。  
    Create crate: `crates/skills/foo_bar` (binary name recommended: `foo-bar-skill`).
 2. 加入工作区：`Cargo.toml` 的 `[workspace].members`。  
@@ -116,6 +119,8 @@ When adding a new skill `foo_bar`, all of the following are required:
      Default `skills_list` in `crates/claw-core/src/config.rs` (as needed)
    - `configs/config.toml` / `configs/config_copy/*.toml`（按现有规范）  
      `configs/config.toml` / `configs/config_copy/*.toml` (follow current conventions)
+   - 外部技能通过 `extension_manager register_external_skill` 自动写入 `configs/config.toml` 的 `skill_switches.<skill>=true`；不要再手工维护一套重复开关流程，除非自动化失败需要排障。
+     External skills should use `extension_manager register_external_skill` to automatically write `skill_switches.<skill>=true` into `configs/config.toml`; do not maintain a duplicate manual switch flow unless debugging an automation failure.
 7. 如果技能需独立配置，补 `configs/*.toml` 与 README 说明，并在 `INTERFACE.md` 里新增 `## Config Entry Points`，写清楚真实配置入口（配置文件 / 环境变量 / 本地数据库或 API / 登录态 / 依赖）。  
    If the skill needs dedicated config, add `configs/*.toml` and README docs, and add `## Config Entry Points` to `INTERFACE.md` so the real setup path is explicit (config file / environment variable / local DB or API / login state / dependency).
 8. 新技能必须附带接口说明文档，便于生成给 LLM 判断/路由用的技能 md。  
@@ -161,6 +166,8 @@ When adding a new skill `foo_bar`, all of the following are required:
 - `skill_switches` 优先级高于 `skills_list` / `skill_switches` has higher priority than `skills_list`:
   - `true`：强制开启 / force enable
   - `false`：强制关闭 / force disable
+- 外部技能在验证/编译通过并执行 `register_external_skill` 后，默认自动记录为 `true`；需要停用时再显式改为 `false`。
+  External skills are automatically recorded as `true` after validation/compilation and `register_external_skill`; set them to `false` only when explicitly disabling them.
 - 关闭技能后 / When a skill is disabled:
   - 二层提示词会显示 disabled 简化提示  
     The second-layer prompt uses a disabled simplified hint
@@ -182,6 +189,8 @@ Before merge, at least the following must pass:
    - `POST /v1/tasks`，`kind=run_skill`，`payload.skill_name=<skill>`
 4. 失败路径有清晰 `error_text`（不允许静默失败）。  
    Failure path must return clear `error_text` (no silent failure).
+5. 外部技能注册动作必须自动完成配置写入：`configs/config.toml` 中出现 `skill_switches.<skill>=true`，且 registry / workspace 映射完整。
+   External skill registration must automatically complete config writing: `configs/config.toml` contains `skill_switches.<skill>=true`, and registry/workspace mappings are complete.
 
 只有当“映射完整 + 编译通过 + 路径可跑通”同时成立，才允许把该技能视为可用。  
 A skill is considered available only when “mapping complete + compile pass + runnable path” are all satisfied.
