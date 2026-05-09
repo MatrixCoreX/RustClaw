@@ -3228,12 +3228,36 @@ fn answer_is_direct_observation_passthrough(answer: &str, loop_state: &LoopState
         })
 }
 
+fn observed_error_step_body(
+    step: &crate::executor::StepExecutionResult,
+    body: &str,
+) -> Option<String> {
+    if !crate::skills::is_observable_run_cmd_error(&step.skill, body)
+        && !crate::skills::is_recoverable_skill_error(&step.skill, body)
+    {
+        return None;
+    }
+    let normalized = crate::skills::normalize_skill_error_for_user(&step.skill, body);
+    let sanitized = crate::visible_text::sanitize_user_visible_text(&normalized);
+    (!sanitized.trim().is_empty()).then(|| {
+        format!(
+            "execution_status: error\nerror_summary: {}",
+            sanitized.trim()
+        )
+    })
+}
+
 fn observed_step_body(step: &crate::executor::StepExecutionResult) -> Option<String> {
-    let body = step
-        .output
-        .as_deref()
-        .map(str::trim)
-        .filter(|text| !text.is_empty())?;
+    let body = if step.is_ok() {
+        step.output.as_deref()
+    } else {
+        step.error.as_deref().or(step.output.as_deref())
+    }
+    .map(str::trim)
+    .filter(|text| !text.is_empty())?;
+    if !step.is_ok() {
+        return observed_error_step_body(step, body);
+    }
     if let Some(normalized) = structured_observed_body(&step.skill, body) {
         let sanitized = crate::visible_text::sanitize_user_visible_text(&normalized);
         return (!sanitized.trim().is_empty()).then_some(sanitized);
@@ -3271,18 +3295,14 @@ fn observed_output_entries(loop_state: &LoopState) -> Vec<String> {
         .executed_step_results
         .iter()
         .enumerate()
-        .rfind(|(_, step)| {
-            step.is_ok() && step.skill == "list_dir" && observed_step_entry(step).is_some()
-        })
+        .rfind(|(_, step)| step.skill == "list_dir" && observed_step_entry(step).is_some())
         .map(|(idx, _)| idx);
     let mut selected_indices = latest_listing_idx.into_iter().collect::<Vec<_>>();
     let mut recent_non_listing = loop_state
         .executed_step_results
         .iter()
         .enumerate()
-        .filter(|(_, step)| {
-            step.is_ok() && step.skill != "list_dir" && observed_step_entry(step).is_some()
-        })
+        .filter(|(_, step)| step.skill != "list_dir" && observed_step_entry(step).is_some())
         .map(|(idx, _)| idx)
         .collect::<Vec<_>>();
     if recent_non_listing.len() > 4 {
@@ -3667,6 +3687,56 @@ mod tests {
             started_at: 0,
             finished_at: 0,
         }
+    }
+
+    fn error_step(step_id: &str, skill: &str, error: &str) -> StepExecutionResult {
+        StepExecutionResult {
+            step_id: step_id.to_string(),
+            skill: skill.to_string(),
+            status: StepExecutionStatus::Error,
+            output: None,
+            error: Some(error.to_string()),
+            started_at: 0,
+            finished_at: 0,
+        }
+    }
+
+    #[test]
+    fn observed_outputs_include_structured_run_cmd_error() {
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "run_cmd",
+                "error_kind": "nonzero_exit",
+                "error_text": "Command failed with exit code 128",
+                "platform": "linux",
+                "extra": {
+                    "command": "git -C /tmp status",
+                    "exit_code": 128,
+                    "exit_category": "terminated_by_signal_or_shell_status",
+                    "stderr": "fatal: not a git repository",
+                    "output_truncated": false
+                }
+            })
+        );
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .executed_step_results
+            .push(error_step("step_1", "run_cmd", &err));
+
+        let entries = observed_output_entries(&loop_state);
+        let joined = entries.join("\n");
+
+        assert!(has_observed_answer_candidates(&loop_state));
+        assert!(joined.contains("skill(run_cmd)"), "entries: {joined}");
+        assert!(
+            joined.contains("execution_status: error"),
+            "entries: {joined}"
+        );
+        assert!(
+            joined.contains("fatal: not a git repository"),
+            "entries: {joined}"
+        );
     }
 
     fn chat_wrapped_unclassified_route(response_shape: OutputResponseShape) -> RouteResult {
@@ -7755,7 +7825,7 @@ version.workspace = true
         loop_state.executed_step_results.push(ok_step(
             "step_2",
             "system_basic",
-            r#"{"action":"extract_field","field_path":"workspace.package.version","value_text":"0.1.6"}"#,
+            r#"{"action":"extract_field","field_path":"workspace.package.version","value_text":"0.1.7"}"#,
         ));
         loop_state.executed_step_results.push(ok_step(
             "step_3",

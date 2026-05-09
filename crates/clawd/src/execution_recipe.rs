@@ -325,6 +325,171 @@ pub(crate) enum ValidationObservation {
     Inconclusive,
 }
 
+pub(crate) const CLAWD_VALIDATION_ARG: &str = "_clawd_validation";
+
+fn structured_validation_value(args: &Value) -> Option<&Value> {
+    args.get(CLAWD_VALIDATION_ARG)
+}
+
+fn structured_validation_declared(args: &Value) -> bool {
+    match structured_validation_value(args) {
+        Some(Value::Bool(true)) => true,
+        Some(Value::Object(map)) => {
+            map.get("validation")
+                .or_else(|| map.get("is_validation"))
+                .or_else(|| map.get("intent"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || map
+                    .get("profile")
+                    .or_else(|| map.get("validation_profile"))
+                    .is_some()
+                || map.get("validator_type").is_some()
+                || map.get("validated_target").is_some()
+        }
+        _ => false,
+    }
+}
+
+fn structured_validation_profile(args: &Value) -> ExecutionRecipeProfile {
+    let Some(Value::Object(map)) = structured_validation_value(args) else {
+        return ExecutionRecipeProfile::None;
+    };
+    map.get("profile")
+        .or_else(|| map.get("validation_profile"))
+        .and_then(Value::as_str)
+        .map(parse_execution_recipe_profile_text)
+        .unwrap_or(ExecutionRecipeProfile::None)
+}
+
+fn structured_validation_satisfies_profile(
+    recipe: ExecutionRecipeRuntimeState,
+    args: &Value,
+) -> bool {
+    if !structured_validation_declared(args) {
+        return false;
+    }
+    match recipe.profile {
+        ExecutionRecipeProfile::None | ExecutionRecipeProfile::OpsService => true,
+        expected => structured_validation_profile(args) == expected,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SuccessMarkerMatchMode {
+    Contains,
+    Equals,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StructuredSuccessMarker {
+    marker: String,
+    match_mode: SuccessMarkerMatchMode,
+    case_sensitive: bool,
+}
+
+fn parse_success_marker_match_mode(value: Option<&str>) -> SuccessMarkerMatchMode {
+    match value
+        .unwrap_or("contains")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "equals" | "exact" | "exact_match" => SuccessMarkerMatchMode::Equals,
+        _ => SuccessMarkerMatchMode::Contains,
+    }
+}
+
+fn structured_validation_success_marker(args: &Value) -> Option<StructuredSuccessMarker> {
+    let Value::Object(map) = structured_validation_value(args)? else {
+        return None;
+    };
+    let raw_marker = map
+        .get("success_marker")
+        .or_else(|| map.get("required_success_marker"))
+        .or_else(|| map.get("expected_output_marker"))
+        .or_else(|| map.get("expect_contains"))?;
+    match raw_marker {
+        Value::String(marker) => {
+            let marker = marker.trim();
+            (!marker.is_empty()).then(|| StructuredSuccessMarker {
+                marker: marker.to_string(),
+                match_mode: SuccessMarkerMatchMode::Contains,
+                case_sensitive: true,
+            })
+        }
+        Value::Object(marker_obj) => {
+            let marker = marker_obj
+                .get("marker")
+                .or_else(|| marker_obj.get("text"))
+                .or_else(|| marker_obj.get("value"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|marker| !marker.is_empty())?;
+            let match_mode = parse_success_marker_match_mode(
+                marker_obj
+                    .get("match_mode")
+                    .or_else(|| marker_obj.get("mode"))
+                    .and_then(Value::as_str),
+            );
+            let case_sensitive = marker_obj
+                .get("case_sensitive")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            Some(StructuredSuccessMarker {
+                marker: marker.to_string(),
+                match_mode,
+                case_sensitive,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn structured_success_marker_matches(output: &str, spec: &StructuredSuccessMarker) -> bool {
+    let (candidate, marker) = if spec.case_sensitive {
+        (output.to_string(), spec.marker.clone())
+    } else {
+        (output.to_lowercase(), spec.marker.to_lowercase())
+    };
+    match spec.match_mode {
+        SuccessMarkerMatchMode::Contains => candidate.contains(&marker),
+        SuccessMarkerMatchMode::Equals => candidate.trim() == marker.trim(),
+    }
+}
+
+fn structured_success_marker_observation(args: &Value, output: &str) -> ValidationObservation {
+    let Some(spec) = structured_validation_success_marker(args) else {
+        return ValidationObservation::Inconclusive;
+    };
+    if structured_success_marker_matches(output, &spec) {
+        ValidationObservation::Passed
+    } else {
+        ValidationObservation::Failed(format!(
+            "validation output missing required marker={}",
+            spec.marker
+        ))
+    }
+}
+
+fn merge_structured_validation_effect(
+    normalized_skill: &str,
+    args: &Value,
+    effect: ActionEffect,
+) -> ActionEffect {
+    if !structured_validation_declared(args) {
+        return effect;
+    }
+    if effect.mutates && !effect.validates && normalized_skill != "run_cmd" {
+        return effect;
+    }
+    ActionEffect {
+        observes: true,
+        mutates: effect.mutates,
+        validates: true,
+    }
+}
+
 fn contains_any(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| text.contains(needle))
 }
@@ -352,77 +517,15 @@ fn normalized_first_command_word(command: &str) -> Option<String> {
         })
 }
 
-fn run_cmd_looks_config_change_validation(command_lower: &str) -> bool {
-    command_lower.contains(" check")
-        || command_lower.starts_with("check ")
-        || command_lower.contains(" validate")
-        || command_lower.contains(" verify")
-        || command_lower.contains(" reload")
-        || command_lower.contains(" systemctl status")
-        || command_lower.contains(" systemctl is-active")
-        || command_lower.contains(" nginx -t")
-        || command_lower.contains(" sing-box check")
-        || command_lower.contains(" curl ")
-        || command_lower.contains(" wget ")
-}
-
-fn run_cmd_looks_code_change_validation(command_lower: &str) -> bool {
-    contains_any(
-        command_lower,
-        &[
-            "cargo check",
-            "cargo test",
-            "cargo clippy",
-            "cargo build",
-            "cargo run",
-            "pytest",
-            "python -m pytest",
-            "python3 -m pytest",
-            "python -m unittest",
-            "python3 -m unittest",
-            "uv run pytest",
-            "uv run python",
-            "npm test",
-            "npm run test",
-            "npm run build",
-            "npm run lint",
-            "pnpm test",
-            "pnpm run test",
-            "pnpm run build",
-            "pnpm run lint",
-            "yarn test",
-            "yarn build",
-            "yarn lint",
-            "bun test",
-            "bun run test",
-            "bun run build",
-            "bun run lint",
-            "go test",
-            "go build",
-            "go run",
-            "make test",
-            "make check",
-            "make build",
-            "just test",
-            "just check",
-            "mvn test",
-            "gradle test",
-        ],
-    )
-}
-
-fn run_cmd_looks_skill_authoring_validation(command_lower: &str) -> bool {
-    run_cmd_looks_code_change_validation(command_lower)
-        || command_lower.contains("skill-runner")
-        || command_lower.contains("sync_skill_docs.py")
-}
-
 pub(crate) fn validation_satisfies_recipe_profile(
     recipe: ExecutionRecipeRuntimeState,
     state: &AppState,
     skill_name: &str,
     args: &Value,
 ) -> bool {
+    if structured_validation_satisfies_profile(recipe, args) {
+        return true;
+    }
     let normalized_skill = state.resolve_canonical_skill_name(skill_name);
     match recipe.profile {
         ExecutionRecipeProfile::None | ExecutionRecipeProfile::OpsService => {
@@ -440,32 +543,16 @@ pub(crate) fn validation_satisfies_recipe_profile(
                     && (action.is_empty() || contains_any(&action, &["validate", "check", "read"]))
             }
             "service_control" | "health_check" | "http_basic" => true,
-            "run_cmd" => args
-                .get("command")
-                .and_then(|value| value.as_str())
-                .map(|command| {
-                    run_cmd_looks_config_change_validation(&command.to_ascii_lowercase())
-                })
-                .unwrap_or(false),
+            "run_cmd" => false,
             _ => false,
         },
         ExecutionRecipeProfile::CodeChange => match normalized_skill.as_str() {
             "service_control" | "health_check" | "http_basic" => true,
-            "run_cmd" => args
-                .get("command")
-                .and_then(|value| value.as_str())
-                .map(|command| run_cmd_looks_code_change_validation(&command.to_ascii_lowercase()))
-                .unwrap_or(false),
+            "run_cmd" => false,
             _ => false,
         },
         ExecutionRecipeProfile::SkillAuthoring => match normalized_skill.as_str() {
-            "run_cmd" => args
-                .get("command")
-                .and_then(|value| value.as_str())
-                .map(|command| {
-                    run_cmd_looks_skill_authoring_validation(&command.to_ascii_lowercase())
-                })
-                .unwrap_or(false),
+            "run_cmd" => false,
             _ => false,
         },
     }
@@ -884,7 +971,8 @@ pub(crate) fn classify_skill_action_effect(
     skill_name: &str,
     args: &Value,
 ) -> ActionEffect {
-    match state.resolve_canonical_skill_name(skill_name).as_str() {
+    let normalized_skill = state.resolve_canonical_skill_name(skill_name);
+    let effect = match normalized_skill.as_str() {
         "read_file" | "list_dir" | "fs_search" | "git_basic" | "db_basic" | "process_basic"
         | "log_analyze" => ActionEffect::observe(),
         "write_file" | "remove_file" | "make_dir" | "package_manager" | "install_module" => {
@@ -951,7 +1039,8 @@ pub(crate) fn classify_skill_action_effect(
             run_cmd_action_effect(command)
         }
         _ => ActionEffect::default(),
-    }
+    };
+    merge_structured_validation_effect(&normalized_skill, args, effect)
 }
 
 fn service_state_is_healthy(state: &str) -> bool {
@@ -1315,13 +1404,100 @@ fn assess_http_basic_validation(args: &Value, output: &str) -> ValidationObserva
     }
 }
 
-pub(crate) fn assess_validation_output(
+fn structured_validation_result(value: &Value) -> ValidationObservation {
+    let result = value
+        .get("result")
+        .or_else(|| value.get("status"))
+        .and_then(Value::as_str)
+        .map(|text| text.trim().to_ascii_lowercase());
+    match result.as_deref() {
+        Some("passed" | "pass" | "ok" | "success" | "succeeded") => {
+            return ValidationObservation::Passed;
+        }
+        Some("failed" | "fail" | "error" | "rejected") => {
+            let detail = value
+                .get("detail")
+                .or_else(|| value.get("reason"))
+                .or_else(|| value.get("error"))
+                .and_then(Value::as_str)
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or("structured validation failed");
+            return ValidationObservation::Failed(detail.to_string());
+        }
+        _ => {}
+    }
+    if let Some(passed) = value
+        .get("passed")
+        .or_else(|| value.get("valid"))
+        .or_else(|| value.get("satisfies_contract"))
+        .and_then(Value::as_bool)
+    {
+        if passed {
+            return ValidationObservation::Passed;
+        }
+        let detail = value
+            .get("detail")
+            .or_else(|| value.get("reason"))
+            .or_else(|| value.get("error"))
+            .and_then(Value::as_str)
+            .filter(|text| !text.trim().is_empty())
+            .unwrap_or("structured validation failed");
+        return ValidationObservation::Failed(detail.to_string());
+    }
+    ValidationObservation::Inconclusive
+}
+
+fn structured_validation_from_output_text(output: &str) -> ValidationObservation {
+    let Ok(value) = serde_json::from_str::<Value>(output) else {
+        return ValidationObservation::Inconclusive;
+    };
+    if let Some(validation) = value.get("validation") {
+        return structured_validation_result(validation);
+    }
+    value
+        .get("extra")
+        .and_then(|extra| extra.get("validation"))
+        .map(structured_validation_result)
+        .unwrap_or(ValidationObservation::Inconclusive)
+}
+
+fn declared_validation_success_fallback(
+    state: &AppState,
+    skill_name: &str,
+    output: &str,
+) -> ValidationObservation {
+    let normalized_skill = state.resolve_canonical_skill_name(skill_name);
+    if normalized_skill == "run_cmd" {
+        let output_lower = output.trim().to_ascii_lowercase();
+        if has_strong_run_cmd_failure_marker(&output_lower) {
+            return ValidationObservation::Failed(output.trim().to_string());
+        }
+    }
+    ValidationObservation::Passed
+}
+
+pub(crate) fn assess_validation_output_with_structured(
     state: &AppState,
     skill_name: &str,
     args: &Value,
     output: &str,
+    structured_validation: Option<&Value>,
 ) -> ValidationObservation {
-    match state.resolve_canonical_skill_name(skill_name).as_str() {
+    if let Some(validation) = structured_validation {
+        let observation = structured_validation_result(validation);
+        if !matches!(observation, ValidationObservation::Inconclusive) {
+            return observation;
+        }
+    }
+    let observation_from_text = structured_validation_from_output_text(output);
+    if !matches!(observation_from_text, ValidationObservation::Inconclusive) {
+        return observation_from_text;
+    }
+    let marker_observation = structured_success_marker_observation(args, output);
+    if !matches!(marker_observation, ValidationObservation::Inconclusive) {
+        return marker_observation;
+    }
+    let observation = match state.resolve_canonical_skill_name(skill_name).as_str() {
         "service_control" => assess_service_control_validation(output),
         "health_check" => assess_health_check_validation(output),
         "http_basic" => assess_http_basic_validation(args, output),
@@ -1332,7 +1508,23 @@ pub(crate) fn assess_validation_output(
             .map(|command| assess_run_cmd_validation(command, output))
             .unwrap_or(ValidationObservation::Inconclusive),
         _ => ValidationObservation::Inconclusive,
+    };
+    if matches!(observation, ValidationObservation::Inconclusive)
+        && structured_validation_declared(args)
+    {
+        return declared_validation_success_fallback(state, skill_name, output);
     }
+    observation
+}
+
+#[cfg(test)]
+pub(crate) fn assess_validation_output(
+    state: &AppState,
+    skill_name: &str,
+    args: &Value,
+    output: &str,
+) -> ValidationObservation {
+    assess_validation_output_with_structured(state, skill_name, args, output, None)
 }
 
 pub(crate) fn stop_signal_for_validation_failure(
@@ -1407,9 +1599,10 @@ mod tests {
     use super::{
         apply_action_effect_failure, apply_action_effect_success, assess_validation_output,
         classify_skill_action_effect, effective_action_effect_for_recipe,
-        stop_signal_for_validation_failure, ActionEffect, ExecutionRecipeKind,
-        ExecutionRecipePhase, ExecutionRecipeProfile, ExecutionRecipeRuntimeState,
-        ExecutionRecipeSpec, ExecutionRecipeTargetScope, ValidationObservation,
+        stop_signal_for_validation_failure, validation_satisfies_recipe_profile, ActionEffect,
+        ExecutionRecipeKind, ExecutionRecipePhase, ExecutionRecipeProfile,
+        ExecutionRecipeRuntimeState, ExecutionRecipeSpec, ExecutionRecipeTargetScope,
+        ValidationObservation,
     };
     use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID};
     use claw_core::config::{AgentConfig, ToolsConfig};
@@ -1505,6 +1698,117 @@ mod tests {
         );
         assert!(effect.mutates);
         assert!(effect.validates);
+    }
+
+    #[test]
+    fn structured_validation_marks_custom_run_cmd_as_code_validation() {
+        let state = test_state();
+        let args = json!({
+            "command": "bash /tmp/rustclaw-validation-case/check.sh",
+            "_clawd_validation": {
+                "profile": "code_change",
+                "validator_type": "custom",
+                "validated_target": "/tmp/rustclaw-validation-case"
+            }
+        });
+        let effect = classify_skill_action_effect(&state, "run_cmd", &args);
+        assert!(effect.observes);
+        assert!(effect.validates);
+        assert!(!effect.mutates);
+
+        let recipe = ExecutionRecipeRuntimeState::from_spec(ExecutionRecipeSpec {
+            kind: ExecutionRecipeKind::OpsClosedLoop,
+            profile: ExecutionRecipeProfile::CodeChange,
+            target_scope: ExecutionRecipeTargetScope::ExternalWorkspace,
+            inspect_first: true,
+            validation_required: true,
+            max_repairs: 2,
+        });
+        assert!(validation_satisfies_recipe_profile(
+            recipe, &state, "run_cmd", &args
+        ));
+    }
+
+    #[test]
+    fn structured_validation_success_fallback_accepts_custom_command_output() {
+        let state = test_state();
+        let args = json!({
+            "command": "bash /tmp/rustclaw-validation-case/check.sh",
+            "_clawd_validation": {
+                "profile": "code_change",
+                "validator_type": "custom",
+                "validated_target": "/tmp/rustclaw-validation-case"
+            }
+        });
+        let observation = assess_validation_output(&state, "run_cmd", &args, "OK\n");
+        assert_eq!(observation, ValidationObservation::Passed);
+    }
+
+    #[test]
+    fn structured_validation_success_marker_accepts_matching_output() {
+        let state = test_state();
+        let args = json!({
+            "command": "bash /tmp/rustclaw-validation-case/check.sh",
+            "_clawd_validation": {
+                "profile": "code_change",
+                "validator_type": "custom",
+                "validated_target": "/tmp/rustclaw-validation-case",
+                "success_marker": {
+                    "marker": "OK",
+                    "match_mode": "contains",
+                    "case_sensitive": true
+                }
+            }
+        });
+        let observation = assess_validation_output(&state, "run_cmd", &args, "script says OK\n");
+        assert_eq!(observation, ValidationObservation::Passed);
+    }
+
+    #[test]
+    fn structured_validation_success_marker_rejects_missing_output_marker() {
+        let state = test_state();
+        let args = json!({
+            "command": "bash /tmp/rustclaw-validation-case/check.sh",
+            "_clawd_validation": {
+                "profile": "code_change",
+                "validator_type": "custom",
+                "validated_target": "/tmp/rustclaw-validation-case",
+                "success_marker": {
+                    "marker": "OK",
+                    "match_mode": "equals"
+                }
+            }
+        });
+        let observation = assess_validation_output(&state, "run_cmd", &args, "DONE\n");
+        assert_eq!(
+            observation,
+            ValidationObservation::Failed(
+                "validation output missing required marker=OK".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn structured_validation_result_from_skill_output_takes_precedence() {
+        let state = test_state();
+        let args = json!({
+            "command": "bash /tmp/rustclaw-validation-case/check.sh",
+            "_clawd_validation": {
+                "profile": "code_change",
+                "validator_type": "custom",
+                "validated_target": "/tmp/rustclaw-validation-case"
+            }
+        });
+        let observation = assess_validation_output(
+            &state,
+            "run_cmd",
+            &args,
+            r#"{"validation":{"result":"failed","detail":"expected marker missing"}}"#,
+        );
+        assert_eq!(
+            observation,
+            ValidationObservation::Failed("expected marker missing".to_string())
+        );
     }
 
     #[test]

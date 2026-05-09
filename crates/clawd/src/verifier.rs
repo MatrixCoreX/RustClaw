@@ -550,157 +550,10 @@ fn verify_execution_recipe(
     }
 }
 
-fn marker_candidate_from_text(rest: &str) -> Option<String> {
-    let trimmed =
-        rest.trim_start_matches(|ch: char| ch.is_whitespace() || matches!(ch, ':' | '：' | '='));
-    let mut chars = trimmed.chars();
-    let Some(first) = chars.next() else {
-        return None;
-    };
-    if matches!(first, '"' | '\'' | '`' | '“' | '”' | '‘' | '’') {
-        let quote = first;
-        let tail = &trimmed[first.len_utf8()..];
-        let end = tail.find(quote).unwrap_or(tail.len());
-        let value = tail[..end].trim();
-        return (!value.is_empty()).then(|| value.to_string());
-    }
-    let value = trimmed
-        .chars()
-        .take_while(|ch| {
-            !ch.is_whitespace()
-                && !matches!(
-                    ch,
-                    ',' | '，'
-                        | ';'
-                        | '；'
-                        | '.'
-                        | '。'
-                        | '!'
-                        | '！'
-                        | '?'
-                        | '？'
-                        | ')'
-                        | '）'
-                        | '('
-                        | '（'
-                        | '['
-                        | ']'
-                        | '{'
-                        | '}'
-                )
-        })
-        .collect::<String>()
-        .trim()
-        .to_string();
-    (!value.is_empty()).then_some(value)
-}
-
-pub(crate) fn extract_expected_http_marker(
-    route_result: Option<&crate::RouteResult>,
-    request_text: Option<&str>,
-) -> Option<String> {
-    let route_texts = route_result.map(|route| {
-        vec![
-            route.resolved_intent.as_str(),
-            route.route_reason.as_str(),
-            route.output_contract.locator_hint.as_str(),
-        ]
-    });
-    let mut texts = Vec::new();
-    if let Some(route_texts) = route_texts {
-        texts.extend(route_texts);
-    }
-    if let Some(request_text) = request_text.map(str::trim).filter(|text| !text.is_empty()) {
-        texts.push(request_text);
-    }
-    for text in texts {
-        let lower = text.to_ascii_lowercase();
-        for keyword in ["contains ", "containing ", "contain "] {
-            if let Some(idx) = lower.find(keyword) {
-                if let Some(marker) = marker_candidate_from_text(&text[idx + keyword.len()..]) {
-                    return Some(marker);
-                }
-            }
-        }
-        for keyword in ["包含", "含有"] {
-            if let Some(idx) = text.find(keyword) {
-                if let Some(marker) = marker_candidate_from_text(&text[idx + keyword.len()..]) {
-                    return Some(marker);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn request_requires_success_marker(
-    route_result: Option<&crate::RouteResult>,
-    request_text: Option<&str>,
-) -> bool {
-    let mut texts = Vec::new();
-    if let Some(route) = route_result {
-        texts.push(route.resolved_intent.as_str());
-        texts.push(route.route_reason.as_str());
-    }
-    if let Some(request_text) = request_text.map(str::trim).filter(|text| !text.is_empty()) {
-        texts.push(request_text);
-    }
-    texts
-        .into_iter()
-        .any(|text| text.to_ascii_uppercase().contains("VALIDATION_PASSED"))
-}
-
-fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-fn run_cmd_looks_validation(command_lower: &str) -> bool {
-    command_lower.contains("curl ")
-        || command_lower.contains("wget ")
-        || command_lower.contains("nc ")
-        || command_lower.contains("grep")
-        || command_lower.contains("systemctl is-active")
-        || command_lower.contains("systemctl status")
-        || command_lower.contains(" service status")
-        || command_lower.contains("service --status-all")
-        || command_lower.contains("nginx -t")
-        || command_lower.contains("sing-box check")
-        || command_lower.contains("ss ")
-        || command_lower.contains("lsof ")
-}
-
-fn decorate_validation_command_with_success_marker(
-    command: &str,
-    expected_http_marker: Option<&str>,
-    request_requires_marker: bool,
-) -> Option<String> {
-    if !request_requires_marker {
-        return None;
-    }
-    let lower = command.trim().to_ascii_lowercase();
-    if lower.contains("validation_passed") || lower.contains("validation_failed") {
-        return None;
-    }
-    if !run_cmd_looks_validation(&lower) {
-        return None;
-    }
-    if let Some(expected_http_marker) = expected_http_marker {
-        if lower.contains("curl ") || lower.contains("wget ") || lower.contains("nc ") {
-            return Some(format!(
-                "{command} | grep -q {} && echo 'VALIDATION_PASSED' || echo 'VALIDATION_FAILED'",
-                shell_single_quote(expected_http_marker)
-            ));
-        }
-    }
-    Some(format!(
-        "{command} && echo 'VALIDATION_PASSED' || echo 'VALIDATION_FAILED'"
-    ))
-}
-
 fn rewrite_execution_recipe_steps(
     state: &AppState,
-    route_result: Option<&crate::RouteResult>,
-    request_text: Option<&str>,
+    _route_result: Option<&crate::RouteResult>,
+    _request_text: Option<&str>,
     plan_result: &PlanResult,
     recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
 ) -> Vec<PlanStep> {
@@ -710,8 +563,6 @@ fn rewrite_execution_recipe_steps(
     ) {
         return Vec::new();
     }
-    let expected_http_marker = extract_expected_http_marker(route_result, request_text);
-    let request_requires_marker = request_requires_success_marker(route_result, request_text);
     let plan_has_mutation = plan_result.steps.iter().any(|step| {
         matches!(step.action_type.as_str(), "call_skill" | "call_tool")
             && crate::execution_recipe::classify_skill_action_effect(state, &step.skill, &step.args)
@@ -745,31 +596,6 @@ fn rewrite_execution_recipe_steps(
             saw_mutation_in_plan = true;
         }
         if matches!(step.action_type.as_str(), "call_skill" | "call_tool")
-            && state.resolve_canonical_skill_name(&step.skill) == "http_basic"
-        {
-            let mut http_step = step.clone();
-            if let Some(expected) = expected_http_marker.as_deref() {
-                if http_step
-                    .args
-                    .get("expect_contains")
-                    .and_then(|value| value.as_str())
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .is_none()
-                {
-                    if let Some(obj) = http_step.args.as_object_mut() {
-                        obj.insert(
-                            "expect_contains".to_string(),
-                            serde_json::Value::String(expected.to_string()),
-                        );
-                        changed = true;
-                    }
-                }
-            }
-            rewritten.push(http_step);
-            continue;
-        }
-        if matches!(step.action_type.as_str(), "call_skill" | "call_tool")
             && state.resolve_canonical_skill_name(&step.skill) == "run_cmd"
         {
             if let Some(command) = step.args.get("command").and_then(|value| value.as_str()) {
@@ -788,12 +614,6 @@ fn rewrite_execution_recipe_steps(
                     validate_step.step_id = format!("{}__validate", step.step_id);
                     validate_step.depends_on = vec![step.step_id.clone()];
                     if let Some(obj) = validate_step.args.as_object_mut() {
-                        let validate_command = decorate_validation_command_with_success_marker(
-                            &validate_command,
-                            expected_http_marker.as_deref(),
-                            request_requires_marker,
-                        )
-                        .unwrap_or(validate_command);
                         obj.insert(
                             "command".to_string(),
                             serde_json::Value::String(validate_command),
@@ -801,23 +621,6 @@ fn rewrite_execution_recipe_steps(
                         obj.remove("timeout_seconds");
                     }
                     rewritten.push(mutate_step);
-                    rewritten.push(validate_step);
-                    changed = true;
-                    continue;
-                }
-                if let Some(decorated_command) = decorate_validation_command_with_success_marker(
-                    command,
-                    expected_http_marker.as_deref(),
-                    request_requires_marker,
-                ) {
-                    let mut validate_step = step.clone();
-                    if let Some(obj) = validate_step.args.as_object_mut() {
-                        obj.insert(
-                            "command".to_string(),
-                            serde_json::Value::String(decorated_command),
-                        );
-                        obj.remove("timeout_seconds");
-                    }
                     rewritten.push(validate_step);
                     changed = true;
                     continue;
@@ -1577,7 +1380,74 @@ primary_fallback_role = "fallback"
     }
 
     #[test]
-    fn code_change_recipe_accepts_cargo_check_verification() {
+    fn code_change_recipe_accepts_structured_cargo_check_verification() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(false)),
+                request_text: Some("修复当前仓库里的 clawd 入口逻辑，并验证编译通过。"),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![
+                    PlanStep {
+                        step_id: "s0".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "read_file".to_string(),
+                        args: json!({ "path": "crates/clawd/src/main.rs" }),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    PlanStep {
+                        step_id: "s1".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "write_file".to_string(),
+                        args: json!({ "path": "crates/clawd/src/main.rs", "content": "fn main() {}\n" }),
+                        depends_on: vec!["s0".to_string()],
+                        why: String::new(),
+                    },
+                    PlanStep {
+                        step_id: "s2".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "run_cmd".to_string(),
+                        args: json!({
+                            "command": "cargo check -p clawd",
+                            "_clawd_validation": {
+                                "profile": "code_change",
+                                "validator_type": "build",
+                                "validated_target": "clawd"
+                            }
+                        }),
+                        depends_on: vec!["s1".to_string()],
+                        why: String::new(),
+                    },
+                ]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                    crate::execution_recipe::ExecutionRecipeSpec {
+                        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                        profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                        target_scope:
+                            crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+                        inspect_first: true,
+                        validation_required: true,
+                        max_repairs: 2,
+                    },
+                ),
+            },
+            VerifyMode::ObserveOnly,
+        );
+        assert!(result.issues.iter().all(|issue| {
+            !matches!(
+                issue.kind,
+                VerifyIssueKind::RecipeValidationAfterMutateRequired
+                    | VerifyIssueKind::RecipeInspectBeforeMutateRequired
+            )
+        }));
+    }
+
+    #[test]
+    fn code_change_recipe_rejects_unstructured_cargo_check_verification() {
         let state = test_state();
         let task = test_task();
         let result = verify_plan(
@@ -1609,6 +1479,70 @@ primary_fallback_role = "fallback"
                         action_type: "call_skill".to_string(),
                         skill: "run_cmd".to_string(),
                         args: json!({ "command": "cargo check -p clawd" }),
+                        depends_on: vec!["s1".to_string()],
+                        why: String::new(),
+                    },
+                ]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                    crate::execution_recipe::ExecutionRecipeSpec {
+                        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                        profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                        target_scope:
+                            crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+                        inspect_first: true,
+                        validation_required: true,
+                        max_repairs: 2,
+                    },
+                ),
+            },
+            VerifyMode::ObserveOnly,
+        );
+        assert!(result.issues.iter().any(|issue| matches!(
+            issue.kind,
+            VerifyIssueKind::RecipeValidationAfterMutateRequired
+        )));
+    }
+
+    #[test]
+    fn code_change_recipe_accepts_structured_custom_validation_step() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(false)),
+                request_text: Some("修复当前仓库里的脚本，并运行自定义检查脚本验证通过。"),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![
+                    PlanStep {
+                        step_id: "s0".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "read_file".to_string(),
+                        args: json!({ "path": "scripts/check.sh" }),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    PlanStep {
+                        step_id: "s1".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "write_file".to_string(),
+                        args: json!({ "path": "scripts/check.sh", "content": "#!/usr/bin/env bash\nexit 0\n" }),
+                        depends_on: vec!["s0".to_string()],
+                        why: String::new(),
+                    },
+                    PlanStep {
+                        step_id: "s2".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "run_cmd".to_string(),
+                        args: json!({
+                            "command": "bash scripts/check.sh",
+                            "_clawd_validation": {
+                                "profile": "code_change",
+                                "validator_type": "custom",
+                                "validated_target": "scripts/check.sh"
+                            }
+                        }),
                         depends_on: vec!["s1".to_string()],
                         why: String::new(),
                     },
@@ -1791,7 +1725,14 @@ primary_fallback_role = "fallback"
                         step_id: "s3".to_string(),
                         action_type: "call_skill".to_string(),
                         skill: "run_cmd".to_string(),
-                        args: json!({ "command": "cd /opt/other-project && cargo check" }),
+                        args: json!({
+                            "command": "cd /opt/other-project && cargo check",
+                            "_clawd_validation": {
+                                "profile": "code_change",
+                                "validator_type": "build",
+                                "validated_target": "/opt/other-project"
+                            }
+                        }),
                         depends_on: vec!["s2".to_string()],
                         why: String::new(),
                     },
@@ -1835,7 +1776,14 @@ primary_fallback_role = "fallback"
                     step_id: "s1".to_string(),
                     action_type: "call_skill".to_string(),
                     skill: "run_cmd".to_string(),
-                    args: json!({ "command": "cargo check" }),
+                    args: json!({
+                        "command": "cargo check",
+                        "_clawd_validation": {
+                            "profile": "code_change",
+                            "validator_type": "build",
+                            "validated_target": "external_workspace"
+                        }
+                    }),
                     depends_on: Vec::new(),
                     why: String::new(),
                 }]),
@@ -1881,7 +1829,14 @@ primary_fallback_role = "fallback"
                     step_id: "s1".to_string(),
                     action_type: "call_skill".to_string(),
                     skill: "run_cmd".to_string(),
-                    args: json!({ "command": "cargo check -p clawd" }),
+                    args: json!({
+                        "command": "cargo check -p clawd",
+                        "_clawd_validation": {
+                            "profile": "code_change",
+                            "validator_type": "build",
+                            "validated_target": "greenfield_project"
+                        }
+                    }),
                     depends_on: Vec::new(),
                     why: String::new(),
                 }]),
@@ -1971,7 +1926,7 @@ primary_fallback_role = "fallback"
     }
 
     #[test]
-    fn ops_recipe_rewrites_validation_run_cmd_with_explicit_success_marker() {
+    fn ops_recipe_split_does_not_infer_success_marker_from_request_text() {
         let state = test_state();
         let task = test_task();
         let mut route = route_result(false);
@@ -2014,14 +1969,12 @@ primary_fallback_role = "fallback"
                 .args
                 .get("command")
                 .and_then(|value| value.as_str()),
-            Some(
-                "sleep 2 && curl -s http://127.0.0.1:51179/ | grep -q 'ops-demo-ok' && echo 'VALIDATION_PASSED' || echo 'VALIDATION_FAILED'"
-            )
+            Some("sleep 2 && curl -s http://127.0.0.1:51179/")
         );
     }
 
     #[test]
-    fn ops_recipe_injects_http_expect_contains_marker() {
+    fn ops_recipe_does_not_infer_http_expect_contains_marker_from_route_text() {
         let state = test_state();
         let task = test_task();
         let mut route = route_result(false);
@@ -2058,18 +2011,16 @@ primary_fallback_role = "fallback"
             },
             VerifyMode::ObserveOnly,
         );
-        assert_eq!(result.rewritten_steps.len(), 1);
-        assert_eq!(
-            result.rewritten_steps[0]
-                .args
-                .get("expect_contains")
-                .and_then(|value| value.as_str()),
-            Some("ops-repair-ok")
-        );
+        assert!(result.rewritten_steps.is_empty());
+        assert_eq!(result.approved_steps.len(), 1);
+        assert!(result.approved_steps[0]
+            .args
+            .get("expect_contains")
+            .is_none());
     }
 
     #[test]
-    fn ops_recipe_injects_http_expect_contains_marker_from_request_text_fallback() {
+    fn ops_recipe_does_not_infer_http_expect_contains_marker_from_request_text() {
         let state = test_state();
         let task = test_task();
         let route = route_result(false);
@@ -2105,14 +2056,12 @@ primary_fallback_role = "fallback"
             },
             VerifyMode::ObserveOnly,
         );
-        assert_eq!(result.rewritten_steps.len(), 1);
-        assert_eq!(
-            result.rewritten_steps[0]
-                .args
-                .get("expect_contains")
-                .and_then(|value| value.as_str()),
-            Some("ops-repair-ok")
-        );
+        assert!(result.rewritten_steps.is_empty());
+        assert_eq!(result.approved_steps.len(), 1);
+        assert!(result.approved_steps[0]
+            .args
+            .get("expect_contains")
+            .is_none());
     }
 
     #[test]
@@ -2146,7 +2095,8 @@ primary_fallback_role = "fallback"
                     skill: "http_basic".to_string(),
                     args: json!({
                         "action": "get",
-                        "url": "http://127.0.0.1:51179/"
+                        "url": "http://127.0.0.1:51179/",
+                        "expect_contains": "ops-repair-ok"
                     }),
                     depends_on: Vec::new(),
                     why: String::new(),
@@ -2155,7 +2105,7 @@ primary_fallback_role = "fallback"
             },
             VerifyMode::ObserveOnly,
         );
-        let inspect_step = &inspect_result.rewritten_steps[0];
+        let inspect_step = &inspect_result.approved_steps[0];
         let raw_effect = crate::execution_recipe::classify_skill_action_effect(
             &state,
             &inspect_step.skill,

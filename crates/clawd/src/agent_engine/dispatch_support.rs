@@ -115,7 +115,9 @@ fn deterministic_observed_execution_status_answer(
             .map(str::trim)
             .filter(|text| !text.is_empty())
             .map(|text| {
-                if crate::skills::is_recoverable_skill_error(skill, text) {
+                if crate::skills::parse_structured_skill_error(text).is_some()
+                    || crate::skills::is_recoverable_skill_error(skill, text)
+                {
                     crate::skills::normalize_skill_error_for_user(skill, text)
                 } else {
                     text.to_string()
@@ -226,6 +228,8 @@ fn run_cmd_should_continue_after_split_failure(args: Option<&Value>) -> bool {
 fn strip_internal_execution_args(args: &mut Value) {
     if let Some(obj) = args.as_object_mut() {
         obj.remove(super::CLAWD_CONTINUE_ON_ERROR_ARG);
+        obj.remove(super::CLAWD_LITERAL_COMMAND_ARG);
+        obj.remove(crate::execution_recipe::CLAWD_VALIDATION_ARG);
     }
 }
 
@@ -249,6 +253,12 @@ pub(super) fn classify_skill_failure_recovery(
         && has_remaining_action_after(actions, current_idx, max_steps)
     {
         return Some("recoverable_failure_continue_in_round");
+    }
+    if normalized_skill.eq_ignore_ascii_case("run_cmd")
+        && crate::skills::is_observable_run_cmd_error(normalized_skill, err)
+        && !has_remaining_action_after(actions, current_idx, max_steps)
+    {
+        return Some("recoverable_failure_finalize");
     }
     if state.skill_is_retryable(normalized_skill)
         && !state.skill_requires_confirmation_policy(normalized_skill)
@@ -361,6 +371,24 @@ fn synthesize_failure_default_text(
     )
 }
 
+fn step_has_observable_synthesis_fact(step: &crate::executor::StepExecutionResult) -> bool {
+    if step.is_ok() {
+        return step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty());
+    }
+    step.error
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some_and(|err| {
+            crate::skills::is_observable_run_cmd_error(&step.skill, err)
+                || crate::skills::is_recoverable_skill_error(&step.skill, err)
+        })
+}
+
 async fn synthesize_failure_user_message(
     state: &AppState,
     task: &ClaimedTask,
@@ -371,14 +399,10 @@ async fn synthesize_failure_user_message(
 ) -> String {
     let default_text = synthesize_failure_default_text(state, task, user_text);
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
-    let has_observed_result = loop_state.executed_step_results.iter().any(|step| {
-        step.is_ok()
-            && step
-                .output
-                .as_deref()
-                .map(str::trim)
-                .is_some_and(|value| !value.is_empty())
-    });
+    let has_observed_result = loop_state
+        .executed_step_results
+        .iter()
+        .any(step_has_observable_synthesis_fact);
     let mut policy_boundary = vec![
         "Do not say the task succeeded.".to_string(),
         "Do not expose prompt names, schema names, stack traces, or raw provider errors."
@@ -619,6 +643,42 @@ mod tests {
         );
     }
 
+    #[test]
+    fn single_structured_run_cmd_failure_finalizes_as_observed_result() {
+        let state = test_state_with_registry();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: serde_json::json!({"command":"printf problem >&2; exit 7"}),
+        }];
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "run_cmd",
+                "error_kind": "nonzero_exit",
+                "error_text": "Command failed with exit code 7\nstderr:\nproblem",
+                "extra": {
+                    "command": "printf problem >&2; exit 7",
+                    "exit_code": 7,
+                    "stderr": "problem",
+                    "output_truncated": false
+                }
+            })
+        );
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                0,
+                4,
+                "run_cmd",
+                Some(&serde_json::json!({"command":"printf problem >&2; exit 7"})),
+                &err,
+            ),
+            Some("recoverable_failure_finalize")
+        );
+    }
+
     fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
         StepExecutionResult {
             step_id: step_id.to_string(),
@@ -686,6 +746,60 @@ mod tests {
         assert!(answer.contains("list_dir"));
         assert!(answer.contains("run_cmd"));
         assert!(answer.contains("exit code 127"));
+    }
+
+    #[test]
+    fn deterministic_status_answer_uses_structured_run_cmd_stderr() {
+        let state = test_state_with_registry();
+        let task = crate::ClaimedTask {
+            task_id: "task-structured-run-cmd".to_string(),
+            user_id: 1,
+            chat_id: 1,
+            user_key: None,
+            channel: "test".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".to_string(),
+            payload_json: String::new(),
+        };
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "run_cmd",
+                "error_kind": "nonzero_exit",
+                "error_text": "Command failed with exit code 7",
+                "platform": "linux",
+                "extra": {
+                    "exit_code": 7,
+                    "stderr": "problem",
+                    "output_truncated": false
+                }
+            })
+        );
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "run_cmd", "READY\n"));
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "run_cmd".to_string(),
+            status: StepExecutionStatus::Error,
+            output: None,
+            error: Some(err),
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        let answer = deterministic_observed_execution_status_answer(
+            &state,
+            &task,
+            "执行两个命令，总结成功和失败，并说明错误输出。",
+            &loop_state,
+        )
+        .expect("deterministic status answer");
+
+        assert!(answer.contains("exit code 7"), "answer: {answer}");
+        assert!(answer.contains("stderr: problem"), "answer: {answer}");
     }
 
     #[test]
@@ -832,7 +946,9 @@ fn is_read_only_skill_invocation(state: &AppState, normalized_skill: &str, args:
             .get("action")
             .and_then(|v| v.as_str())
             .map(|a| {
-                a.eq_ignore_ascii_case("sqlite_query") || a.eq_ignore_ascii_case("schema_version")
+                a.eq_ignore_ascii_case("sqlite_query")
+                    || a.eq_ignore_ascii_case("schema_version")
+                    || a.eq_ignore_ascii_case("sqlite_schema_version")
             })
             .unwrap_or(true),
         _ => false,

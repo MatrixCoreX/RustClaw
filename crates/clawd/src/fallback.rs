@@ -18,10 +18,13 @@
 use std::collections::HashMap;
 
 use crate::AppState;
+use serde::Deserialize;
 use serde_json::json;
 
 pub(crate) const USER_RESPONSE_COMPOSER_PROMPT_LOGICAL_PATH: &str =
     "prompts/user_response_composer_prompt.md";
+const USER_RESPONSE_CONTRACT_VALIDATOR_PROMPT_LOGICAL_PATH: &str =
+    "prompts/user_response_contract_validator_prompt.md";
 
 /// 用户可见回复的结构化意图类型。
 ///
@@ -62,6 +65,22 @@ pub(crate) struct UserResponseContract {
     pub(crate) resolved_user_intent: String,
     pub(crate) response_shape: String,
     pub(crate) language_hint: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct UserResponseContractValidationOut {
+    #[serde(default)]
+    satisfies_contract: bool,
+    #[serde(default)]
+    false_claims: bool,
+    #[serde(default)]
+    asks_for_missing_target: bool,
+    #[serde(default)]
+    mentions_internal_details: bool,
+    #[serde(default)]
+    confidence: f64,
+    #[serde(default)]
+    reason: String,
 }
 
 impl Default for UserResponseKind {
@@ -416,7 +435,7 @@ async fn compose_user_response_from_contract_impl(
                     None,
                     &contract.language_hint,
                 )
-            } else if !user_response_contract_shape_satisfied(contract, trimmed) {
+            } else if !user_response_contract_local_shape_satisfied(contract, trimmed) {
                 tracing::warn!(
                     task_id = %task.task_id,
                     response_shape = %contract.response_shape,
@@ -424,6 +443,25 @@ async fn compose_user_response_from_contract_impl(
                     reply_chars = trimmed.chars().count(),
                     reply_lines = trimmed.lines().filter(|line| !line.trim().is_empty()).count(),
                     "user_response_composer_invalid_shape"
+                );
+                if let Some(default_text) = default_text {
+                    return default_text.to_string();
+                }
+                render_clarify_fallback_with_language_hint(
+                    state,
+                    &task.task_id,
+                    fallback_source,
+                    None,
+                    &contract.language_hint,
+                )
+            } else if !user_response_contract_llm_validated(state, task, contract, trimmed).await {
+                tracing::warn!(
+                    task_id = %task.task_id,
+                    response_shape = %contract.response_shape,
+                    fallback_source = fallback_source.as_metric_label(),
+                    reply_chars = trimmed.chars().count(),
+                    reply_lines = trimmed.lines().filter(|line| !line.trim().is_empty()).count(),
+                    "user_response_composer_contract_validator_rejected"
                 );
                 if let Some(default_text) = default_text {
                     return default_text.to_string();
@@ -460,7 +498,10 @@ async fn compose_user_response_from_contract_impl(
     }
 }
 
-fn user_response_contract_shape_satisfied(contract: &UserResponseContract, reply: &str) -> bool {
+fn user_response_contract_local_shape_satisfied(
+    contract: &UserResponseContract,
+    reply: &str,
+) -> bool {
     let trimmed = reply.trim();
     if trimmed.is_empty() || trimmed.starts_with('{') || trimmed.starts_with('[') {
         return false;
@@ -468,130 +509,160 @@ fn user_response_contract_shape_satisfied(contract: &UserResponseContract, reply
     if trimmed.contains("```") {
         return false;
     }
-    if reply_makes_false_local_filesystem_access_claim(trimmed) {
+    if reply_contains_obvious_internal_trace(trimmed) {
         return false;
     }
     match contract.response_shape.trim() {
-        "one_short_clarification" => {
-            concise_single_line_reply_satisfied(trimmed, 160)
-                && clarification_reply_is_grounded_in_request(contract, trimmed)
-        }
+        "one_short_clarification" => concise_single_line_reply_satisfied(trimmed, 160),
         "one_short_confirmation_question" => concise_single_line_reply_satisfied(trimmed, 220),
         _ => true,
     }
 }
 
-fn reply_makes_false_local_filesystem_access_claim(reply: &str) -> bool {
+fn user_response_contract_validation_accepts(
+    contract: &UserResponseContract,
+    validation: &UserResponseContractValidationOut,
+) -> bool {
+    if validation.confidence < 0.55 {
+        return true;
+    }
+    if !validation.satisfies_contract
+        || validation.false_claims
+        || validation.mentions_internal_details
+    {
+        return false;
+    }
+    if contract.response_shape.trim() == "one_short_clarification"
+        && !validation.asks_for_missing_target
+    {
+        return false;
+    }
+    true
+}
+
+async fn user_response_contract_llm_validated(
+    state: &AppState,
+    task: &crate::ClaimedTask,
+    contract: &UserResponseContract,
+    reply: &str,
+) -> bool {
+    let resolved = match crate::bootstrap::load_required_prompt_template_for_state_with_meta(
+        state,
+        USER_RESPONSE_CONTRACT_VALIDATOR_PROMPT_LOGICAL_PATH,
+    ) {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            tracing::info!(
+                "user_response_contract_validator prompt_missing task_id={} err={}",
+                task.task_id,
+                err
+            );
+            return true;
+        }
+    };
+    let prompt = crate::render_prompt_template(
+        &resolved.template,
+        &[
+            (
+                "__USER_RESPONSE_CONTRACT__",
+                &contract.to_prompt_context_block(),
+            ),
+            ("__CANDIDATE_REPLY__", reply.trim()),
+        ],
+    );
+    crate::log_prompt_render_with_version(
+        state,
+        &task.task_id,
+        "user_response_contract_validator_prompt",
+        &resolved.source,
+        resolved.version.as_deref(),
+        None,
+    );
+    let prompt_source = resolved.source;
+    let llm_out = match crate::llm_gateway::run_with_fallback_with_prompt_source(
+        state,
+        task,
+        &prompt,
+        &prompt_source,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(err) => {
+            tracing::info!(
+                "user_response_contract_validator llm_failed task_id={} err={}",
+                task.task_id,
+                err
+            );
+            return true;
+        }
+    };
+    let validation = match crate::prompt_utils::validate_against_schema::<
+        UserResponseContractValidationOut,
+    >(
+        &llm_out,
+        crate::prompt_utils::PromptSchemaId::UserResponseContractValidator,
+    ) {
+        Ok(validated) => {
+            if !validated.raw_parse_ok || validated.schema_normalized {
+                tracing::info!(
+                        "user_response_contract_validator schema_parse_recovery task_id={} raw_parse_ok={} schema_normalized={}",
+                        task.task_id,
+                        validated.raw_parse_ok,
+                        validated.schema_normalized
+                    );
+            }
+            UserResponseContractValidationOut {
+                confidence: validated.value.confidence.clamp(0.0, 1.0),
+                ..validated.value
+            }
+        }
+        Err(err) => {
+            tracing::info!(
+                "user_response_contract_validator schema_validation_failed task_id={} err={}",
+                task.task_id,
+                err
+            );
+            return true;
+        }
+    };
+    let accepted = user_response_contract_validation_accepts(contract, &validation);
+    if !accepted {
+        tracing::info!(
+            task_id = %task.task_id,
+            satisfies_contract = validation.satisfies_contract,
+            false_claims = validation.false_claims,
+            asks_for_missing_target = validation.asks_for_missing_target,
+            mentions_internal_details = validation.mentions_internal_details,
+            confidence = validation.confidence,
+            reason = %validation.reason,
+            "user_response_contract_validator_reject"
+        );
+    }
+    accepted
+}
+
+fn reply_contains_obvious_internal_trace(reply: &str) -> bool {
     let lower = reply.to_ascii_lowercase();
-    (reply.contains("没有直接访问") && reply.contains("本地文件系统"))
-        || (reply.contains("无法访问") && reply.contains("本地文件系统"))
-        || (lower.contains("cannot access") && lower.contains("local filesystem"))
-        || (lower.contains("can't access") && lower.contains("local filesystem"))
-        || (lower.contains("no access") && lower.contains("local filesystem"))
+    [
+        "fallback_source",
+        "resolver_reason",
+        "user_response_contract",
+        "prompt_name",
+        "prompt_source",
+        "task_id=",
+        "call_id=",
+        "raw provider error",
+        "raw model output",
+        "stack trace",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 fn concise_single_line_reply_satisfied(reply: &str, max_chars: usize) -> bool {
     let nonempty_lines = reply.lines().filter(|line| !line.trim().is_empty()).count();
     nonempty_lines <= 1 && reply.chars().count() <= max_chars
-}
-
-fn clarification_reply_is_grounded_in_request(
-    contract: &UserResponseContract,
-    reply: &str,
-) -> bool {
-    let salient = salient_request_tokens(&contract.original_user_request);
-    if salient.is_empty() {
-        return true;
-    }
-    let reply_lower = reply.to_ascii_lowercase();
-    salient.iter().any(|token| {
-        if token.is_ascii() {
-            reply_lower.contains(&token.to_ascii_lowercase())
-        } else {
-            reply.contains(token)
-        }
-    }) || (request_uses_deictic_reference(&contract.original_user_request)
-        && clarification_reply_requests_missing_target(reply))
-}
-
-fn request_uses_deictic_reference(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower
-        .split(|ch: char| !ch.is_ascii_alphanumeric())
-        .any(|token| matches!(token, "it" | "this" | "that" | "those" | "these"))
-        || ["它", "这个", "那个", "这份", "那份", "这里", "那里"]
-            .iter()
-            .any(|marker| text.contains(marker))
-}
-
-fn clarification_reply_requests_missing_target(reply: &str) -> bool {
-    let trimmed = reply.trim();
-    let asks_for_input = trimmed.contains('？')
-        || trimmed.contains('?')
-        || ["请提供", "请指定", "发我", "告诉我", "补充"]
-            .iter()
-            .any(|marker| trimmed.contains(marker));
-    let mentions_target = [
-        "哪个",
-        "哪一个",
-        "哪份",
-        "目标",
-        "文件",
-        "路径",
-        "目录",
-        "内容",
-        "日志",
-        "数据库",
-        "sqlite",
-        "压缩包",
-        "链接",
-    ]
-    .iter()
-    .any(|marker| trimmed.contains(marker));
-    asks_for_input && mentions_target
-}
-
-fn salient_request_tokens(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for token in text.split(|ch: char| !ch.is_ascii_alphanumeric()) {
-        if token.chars().count() >= 3 && token.chars().any(|ch| ch.is_ascii_alphabetic()) {
-            push_unique_token(&mut out, token.to_ascii_lowercase());
-        }
-    }
-    let mut cjk_run = String::new();
-    for ch in text.chars() {
-        if ('\u{4E00}'..='\u{9FFF}').contains(&ch) {
-            cjk_run.push(ch);
-        } else {
-            push_cjk_ngrams(&mut out, &cjk_run);
-            cjk_run.clear();
-        }
-    }
-    push_cjk_ngrams(&mut out, &cjk_run);
-    out
-}
-
-fn push_cjk_ngrams(out: &mut Vec<String>, run: &str) {
-    let chars = run.chars().collect::<Vec<_>>();
-    if chars.len() < 2 {
-        return;
-    }
-    for window in chars.windows(2) {
-        let token = window.iter().collect::<String>();
-        if matches!(token.as_str(), "那个" | "这个" | "那份" | "这份" | "一下") {
-            continue;
-        }
-        push_unique_token(out, token);
-        if out.len() >= 16 {
-            break;
-        }
-    }
-}
-
-fn push_unique_token(out: &mut Vec<String>, token: String) {
-    if !token.trim().is_empty() && !out.iter().any(|existing| existing == &token) {
-        out.push(token);
-    }
 }
 
 /// 失败时给用户的兜底答案 source 分类，决定 i18n 文案 + tracing label。
@@ -954,11 +1025,11 @@ mod tests {
             ..UserResponseContract::default()
         };
 
-        assert!(user_response_contract_shape_satisfied(
+        assert!(user_response_contract_local_shape_satisfied(
             &contract,
             "请提供这个配置文件的完整路径。"
         ));
-        assert!(!user_response_contract_shape_satisfied(
+        assert!(!user_response_contract_local_shape_satisfied(
             &contract,
             "我会遵循当前规则来回答。\n\n请问你接下来希望我处理什么具体任务？"
         ));
@@ -972,39 +1043,39 @@ mod tests {
         };
         let long_reply = "请补充目标。".repeat(30);
 
-        assert!(!user_response_contract_shape_satisfied(
+        assert!(!user_response_contract_local_shape_satisfied(
             &contract,
             &long_reply
         ));
     }
 
     #[test]
-    fn one_short_clarification_shape_rejects_generic_meta_reply() {
+    fn one_short_clarification_local_shape_leaves_generic_meta_to_llm_validator() {
         let contract = UserResponseContract {
             response_shape: "one_short_clarification".to_string(),
             original_user_request: "查一下那个 sqlite 里有哪些表".to_string(),
             ..UserResponseContract::default()
         };
 
-        assert!(user_response_contract_shape_satisfied(
+        assert!(user_response_contract_local_shape_satisfied(
             &contract,
             "请提供 sqlite 数据库的完整路径。"
         ));
-        assert!(!user_response_contract_shape_satisfied(
+        assert!(user_response_contract_local_shape_satisfied(
             &contract,
             "我已准备好处理后续任务，请告诉我接下来需要我做什么。"
         ));
     }
 
     #[test]
-    fn one_short_clarification_shape_rejects_false_local_filesystem_access_claim() {
+    fn one_short_clarification_local_shape_leaves_false_claims_to_llm_validator() {
         let contract = UserResponseContract {
             response_shape: "one_short_clarification".to_string(),
             original_user_request: "读一下那个 README 开头 3 行".to_string(),
             ..UserResponseContract::default()
         };
 
-        assert!(!user_response_contract_shape_satisfied(
+        assert!(user_response_contract_local_shape_satisfied(
             &contract,
             "请问你指的是哪个目录下的 README 文件？我目前没有直接访问你本地文件系统的权限。"
         ));
@@ -1018,10 +1089,115 @@ mod tests {
             ..UserResponseContract::default()
         };
 
-        assert!(user_response_contract_shape_satisfied(
+        assert!(user_response_contract_local_shape_satisfied(
             &contract,
             "请问您想发送哪个文件或内容？请提供具体的文件名或路径。"
         ));
+    }
+
+    #[test]
+    fn user_response_contract_local_shape_rejects_internal_trace() {
+        let contract = UserResponseContract {
+            response_shape: "one_short_clarification".to_string(),
+            ..UserResponseContract::default()
+        };
+
+        assert!(!user_response_contract_local_shape_satisfied(
+            &contract,
+            "fallback_source=intent_unresolved，请补充目标。"
+        ));
+    }
+
+    #[test]
+    fn user_response_contract_validator_rejects_high_confidence_false_claims() {
+        let contract = UserResponseContract {
+            response_shape: "brief_failure_with_next_step".to_string(),
+            ..UserResponseContract::default()
+        };
+        let validation = UserResponseContractValidationOut {
+            satisfies_contract: true,
+            false_claims: true,
+            asks_for_missing_target: false,
+            mentions_internal_details: false,
+            confidence: 0.9,
+            reason: "claims unavailable access".to_string(),
+        };
+
+        assert!(!user_response_contract_validation_accepts(
+            &contract,
+            &validation
+        ));
+    }
+
+    #[test]
+    fn user_response_contract_validator_rejects_clarification_without_missing_target() {
+        let contract = UserResponseContract {
+            response_shape: "one_short_clarification".to_string(),
+            ..UserResponseContract::default()
+        };
+        let validation = UserResponseContractValidationOut {
+            satisfies_contract: true,
+            false_claims: false,
+            asks_for_missing_target: false,
+            mentions_internal_details: false,
+            confidence: 0.86,
+            reason: "generic follow-up".to_string(),
+        };
+
+        assert!(!user_response_contract_validation_accepts(
+            &contract,
+            &validation
+        ));
+    }
+
+    #[test]
+    fn user_response_contract_validator_low_confidence_fails_open() {
+        let contract = UserResponseContract {
+            response_shape: "one_short_clarification".to_string(),
+            ..UserResponseContract::default()
+        };
+        let validation = UserResponseContractValidationOut {
+            satisfies_contract: false,
+            false_claims: true,
+            asks_for_missing_target: false,
+            mentions_internal_details: true,
+            confidence: 0.2,
+            reason: "uncertain".to_string(),
+        };
+
+        assert!(user_response_contract_validation_accepts(
+            &contract,
+            &validation
+        ));
+    }
+
+    #[test]
+    fn user_response_contract_validator_schema_drift() {
+        const SCHEMA_RAW: &str =
+            include_str!("../../../prompts/schemas/user_response_contract_validator.schema.json");
+        let schema: serde_json::Value =
+            serde_json::from_str(SCHEMA_RAW).expect("schema JSON should parse");
+        let props = schema
+            .get("properties")
+            .and_then(|value| value.as_object())
+            .expect("schema should define object properties");
+        for field in [
+            "satisfies_contract",
+            "false_claims",
+            "asks_for_missing_target",
+            "mentions_internal_details",
+            "confidence",
+            "reason",
+        ] {
+            assert!(props.contains_key(field), "missing schema field {field}");
+        }
+
+        let raw = r#"{"satisfies_contract":true,"false_claims":false,"asks_for_missing_target":true,"mentions_internal_details":false,"confidence":0.9,"reason":"ok"}"#;
+        crate::prompt_utils::validate_against_schema::<UserResponseContractValidationOut>(
+            raw,
+            crate::prompt_utils::PromptSchemaId::UserResponseContractValidator,
+        )
+        .expect("schema should validate typed contract validator output");
     }
 
     #[test]

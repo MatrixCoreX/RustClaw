@@ -26,6 +26,10 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "intent_normalizer (routing)",
     ),
     (
+        "prompts/contract_repair_judge_prompt.md",
+        "contract_repair_judge (routing)",
+    ),
+    (
         "prompts/clarify_question_prompt.md",
         "clarify_question (routing)",
     ),
@@ -80,6 +84,10 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
     (
         "prompts/user_response_composer_prompt.md",
         "user_response_composer (fallback.response)",
+    ),
+    (
+        "prompts/user_response_contract_validator_prompt.md",
+        "user_response_contract_validator (fallback.response)",
     ),
 ];
 

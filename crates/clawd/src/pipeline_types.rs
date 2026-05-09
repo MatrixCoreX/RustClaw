@@ -96,6 +96,13 @@ pub(crate) enum OutputSemanticKind {
     SqliteTableNamesOnly,
     SqliteDatabaseKindJudgment,
     SqliteSchemaVersion,
+    ArchiveList,
+    ArchivePack,
+    ArchiveUnpack,
+    DockerPs,
+    DockerImages,
+    DockerLogs,
+    DockerContainerLifecycle,
 }
 
 impl OutputSemanticKind {
@@ -127,6 +134,13 @@ impl OutputSemanticKind {
             Self::SqliteTableNamesOnly => "sqlite_table_names_only",
             Self::SqliteDatabaseKindJudgment => "sqlite_database_kind_judgment",
             Self::SqliteSchemaVersion => "sqlite_schema_version",
+            Self::ArchiveList => "archive_list",
+            Self::ArchivePack => "archive_pack",
+            Self::ArchiveUnpack => "archive_unpack",
+            Self::DockerPs => "docker_ps",
+            Self::DockerImages => "docker_images",
+            Self::DockerLogs => "docker_logs",
+            Self::DockerContainerLifecycle => "docker_container_lifecycle",
         }
     }
 }

@@ -374,6 +374,10 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    platform: Option<String>,
     error_text: Option<String>,
 }
 
@@ -476,6 +480,8 @@ fn parse_input(args: &Value) -> Result<SkillInput, String> {
 #[derive(Debug, Default, Clone, Serialize)]
 struct OutputContract {
     status: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    error_kind: String,
     service_name: String,
     manager_type: String,
     requested_action: String,
@@ -495,8 +501,9 @@ impl OutputContract {
         self.status = "ok".to_string();
         self.summary = msg.to_string();
     }
-    fn fail(&mut self, reason: &str) {
+    fn fail_kind(&mut self, kind: &str, reason: &str) {
         self.status = "error".to_string();
+        self.error_kind = kind.trim().to_string();
         self.failure_reason = reason.to_string();
     }
     fn add_evidence(&mut self, s: impl AsRef<str>) {
@@ -583,6 +590,10 @@ fn build_runner_response(request_id: String, result: Result<OutputContract, Stri
                     "ok".to_string()
                 },
                 text: text.clone(),
+                error_kind: is_business_error
+                    .then(|| out.error_kind.trim().to_string())
+                    .filter(|kind| !kind.is_empty()),
+                platform: is_business_error.then(|| std::env::consts::OS.to_string()),
                 error_text: if is_business_error {
                     Some(if out.failure_reason.is_empty() {
                         "skill reported error".to_string()
@@ -598,6 +609,8 @@ fn build_runner_response(request_id: String, result: Result<OutputContract, Stri
             request_id,
             status: "error".to_string(),
             text: String::new(),
+            error_kind: Some("skill_execution_failed".to_string()),
+            platform: Some(std::env::consts::OS.to_string()),
             error_text: Some(err),
         },
     }
@@ -641,6 +654,8 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                error_kind: Some("invalid_input".to_string()),
+                platform: Some(std::env::consts::OS.to_string()),
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -677,7 +692,10 @@ fn execute(
         let mut out = OutputContract::default();
         out.service_name = input.target.clone().unwrap_or_default();
         out.requested_action = input.action.clone();
-        out.fail("target (service name) is required for this action and must not be empty");
+        out.fail_kind(
+            "missing_input",
+            "target (service name) is required for this action and must not be empty",
+        );
         out.next_step =
             "Provide a specific service name in args.target or args.service.".to_string();
         return Ok(out);
@@ -688,7 +706,10 @@ fn execute(
             let mut out = OutputContract::default();
             out.service_name = t.to_string();
             out.requested_action = input.action.clone();
-            out.fail("target is ambiguous or too broad for high-risk action (stop/restart); refuse to execute");
+            out.fail_kind(
+                "ambiguous_target",
+                "target is ambiguous or too broad for high-risk action (stop/restart); refuse to execute",
+            );
             out.next_step =
                 "Use a specific service name and avoid vague targets like backend/services/all."
                     .to_string();
@@ -698,7 +719,10 @@ fn execute(
             if !is_safe_target(t) {
                 let mut out = OutputContract::default();
                 out.service_name = t.to_string();
-                out.fail("target contains invalid characters; use only alphanumeric, dot, dash, underscore");
+                out.fail_kind(
+                    "invalid_input",
+                    "target contains invalid characters; use only alphanumeric, dot, dash, underscore",
+                );
                 return Ok(out);
             }
         }
@@ -736,7 +760,10 @@ fn execute(
                 out.service_name = t.to_string();
                 out.manager_type = "unknown".to_string();
                 out.requested_action = input.action.clone();
-                out.fail("no matching service found for the given target");
+                out.fail_kind(
+                    "not_found",
+                    "no matching service found for the given target",
+                );
                 out.next_step = "Provide a more specific service name, or confirm the service exists on this host.".to_string();
                 return Ok(out);
             }
@@ -753,7 +780,7 @@ fn execute(
                     out.service_name = t.to_string();
                     out.manager_type = "unknown".to_string();
                     out.requested_action = input.action.clone();
-                    out.fail("ambiguous: multiple matching services");
+                    out.fail_kind("ambiguous_target", "ambiguous: multiple matching services");
                     out.next_step = format!(
                         "Select one concrete service name and retry. candidates: {}",
                         candidates.join(", ")
@@ -901,7 +928,8 @@ fn execute(
             post_state == "active" || post_state == "running" || post_state == "active (running)";
         out.verified = healthy;
         if !healthy {
-            out.fail(
+            out.fail_kind(
+                "service_inactive",
                 "Post-action verification failed: service did not reach active/running state.",
             );
             if do_logs_after_fail {
@@ -1198,6 +1226,27 @@ fn rustclaw_service_state(data: &Value, service: &str) -> (bool, Option<usize>, 
     }
 }
 
+fn rustclaw_process_fallback_state(target: Option<&str>, reason: &str) -> (String, Vec<String>) {
+    let services: Vec<&str> = target
+        .map(|t| vec![t])
+        .unwrap_or_else(|| RUSTCLAW_SERVICES.to_vec());
+    let mut parts = Vec::new();
+    let mut evidence = Vec::new();
+    evidence.push(format!(
+        "health API unavailable: {}; used local process scan fallback",
+        reason
+    ));
+    for service in services {
+        let count = process_count_for_target(service);
+        let state = if count > 0 { "running" } else { "stopped" };
+        parts.push(format!("{service}={state}"));
+        evidence.push(format!(
+            "{service} process_count={count} memory_rss_bytes=None"
+        ));
+    }
+    (parts.join(", "), evidence)
+}
+
 fn run_status_inner(
     _input: &SkillInput,
     manager: &str,
@@ -1214,15 +1263,15 @@ fn run_status_inner(
             {
                 Ok(c) => c,
                 Err(e) => {
-                    out.fail(&format!("http client: {e}"));
+                    out.fail_kind("dependency_error", &format!("http client: {e}"));
                     return ("unknown".to_string(), evidence);
                 }
             };
             let data = match rustclaw_health(&client, req_user_key) {
                 Ok(d) => d,
                 Err(e) => {
-                    out.fail(&e);
-                    return ("unknown".to_string(), evidence);
+                    let (state, fallback_evidence) = rustclaw_process_fallback_state(target, &e);
+                    return (state, fallback_evidence);
                 }
             };
             let services: Vec<&str> = target
@@ -1246,7 +1295,7 @@ fn run_status_inner(
         "systemd" => {
             let t = target.unwrap_or("");
             if !is_safe_target(t) {
-                out.fail("invalid target for systemd");
+                out.fail_kind("invalid_input", "invalid target for systemd");
                 return ("unknown".to_string(), evidence);
             }
             let o = Command::new("systemctl").args(["is-active", t]).output();
@@ -1263,7 +1312,7 @@ fn run_status_inner(
                     }
                 }
                 Err(e) => {
-                    out.fail(&format!("systemctl failed: {e}"));
+                    out.fail_kind("dependency_error", &format!("systemctl failed: {e}"));
                     ("unknown".to_string(), evidence)
                 }
             }
@@ -1271,7 +1320,7 @@ fn run_status_inner(
         "service" => {
             let t = target.unwrap_or("");
             if !is_safe_target(t) {
-                out.fail("invalid target for service");
+                out.fail_kind("invalid_input", "invalid target for service");
                 return ("unknown".to_string(), evidence);
             }
             let o = Command::new("service").args([t, "status"]).output();
@@ -1288,7 +1337,7 @@ fn run_status_inner(
                     (state.to_string(), evidence)
                 }
                 Err(e) => {
-                    out.fail(&format!("service status failed: {e}"));
+                    out.fail_kind("dependency_error", &format!("service status failed: {e}"));
                     ("unknown".to_string(), evidence)
                 }
             }
@@ -1296,7 +1345,7 @@ fn run_status_inner(
         "brew_services" => {
             let t = target.unwrap_or("");
             let Some(entry) = brew_service_entry(t) else {
-                out.fail("brew service not found");
+                out.fail_kind("not_found", "brew service not found");
                 return ("unknown".to_string(), evidence);
             };
             let state = if entry.status.eq_ignore_ascii_case("started") {
@@ -1315,7 +1364,7 @@ fn run_status_inner(
         "launchd" => {
             let t = target.unwrap_or("");
             let Some(entry) = launchctl_entry(t) else {
-                out.fail("launchd service not found");
+                out.fail_kind("not_found", "launchd service not found");
                 return ("unknown".to_string(), evidence);
             };
             let state = if entry.pid.unwrap_or_default() > 0 {
@@ -1342,7 +1391,10 @@ fn run_status_inner(
             }
         }
         _ => {
-            out.fail(&format!("manager {} not implemented for status", manager));
+            out.fail_kind(
+                "unsupported_platform",
+                &format!("manager {} not implemented for status", manager),
+            );
             ("unknown".to_string(), evidence)
         }
     }
@@ -1366,7 +1418,16 @@ fn run_verify_inner(
             };
             let data = match rustclaw_health(&client, req_user_key) {
                 Ok(d) => d,
-                Err(_) => return ("unknown".to_string(), evidence),
+                Err(e) => {
+                    let count = process_count_for_target(target);
+                    let state = if count > 0 { "running" } else { "stopped" };
+                    evidence.push(format!(
+                        "health API unavailable: {}; used local process scan fallback",
+                        e
+                    ));
+                    evidence.push(format!("{target} process_count={count}"));
+                    return (state.to_string(), evidence);
+                }
             };
             let (running, _, _) = rustclaw_service_state(&data, target);
             let state = if running { "running" } else { "stopped" };
@@ -1443,7 +1504,10 @@ fn run_verify_inner(
             (state.to_string(), evidence)
         }
         _ => {
-            out.fail(&format!("manager {} not implemented for verify", manager));
+            out.fail_kind(
+                "unsupported_platform",
+                &format!("manager {} not implemented for verify", manager),
+            );
             ("unknown".to_string(), evidence)
         }
     }
@@ -1465,11 +1529,17 @@ fn run_control_inner(
     match manager {
         "rustclaw" => {
             if !RUSTCLAW_SERVICES.contains(&target) {
-                out.fail(&format!("service {} not in RustClaw whitelist", target));
+                out.fail_kind(
+                    "not_found",
+                    &format!("service {} not in RustClaw whitelist", target),
+                );
                 return Err(());
             }
             if target == "clawd" && matches!(effective_action, "start" | "stop" | "restart") {
-                out.fail("clawd cannot be started/stopped/restarted via this skill");
+                out.fail_kind(
+                    "unsupported_action",
+                    "clawd cannot be started/stopped/restarted via this skill",
+                );
                 return Err(());
             }
             let base = clawd_base_url();
@@ -1478,7 +1548,7 @@ fn run_control_inner(
                 .timeout(Duration::from_secs(60))
                 .build()
                 .map_err(|e| {
-                    out.fail(&format!("http client: {e}"));
+                    out.fail_kind("dependency_error", &format!("http client: {e}"));
                 })?;
             let mut req = client.post(&url);
             let fallback_ui_key = ui_key();
@@ -1486,16 +1556,16 @@ fn run_control_inner(
                 req = req.header("x-rustclaw-key", k);
             }
             let resp = req.send().map_err(|e| {
-                out.fail(&format!("request failed: {e}"));
+                out.fail_kind("dependency_error", &format!("request failed: {e}"));
             })?;
             if resp.status().as_u16() == 401 {
-                out.fail("clawd API 401; missing valid user key");
+                out.fail_kind("permission_denied", "clawd API 401; missing valid user key");
                 return Err(());
             }
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().unwrap_or_default();
-                out.fail(&format!("{} {}", status, body));
+                out.fail_kind("dependency_error", &format!("{} {}", status, body));
                 return Err(());
             }
             let data: Value = resp.json().unwrap_or_default();
@@ -1509,7 +1579,7 @@ fn run_control_inner(
         }
         "systemd" => {
             if !is_safe_target(target) {
-                out.fail("invalid target for systemd");
+                out.fail_kind("invalid_input", "invalid target for systemd");
                 return Err(());
             }
             let cmd = match effective_action {
@@ -1518,10 +1588,10 @@ fn run_control_inner(
                 "restart" => "restart",
                 "reload" => "reload",
                 _ => {
-                    out.fail(&format!(
-                        "action {} not supported for systemd",
-                        effective_action
-                    ));
+                    out.fail_kind(
+                        "unsupported_action",
+                        &format!("action {} not supported for systemd", effective_action),
+                    );
                     return Err(());
                 }
             };
@@ -1546,34 +1616,43 @@ fn run_control_inner(
                                         Ok(())
                                     } else {
                                         let sudo_message = command_output_text(&outp2);
-                                        out.fail("unable to execute via sudo");
+                                        out.fail_kind(
+                                            "permission_denied",
+                                            "unable to execute via sudo",
+                                        );
                                         out.add_evidence(format!("sudo failed: {}", sudo_message));
                                         out.next_step = "Use an account with sudo privileges, or run the command manually.".to_string();
                                         Err(())
                                     }
                                 }
                                 Err(e) => {
-                                    out.fail("unable to execute via sudo");
+                                    out.fail_kind(
+                                        "permission_denied",
+                                        "unable to execute via sudo",
+                                    );
                                     out.add_evidence(format!("sudo launch failed: {e}"));
                                     out.next_step = "Use an account with sudo privileges, or run the command manually.".to_string();
                                     Err(())
                                 }
                             }
                         } else {
-                            out.fail(&format!("systemctl {} failed: {}", cmd, message));
+                            out.fail_kind(
+                                "service_control_failed",
+                                &format!("systemctl {} failed: {}", cmd, message),
+                            );
                             Err(())
                         }
                     }
                 }
                 Err(e) => {
-                    out.fail(&format!("systemctl: {e}"));
+                    out.fail_kind("dependency_error", &format!("systemctl: {e}"));
                     Err(())
                 }
             }
         }
         "service" => {
             if !is_safe_target(target) {
-                out.fail("invalid target for service");
+                out.fail_kind("invalid_input", "invalid target for service");
                 return Err(());
             }
             let cmd = match effective_action {
@@ -1582,10 +1661,10 @@ fn run_control_inner(
                 "restart" => "restart",
                 "reload" => "reload",
                 _ => {
-                    out.fail(&format!(
-                        "action {} not supported for service",
-                        effective_action
-                    ));
+                    out.fail_kind(
+                        "unsupported_action",
+                        &format!("action {} not supported for service", effective_action),
+                    );
                     return Err(());
                 }
             };
@@ -1608,27 +1687,36 @@ fn run_control_inner(
                                         Ok(())
                                     } else {
                                         let sudo_message = command_output_text(&outp2);
-                                        out.fail("unable to execute via sudo");
+                                        out.fail_kind(
+                                            "permission_denied",
+                                            "unable to execute via sudo",
+                                        );
                                         out.add_evidence(format!("sudo failed: {}", sudo_message));
                                         out.next_step = "Use an account with sudo privileges, or run the command manually.".to_string();
                                         Err(())
                                     }
                                 }
                                 Err(e) => {
-                                    out.fail("unable to execute via sudo");
+                                    out.fail_kind(
+                                        "permission_denied",
+                                        "unable to execute via sudo",
+                                    );
                                     out.add_evidence(format!("sudo launch failed: {e}"));
                                     out.next_step = "Use an account with sudo privileges, or run the command manually.".to_string();
                                     Err(())
                                 }
                             }
                         } else {
-                            out.fail(&format!("service {} {} failed: {}", target, cmd, message));
+                            out.fail_kind(
+                                "service_control_failed",
+                                &format!("service {} {} failed: {}", target, cmd, message),
+                            );
                             Err(())
                         }
                     }
                 }
                 Err(e) => {
-                    out.fail(&format!("service: {e}"));
+                    out.fail_kind("dependency_error", &format!("service: {e}"));
                     Err(())
                 }
             }
@@ -1639,10 +1727,13 @@ fn run_control_inner(
                 "stop" => "stop",
                 "restart" | "reload" => "restart",
                 _ => {
-                    out.fail(&format!(
-                        "action {} not supported for brew services",
-                        effective_action
-                    ));
+                    out.fail_kind(
+                        "unsupported_action",
+                        &format!(
+                            "action {} not supported for brew services",
+                            effective_action
+                        ),
+                    );
                     return Err(());
                 }
             };
@@ -1669,7 +1760,10 @@ fn run_control_inner(
                                         ));
                                         Ok(())
                                     } else {
-                                        out.fail("unable to execute via sudo");
+                                        out.fail_kind(
+                                            "permission_denied",
+                                            "unable to execute via sudo",
+                                        );
                                         out.add_evidence(format!(
                                             "sudo failed: {}",
                                             command_output_text(&outp2)
@@ -1679,43 +1773,55 @@ fn run_control_inner(
                                     }
                                 }
                                 Err(e) => {
-                                    out.fail("unable to execute via sudo");
+                                    out.fail_kind(
+                                        "permission_denied",
+                                        "unable to execute via sudo",
+                                    );
                                     out.add_evidence(format!("sudo launch failed: {e}"));
                                     out.next_step = "Use an account with sudo privileges, or run brew services manually.".to_string();
                                     Err(())
                                 }
                             }
                         } else {
-                            out.fail(&format!("brew services {} failed: {}", cmd, message));
+                            out.fail_kind(
+                                "service_control_failed",
+                                &format!("brew services {} failed: {}", cmd, message),
+                            );
                             Err(())
                         }
                     }
                 }
                 Err(e) => {
-                    out.fail(&format!("brew services: {e}"));
+                    out.fail_kind("dependency_error", &format!("brew services: {e}"));
                     Err(())
                 }
             }
         }
         "launchd" => {
-            out.fail("launchd lifecycle control is limited in this skill");
+            out.fail_kind(
+                "unsupported_action",
+                "launchd lifecycle control is limited in this skill",
+            );
             out.next_step =
                 "Prefer brew services on macOS, or use launchctl manually for this target."
                     .to_string();
             Err(())
         }
         "process_only" => {
-            out.fail("process_only manager does not support lifecycle control");
+            out.fail_kind(
+                "unsupported_action",
+                "process_only manager does not support lifecycle control",
+            );
             out.next_step =
                 "This process appears to be manually started; manage it with the original command, supervisor, or shell."
                     .to_string();
             Err(())
         }
         _ => {
-            out.fail(&format!(
-                "manager {} does not support lifecycle control",
-                manager
-            ));
+            out.fail_kind(
+                "unsupported_platform",
+                &format!("manager {} does not support lifecycle control", manager),
+            );
             Err(())
         }
     }
@@ -1820,6 +1926,7 @@ mod tests {
         let out = execute("req-1".to_string(), args, None)
             .expect("execute must return Ok(OutputContract)");
         assert_eq!(out.status, "error");
+        assert_eq!(out.error_kind, "missing_input");
         assert!(!out.failure_reason.is_empty(), "failure_reason must be set");
         assert!(!out.next_step.is_empty());
     }
@@ -1844,6 +1951,8 @@ mod tests {
         assert_eq!(out.status, "error");
         let resp = build_runner_response("req-bf".to_string(), Ok(out));
         assert_eq!(resp.status, "error");
+        assert_eq!(resp.error_kind.as_deref(), Some("missing_input"));
+        assert_eq!(resp.platform.as_deref(), Some(std::env::consts::OS));
         assert!(resp.error_text.is_some());
     }
 
@@ -1874,6 +1983,20 @@ mod tests {
         let args = json!({"action": "status", "target": "clawd"});
         let out = execute("req-m1".to_string(), args, None).unwrap();
         assert_eq!(out.manager_type, "rustclaw");
+    }
+
+    #[test]
+    fn rustclaw_status_without_user_key_falls_back_to_process_scan() {
+        let args = json!({"action": "status", "target": "clawd"});
+        let out = execute("req-rustclaw-fallback".to_string(), args, None).unwrap();
+        assert_eq!(out.manager_type, "rustclaw");
+        assert_eq!(out.status, "ok");
+        assert!(out.failure_reason.is_empty());
+        assert!(
+            out.pre_state.contains("clawd="),
+            "pre_state: {}",
+            out.pre_state
+        );
     }
 
     #[test]
@@ -1919,6 +2042,7 @@ mod tests {
             "executed_actions",
             "key_evidence",
             "failure_reason",
+            "error_kind",
         ];
         for key in required {
             assert!(

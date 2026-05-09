@@ -522,6 +522,7 @@ pub(crate) fn append_delivery_message(
     delivery_messages: &mut Vec<String>,
     message: String,
 ) {
+    let message = crate::visible_text::sanitize_user_visible_text(&message);
     delivery_messages.push(message.clone());
     info!(
         "delivery appended task_id={} len={} content={}",
@@ -573,8 +574,8 @@ pub(super) fn action_fingerprint(state: &AppState, action: &AgentAction) -> Stri
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_execution_recipe_progress_hints, execution_recipe_phase_progress_key,
-        AgentLoopGuardPolicy, LoopRecipeOverrides,
+        append_delivery_message, collect_execution_recipe_progress_hints,
+        execution_recipe_phase_progress_key, AgentLoopGuardPolicy, LoopRecipeOverrides,
     };
     use crate::agent_engine::LoopState;
     use crate::execution_recipe::{
@@ -642,6 +643,19 @@ mod tests {
         });
         policy.apply_recipe_runtime_overrides(&mut recipe);
         assert_eq!(recipe.max_repairs, 3);
+    }
+
+    #[test]
+    fn append_delivery_message_sanitizes_structured_skill_errors() {
+        let mut messages = Vec::new();
+        append_delivery_message(
+            "task-support-test",
+            &mut messages,
+            r#"执行失败：__RC_SKILL_ERROR__:{"skill":"archive_basic","error_kind":"unknown","error_text":"archive is required","text":null}。"#
+                .to_string(),
+        );
+
+        assert_eq!(messages, vec!["执行失败：archive is required。"]);
     }
 
     #[test]

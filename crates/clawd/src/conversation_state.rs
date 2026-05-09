@@ -1344,7 +1344,7 @@ mod tests {
             &route_result,
             Some(&turn_analysis),
             "Write a short release note for RustClaw.",
-            "RustClaw 0.1.6 is now available.",
+            "RustClaw 0.1.7 is now available.",
             &[],
         );
 
@@ -1352,7 +1352,7 @@ mod tests {
             prompt.as_deref(),
             Some("Write a short release note for RustClaw.")
         );
-        assert_eq!(output.as_deref(), Some("RustClaw 0.1.6 is now available."));
+        assert_eq!(output.as_deref(), Some("RustClaw 0.1.7 is now available."));
     }
 
     #[test]

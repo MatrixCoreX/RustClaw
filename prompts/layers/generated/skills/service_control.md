@@ -43,13 +43,13 @@
 
 ## Error Contract (from interface)
 - Missing or invalid `action` / unknown `target` → clear `failure_reason`.
-- **No matching service** (0 candidates after discovery) → `failure_reason` and `next_step` "请提供更具体服务名，或确认该服务已在当前主机安装并可用。" Do not invent or guess service names.
-- **Ambiguous match** (>1 candidates) → `failure_reason` "ambiguous: multiple matching services", `next_step` lists candidates for user to choose. Do not execute until exactly one target is specified.
+- **No matching service** (0 candidates after discovery) → `error_kind=not_found`, `failure_reason`, and `next_step` "请提供更具体服务名，或确认该服务已在当前主机安装并可用。" Do not invent or guess service names.
+- **Ambiguous match** (>1 candidates) → `error_kind=ambiguous_target`, `failure_reason` "ambiguous: multiple matching services", `next_step` lists candidates for user to choose. Do not execute until exactly one target is specified.
 - `clawd` → start/stop/restart return error (main daemon).
-- Ambiguous target (vague wording) + stop/restart without `allow_risky` → refuse with `failure_reason` and `next_step`.
-- Manager not implemented for the action → `failure_reason` and optional `next_step`.
-- API 401 (rustclaw) → suggest RUSTCLAW_UI_KEY.
-- **Permission denied**: On systemd/service, if the control command fails due to permission, the skill may retry with `sudo`. Success is returned without mentioning sudo. If sudo also fails, `failure_reason` is "无法通过 sudo 执行" and `next_step` suggests using a privileged account or configuring passwordless sudo.
+- Ambiguous target (vague wording) + stop/restart without `allow_risky` → refuse with `error_kind=ambiguous_target`, `failure_reason`, and `next_step`.
+- Manager not implemented for the action → `error_kind=unsupported_platform` or `unsupported_action`, `failure_reason`, and optional `next_step`.
+- API 401 (rustclaw) → `error_kind=permission_denied`; suggest RUSTCLAW_UI_KEY.
+- **Permission denied**: On systemd/service, if the control command fails due to permission, the skill may retry with `sudo`. Success is returned without mentioning sudo. If sudo also fails, `error_kind=permission_denied`, `failure_reason` is "无法通过 sudo 执行", and `next_step` suggests using a privileged account or configuring passwordless sudo.
 
 ## Request/Response Examples (from interface)
 ### status (all, rustclaw)
@@ -83,7 +83,7 @@ Request:
 {"request_id":"r5","args":{"action":"restart","target":"nginx","manager_type":"systemd"}}
 ```
 
-Response (concept): skill returns `{"request_id":"...","status":"ok","text":"{...structured output...}","error_text":null}` where `text` is the JSON output contract above.
+Response (concept): skill returns `{"request_id":"...","status":"ok","text":"{...structured output...}","error_text":null}` where `text` is the JSON output contract above. On failure, runner response includes top-level `error_kind` and `platform` in addition to the structured JSON in `text`.
 
 ## Output Contract
 - Use only actions and params declared in the interface spec.

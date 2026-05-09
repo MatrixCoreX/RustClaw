@@ -66,7 +66,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
 
     match action {
         "list" => {
-            let archive = required_str_any(obj, &["archive", "archive_path"])?;
+            let archive = required_str_any(obj, &["archive", "archive_path", "path"])?;
             let archive = resolve_path(&root, archive, false)?;
             list_archive(&archive).map(|text| {
                 (
@@ -103,7 +103,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         "unpack" => {
             let archive = resolve_path(
                 &root,
-                required_str_any(obj, &["archive", "archive_path"])?,
+                required_str_any(obj, &["archive", "archive_path", "path"])?,
                 false,
             )?;
             let dest = resolve_path(&root, required_str_any(obj, &["dest", "dest_path"])?, true)?;

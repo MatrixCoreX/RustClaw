@@ -67,6 +67,8 @@ pub(crate) fn log_prompt_render_with_version(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PromptSchemaId {
     IntentNormalizer,
+    ContractRepairJudge,
+    UserResponseContractValidator,
     PlanResult,
     FinalizerOut,
     DeliveryTextClassifier,
@@ -79,6 +81,8 @@ impl PromptSchemaId {
     fn as_str(self) -> &'static str {
         match self {
             Self::IntentNormalizer => "intent_normalizer",
+            Self::ContractRepairJudge => "contract_repair_judge",
+            Self::UserResponseContractValidator => "user_response_contract_validator",
             Self::PlanResult => "plan_result",
             Self::FinalizerOut => "finalizer_out",
             Self::DeliveryTextClassifier => "delivery_text_classifier",
@@ -94,6 +98,8 @@ impl PromptSchemaId {
         }
 
         static INTENT_NORMALIZER: OnceLock<Value> = OnceLock::new();
+        static CONTRACT_REPAIR_JUDGE: OnceLock<Value> = OnceLock::new();
+        static USER_RESPONSE_CONTRACT_VALIDATOR: OnceLock<Value> = OnceLock::new();
         static PLAN_RESULT: OnceLock<Value> = OnceLock::new();
         static FINALIZER_OUT: OnceLock<Value> = OnceLock::new();
         static DELIVERY_TEXT_CLASSIFIER: OnceLock<Value> = OnceLock::new();
@@ -107,6 +113,18 @@ impl PromptSchemaId {
                     "../../../prompts/schemas/intent_normalizer.schema.json"
                 ))
             }),
+            Self::ContractRepairJudge => CONTRACT_REPAIR_JUDGE.get_or_init(|| {
+                parse_schema(include_str!(
+                    "../../../prompts/schemas/contract_repair_judge.schema.json"
+                ))
+            }),
+            Self::UserResponseContractValidator => {
+                USER_RESPONSE_CONTRACT_VALIDATOR.get_or_init(|| {
+                    parse_schema(include_str!(
+                        "../../../prompts/schemas/user_response_contract_validator.schema.json"
+                    ))
+                })
+            }
             Self::PlanResult => PLAN_RESULT.get_or_init(|| {
                 parse_schema(include_str!(
                     "../../../prompts/schemas/plan_result.schema.json"
@@ -1323,11 +1341,27 @@ fn normalize_run_cmd_call(
     if let Some(llm_suggest_once) = value_for("llm_suggest_once", &[]) {
         args.insert("llm_suggest_once".to_string(), llm_suggest_once);
     }
+    preserve_internal_execution_args(&mut args, raw_args);
+    preserve_internal_execution_args(&mut args, Some(obj));
     json!({
         "type": "call_skill",
         "skill": "run_cmd",
         "args": Value::Object(args),
     })
+}
+
+fn preserve_internal_execution_args(
+    args: &mut serde_json::Map<String, Value>,
+    source: Option<&serde_json::Map<String, Value>>,
+) {
+    let Some(source) = source else {
+        return;
+    };
+    for (key, value) in source {
+        if key.starts_with("_clawd_") {
+            args.entry(key.clone()).or_insert_with(|| value.clone());
+        }
+    }
 }
 
 fn normalize_system_basic_base_skill_alias(args: &serde_json::Map<String, Value>) -> Option<Value> {
@@ -2129,6 +2163,53 @@ mod tests {
                     "command": "pwd",
                     "cwd": "/tmp",
                     "timeout_seconds": 3
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn normalize_agent_action_shape_preserves_internal_run_cmd_metadata() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let normalized = super::parse_agent_action_json_with_repair(
+            r#"{"type":"call_skill","skill":"run_cmd","args":{"command":"bash /tmp/check.sh","cwd":"/tmp","_clawd_validation":{"profile":"code_change","validator_type":"runtime_probe","validated_target":"/tmp/check.sh"}}}"#,
+            &state,
+        )
+        .expect("run_cmd should normalize");
+        assert_eq!(
+            normalized,
+            json!({
+                "type": "call_skill",
+                "skill": "run_cmd",
+                "args": {
+                    "command": "bash /tmp/check.sh",
+                    "cwd": "/tmp",
+                    "_clawd_validation": {
+                        "profile": "code_change",
+                        "validator_type": "runtime_probe",
+                        "validated_target": "/tmp/check.sh"
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn normalize_agent_action_shape_preserves_top_level_internal_run_cmd_metadata() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let normalized = super::parse_agent_action_json_with_repair(
+            r#"{"type":"run_cmd","cmd":"pwd","_clawd_continue_on_error":true}"#,
+            &state,
+        )
+        .expect("bare run_cmd should normalize");
+        assert_eq!(
+            normalized,
+            json!({
+                "type": "call_skill",
+                "skill": "run_cmd",
+                "args": {
+                    "command": "pwd",
+                    "_clawd_continue_on_error": true
                 }
             })
         );

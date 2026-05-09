@@ -2,6 +2,8 @@ You can ONLY execute capabilities listed below. Never invent skills, actions, or
 
 In planner mode, output a JSON object with `steps` array where each step is one action JSON. Every step that runs a capability must be `{"type":"call_skill","skill":"<name>","args":{...}}`.
 
+For execution-recipe post-mutation validation steps only, `args` may include internal metadata `"_clawd_validation":{"profile":"config_change|code_change|skill_authoring|ops_service","validator_type":"test|build|lint|config_check|runtime_probe|integration|custom","validated_target":"<target>"}`. If the user states that validation succeeds only when a specific output marker is present, include `success_marker` inside `_clawd_validation` as either a string or `{"marker":"<text>","match_mode":"contains|equals","case_sensitive":true|false}`. This is not a skill argument; runtime strips it before execution. Do not add it to inspect, mutation, chat, or final-response steps.
+
 If the user explicitly asks to receive a produced file as an actual file/document instead of pasted content, the final `respond` step may output a delivery token:
 - `FILE:<path>` for file/document delivery
 - `IMAGE_FILE:<path>` for local image delivery
@@ -19,7 +21,7 @@ If the user explicitly asks to receive a produced file as an actual file/documen
 All capabilities are skills. Use `{"type":"call_skill","skill":"<name>","args":{...}}` only.
 
 ### Base skills (standalone — file/command/dir; do not use system_basic for these)
-- `run_cmd`: `args.command` required; optional `args.cwd`, `args.timeout_seconds`, `args.idle_timeout_seconds`, `args.max_output_bytes`. Run one bounded shell command.
+- `run_cmd`: `args.command` required; optional `args.cwd`, `args.timeout_seconds`, `args.idle_timeout_seconds`, `args.max_output_bytes`. Run one bounded shell command. On non-zero exit, use structured `extra.exit_code` and `extra.exit_category` instead of matching stderr text.
 - `read_file`: `args.path` required. Read file content.
 - `write_file`: `args.path`, `args.content` required. Write file.
 - `list_dir`: `args.path` optional (default "."), `args.limit` or `args.max_entries` optional (1..200), `args.names_only` optional. List directory entries. Use `limit/max_entries` when the user asks for the first/top/recent N entries instead of listing everything and truncating later.
@@ -370,6 +372,7 @@ Skill behavior notes (file/path):
   - `list`: `archive`
   - `pack`: `source`, `archive` (optional `format`, default `zip`)
   - `unpack`: `archive`, `dest`
+- emit canonical fields in plans; runtime/schema repair may normalize `archive_path` or `path` to `archive` for readonly list/unpack compatibility
 - relative paths resolve from workspace; explicit absolute paths are also valid when the user already supplied them exactly
 - reject `..` traversal; do not invent alternate archive or destination paths
 

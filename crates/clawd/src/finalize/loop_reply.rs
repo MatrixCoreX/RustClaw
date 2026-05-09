@@ -112,13 +112,18 @@ pub(crate) fn output_excerpt_has_missing_file_evidence(output: &str) -> bool {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
         return false;
     };
-    let fs_search_found_nothing = value.get("action").and_then(|v| v.as_str()) == Some("find_name")
+    let locator_found_nothing = value
+        .get("action")
+        .and_then(|v| v.as_str())
+        .is_some_and(|action| matches!(action, "find_name" | "find_path"))
         && value.get("count").and_then(|v| v.as_i64()) == Some(0)
-        && value
-            .get("results")
-            .and_then(|v| v.as_array())
-            .is_some_and(|results| results.is_empty());
-    if fs_search_found_nothing {
+        && ["results", "matches"].iter().any(|field| {
+            value
+                .get(field)
+                .and_then(|v| v.as_array())
+                .is_some_and(|items| items.is_empty())
+        });
+    if locator_found_nothing {
         return true;
     }
 
@@ -140,11 +145,35 @@ pub(crate) fn output_excerpt_has_missing_file_evidence(output: &str) -> bool {
 
 fn has_missing_file_search_evidence(loop_state: &LoopState) -> bool {
     loop_state.executed_step_results.iter().rev().any(|step| {
-        step.is_ok()
-            && step
-                .output
-                .as_deref()
-                .is_some_and(output_excerpt_has_missing_file_evidence)
+        if step
+            .output
+            .as_deref()
+            .is_some_and(output_excerpt_has_missing_file_evidence)
+        {
+            return true;
+        }
+        step_error_has_missing_file_evidence(step)
+    })
+}
+
+fn step_error_has_missing_file_evidence(step: &crate::executor::StepExecutionResult) -> bool {
+    let Some(error) = step
+        .error
+        .as_deref()
+        .map(str::trim)
+        .filter(|error| !error.is_empty())
+    else {
+        return false;
+    };
+    if error.starts_with("__RC_READ_FILE_NOT_FOUND__:") {
+        return true;
+    }
+    crate::skills::parse_structured_skill_error(error).is_some_and(|structured| {
+        structured.error_kind == "not_found"
+            && matches!(
+                structured.skill.as_str(),
+                "read_file" | "system_basic" | "fs_search"
+            )
     })
 }
 
@@ -186,11 +215,20 @@ fn latest_file_delivery_observation_is_missing(loop_state: &LoopState) -> bool {
                 "respond" | "think" | "synthesize_answer"
             )
         })
-        .filter_map(|step| step.output.as_deref())
-        .find_map(|output| {
-            if output_excerpt_has_missing_file_evidence(output) {
+        .find_map(|step| {
+            if step_error_has_missing_file_evidence(step) {
                 Some(true)
-            } else if output_excerpt_has_existing_file_evidence(output) {
+            } else if step
+                .output
+                .as_deref()
+                .is_some_and(output_excerpt_has_missing_file_evidence)
+            {
+                Some(true)
+            } else if step
+                .output
+                .as_deref()
+                .is_some_and(output_excerpt_has_existing_file_evidence)
+            {
                 Some(false)
             } else {
                 None
@@ -255,9 +293,38 @@ fn missing_file_path_from_loop(
         .executed_step_results
         .iter()
         .rev()
-        .filter_map(|step| step.output.as_deref())
-        .find_map(missing_file_path_from_output)
+        .find_map(|step| {
+            step.output
+                .as_deref()
+                .and_then(missing_file_path_from_output)
+                .or_else(|| missing_file_path_from_step_error(step))
+        })
         .or_else(|| route_locator_hint(agent_run_context).map(ToString::to_string))
+}
+
+fn missing_file_path_from_step_error(
+    step: &crate::executor::StepExecutionResult,
+) -> Option<String> {
+    let error = step.error.as_deref()?.trim();
+    if let Some(path) = error
+        .strip_prefix("__RC_READ_FILE_NOT_FOUND__:")
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        return Some(path.to_string());
+    }
+    let structured = crate::skills::parse_structured_skill_error(error)?;
+    if structured.error_kind != "not_found" {
+        return None;
+    }
+    structured
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get("path"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(ToString::to_string)
 }
 
 fn resolve_file_token_from_auto_locator_answer(
@@ -981,10 +1048,33 @@ fn prefer_english_for_user_text_without_state(user_text: &str) -> bool {
     crate::language_policy::request_language_hint(user_text) == "en"
 }
 
-fn prefer_english_for_execution_summary(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecutionSummaryLanguage {
+    Zh,
+    En,
+    Ja,
+    Ko,
+}
+
+fn execution_summary_language_from_hint(hint: &str) -> ExecutionSummaryLanguage {
+    let normalized = hint.trim().to_ascii_lowercase();
+    if normalized.starts_with("ja") {
+        ExecutionSummaryLanguage::Ja
+    } else if normalized.starts_with("ko") {
+        ExecutionSummaryLanguage::Ko
+    } else if normalized.starts_with("zh") || normalized == "mixed" {
+        ExecutionSummaryLanguage::Zh
+    } else if normalized == "config_default" || normalized.is_empty() {
+        ExecutionSummaryLanguage::Zh
+    } else {
+        ExecutionSummaryLanguage::En
+    }
+}
+
+fn execution_summary_language(
     agent_run_context: Option<&AgentRunContext>,
     user_text: Option<&str>,
-) -> bool {
+) -> ExecutionSummaryLanguage {
     if let Some(original) = agent_run_context
         .and_then(|ctx| ctx.original_user_request.as_deref())
         .map(str::trim)
@@ -992,12 +1082,35 @@ fn prefer_english_for_execution_summary(
     {
         let hint = crate::language_policy::request_language_hint(original);
         if hint != "config_default" {
-            return hint == "en";
+            return execution_summary_language_from_hint(hint);
         }
     }
     user_text
-        .map(prefer_english_for_user_text_without_state)
-        .unwrap_or(false)
+        .map(crate::language_policy::request_language_hint)
+        .map(execution_summary_language_from_hint)
+        .unwrap_or(ExecutionSummaryLanguage::Zh)
+}
+
+fn execution_summary_prefix(language: ExecutionSummaryLanguage) -> &'static str {
+    match language {
+        ExecutionSummaryLanguage::Zh => crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX,
+        ExecutionSummaryLanguage::En => crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN,
+        ExecutionSummaryLanguage::Ja => crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_JA,
+        ExecutionSummaryLanguage::Ko => crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_KO,
+    }
+}
+
+fn execution_summary_status_label(language: ExecutionSummaryLanguage, ok: bool) -> &'static str {
+    match (language, ok) {
+        (ExecutionSummaryLanguage::Zh, true) => "输出",
+        (ExecutionSummaryLanguage::Zh, false) => "错误",
+        (ExecutionSummaryLanguage::En, true) => "Output",
+        (ExecutionSummaryLanguage::En, false) => "Error",
+        (ExecutionSummaryLanguage::Ja, true) => "出力",
+        (ExecutionSummaryLanguage::Ja, false) => "エラー",
+        (ExecutionSummaryLanguage::Ko, true) => "출력",
+        (ExecutionSummaryLanguage::Ko, false) => "오류",
+    }
 }
 
 fn execution_recipe_closeout_note(
@@ -1705,29 +1818,29 @@ fn raw_command_arg_from_plan_step(plan_step: Option<&crate::PlanStep>) -> Option
 fn execution_summary_invocation_label(
     step: &crate::executor::StepExecutionResult,
     plan_step: Option<&crate::PlanStep>,
-    prefer_english: bool,
+    language: ExecutionSummaryLanguage,
 ) -> String {
     if let Some(command) = command_arg_from_plan_step(plan_step) {
-        return if prefer_english {
-            format!("command `{command}`")
-        } else {
-            format!("命令 `{command}`")
+        return match language {
+            ExecutionSummaryLanguage::Zh => format!("命令 `{command}`"),
+            ExecutionSummaryLanguage::En => format!("command `{command}`"),
+            ExecutionSummaryLanguage::Ja => format!("コマンド `{command}`"),
+            ExecutionSummaryLanguage::Ko => format!("명령 `{command}`"),
         };
     }
 
     let action_type = plan_step
         .map(|step| step.action_type.as_str())
         .unwrap_or("call_skill");
-    let kind = if prefer_english {
-        if action_type == "call_tool" {
-            "tool"
-        } else {
-            "skill"
-        }
-    } else if action_type == "call_tool" {
-        "工具"
-    } else {
-        "技能"
+    let kind = match (language, action_type == "call_tool") {
+        (ExecutionSummaryLanguage::Zh, true) => "工具",
+        (ExecutionSummaryLanguage::Zh, false) => "技能",
+        (ExecutionSummaryLanguage::En, true) => "tool",
+        (ExecutionSummaryLanguage::En, false) => "skill",
+        (ExecutionSummaryLanguage::Ja, true) => "ツール",
+        (ExecutionSummaryLanguage::Ja, false) => "スキル",
+        (ExecutionSummaryLanguage::Ko, true) => "도구",
+        (ExecutionSummaryLanguage::Ko, false) => "스킬",
     };
     let skill = plan_step
         .map(|step| step.skill.as_str())
@@ -1737,10 +1850,15 @@ fn execution_summary_invocation_label(
         .unwrap_or_default();
     if args.is_empty() {
         format!("{kind} `{skill}`")
-    } else if prefer_english {
-        format!("{kind} `{skill}` ({args})")
     } else {
-        format!("{kind} `{skill}`（{args}）")
+        match language {
+            ExecutionSummaryLanguage::Zh | ExecutionSummaryLanguage::Ja => {
+                format!("{kind} `{skill}`（{args}）")
+            }
+            ExecutionSummaryLanguage::En | ExecutionSummaryLanguage::Ko => {
+                format!("{kind} `{skill}` ({args})")
+            }
+        }
     }
 }
 
@@ -1764,6 +1882,11 @@ fn output_text_from_execution_result(
             "file not found: {}",
             path.trim()
         )));
+    }
+    if crate::skills::parse_structured_skill_error(trimmed).is_some() {
+        return Some(crate::visible_text::sanitize_user_visible_text(
+            &crate::skills::normalize_skill_error_for_user(&step.skill, trimmed),
+        ));
     }
     if !step.is_ok() && crate::skills::is_recoverable_skill_error(&step.skill, trimmed) {
         return Some(crate::visible_text::sanitize_user_visible_text(
@@ -1830,12 +1953,8 @@ fn build_execution_summary_messages(
         return Vec::new();
     }
 
-    let prefer_english = prefer_english_for_execution_summary(agent_run_context, user_text);
-    let prefix = if prefer_english {
-        crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN.to_string()
-    } else {
-        crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX.to_string()
-    };
+    let language = execution_summary_language(agent_run_context, user_text);
+    let prefix = execution_summary_prefix(language).to_string();
     let omitted = steps.len().saturating_sub(EXECUTION_SUMMARY_MAX_STEPS);
     steps
         .iter()
@@ -1845,38 +1964,41 @@ fn build_execution_summary_messages(
             let plan_step = plan_step_for_execution(loop_state, step);
             let output = output_text_from_execution_result(step)?.replace("```", "'''");
             let output = truncate_with_ellipsis(&output, EXECUTION_SUMMARY_OUTPUT_MAX_CHARS);
-            let status_label = if prefer_english {
-                if step.is_ok() {
-                    "Output"
-                } else {
-                    "Error"
+            let status_label = execution_summary_status_label(language, step.is_ok());
+            let invocation = execution_summary_invocation_label(step, plan_step, language);
+            let line = match language {
+                ExecutionSummaryLanguage::Zh => format!("{}. 调用{}", index + 1, invocation),
+                ExecutionSummaryLanguage::En => format!("{}. Called {}", index + 1, invocation),
+                ExecutionSummaryLanguage::Ja => {
+                    format!("{}. {}を呼び出しました", index + 1, invocation)
                 }
-            } else if step.is_ok() {
-                "输出"
-            } else {
-                "错误"
-            };
-            let invocation = execution_summary_invocation_label(step, plan_step, prefer_english);
-            let line = if prefer_english {
-                format!("{}. Called {}", index + 1, invocation)
-            } else {
-                format!("{}. 调用{}", index + 1, invocation)
+                ExecutionSummaryLanguage::Ko => format!("{}. {} 호출", index + 1, invocation),
             };
             let mut lines = vec![prefix.clone(), line];
-            if prefer_english {
-                lines.push(format!("   {status_label}:"));
+            let status_separator = if matches!(language, ExecutionSummaryLanguage::En) {
+                ":"
             } else {
-                lines.push(format!("   {status_label}："));
-            }
+                "："
+            };
+            lines.push(format!("   {status_label}{status_separator}"));
             lines.push("```text".to_string());
             lines.push(output);
             lines.push("```".to_string());
             if omitted > 0 && index + 1 == EXECUTION_SUMMARY_MAX_STEPS {
-                if prefer_english {
-                    let suffix = if omitted == 1 { "step" } else { "steps" };
-                    lines.push(format!("... ({omitted} more execution {suffix} omitted)"));
-                } else {
-                    lines.push(format!("...（还有 {omitted} 个执行步骤已省略）"));
+                match language {
+                    ExecutionSummaryLanguage::Zh => {
+                        lines.push(format!("...（还有 {omitted} 个执行步骤已省略）"));
+                    }
+                    ExecutionSummaryLanguage::En => {
+                        let suffix = if omitted == 1 { "step" } else { "steps" };
+                        lines.push(format!("... ({omitted} more execution {suffix} omitted)"));
+                    }
+                    ExecutionSummaryLanguage::Ja => {
+                        lines.push(format!("...（他 {omitted} 件の実行手順を省略）"));
+                    }
+                    ExecutionSummaryLanguage::Ko => {
+                        lines.push(format!("... (추가 실행 단계 {omitted}개 생략)"));
+                    }
                 }
             }
             Some(lines.join("\n"))
@@ -1921,14 +2043,10 @@ fn error_looks_like_os_permission_denied(error: &str) -> bool {
 }
 
 fn error_looks_like_missing_file_or_directory(error: &str) -> bool {
-    let lower = error.to_ascii_lowercase();
-    lower.contains("no such file or directory")
-        || lower.contains("(os error 2)")
-        || lower.contains("__rc_read_file_not_found__")
-        || lower.contains("file not found")
-        || lower.contains("directory not found")
-        || lower.contains("path not found")
-        || lower.contains("does not exist at the specified path")
+    if let Some(structured) = crate::skills::parse_structured_skill_error(error) {
+        return structured.error_kind == "not_found";
+    }
+    error.trim().starts_with("__RC_READ_FILE_NOT_FOUND__:")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1948,35 +2066,22 @@ fn route_is_service_status(agent_run_context: Option<&AgentRunContext>) -> bool 
 }
 
 fn service_status_observation_from_error(error: &str) -> Option<ServiceStatusFailureObservation> {
-    let lower = error.to_ascii_lowercase();
-    if lower.contains("could not be found")
-        || lower.contains("unit not found")
-        || (lower.contains("unit ") && lower.contains(" not found"))
-    {
-        return Some(ServiceStatusFailureObservation::UnitNotFound);
-    }
-    if lower.contains("active: inactive")
-        || lower.contains("inactive (dead)")
-        || lower.lines().any(|line| line.trim() == "inactive")
-    {
-        return Some(ServiceStatusFailureObservation::Inactive);
-    }
-    if lower.contains("active: failed")
-        || lower.contains("failed (")
-        || lower.lines().any(|line| line.trim() == "failed")
-    {
-        return Some(ServiceStatusFailureObservation::Failed);
+    if let Some(structured) = crate::skills::parse_structured_skill_error(error) {
+        return match structured.error_kind.as_str() {
+            "not_found" => Some(ServiceStatusFailureObservation::UnitNotFound),
+            "service_inactive" => Some(ServiceStatusFailureObservation::Inactive),
+            "service_failed" | "service_control_failed" => {
+                Some(ServiceStatusFailureObservation::Failed)
+            }
+            _ => None,
+        };
     }
     None
 }
 
 fn extract_systemd_unit_from_error(error: &str) -> Option<String> {
-    let after_unit = error.split("Unit ").nth(1)?;
-    let raw = after_unit
-        .split_whitespace()
-        .next()?
-        .trim_matches(|ch| matches!(ch, '"' | '\'' | '`' | ':' | ';' | ',' | '.'));
-    (!raw.is_empty()).then(|| raw.to_string())
+    let _ = error;
+    None
 }
 
 fn service_status_target_label(error: &str, agent_run_context: Option<&AgentRunContext>) -> String {
@@ -1985,6 +2090,10 @@ fn service_status_target_label(error: &str, agent_run_context: Option<&AgentRunC
         .map(|route| route.output_contract.locator_hint.trim())
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+        .or_else(|| {
+            crate::skills::parse_structured_skill_error(error)
+                .and_then(|structured| structured.service_name)
+        })
         .or_else(|| extract_systemd_unit_from_error(error))
         .unwrap_or_else(|| "requested service".to_string())
 }
@@ -2029,6 +2138,7 @@ fn content_evidence_step_failure_default_answer(
     agent_run_context: Option<&AgentRunContext>,
     failed_step: &crate::executor::StepExecutionResult,
     error: &str,
+    permission_denied: bool,
 ) -> String {
     let locator = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
@@ -2045,7 +2155,7 @@ fn content_evidence_step_failure_default_answer(
         }
         (false, None) => format!("`{}` 步骤执行失败：{error}。", failed_step.skill.trim()),
     };
-    if error_looks_like_os_permission_denied(error) {
+    if permission_denied {
         if prefer_english {
             format!("{answer} The `clawd` process does not have sudo/root permission to access it.")
         } else {
@@ -2054,6 +2164,98 @@ fn content_evidence_step_failure_default_answer(
     } else {
         answer
     }
+}
+
+fn structured_extra_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| crate::truncate_for_agent_trace(&compact_observed_stream(value)))
+}
+
+fn structured_extra_i64(value: &serde_json::Value, key: &str) -> Option<i64> {
+    value.get(key).and_then(|value| value.as_i64())
+}
+
+fn structured_extra_bool(value: &serde_json::Value, key: &str) -> bool {
+    value
+        .get(key)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+fn compact_observed_stream(text: &str) -> String {
+    let compact = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    if compact.is_empty() {
+        text.trim().to_string()
+    } else {
+        compact
+    }
+}
+
+fn run_cmd_failure_direct_answer(
+    state: &AppState,
+    user_text: &str,
+    skill_name: &str,
+    raw_error: &str,
+    normalized_error: &str,
+) -> Option<String> {
+    let structured = crate::skills::parse_structured_skill_error(raw_error)?;
+    let effective_skill = if structured.skill.trim().is_empty() {
+        skill_name
+    } else {
+        structured.skill.as_str()
+    };
+    if !effective_skill.eq_ignore_ascii_case("run_cmd") {
+        return None;
+    }
+    let extra = structured.extra.as_ref()?;
+    let exit_code = structured_extra_i64(extra, "exit_code");
+    let stderr = structured_extra_string(extra, "stderr");
+    let stdout = structured_extra_string(extra, "stdout");
+    let output_truncated = structured_extra_bool(extra, "output_truncated");
+    let prefer_english = prefer_english_for_user_text(state, user_text);
+
+    if prefer_english {
+        let mut sentence = if let Some(exit_code) = exit_code {
+            format!("The command failed with exit code {exit_code}")
+        } else {
+            format!("The command failed: {normalized_error}")
+        };
+        if let Some(stderr) = stderr.as_deref() {
+            sentence.push_str(&format!(". Stderr: {stderr}"));
+        } else if let Some(stdout) = stdout.as_deref() {
+            sentence.push_str(&format!(". Stdout: {stdout}"));
+        }
+        if output_truncated {
+            sentence.push_str(". Output was truncated");
+        }
+        sentence.push('.');
+        return Some(sentence);
+    }
+
+    let mut sentence = if let Some(exit_code) = exit_code {
+        format!("命令执行失败，退出码为 {exit_code}")
+    } else {
+        format!("命令执行失败：{normalized_error}")
+    };
+    if let Some(stderr) = stderr.as_deref() {
+        sentence.push_str(&format!("，错误输出为：{stderr}"));
+    } else if let Some(stdout) = stdout.as_deref() {
+        sentence.push_str(&format!("，标准输出为：{stdout}"));
+    }
+    if output_truncated {
+        sentence.push_str("，输出已截断");
+    }
+    sentence.push('。');
+    Some(sentence)
 }
 
 fn missing_content_target_label(
@@ -2130,7 +2332,9 @@ async fn content_evidence_step_failure_answer(
     }
     let recoverable_skill_error =
         crate::skills::is_recoverable_skill_error(&failed_step.skill, raw_error);
-    let user_visible_error = if recoverable_skill_error {
+    let observable_run_cmd_error =
+        crate::skills::is_observable_run_cmd_error(&failed_step.skill, raw_error);
+    let user_visible_error = if recoverable_skill_error || observable_run_cmd_error {
         crate::skills::normalize_skill_error_for_user(&failed_step.skill, raw_error)
     } else {
         raw_error.to_string()
@@ -2177,14 +2381,29 @@ async fn content_evidence_step_failure_answer(
     }
 
     let permission_denied = error_looks_like_os_permission_denied(raw_error);
-    let default_answer = content_evidence_step_failure_default_answer(
-        state,
-        user_text,
-        agent_run_context,
-        failed_step,
-        error,
-    );
-    if permission_denied || recoverable_skill_error {
+    let default_answer = if observable_run_cmd_error {
+        run_cmd_failure_direct_answer(state, user_text, &failed_step.skill, raw_error, error)
+            .unwrap_or_else(|| {
+                content_evidence_step_failure_default_answer(
+                    state,
+                    user_text,
+                    agent_run_context,
+                    failed_step,
+                    error,
+                    permission_denied,
+                )
+            })
+    } else {
+        content_evidence_step_failure_default_answer(
+            state,
+            user_text,
+            agent_run_context,
+            failed_step,
+            error,
+            permission_denied,
+        )
+    };
+    if permission_denied || recoverable_skill_error || observable_run_cmd_error {
         return Some((
             default_answer,
             crate::task_journal::TaskJournalFinalizerSummary {
@@ -2425,10 +2644,9 @@ fn observed_execution_facts_for_missing_delivery(
 
 fn missing_delivery_after_observation_default_message(state: &AppState, user_text: &str) -> String {
     if prefer_english_for_user_text(state, user_text) {
-        "I attached the execution results, but the final answer did not pass the current delivery requirements. Ask me to synthesize again from the raw results.".to_string()
+        "I have execution results, but I could not turn them into a reliable final answer. Ask me to retry from the raw results.".to_string()
     } else {
-        "执行结果已附上，但最终答案没有通过当前交付要求。你可以让我基于这些原始结果重新整理。"
-            .to_string()
+        "已有执行结果，但我没能整理成可靠结论。你可以让我基于原始结果重新整理一次。".to_string()
     }
 }
 
@@ -2722,9 +2940,10 @@ async fn missing_delivery_after_observation_message(
             "Do not claim the task succeeded.".to_string(),
             "Do not ask which item the user wants if execution outputs are already attached."
                 .to_string(),
-            "Explain that execution results are attached but final synthesis did not satisfy the delivery requirements."
+            "Use observed execution facts to explain the blocker or incomplete result."
                 .to_string(),
-            "Offer one concrete next step: re-synthesize from the raw results.".to_string(),
+            "Offer one concrete next step only when the observed facts do not already answer the user's request."
+                .to_string(),
         ],
         "brief_failure_with_next_step",
         &language_hint,
@@ -3664,6 +3883,53 @@ mod tests {
     }
 
     #[test]
+    fn execution_summary_uses_japanese_labels_for_japanese_request() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "logs ディレクトリのファイル名を3つだけ一覧して。".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "system_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": "inventory_dir",
+                        "path": "/tmp/logs",
+                        "names_only": true,
+                        "max_entries": 3
+                    }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "system_basic",
+            "act_plan.log\nclawd.log\nclawd.run.log\n",
+        ));
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(free_route_result()),
+            original_user_request: Some(
+                "logs ディレクトリのファイル名を3つだけ一覧して。".to_string(),
+            ),
+            ..Default::default()
+        };
+        let mut delivery = vec!["act_plan.log\nclawd.log\nclawd.run.log".to_string()];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(delivery.len(), 2);
+        assert!(delivery[0].contains("**実行過程**"));
+        assert!(delivery[0].contains("スキル `system_basic`"));
+        assert!(delivery[0].contains("出力："));
+        assert!(crate::finalize::is_execution_summary_message(&delivery[0]));
+    }
+
+    #[test]
     fn execution_summary_attaches_for_scalar_value_contract() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state
@@ -4511,7 +4777,19 @@ mod tests {
             skill: "system_basic".to_string(),
             status: StepExecutionStatus::Error,
             output: None,
-            error: Some("read file failed: Permission denied (os error 13)".to_string()),
+            error: Some(format!(
+                "__RC_SKILL_ERROR__:{}",
+                serde_json::json!({
+                    "skill": "system_basic",
+                    "error_kind": "permission_denied",
+                    "error_text": "read_range failed for /etc/shadow",
+                    "platform": "linux",
+                    "extra": {
+                        "operation": "metadata",
+                        "path": "/etc/shadow"
+                    }
+                })
+            )),
             started_at: 0,
             finished_at: 0,
         });
@@ -4527,7 +4805,7 @@ mod tests {
         .expect("content evidence failure should be publishable");
 
         assert!(answer.contains("`/etc/shadow`"));
-        assert!(answer.contains("Permission denied"));
+        assert!(answer.to_ascii_lowercase().contains("permission denied"));
         assert!(answer.contains("`clawd` 进程当前没有 sudo/root 权限"));
         assert_eq!(summary.grounded_ok, Some(true));
         assert_eq!(summary.completion_ok, Some(true));
@@ -4622,6 +4900,42 @@ mod tests {
         assert!(answer.contains("第 1 步 `health_check` 成功"));
         assert!(answer.contains("第 2 步 `run_cmd` 失败"));
         assert!(answer.contains("exit code 127"));
+    }
+
+    #[test]
+    fn deterministic_observed_execution_status_answer_uses_structured_run_cmd_stderr() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "run_cmd",
+                "error_kind": "nonzero_exit",
+                "error_text": "Command failed with exit code 7",
+                "platform": "linux",
+                "extra": {
+                    "exit_code": 7,
+                    "stderr": "problem",
+                    "output_truncated": false
+                }
+            })
+        );
+        loop_state
+            .executed_step_results
+            .push(ok_step_result("step_1", "run_cmd", "READY\n"));
+        loop_state
+            .executed_step_results
+            .push(err_step_result("step_2", "run_cmd", &err));
+
+        let answer = deterministic_observed_execution_status_answer(
+            &state,
+            "执行两个命令，告诉我退出码和错误输出。",
+            &loop_state,
+        )
+        .expect("mixed observed results should produce deterministic answer");
+
+        assert!(answer.contains("exit code 7"), "answer: {answer}");
+        assert!(answer.contains("stderr: problem"), "answer: {answer}");
     }
 
     #[test]
@@ -5001,7 +5315,19 @@ mod tests {
             skill: "system_basic".to_string(),
             status: StepExecutionStatus::Error,
             output: None,
-            error: Some("read file failed: Permission denied (os error 13)".to_string()),
+            error: Some(format!(
+                "__RC_SKILL_ERROR__:{}",
+                serde_json::json!({
+                    "skill": "system_basic",
+                    "error_kind": "permission_denied",
+                    "error_text": "read_range failed for /etc/shadow",
+                    "platform": "linux",
+                    "extra": {
+                        "operation": "metadata",
+                        "path": "/etc/shadow"
+                    }
+                })
+            )),
             started_at: 0,
             finished_at: 0,
         });
@@ -5017,7 +5343,7 @@ mod tests {
         .expect("finalize should return a user-visible failure");
 
         assert!(reply.text.contains("`/etc/shadow`"));
-        assert!(reply.text.contains("Permission denied"));
+        assert!(reply.text.contains("permission denied"));
         assert!(reply.text.contains("`clawd` 进程当前没有 sudo/root 权限"));
         assert!(!reply.should_fail_task);
         assert_eq!(reply.messages.len(), 2);
@@ -5028,14 +5354,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn finalize_loop_reply_treats_missing_service_unit_as_status_answer() {
+    async fn finalize_loop_reply_does_not_infer_service_status_from_raw_systemd_text() {
         let state = test_state();
-        let task = claimed_task("task-service-status-missing-unit");
+        let task = claimed_task("task-service-status-raw-systemd-text");
         let mut route = free_route_result();
         route.routed_mode = crate::RoutedMode::ChatAct;
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.requires_content_evidence = true;
         route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+        route.output_contract.locator_hint.clear();
         route.output_contract.locator_hint = "telegramd.service".to_string();
         let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
@@ -5064,23 +5391,126 @@ mod tests {
             Some(&agent_run_context),
         )
         .await
+        .expect("finalize should return a user-visible command result");
+
+        assert!(
+            reply.should_fail_task,
+            "raw systemd prose should not be promoted to a qualified service-status answer"
+        );
+        assert!(
+            !reply.text.contains("no service unit"),
+            "raw text should not trigger local service-status phrase inference: {}",
+            reply.text
+        );
+    }
+
+    #[tokio::test]
+    async fn finalize_loop_reply_uses_structured_service_error_kind() {
+        let state = test_state();
+        let task = claimed_task("task-service-status-structured-missing");
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::ChatAct;
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+        route.output_contract.locator_hint.clear();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let structured_error = serde_json::json!({
+            "skill": "service_control",
+            "error_kind": "not_found",
+            "error_text": "no matching service found for the given target",
+            "platform": "linux",
+            "manager_type": "unknown",
+            "service_name": "telegramd"
+        });
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "service_control".to_string(),
+            status: StepExecutionStatus::Error,
+            output: None,
+            error: Some(format!("__RC_SKILL_ERROR__:{structured_error}")),
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        let reply = finalize_loop_reply(
+            &state,
+            &task,
+            "check whether telegramd is running right now and briefly explain the status",
+            loop_state,
+            Some(&agent_run_context),
+        )
+        .await
         .expect("finalize should return a service status answer");
 
         assert!(!reply.should_fail_task);
+        assert!(reply.text.contains("telegramd"));
         assert!(reply.text.contains("not active"));
         assert!(reply.text.contains("no service unit"));
+        assert!(!reply.text.contains("__RC_SKILL_ERROR__"));
+    }
+
+    #[tokio::test]
+    async fn finalize_loop_reply_treats_structured_run_cmd_failure_as_user_result() {
+        let state = test_state();
+        let task = claimed_task("task-structured-run-cmd-nonzero");
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::ChatAct;
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let structured_error = serde_json::json!({
+            "skill": "run_cmd",
+            "error_kind": "nonzero_exit",
+            "error_text": "Command failed with exit code 7",
+            "platform": "linux",
+            "extra": {
+                "command": "printf problem >&2; exit 7",
+                "exit_code": 7,
+                "stderr": "problem",
+                "output_truncated": false
+            }
+        });
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(err_step_result(
+            "step_1",
+            "run_cmd",
+            &format!("__RC_SKILL_ERROR__:{structured_error}"),
+        ));
+
+        let reply = finalize_loop_reply(
+            &state,
+            &task,
+            "执行命令 printf problem >&2; exit 7，告诉我退出码和错误输出。",
+            loop_state,
+            Some(&agent_run_context),
+        )
+        .await
+        .expect("finalize should return a user-visible command failure");
+
+        assert!(!reply.should_fail_task);
+        assert!(reply.text.contains("退出码为 7"), "text: {}", reply.text);
+        assert!(
+            reply.text.contains("错误输出为：problem"),
+            "text: {}",
+            reply.text
+        );
+        assert!(!reply.text.contains("__RC_SKILL_ERROR__"));
         assert_eq!(reply.messages.len(), 2);
         assert!(crate::finalize::is_execution_summary_message(
             &reply.messages[0]
         ));
         assert_eq!(reply.messages.last(), Some(&reply.text));
-        assert_eq!(
-            reply
-                .task_journal
-                .as_ref()
-                .and_then(|journal| journal.final_status),
-            Some(crate::task_journal::TaskJournalFinalStatus::Success)
-        );
     }
 
     #[tokio::test]
@@ -5104,7 +5534,19 @@ mod tests {
             skill: "system_basic".to_string(),
             status: StepExecutionStatus::Error,
             output: None,
-            error: Some("read file failed: No such file or directory (os error 2)".to_string()),
+            error: Some(format!(
+                "__RC_SKILL_ERROR__:{}",
+                serde_json::json!({
+                    "skill": "system_basic",
+                    "error_kind": "not_found",
+                    "error_text": "path was not found: document/missing.txt",
+                    "platform": "linux",
+                    "extra": {
+                        "operation": "metadata",
+                        "path": "document/missing.txt"
+                    }
+                })
+            )),
             started_at: 0,
             finished_at: 0,
         });
@@ -5261,7 +5703,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_recipe_closeout_prefix_includes_requested_success_marker() {
+    fn execution_recipe_closeout_does_not_infer_success_marker_from_user_text() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -5294,7 +5736,7 @@ mod tests {
 
         assert_eq!(delivery.len(), 1);
         assert!(delivery[0].contains("系统范围"));
-        assert!(delivery[0].contains("VALIDATION_PASSED"));
+        assert!(!delivery[0].contains("VALIDATION_PASSED"));
         assert!(delivery[0].ends_with("修复已经完成。"));
     }
 
@@ -5441,7 +5883,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_recipe_closeout_allows_scalar_route_when_success_marker_requested() {
+    fn execution_recipe_closeout_skips_scalar_route_when_marker_is_only_user_text() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -5473,13 +5915,11 @@ mod tests {
             &mut delivery,
         );
 
-        assert_eq!(delivery.len(), 1);
-        assert!(delivery[0].contains("当前仓库"));
-        assert!(delivery[0].contains("VALIDATION_PASSED"));
+        assert_eq!(delivery, vec!["VALIDATION_PASSED".to_string()]);
     }
 
     #[test]
-    fn ensure_requested_success_marker_visible_appends_marker_to_closeout_text() {
+    fn ensure_requested_success_marker_visible_does_not_scan_user_text() {
         let ctx = crate::agent_engine::AgentRunContext {
             user_request: Some(
                 "When it passes, explicitly output VALIDATION_PASSED and stop immediately."
@@ -5493,12 +5933,12 @@ mod tests {
         ensure_requested_success_marker_visible(Some(&ctx), &mut delivery);
 
         assert_eq!(delivery.len(), 1);
-        assert!(delivery[0].contains("VALIDATION_PASSED"));
         assert!(delivery[0].contains("system scope"));
+        assert!(!delivery[0].contains("VALIDATION_PASSED"));
     }
 
     #[test]
-    fn missing_requested_success_marker_blocks_recipe_success() {
+    fn missing_requested_success_marker_does_not_scan_user_text() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -5520,7 +5960,7 @@ mod tests {
         let delivery_messages = vec!["ops-repair-bad".to_string()];
         assert_eq!(
             missing_requested_success_marker(Some(&ctx), &loop_state, &delivery_messages),
-            Some("VALIDATION_PASSED")
+            None
         );
     }
 
@@ -5552,7 +5992,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_requested_success_marker_fires_when_recipe_done() {
+    fn auto_requested_success_marker_stays_off_without_structured_request() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState {
             kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
@@ -5574,7 +6014,7 @@ mod tests {
         let delivery_messages = vec!["status=200\nops-repair-ok".to_string()];
         assert_eq!(
             auto_requested_success_marker(Some(&ctx), &loop_state, &delivery_messages),
-            Some("VALIDATION_PASSED")
+            None
         );
     }
 
@@ -7014,6 +7454,31 @@ mod tests {
             skill: "run_cmd".to_string(),
             status: StepExecutionStatus::Ok,
             output: Some("NOT_FOUND\n".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        assert!(has_missing_file_search_evidence(&loop_state));
+    }
+
+    #[test]
+    fn missing_file_search_evidence_detects_system_basic_find_path_zero_matches() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                serde_json::json!({
+                    "action": "find_path",
+                    "count": 0,
+                    "matches": [],
+                    "query": "missing.md",
+                    "target_kind": "file"
+                })
+                .to_string(),
+            ),
             error: None,
             started_at: 0,
             finished_at: 0,

@@ -39,6 +39,7 @@ use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
 
 const AGENT_TOOL_SPEC_PATH: &str = "prompts/agent_tool_spec.md";
 const CLAWD_CONTINUE_ON_ERROR_ARG: &str = "_clawd_continue_on_error";
+const CLAWD_LITERAL_COMMAND_ARG: &str = "_clawd_literal_command";
 const SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/single_plan_execution_prompt.md";
 const LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/lightweight_execution_prompt.md";
 const LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
@@ -661,7 +662,33 @@ fn user_safe_step_error(err: &str, prefer_english: bool) -> String {
             "执行失败，但没有返回明确原因".to_string()
         };
     }
+    if let Some(structured) = crate::skills::parse_structured_skill_error(trimmed) {
+        let skill = if structured.skill.trim().is_empty() {
+            ""
+        } else {
+            structured.skill.as_str()
+        };
+        return crate::truncate_for_agent_trace(&crate::skills::normalize_skill_error_for_user(
+            skill, trimmed,
+        ));
+    }
     crate::truncate_for_agent_trace(trimmed)
+}
+
+fn resume_context_structured_skill_error(raw_err: Option<&str>) -> Option<Value> {
+    let structured = raw_err
+        .map(str::trim)
+        .filter(|err| !err.is_empty())
+        .and_then(crate::skills::parse_structured_skill_error)?;
+    Some(json!({
+        "skill": structured.skill,
+        "error_kind": structured.error_kind,
+        "error_text": structured.error_text,
+        "platform": structured.platform,
+        "manager_type": structured.manager_type,
+        "service_name": structured.service_name,
+        "extra": structured.extra,
+    }))
 }
 
 async fn build_resume_context_error(
@@ -676,6 +703,7 @@ async fn build_resume_context_error(
     failed_index: usize,
     failed_action: &str,
     err: &str,
+    raw_err: Option<&str>,
 ) -> String {
     let completed_messages_for_ctx: Vec<String> = if delivery_messages.is_empty() {
         subtask_results.to_vec()
@@ -709,7 +737,7 @@ async fn build_resume_context_error(
     } else {
         Vec::new()
     };
-    let resume_context = json!({
+    let mut resume_context = json!({
         "resume_context_id": format!("ctx-{}", uuid::Uuid::new_v4()),
         "user_request": user_request,
         "goal": goal,
@@ -725,6 +753,14 @@ async fn build_resume_context_error(
         "remaining_actions": remaining_actions,
         "hint": "LLM should infer continuation from resume context and user follow-up."
     });
+    if let Some(structured_error) = resume_context_structured_skill_error(raw_err) {
+        if let Some(failed_step) = resume_context
+            .get_mut("failed_step")
+            .and_then(|value| value.as_object_mut())
+        {
+            failed_step.insert("structured_error".to_string(), structured_error);
+        }
+    }
     let has_remaining_actions = resume_context
         .get("remaining_actions")
         .and_then(|v| v.as_array())

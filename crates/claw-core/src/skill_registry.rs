@@ -183,6 +183,9 @@ pub struct SkillManifest {
     pub kind: SkillKind,
     pub output_kind: OutputKind,
     pub description: Option<String>,
+    pub semantic_tags: Vec<String>,
+    pub preferred_over_run_cmd: bool,
+    pub validation_actions: Vec<String>,
     pub prompt_file: Option<String>,
     pub input_schema: Option<JsonValue>,
     pub output_schema: Option<JsonValue>,
@@ -219,6 +222,18 @@ pub struct SkillRegistryEntry {
     pub output_kind: OutputKind,
     #[serde(default)]
     pub description: Option<String>,
+    /// Planner-facing semantic tags, for example `sqlite_table_listing`,
+    /// `archive_unpack`, or `service_status`. These are descriptive routing
+    /// hints, not permissions.
+    #[serde(default)]
+    pub semantic_tags: Vec<String>,
+    /// Prefer this structured skill over ad-hoc shell commands when its
+    /// semantic tags match the task.
+    #[serde(default)]
+    pub preferred_over_run_cmd: bool,
+    /// Read-only actions that can validate or inspect the skill's domain.
+    #[serde(default)]
+    pub validation_actions: Vec<String>,
     #[serde(default)]
     pub input_schema: Option<TomlValue>,
     #[serde(default)]
@@ -305,6 +320,18 @@ fn trim_optional_string(value: Option<&str>) -> Option<String> {
         .map(ToString::to_string)
 }
 
+fn normalize_metadata_tokens(values: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for value in values {
+        let token = value.trim().to_ascii_lowercase();
+        if token.is_empty() || out.iter().any(|existing| existing == &token) {
+            continue;
+        }
+        out.push(token);
+    }
+    out
+}
+
 fn toml_value_to_json(value: &TomlValue) -> Option<JsonValue> {
     serde_json::to_value(value).ok()
 }
@@ -357,6 +384,8 @@ impl SkillsRegistry {
                 .map(|a| to_canonical_key(a))
                 .filter(|a| !a.is_empty() && *a != canonical)
                 .collect();
+            entry.semantic_tags = normalize_metadata_tokens(&entry.semantic_tags);
+            entry.validation_actions = normalize_metadata_tokens(&entry.validation_actions);
             // §P4.1 主体：把 capabilities_raw 翻译成强类型，未知 token 直接报错。
             // 排序 + dedup 让"声明顺序"不影响等价性，并避免重复声明在策略层
             // 引出二义性。
@@ -557,6 +586,9 @@ impl SkillsRegistry {
             kind: entry.kind,
             output_kind: entry.output_kind,
             description: trim_optional_string(entry.description.as_deref()),
+            semantic_tags: entry.semantic_tags.clone(),
+            preferred_over_run_cmd: entry.preferred_over_run_cmd,
+            validation_actions: entry.validation_actions.clone(),
             prompt_file: trim_optional_string(Some(entry.prompt_file.as_str())),
             input_schema: entry.input_schema.as_ref().and_then(toml_value_to_json),
             output_schema: entry.output_schema.as_ref().and_then(toml_value_to_json),
@@ -988,6 +1020,44 @@ capabilities = ["llm", "net", "fs.write", "llm", "secrets.image_generation_minim
         // manifest 视图也带上
         let manifest = reg.manifest("image_generate").unwrap();
         assert_eq!(manifest.capabilities.len(), 4);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn registry_manifest_exposes_planner_metadata() {
+        let toml = r#"
+[[skills]]
+name = "db_basic"
+enabled = true
+kind = "runner"
+description = "Use structured SQLite actions."
+semantic_tags = ["sqlite_query", "SQLite_Query", "sqlite_table_listing", ""]
+preferred_over_run_cmd = true
+validation_actions = ["sqlite_query", "SQLITE_QUERY"]
+"#;
+        let path = std::env::temp_dir().join("test_registry_planner_metadata.toml");
+        std::fs::write(&path, toml).unwrap();
+        let reg = SkillsRegistry::load_from_path(&path).unwrap();
+        let manifest = reg.manifest("db_basic").unwrap();
+        assert_eq!(
+            manifest.description.as_deref(),
+            Some("Use structured SQLite actions.")
+        );
+        assert_eq!(
+            manifest.semantic_tags,
+            vec![
+                "sqlite_query".to_string(),
+                "sqlite_table_listing".to_string()
+            ]
+        );
+        assert!(manifest.preferred_over_run_cmd);
+        assert_eq!(
+            manifest.validation_actions,
+            vec!["sqlite_query".to_string()]
+        );
+        let entry = reg.get("db_basic").unwrap();
+        assert_eq!(entry.semantic_tags, manifest.semantic_tags);
+        assert_eq!(entry.validation_actions, manifest.validation_actions);
         let _ = std::fs::remove_file(path);
     }
 

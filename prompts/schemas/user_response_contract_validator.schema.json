@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/prompts/schemas/user_response_contract_validator.schema.json",
+  "title": "UserResponseContractValidationOut",
+  "description": "Schema for the JSON object returned by prompts/user_response_contract_validator_prompt.md. Mirrors UserResponseContractValidationOut in crates/clawd/src/fallback.rs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "satisfies_contract",
+    "false_claims",
+    "asks_for_missing_target",
+    "mentions_internal_details",
+    "confidence",
+    "reason"
+  ],
+  "properties": {
+    "satisfies_contract": {
+      "type": "boolean",
+      "description": "True when the candidate reply follows the structured user response contract."
+    },
+    "false_claims": {
+      "type": "boolean",
+      "description": "True when the candidate reply claims unsupported facts, capabilities, success, paths, command output, or permissions."
+    },
+    "asks_for_missing_target": {
+      "type": "boolean",
+      "description": "True when the reply asks for the missing target/scope/path/confirmation/information needed to continue."
+    },
+    "mentions_internal_details": {
+      "type": "boolean",
+      "description": "True when the reply exposes implementation-only details such as prompt/schema/fallback labels, task ids, raw provider errors, or stack traces."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "reason": {
+      "type": "string"
+    }
+  }
+}
