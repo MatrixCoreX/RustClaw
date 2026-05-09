@@ -1,5 +1,5 @@
-//! 使用与 clawd 主程序一致的默认 OpenAI 兼容端点：`OPENAI_*` 环境变量（由 skill-runner 从当前
-//! `openai_compat` provider 注入）或回退读取 `WORKSPACE_ROOT/configs/config.toml` 中的 `[llm]`。
+//! 经 clawd 调用时优先走内部文本 LLM 网关，默认使用系统 `[llm]` 选择；
+//! 单独运行二进制时回退到 `OPENAI_*` 或 `WORKSPACE_ROOT/configs/config.toml`。
 
 use reqwest::blocking::Client;
 use serde::Deserialize;
@@ -17,6 +17,26 @@ pub struct LlmCreds {
     pub timeout_secs: u64,
     /// `env_openai` | `config_toml`
     pub source: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub struct LlmTextOutput {
+    pub text: String,
+    pub source: &'static str,
+    pub model: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct InternalLlmApiResponse {
+    ok: bool,
+    data: Option<InternalLlmTextData>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InternalLlmTextData {
+    text: String,
+    model: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,6 +181,80 @@ pub fn resolve_llm_credentials() -> Result<LlmCreds, String> {
         timeout_secs: row.timeout_seconds.max(1).min(120),
         source: "config_toml",
     })
+}
+
+pub fn chat_completion_default(system: &str, user: &str) -> Result<LlmTextOutput, String> {
+    if let Some(result) = internal_chat_completion(system, user) {
+        return result;
+    }
+    let creds = resolve_llm_credentials()?;
+    let text = chat_completion(&creds, system, user)?;
+    Ok(LlmTextOutput {
+        text,
+        source: creds.source,
+        model: creds.model,
+    })
+}
+
+fn internal_chat_completion(system: &str, user: &str) -> Option<Result<LlmTextOutput, String>> {
+    let url = std::env::var("RUSTCLAW_INTERNAL_LLM_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let token = std::env::var("RUSTCLAW_INTERNAL_LLM_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let timeout_secs = std::env::var("SKILL_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(60)
+        .min(120);
+    let body = json!({
+        "skill_name": "invest_copy",
+        "prompt_source": "skills/invest_copy/draft",
+        "system": system,
+        "user": user,
+        "temperature": 0.35,
+        "max_tokens": 4096
+    });
+    let result = (|| {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(timeout_secs.max(5)))
+            .build()
+            .map_err(|e| format!("内部 LLM 客户端: {e}"))?;
+        let resp = client
+            .post(url)
+            .header("x-rustclaw-internal-llm-token", token)
+            .json(&body)
+            .send()
+            .map_err(|e| format!("内部 LLM 请求失败: {e}"))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let t = resp.text().unwrap_or_default();
+            return Err(format!("内部 LLM 返回 {}: {}", status, truncate(&t, 800)));
+        }
+        let parsed: InternalLlmApiResponse =
+            resp.json().map_err(|e| format!("解析内部 LLM JSON: {e}"))?;
+        if !parsed.ok {
+            return Err(parsed
+                .error
+                .unwrap_or_else(|| "内部 LLM 调用失败".to_string()));
+        }
+        let data = parsed
+            .data
+            .ok_or_else(|| "内部 LLM 响应缺少 data".to_string())?;
+        if data.text.trim().is_empty() {
+            return Err("内部 LLM 响应缺少正文".to_string());
+        }
+        Ok(LlmTextOutput {
+            text: data.text,
+            source: "clawd_internal",
+            model: data.model,
+        })
+    })();
+    Some(result)
 }
 
 /// OpenAI 兼容 `POST /chat/completions`

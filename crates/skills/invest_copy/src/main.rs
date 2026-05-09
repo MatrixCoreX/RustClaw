@@ -338,21 +338,6 @@ fn draft(
         };
     }
 
-    let creds = match llm_client::resolve_llm_credentials() {
-        Ok(c) => c,
-        Err(e) => {
-            return SkillResp {
-                request_id,
-                status: "error",
-                text: String::new(),
-                extra: None,
-                error_text: Some(format!(
-                    "{e}\n可在 args 中加 use_heuristic=true 使用离线规则摘要（不调用模型）。"
-                )),
-            };
-        }
-    };
-
     let system = build_llm_system_prompt(en, compliance);
     let user = build_llm_user_prompt(
         en,
@@ -365,7 +350,7 @@ fn draft(
         max_bullets,
     );
 
-    let raw = match llm_client::chat_completion(&creds, &system, &user) {
+    let generated = match llm_client::chat_completion_default(&system, &user) {
         Ok(t) => t,
         Err(e) => {
             return SkillResp {
@@ -378,7 +363,7 @@ fn draft(
         }
     };
 
-    if forbidden_peddlers(&raw, "") {
+    if forbidden_peddlers(&generated.text, "") {
         return SkillResp {
             request_id,
             status: "error",
@@ -393,7 +378,11 @@ fn draft(
 
     let header_zh = "【以下内容使用系统当前配置的 OpenAI 兼容大模型生成，仅供信息与投教阅读；不构成投资建议，亦不暗示公众人物背书】\n\n";
     let header_en = "_Generated using the system's default OpenAI-compatible model. Educational context only; not investment advice; no endorsement implied._\n\n";
-    let text = format!("{}{}", if en { header_en } else { header_zh }, raw.trim());
+    let text = format!(
+        "{}{}",
+        if en { header_en } else { header_zh },
+        generated.text.trim()
+    );
     let word_count = text.chars().count();
 
     SkillResp {
@@ -405,8 +394,8 @@ fn draft(
             "person_slug": p.slug,
             "summary_mode": "llm",
             "llm": {
-                "credential_source": creds.source,
-                "model": creds.model,
+                "credential_source": generated.source,
+                "model": generated.model,
             },
             "data_truncated": truncated,
             "compliance": compliance,

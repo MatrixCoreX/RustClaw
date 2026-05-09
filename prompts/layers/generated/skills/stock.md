@@ -13,7 +13,9 @@
 - 仅读、不涉及交易或下单。
 
 ## Config Entry Points (from interface)
-- No dedicated config entry points declared.
+- `configs/stock.toml` controls aliases and LLM typo correction.
+- Text LLM fallback uses the system default `[llm].selected_vendor` / `selected_model` by default.
+- `stock.llm_vendor` / `stock.llm_model` are optional dedicated overrides and should stay commented unless stock name correction needs a separate text model.
 
 ## Actions (from interface)
 - `quote`（默认）/ `query`：按股票代码，或按已配置的公司名/别名，查询单只 A 股行情。

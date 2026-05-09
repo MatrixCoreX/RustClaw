@@ -94,6 +94,10 @@
 - Malformed stdin JSON:
   - `invalid input: <serde error>`
 
+## Config Entry Points
+- Text LLM generation goes through the internal text LLM gateway when called by `clawd`, using the system default `[llm].selected_vendor` / `selected_model`.
+- Legacy standalone fallback still accepts `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` and optional `EXTENSION_MANAGER_MODEL`, but normal runtime should not require a dedicated model override.
+
 ## Request/Response Examples
 ### Example 1
 Request:

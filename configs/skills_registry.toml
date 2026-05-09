@@ -379,6 +379,7 @@ aliases = ["a_stock", "stock_quote", "股票"]
 timeout_seconds = 15
 prompt_file = "prompts/skills/stock.md"
 output_kind = "text"
+capabilities = ["llm"]
 
 [[skills]]
 name = "weather"
@@ -440,6 +441,7 @@ timeout_seconds = 90
 prompt_file = "prompts/skills/invest_copy.md"
 output_kind = "text"
 risk_level = "medium"
+capabilities = ["llm"]
 auto_invocable = false
 retryable = true
 
@@ -492,6 +494,7 @@ timeout_seconds = 30
 prompt_file = "prompts/skills/extension_manager.md"
 output_kind = "text"
 risk_level = "high"
+capabilities = ["llm"]
 auto_invocable = false
 requires_confirmation = true
 side_effect = true

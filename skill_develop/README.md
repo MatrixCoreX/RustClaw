@@ -45,6 +45,14 @@ python3 skill_develop/create_skill.py <skill_name>
 python3 skill_develop/create_skill.py stock --aliases "a_stock,stock_quote" --timeout 15
 ```
 
+如果新技能需要调用文本 LLM，只声明能力，不指定独立模型：
+
+```bash
+python3 skill_develop/create_skill.py report_writer --uses-llm
+```
+
+文本类 skill 默认使用 `configs/config.toml` 的 `[llm].selected_vendor` / `selected_model`。只有确实要让某个 skill 固定走独立模型时，才在该 skill 自己的配置文件里提供注释态覆盖项，例如 `llm_vendor` / `llm_model`，默认保持注释。
+
 如果是外部提交技能，不使用 `create_skill.py`，走 `extension_manager`：
 
 ```text
@@ -96,6 +104,8 @@ python3 skill_develop/create_skill.py stock --aliases "a_stock,stock_quote" --ti
   - `--aliases`
   - `--timeout`
   - `--output-kind`
+  - `--capabilities`
+  - `--uses-llm`
   - `--disabled`
   - `--runner-name`
 
@@ -109,6 +119,7 @@ python3 skill_develop/create_skill.py --help
 - 普通技能默认做成 `runner`
 - 二进制命名约定：`foo_bar -> foo-bar-skill`
 - 新增普通仓内 runner 技能时，不应修改主程序代码
+- 文本类 skill 需要模型时，在 `configs/skills_registry.toml` 声明 `capabilities = ["llm"]`；默认走系统 `[llm].selected_vendor` / `selected_model`，不要为每个文本 skill 预设独立模型
 - 外部提交技能优先落在 `external_skills/<skill_name>`，通过 `extension_manager` 注册，不应为了新增 skill 修改 `clawd` 主流程
 - 外部技能验证/编译通过后，`register_external_skill(confirm=true)` 会自动写 `configs/config.toml` 的 `skill_switches.<skill_name>=true`
 - skill prompt 运行时组装方式：

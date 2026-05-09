@@ -365,6 +365,9 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
             ],
         ),
         ("image_vision", &["llm", "net"]),
+        ("stock", &["llm"]),
+        ("invest_copy", &["llm"]),
+        ("extension_manager", &["llm"]),
     ];
     let docker_expected_with_caps: &[(&str, &[&str])] = &[
         // Docker 模板保持专用 image_edit / image_vision secret 声明。

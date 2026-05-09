@@ -23,9 +23,11 @@
 5. 在 `configs/skills_registry.toml` 中新增一个 `[[skills]]`。
 6. 如需别名，只在 registry 的 `aliases` 中配置，不要优先改主程序 fallback。
 7. 如需自定义 runner 二进制名，只在 registry 中配置 `runner_name`。
-8. 在 `prompts/layers/overlays/agent_tool_spec.md` 中补充该技能的参数契约。
-9. 运行 `python3 scripts/sync_skill_docs.py`，生成或更新 `prompts/layers/generated/skills/<skill_name>.md`。
-10. 如需模型特化，只新增 `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`，不要再维护旧的 vendor skill 全量副本。
+8. 如需调用文本 LLM，在 registry 声明 `capabilities = ["llm"]`；默认走系统 `[llm].selected_vendor` / `selected_model`，不要为每个文本 skill 预设独立模型。
+9. 如确实需要某个 skill 固定走独立文本模型，只在该 skill 的专用配置文件里提供注释态覆盖项（例如 `llm_vendor` / `llm_model`），默认保持注释。
+10. 在 `prompts/layers/overlays/agent_tool_spec.md` 中补充该技能的参数契约。
+11. 运行 `python3 scripts/sync_skill_docs.py`，生成或更新 `prompts/layers/generated/skills/<skill_name>.md`。
+12. 如需模型特化，只新增 `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`，不要再维护旧的 vendor skill 全量副本。
 
 ## 外部提交技能必须完成的接入项
 0. 适用于用户上传、外部目录提交，或不希望把新能力放进 `crates/skills` 的场景。
@@ -46,6 +48,7 @@
 - `timeout_seconds`
 - `prompt_file = "prompts/skills/<skill_name>.md"`
 - `output_kind`
+- 需要调用文本 LLM 时才写 `capabilities = ["llm"]`
 - 仅当二进制名不符合默认约定时，再额外配置 `runner_name`
 - 注意：这里的 `prompt_file` 是逻辑路径；运行时主体内容由 `scripts/sync_skill_docs.py` 生成到 `prompts/layers/generated/skills/<skill_name>.md`
 

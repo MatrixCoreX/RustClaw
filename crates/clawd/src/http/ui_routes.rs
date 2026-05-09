@@ -34,6 +34,7 @@ use super::super::{
     whatsappd_process_stats, ApiResponse, AppState, HealthResponse, LlmProviderRuntime,
     LocalInteractionContext, PendingChannelBindSession,
 };
+use crate::ClaimedTask;
 use claw_core::types::{
     AuthIdentity, BindChannelKeyRequest, DetectFeishuBindSessionRequest,
     DetectFeishuBindSessionResponse, ExchangeCredentialStatus, FeishuBindSessionStatusResponse,
@@ -783,7 +784,221 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
             "/internal/webd/verify-login",
             post(webd_internal_verify_login),
         )
+        .route("/internal/llm/text", post(internal_llm_text))
         .route("/admin/webd-accounts", post(admin_upsert_webd_account))
+}
+
+#[derive(Debug, Deserialize)]
+struct InternalLlmTextRequest {
+    #[serde(default)]
+    skill_name: String,
+    #[serde(default)]
+    prompt_source: String,
+    #[serde(default)]
+    vendor: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    system: String,
+    #[serde(default)]
+    user: String,
+    #[serde(default)]
+    prompt: String,
+    temperature: Option<f64>,
+    max_tokens: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct InternalLlmTextResponse {
+    text: String,
+    prompt_source: String,
+    model: String,
+    provider: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct InternalLlmTokenContext {
+    task_id: String,
+    user_id: i64,
+    chat_id: i64,
+    user_key: Option<String>,
+    channel: String,
+    external_user_id: Option<String>,
+    external_chat_id: Option<String>,
+    kind: String,
+    payload_json: String,
+    skill_name: String,
+}
+
+fn api_error_value(
+    status: StatusCode,
+    error: impl Into<String>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    (
+        status,
+        Json(ApiResponse {
+            ok: false,
+            data: None,
+            error: Some(error.into()),
+        }),
+    )
+}
+
+async fn internal_llm_text(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<InternalLlmTextRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    let token = headers
+        .get("x-rustclaw-internal-llm-token")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    let Some(token) = token else {
+        return api_error_value(StatusCode::UNAUTHORIZED, "missing internal llm token");
+    };
+
+    let token_payload = match claw_core::secrets::redeem_secret_token_reference(token) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return api_error_value(StatusCode::UNAUTHORIZED, "invalid internal llm token");
+        }
+        Err(err) => {
+            return api_error_value(
+                StatusCode::UNAUTHORIZED,
+                format!("internal llm token rejected: {err}"),
+            );
+        }
+    };
+    let token_ctx: InternalLlmTokenContext = match serde_json::from_str(&token_payload) {
+        Ok(value) => value,
+        Err(err) => {
+            return api_error_value(
+                StatusCode::UNAUTHORIZED,
+                format!("internal llm token payload invalid: {err}"),
+            );
+        }
+    };
+
+    let requested_skill = req.skill_name.trim();
+    if !requested_skill.is_empty() && requested_skill != token_ctx.skill_name {
+        return api_error_value(
+            StatusCode::FORBIDDEN,
+            format!(
+                "internal llm token is scoped to skill `{}`, not `{requested_skill}`",
+                token_ctx.skill_name
+            ),
+        );
+    }
+
+    let prompt_source = req.prompt_source.trim();
+    if prompt_source.is_empty() {
+        return api_error_value(StatusCode::BAD_REQUEST, "prompt_source is required");
+    }
+    let prompt = if !req.prompt.trim().is_empty() {
+        req.prompt.trim().to_string()
+    } else if !req.system.trim().is_empty() || !req.user.trim().is_empty() {
+        format!(
+            "System:\n{}\n\nUser:\n{}",
+            req.system.trim(),
+            req.user.trim()
+        )
+    } else {
+        return api_error_value(StatusCode::BAD_REQUEST, "prompt or system/user is required");
+    };
+    let task = ClaimedTask {
+        task_id: token_ctx.task_id,
+        user_id: token_ctx.user_id,
+        chat_id: token_ctx.chat_id,
+        user_key: token_ctx.user_key,
+        channel: token_ctx.channel,
+        external_user_id: token_ctx.external_user_id,
+        external_chat_id: token_ctx.external_chat_id,
+        kind: token_ctx.kind,
+        payload_json: token_ctx.payload_json,
+    };
+    let providers = match internal_llm_text_providers(&state, &task, &req) {
+        Ok(providers) => providers,
+        Err(err) => return api_error_value(StatusCode::BAD_REQUEST, err),
+    };
+    let selected_model = providers
+        .first()
+        .map(|provider| provider.config.model.clone())
+        .unwrap_or_default();
+    let selected_provider = providers
+        .first()
+        .map(|provider| provider.config.name.clone())
+        .unwrap_or_default();
+    let hints = crate::ChatRequestHints {
+        temperature: req.temperature,
+        max_tokens: req.max_tokens,
+    };
+
+    match crate::llm_gateway::run_with_fallback_on_providers_with_hints(
+        &state,
+        &task,
+        &prompt,
+        prompt_source,
+        hints,
+        providers,
+    )
+    .await
+    {
+        Ok(text) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!(InternalLlmTextResponse {
+                    text,
+                    prompt_source: prompt_source.to_string(),
+                    model: selected_model,
+                    provider: selected_provider,
+                })),
+                error: None,
+            }),
+        ),
+        Err(err) => api_error_value(
+            StatusCode::BAD_GATEWAY,
+            format!("internal llm call failed: {err}"),
+        ),
+    }
+}
+
+fn internal_llm_text_providers(
+    state: &AppState,
+    task: &ClaimedTask,
+    req: &InternalLlmTextRequest,
+) -> Result<Vec<Arc<LlmProviderRuntime>>, String> {
+    let vendor = req
+        .vendor
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let model = req
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    if vendor.is_none() && model.is_none() {
+        return Ok(state.task_llm_providers(task));
+    }
+
+    let config_path = state.reload_ctx.config_path_for_reload.trim();
+    if config_path.is_empty() {
+        return Err("internal llm model override requires a loaded config path".to_string());
+    }
+    let config = claw_core::config::AppConfig::load(config_path)
+        .map_err(|err| format!("load config for internal llm override failed: {err}"))?;
+    let providers = crate::llm_gateway::build_providers_for_selection(&config, vendor, model);
+    if providers.is_empty() {
+        let vendor_label = vendor.unwrap_or("<default>");
+        let model_label = model.unwrap_or("<default>");
+        return Err(format!(
+            "no llm provider matched internal override vendor={vendor_label} model={model_label}"
+        ));
+    }
+    Ok(providers)
 }
 
 #[derive(Debug, Deserialize)]

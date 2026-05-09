@@ -3230,7 +3230,23 @@ fn normalize_execution_recipe_for_schema(obj: &mut serde_json::Map<String, Value
 }
 
 fn output_recipe_value_declares_execution(value: Option<&Value>) -> bool {
+    if execution_recipe_value_explicitly_declares_none_kind(value) {
+        return false;
+    }
     execution_recipe_value_has_text(value, schema_text_declares_execution_recipe)
+}
+
+fn execution_recipe_value_explicitly_declares_none_kind(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_object)
+        .and_then(|map| map.get("kind"))
+        .and_then(scalar_json_value_text)
+        .is_some_and(|kind| {
+            matches!(
+                crate::execution_recipe::parse_execution_recipe_kind_text(&kind),
+                crate::execution_recipe::ExecutionRecipeKind::None
+            )
+        })
 }
 
 fn execution_recipe_value_has_text(value: Option<&Value>, predicate: fn(&str) -> bool) -> bool {
@@ -6788,6 +6804,73 @@ mod tests {
                 .pointer("/output_contract/requires_content_evidence")
                 .and_then(|value| value.as_bool()),
             Some(false)
+        );
+        crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+            &normalized,
+            crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+        )
+        .expect("schema validation");
+    }
+
+    #[test]
+    fn normalizer_schema_normalization_trusts_explicit_none_recipe_for_skill_plan() {
+        let raw = r#"{
+          "resolved_user_intent":"只生成一个全新可复用技能方案，不执行、不启用。",
+          "answer_candidate":"",
+          "resume_behavior":"none",
+          "schedule_kind":"none",
+          "schedule_intent":null,
+          "wants_file_delivery":false,
+          "should_refresh_long_term_memory":false,
+          "agent_display_name_hint":"",
+          "needs_clarify":false,
+          "clarify_question":"",
+          "reason":"纯设计交付物；execution_recipe.kind=none。",
+          "confidence":0.92,
+          "mode":"chat",
+          "output_contract":{
+            "response_shape":"strict",
+            "requires_content_evidence":false,
+            "delivery_required":false,
+            "locator_kind":"none",
+            "delivery_intent":"none",
+            "semantic_kind":"none",
+            "locator_hint":"",
+            "self_extension":{"mode":"none","trigger":"none","execute_now":false}
+          },
+          "execution_recipe":{"kind":"none","profile":"skill_authoring","target_scope":"none"},
+          "turn_type":"task_request",
+          "target_task_policy":"standalone",
+          "should_interrupt_active_run":false,
+          "state_patch":null,
+          "attachment_processing_required":false
+        }"#;
+        let normalized = super::normalize_intent_normalizer_raw_for_schema(
+            raw,
+            "请为一个 action=ping 的全新可复用能力生成技能方案，先不要执行，也不要启用。",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        assert_eq!(
+            value.get("mode").and_then(|value| value.as_str()),
+            Some("chat")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/requires_content_evidence")
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            value
+                .pointer("/execution_recipe/kind")
+                .and_then(|value| value.as_str()),
+            Some("none")
+        );
+        assert_eq!(
+            value
+                .pointer("/execution_recipe/profile")
+                .and_then(|value| value.as_str()),
+            Some("skill_authoring")
         );
         crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
             &normalized,

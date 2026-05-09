@@ -108,6 +108,18 @@ struct RuntimeConfig {
     stock: StockSkillConfig,
 }
 
+#[derive(Debug, Deserialize)]
+struct InternalLlmApiResponse {
+    ok: bool,
+    data: Option<InternalLlmTextData>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InternalLlmTextData {
+    text: String,
+}
+
 #[derive(Debug, Clone)]
 struct ResolvedSymbol {
     code: String,
@@ -522,10 +534,6 @@ fn choose_candidate_via_llm<'a>(
     if candidates.is_empty() {
         return Ok(None);
     }
-    let Some((vendor_cfg, model, timeout_secs)) = resolve_llm_vendor(runtime) else {
-        return Ok(None);
-    };
-
     let candidate_names = candidates
         .iter()
         .map(|c| format!("{} -> {}", c.alias, c.code))
@@ -536,7 +544,25 @@ fn choose_candidate_via_llm<'a>(
         raw_input.trim(),
         candidate_names.join("\n")
     );
-    let content = call_openai_compatible_chat(vendor_cfg, &model, timeout_secs, system, &user)?;
+    let internal_timeout_secs = runtime.stock.llm_timeout_seconds.unwrap_or(15).max(1);
+    let content = match call_internal_llm_text(
+        "skills/stock/name_correction",
+        system,
+        &user,
+        runtime.stock.llm_vendor.as_deref(),
+        runtime.stock.llm_model.as_deref(),
+        0.0,
+        64,
+        internal_timeout_secs,
+    ) {
+        Some(result) => result?,
+        None => {
+            let Some((vendor_cfg, model, timeout_secs)) = resolve_llm_vendor(runtime) else {
+                return Ok(None);
+            };
+            call_openai_compatible_chat(vendor_cfg, &model, timeout_secs, system, &user)?
+        }
+    };
     let alias = parse_llm_alias_response(&content)?;
     if alias.eq_ignore_ascii_case("NONE") {
         return Ok(None);
@@ -609,6 +635,67 @@ fn resolve_llm_vendor(runtime: &RuntimeConfig) -> Option<(&VendorConfig, String,
         return Some((cfg, model, timeout_secs));
     }
     None
+}
+
+fn call_internal_llm_text(
+    prompt_source: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    vendor: Option<&str>,
+    model: Option<&str>,
+    temperature: f64,
+    max_tokens: u64,
+    timeout_secs: u64,
+) -> Option<Result<String, String>> {
+    let url = std::env::var("RUSTCLAW_INTERNAL_LLM_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let token = std::env::var("RUSTCLAW_INTERNAL_LLM_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let body = json!({
+        "skill_name": "stock",
+        "prompt_source": prompt_source,
+        "system": system_prompt,
+        "user": user_prompt,
+        "vendor": vendor.map(str::trim).filter(|value| !value.is_empty()),
+        "model": model.map(str::trim).filter(|value| !value.is_empty()),
+        "temperature": temperature,
+        "max_tokens": max_tokens
+    });
+    let result = (|| {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(timeout_secs.max(5)))
+            .build()
+            .map_err(|e| format!("创建内部 LLM 客户端失败: {e}"))?;
+        let resp = client
+            .post(url)
+            .header("x-rustclaw-internal-llm-token", token)
+            .json(&body)
+            .send()
+            .map_err(|e| format!("内部 LLM 名称纠错请求失败: {e}"))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            return Err(format!("内部 LLM 名称纠错失败 HTTP {}: {}", status, body));
+        }
+        let parsed: InternalLlmApiResponse = resp
+            .json()
+            .map_err(|e| format!("解析内部 LLM 名称纠错响应失败: {e}"))?;
+        if !parsed.ok {
+            return Err(parsed
+                .error
+                .unwrap_or_else(|| "内部 LLM 名称纠错失败".to_string()));
+        }
+        parsed
+            .data
+            .map(|data| data.text)
+            .filter(|text| !text.trim().is_empty())
+            .ok_or_else(|| "内部 LLM 名称纠错返回空内容".to_string())
+    })();
+    Some(result)
 }
 
 fn parse_vendor_kind(raw: &str) -> Option<VendorKind> {

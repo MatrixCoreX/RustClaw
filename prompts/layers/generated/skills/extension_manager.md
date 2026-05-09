@@ -13,7 +13,8 @@
 - The current MVP supports safe gap assessment, bounded temporary-fix planning/execution, and external skill scaffold generation under `external_skills/`.
 
 ## Config Entry Points (from interface)
-- No dedicated config entry points declared.
+- Text LLM generation goes through the internal text LLM gateway when called by `clawd`, using the system default `[llm].selected_vendor` / `selected_model`.
+- Legacy standalone fallback still accepts `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` and optional `EXTENSION_MANAGER_MODEL`, but normal runtime should not require a dedicated model override.
 
 ## Actions (from interface)
 - `assess_gap`: summarize whether a request should stay a one-off temporary fix or become a reusable new capability.
