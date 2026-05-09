@@ -22,6 +22,11 @@
 - 无效代码或非 A 股时返回「未获取到行情」类提示。
 - 名称未命中映射时返回明确提示，并建议补充 `configs/stock.toml`。
 
+## Config Entry Points
+- `configs/stock.toml` controls aliases and LLM typo correction.
+- Text LLM fallback uses the system default `[llm].selected_vendor` / `selected_model` by default.
+- `stock.llm_vendor` / `stock.llm_model` are optional dedicated overrides and should stay commented unless stock name correction needs a separate text model.
+
 ## Request/Response Examples
 
 ### Example 1：查询贵州茅台

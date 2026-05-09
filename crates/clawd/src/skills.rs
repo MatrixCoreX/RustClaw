@@ -1698,6 +1698,37 @@ fn extract_skill_provider_model(value: &Value) -> Option<(String, String, String
     ))
 }
 
+fn local_clawd_base_url_from_workspace(workspace_root: &Path) -> String {
+    let config_path = workspace_root.join("configs/config.toml");
+    let parsed = std::fs::read_to_string(config_path)
+        .ok()
+        .and_then(|raw| raw.parse::<toml::Value>().ok());
+    let server = parsed
+        .as_ref()
+        .and_then(|value| value.get("server"))
+        .and_then(|value| value.as_table());
+    if let Some(base_url) = server
+        .and_then(|table| table.get("clawd_base_url"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return base_url.trim_end_matches('/').to_string();
+    }
+    let listen = server
+        .and_then(|table| table.get("listen"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("127.0.0.1:8787");
+    let loopback_listen = if listen.starts_with("0.0.0.0:") {
+        listen.replacen("0.0.0.0", "127.0.0.1", 1)
+    } else {
+        listen.to_string()
+    };
+    format!("http://{}", loopback_listen.trim_end_matches('/'))
+}
+
 pub(crate) async fn run_skill_with_runner(
     state: &AppState,
     task: &ClaimedTask,
@@ -1766,16 +1797,17 @@ pub(crate) async fn run_skill_with_runner_once(
 
     // §E1.b: 按 manifest capabilities 注入 secrets env。fail-loud：声明了
     // 但 broker 找不到 ⇒ 直接拒绝 spawn，绝不让 skill 拿空字符串去打 vendor。
-    // 当前 manifest 里没有任何 skill 声明 `secrets.*`（image_generate 走的是
-    // 父进程 env 继承），所以 provisioned 大概率为空 ⇒ 行为零变化；下一步
-    // §E1.c 给 image_generate 声明 secrets.image_generation_<vendor>_api_key
-    // 时本路径自动接管。
+    // 同一份 manifest capabilities 也用于 LLM 权限边界：只有声明 `llm`
+    // 的 skill 才会拿到内部文本 LLM token / OPENAI_* 兼容环境。
+    let caps: Vec<claw_core::skill_registry::Capability> = state
+        .get_skills_registry()
+        .as_ref()
+        .map(|reg| reg.capabilities(canonical_skill_name).to_vec())
+        .unwrap_or_default();
+    let skill_uses_llm = caps
+        .iter()
+        .any(|cap| matches!(cap, claw_core::skill_registry::Capability::Llm));
     let secret_envs = {
-        let caps: Vec<claw_core::skill_registry::Capability> = state
-            .get_skills_registry()
-            .as_ref()
-            .map(|reg| reg.capabilities(canonical_skill_name).to_vec())
-            .unwrap_or_default();
         let broker = claw_core::secrets::global_or_default();
         match claw_core::secrets::provision_secret_envs(broker.as_ref(), &caps) {
             Ok(pairs) => {
@@ -1821,8 +1853,39 @@ pub(crate) async fn run_skill_with_runner_once(
         }
     };
 
-    let selected_openai_model = crate::llm_gateway::selected_openai_model(state, Some(task));
     let secret_token_ttl = Duration::from_secs(300);
+    let selected_openai_model = if skill_uses_llm {
+        Some(crate::llm_gateway::selected_openai_model(state, Some(task)))
+    } else {
+        None
+    };
+    let internal_llm_token = if skill_uses_llm {
+        let internal_llm_context = json!({
+            "task_id": task.task_id.clone(),
+            "user_id": task.user_id,
+            "chat_id": task.chat_id,
+            "user_key": task.user_key.clone(),
+            "channel": task.channel.clone(),
+            "external_user_id": task.external_user_id.clone(),
+            "external_chat_id": task.external_chat_id.clone(),
+            "kind": task.kind.clone(),
+            "payload_json": task.payload_json.clone(),
+            "skill_name": canonical_skill_name,
+        });
+        match claw_core::secrets::issue_secret_token_value(
+            &claw_core::secrets::SecretValue::new(internal_llm_context.to_string()),
+            secret_token_ttl,
+        ) {
+            Ok(token) => Some(token),
+            Err(err) => {
+                return Err(format!(
+                    "skill `{canonical_skill_name}` failed to issue internal LLM token: {err}"
+                ));
+            }
+        }
+    } else {
+        None
+    };
     let tokenized_secret_envs =
         match claw_core::secrets::issue_secret_env_tokens(&secret_envs, secret_token_ttl) {
             Ok(pairs) => pairs,
@@ -1832,21 +1895,26 @@ pub(crate) async fn run_skill_with_runner_once(
             ));
             }
         };
-    let selected_openai_api_key = crate::llm_gateway::selected_openai_api_key(state, Some(task));
-    let openai_api_key_token = if selected_openai_api_key.trim().is_empty() {
-        None
-    } else {
-        match claw_core::secrets::issue_secret_token_value(
-            &claw_core::secrets::SecretValue::new(selected_openai_api_key),
-            secret_token_ttl,
-        ) {
-            Ok(token) => Some(token),
-            Err(err) => {
-                return Err(format!(
-                    "skill `{canonical_skill_name}` failed to mint OPENAI_API_KEY token: {err}"
-                ));
+    let openai_api_key_token = if skill_uses_llm {
+        let selected_openai_api_key =
+            crate::llm_gateway::selected_openai_api_key(state, Some(task));
+        if selected_openai_api_key.trim().is_empty() {
+            None
+        } else {
+            match claw_core::secrets::issue_secret_token_value(
+                &claw_core::secrets::SecretValue::new(selected_openai_api_key),
+                secret_token_ttl,
+            ) {
+                Ok(token) => Some(token),
+                Err(err) => {
+                    return Err(format!(
+                        "skill `{canonical_skill_name}` failed to mint OPENAI_API_KEY token: {err}"
+                    ));
+                }
             }
         }
+    } else {
+        None
     };
     let mut cmd = Command::new(&state.skill_rt.skill_runner_path);
     // §E2 step1: 严格模式下先 env_clear + 白名单，让后续 `.env(...)` / secrets 注入
@@ -1867,11 +1935,6 @@ pub(crate) async fn run_skill_with_runner_once(
                 .to_string(),
         )
         .env(
-            "OPENAI_BASE_URL",
-            crate::llm_gateway::selected_openai_base_url(state, Some(task)),
-        )
-        .env("OPENAI_MODEL", selected_openai_model.clone())
-        .env(
             "WORKSPACE_ROOT",
             state.skill_rt.workspace_root.display().to_string(),
         )
@@ -1883,6 +1946,23 @@ pub(crate) async fn run_skill_with_runner_once(
             "RUSTCLAW_LOCATOR_SCAN_MAX_FILES",
             state.skill_rt.locator_scan_max_files.to_string(),
         );
+    if let Some(token) = &internal_llm_token {
+        cmd.env(
+            "RUSTCLAW_INTERNAL_LLM_URL",
+            format!(
+                "{}/v1/internal/llm/text",
+                local_clawd_base_url_from_workspace(&state.skill_rt.workspace_root)
+            ),
+        )
+        .env("RUSTCLAW_INTERNAL_LLM_TOKEN", token)
+        .env(
+            "OPENAI_BASE_URL",
+            crate::llm_gateway::selected_openai_base_url(state, Some(task)),
+        );
+    }
+    if let Some(model) = &selected_openai_model {
+        cmd.env("OPENAI_MODEL", model);
+    }
     if let Some(token) = &openai_api_key_token {
         cmd.env("OPENAI_API_KEY", token);
     }

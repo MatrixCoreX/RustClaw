@@ -77,6 +77,9 @@ user_rpm = 20
 # 建议修改/Recommended change: 可改.
 # 风险/Risk: vendor/model 不匹配会导致调用失败.
 [llm]
+# 文本类 skill 声明 capabilities=["llm"] 后默认使用这里的全局选择；
+# 除非某个 skill 的专用配置文件明确提供并启用独立覆盖项，否则不要为每个文本 skill 单独指定模型。
+# Text skills use this global selection by default; per-skill text model overrides should be explicit and opt-in.
 # 默认模型名 / Default selected model.
 selected_model = "mimo-v2.5-pro"
 # 默认厂商标识 / Default selected vendor.

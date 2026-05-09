@@ -1,6 +1,6 @@
 # invest_copy Interface Spec
 
-> Builtin skill: `invest_copy` → binary `invest-copy-skill`。默认通过 **OpenAI 兼容 `/chat/completions`** 调用**与 clawd 当前默认 `openai_compat` 提供商一致**的环境（`OPENAI_*`，由 `skill-runner` 注入）或回退读取 `configs/config.toml` 的 `[llm]`；可选 `use_heuristic=true` **不调用模型**，改用内置规则摘要。
+> Builtin skill: `invest_copy` → binary `invest-copy-skill`。经 `clawd` 调用时默认走内部文本 LLM 网关，使用系统当前 `[llm].selected_vendor` / `selected_model`；单独运行二进制时回退读取 `configs/config.toml` 的 `[llm]` 或 `OPENAI_*`。可选 `use_heuristic=true` **不调用模型**，改用内置规则摘要。
 
 ## Capability Summary
 
@@ -45,7 +45,7 @@
 
 ## Success `extra`（`status=ok`）
 
-- `draft`：`action`、`person_slug`、`summary_mode`（`llm` \| `heuristic`）、`data_truncated`（bool）、`compliance`、`word_count`；`summary_mode=llm` 时含 `llm.credential_source`（`env_openai`|`config_toml`）与 `llm.model`。
+- `draft`：`action`、`person_slug`、`summary_mode`（`llm` \| `heuristic`）、`data_truncated`（bool）、`compliance`、`word_count`；`summary_mode=llm` 时含 `llm.credential_source`（`clawd_internal`|`env_openai`|`config_toml`）与 `llm.model`。
 - **`summary_mode=heuristic`** 时另有 `summary_bullet_count`（number）。
 - `list_investors`：`action`、`count`.
 
@@ -95,7 +95,7 @@ Response：
 
 ## Config Entry Points
 
-- **LLM**：与主程序一致——经 `skill-runner` 时优先使用注入的 `OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_KEY`（对应运行中第一个 `openai_compat` provider）。单独跑二进制且无环境变量时，尝试读取 **`WORKSPACE_ROOT`/当前目录向上的** `configs/config.toml` 中 `[llm.selected_vendor]` 与 `[llm.<vendor>]`（支持 `openai`、`minimax`、`mimo`、`deepseek`、`qwen`、`custom`、`grok` 等 OpenAI 兼容段；需在该段填写 **`api_key`**）。
+- **LLM**：经 `clawd` 调用时走内部文本 LLM 网关，默认使用系统 `[llm].selected_vendor` / `selected_model`。本技能当前没有独立模型覆盖项；如未来需要专用文案模型，应新增显式配置并保持默认注释。单独跑二进制且无内部网关环境变量时，尝试读取 **`WORKSPACE_ROOT`/当前目录向上的** `configs/config.toml` 中 `[llm.selected_vendor]` 与 `[llm.<vendor>]`（支持 `openai`、`minimax`、`mimo`、`deepseek`、`qwen`、`custom`、`grok` 等 OpenAI 兼容段；需在该段填写 **`api_key`**）。
 - **人物**：`personas.toml` 编译进二进制，无运行时热加载。
 
 ## Multilingual Reinforcement

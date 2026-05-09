@@ -222,7 +222,28 @@ fn synthesize_llm_providers(
 ) -> Vec<LlmProviderConfig> {
     let mut out = Vec::new();
     let selected_vendor = provider_override.or(config.llm.selected_vendor.as_deref());
-    let selected_model = model_override.or(config.llm.selected_model.as_deref());
+    let selected_model = model_override
+        .or_else(|| {
+            let override_vendor = provider_override?.trim();
+            let configured_vendor = config.llm.selected_vendor.as_deref()?.trim();
+            if override_vendor.eq_ignore_ascii_case(configured_vendor)
+                || (override_vendor.eq_ignore_ascii_case("xiaomi")
+                    && configured_vendor.eq_ignore_ascii_case("mimo"))
+                || (override_vendor.eq_ignore_ascii_case("mimo")
+                    && configured_vendor.eq_ignore_ascii_case("xiaomi"))
+            {
+                config.llm.selected_model.as_deref()
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            if provider_override.is_none() {
+                config.llm.selected_model.as_deref()
+            } else {
+                None
+            }
+        });
 
     if let Some(v) = &config.llm.openai {
         if selected_vendor.is_none() || selected_vendor == Some("openai") {
@@ -434,16 +455,35 @@ pub(crate) async fn run_with_fallback_with_prompt_source(
     .await
 }
 
-async fn run_with_fallback_with_hints(
+pub(crate) async fn run_with_fallback_with_hints(
     state: &AppState,
     task: &ClaimedTask,
     prompt: &str,
     prompt_source: &str,
     hints: crate::ChatRequestHints,
 ) -> Result<String, String> {
-    let _prompt_debug_enabled = state.policy.routing.debug_log_prompt;
     let task_providers = state.task_llm_providers(task);
-    if task_providers.is_empty() {
+    run_with_fallback_on_providers_with_hints(
+        state,
+        task,
+        prompt,
+        prompt_source,
+        hints,
+        task_providers,
+    )
+    .await
+}
+
+pub(crate) async fn run_with_fallback_on_providers_with_hints(
+    state: &AppState,
+    task: &ClaimedTask,
+    prompt: &str,
+    prompt_source: &str,
+    hints: crate::ChatRequestHints,
+    providers: Vec<Arc<LlmProviderRuntime>>,
+) -> Result<String, String> {
+    let _prompt_debug_enabled = state.policy.routing.debug_log_prompt;
+    if providers.is_empty() {
         return Err("No available LLM provider configured".to_string());
     }
 
@@ -473,7 +513,7 @@ async fn run_with_fallback_with_hints(
     let mut any_provider_attempted = false;
     let mut skipped_providers: Vec<String> = Vec::new();
 
-    for provider in &task_providers {
+    for provider in &providers {
         let vendor = crate::llm_vendor_name(provider);
         let model = provider.config.model.as_str();
         let model_kind = crate::llm_model_kind(provider);
@@ -1027,6 +1067,25 @@ mod tests {
             .expect("mimo provider should be synthesized");
 
         assert_eq!(mimo.provider_type, "openai_compat");
+    }
+
+    #[test]
+    fn provider_override_without_model_uses_target_vendor_default_model() {
+        let path = repo_config_path();
+        let mut config = AppConfig::load(path.to_str().expect("utf-8 path"))
+            .expect("config fixture should load");
+        config.llm.selected_vendor = Some("mimo".to_string());
+        config.llm.selected_model = Some("mimo-v2.5-pro".to_string());
+        let qwen_default = config.llm.qwen.as_ref().expect("qwen config").model.clone();
+
+        let providers = synthesize_llm_providers(&config, Some("qwen"), None);
+        let qwen = providers
+            .iter()
+            .find(|provider| provider.name == "vendor-qwen")
+            .expect("qwen provider should be synthesized");
+
+        assert_eq!(qwen.model, qwen_default);
+        assert_ne!(qwen.model, "mimo-v2.5-pro");
     }
 
     #[test]

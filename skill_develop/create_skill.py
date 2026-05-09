@@ -142,6 +142,16 @@ def parse_args() -> argparse.Namespace:
         help="registry output_kind",
     )
     parser.add_argument(
+        "--capabilities",
+        default="",
+        help='comma-separated registry capability tokens, e.g. "llm,net"',
+    )
+    parser.add_argument(
+        "--uses-llm",
+        action="store_true",
+        help='shortcut for --capabilities llm; text skills still use the global [llm] model by default',
+    )
+    parser.add_argument(
         "--disabled",
         action="store_true",
         help="create registry entry with enabled = false",
@@ -157,6 +167,16 @@ def parse_args() -> argparse.Namespace:
 def ensure_valid_skill_name(skill_name: str) -> None:
     if not re.fullmatch(r"[a-z0-9_]+", skill_name):
         raise SystemExit("skill_name must match [a-z0-9_]+")
+
+
+def normalize_unique_tokens(values: list[str]) -> list[str]:
+    out: list[str] = []
+    for value in values:
+        token = value.strip()
+        if not token or token in out:
+            continue
+        out.append(token)
+    return out
 
 
 def cargo_toml_text(skill_name: str) -> str:
@@ -185,8 +205,10 @@ def registry_entry_text(
     output_kind: str,
     enabled: bool,
     runner_name: str,
+    capabilities: list[str],
 ) -> str:
     alias_text = ", ".join(f'"{alias}"' for alias in aliases)
+    capability_text = ", ".join(f'"{capability}"' for capability in capabilities)
     lines = [
         "",
         "[[skills]]",
@@ -198,6 +220,8 @@ def registry_entry_text(
         f'prompt_file = "prompts/skills/{skill_name}.md"',
         f'output_kind = "{output_kind}"',
     ]
+    if capabilities:
+        lines.append(f"capabilities = [{capability_text}]")
     if runner_name.strip():
         lines.append(f'runner_name = "{runner_name.strip()}"')
     lines.append("")
@@ -243,13 +267,14 @@ def add_registry_entry(
     output_kind: str,
     enabled: bool,
     runner_name: str,
+    capabilities: list[str],
 ) -> bool:
     content = REGISTRY_TOML.read_text(encoding="utf-8")
     if f'name = "{skill_name}"' in content:
         return False
 
     updated = content.rstrip() + registry_entry_text(
-        skill_name, aliases, timeout, output_kind, enabled, runner_name
+        skill_name, aliases, timeout, output_kind, enabled, runner_name, capabilities
     )
     REGISTRY_TOML.write_text(updated + "\n", encoding="utf-8")
     return True
@@ -269,6 +294,11 @@ def main() -> int:
     ensure_valid_skill_name(skill_name)
 
     aliases = [v.strip() for v in args.aliases.split(",") if v.strip()]
+    capabilities = normalize_unique_tokens(
+        [v.strip() for v in args.capabilities.split(",") if v.strip()]
+    )
+    if args.uses_llm and "llm" not in capabilities:
+        capabilities.append("llm")
     skill_dir = SKILLS_DIR / skill_name
 
     created = []
@@ -292,6 +322,7 @@ def main() -> int:
         output_kind=args.output_kind,
         enabled=not args.disabled,
         runner_name=args.runner_name,
+        capabilities=capabilities,
     ):
         updated.append(REGISTRY_TOML)
 

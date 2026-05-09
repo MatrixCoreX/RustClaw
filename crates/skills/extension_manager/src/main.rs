@@ -54,6 +54,18 @@ struct Resp {
     error_text: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct InternalLlmApiResponse {
+    ok: bool,
+    data: Option<InternalLlmTextData>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct InternalLlmTextData {
+    text: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TemporaryFixPlan {
     summary: String,
@@ -572,6 +584,24 @@ async fn build_external_skill_implementation(
 }
 
 async fn llm_generate_temporary_fix_plan(request: &str) -> Result<String, String> {
+    let timeout_secs = extension_manager_timeout_seconds(90);
+    let user_prompt = format!(
+        "Create a bounded temporary-fix plan for this request.\n\nRequest:\n{}\n",
+        request.trim()
+    );
+    if let Some(result) = internal_llm_generate(
+        "skills/extension_manager/temporary_fix_plan",
+        TEMP_FIX_SYSTEM_PROMPT,
+        &user_prompt,
+        0.2,
+        2200,
+        timeout_secs,
+    )
+    .await
+    {
+        return result;
+    }
+
     let base_url = env::var("OPENAI_BASE_URL")
         .ok()
         .filter(|v| !v.trim().is_empty())
@@ -588,22 +618,6 @@ async fn llm_generate_temporary_fix_plan(request: &str) -> Result<String, String
                 .filter(|v| !v.trim().is_empty())
         })
         .unwrap_or_else(|| default_model_for_base_url(&base_url).to_string());
-    let timeout_secs = env::var("EXTENSION_MANAGER_TIMEOUT_SECONDS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|v| *v > 0)
-        .or_else(|| {
-            env::var("SKILL_TIMEOUT_SECONDS")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .filter(|v| *v > 0)
-        })
-        .unwrap_or(90);
-
-    let user_prompt = format!(
-        "Create a bounded temporary-fix plan for this request.\n\nRequest:\n{}\n",
-        request.trim()
-    );
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let body = json!({
         "model": model,
@@ -645,6 +659,24 @@ async fn llm_generate_temporary_fix_plan(request: &str) -> Result<String, String
 }
 
 async fn llm_generate_permanent_extension_plan(request: &str) -> Result<String, String> {
+    let timeout_secs = extension_manager_timeout_seconds(90);
+    let user_prompt = format!(
+        "Create a reusable external skill scaffold plan for this request.\n\nRequest:\n{}\n",
+        request.trim()
+    );
+    if let Some(result) = internal_llm_generate(
+        "skills/extension_manager/permanent_extension_plan",
+        PERMANENT_EXTENSION_SYSTEM_PROMPT,
+        &user_prompt,
+        0.2,
+        1200,
+        timeout_secs,
+    )
+    .await
+    {
+        return result;
+    }
+
     let base_url = env::var("OPENAI_BASE_URL")
         .ok()
         .filter(|v| !v.trim().is_empty())
@@ -661,22 +693,6 @@ async fn llm_generate_permanent_extension_plan(request: &str) -> Result<String, 
                 .filter(|v| !v.trim().is_empty())
         })
         .unwrap_or_else(|| default_model_for_base_url(&base_url).to_string());
-    let timeout_secs = env::var("EXTENSION_MANAGER_TIMEOUT_SECONDS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|v| *v > 0)
-        .or_else(|| {
-            env::var("SKILL_TIMEOUT_SECONDS")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .filter(|v| *v > 0)
-        })
-        .unwrap_or(90);
-
-    let user_prompt = format!(
-        "Create a reusable external skill scaffold plan for this request.\n\nRequest:\n{}\n",
-        request.trim()
-    );
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let body = json!({
         "model": model,
@@ -725,6 +741,27 @@ async fn llm_generate_external_skill_implementation(
     capability_summary: &str,
     actions: &[String],
 ) -> Result<String, String> {
+    let timeout_secs = extension_manager_timeout_seconds(90);
+    let user_prompt = format!(
+        "Implement the first reusable external skill scaffold for this request.\n\nRequest:\n{}\n\nSkill name: {}\nCapability summary: {}\nActions: {}\n",
+        request.trim(),
+        skill_name,
+        capability_summary.trim(),
+        actions.join(", ")
+    );
+    if let Some(result) = internal_llm_generate(
+        "skills/extension_manager/external_skill_implementation",
+        SKILL_IMPLEMENTATION_SYSTEM_PROMPT,
+        &user_prompt,
+        0.2,
+        3200,
+        timeout_secs,
+    )
+    .await
+    {
+        return result;
+    }
+
     let base_url = env::var("OPENAI_BASE_URL")
         .ok()
         .filter(|v| !v.trim().is_empty())
@@ -741,25 +778,6 @@ async fn llm_generate_external_skill_implementation(
                 .filter(|v| !v.trim().is_empty())
         })
         .unwrap_or_else(|| default_model_for_base_url(&base_url).to_string());
-    let timeout_secs = env::var("EXTENSION_MANAGER_TIMEOUT_SECONDS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|v| *v > 0)
-        .or_else(|| {
-            env::var("SKILL_TIMEOUT_SECONDS")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .filter(|v| *v > 0)
-        })
-        .unwrap_or(90);
-
-    let user_prompt = format!(
-        "Implement the first reusable external skill scaffold for this request.\n\nRequest:\n{}\n\nSkill name: {}\nCapability summary: {}\nActions: {}\n",
-        request.trim(),
-        skill_name,
-        capability_summary.trim(),
-        actions.join(", ")
-    );
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let body = json!({
         "model": model,
@@ -800,6 +818,82 @@ async fn llm_generate_external_skill_implementation(
         }
         format!("external skill implementation llm returned empty content (preview={preview})")
     })
+}
+
+fn extension_manager_timeout_seconds(default_secs: u64) -> u64 {
+    env::var("EXTENSION_MANAGER_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .or_else(|| {
+            env::var("SKILL_TIMEOUT_SECONDS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .filter(|v| *v > 0)
+        })
+        .unwrap_or(default_secs)
+}
+
+async fn internal_llm_generate(
+    prompt_source: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+    temperature: f64,
+    max_tokens: u64,
+    timeout_secs: u64,
+) -> Option<Result<String, String>> {
+    let url = env::var("RUSTCLAW_INTERNAL_LLM_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let token = env::var("RUSTCLAW_INTERNAL_LLM_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let body = json!({
+        "skill_name": "extension_manager",
+        "prompt_source": prompt_source,
+        "system": system_prompt,
+        "user": user_prompt,
+        "temperature": temperature,
+        "max_tokens": max_tokens
+    });
+    let result = async {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(timeout_secs.max(5)))
+            .build()
+            .map_err(|e| format!("build internal llm http client failed: {e}"))?;
+        let resp = client
+            .post(url)
+            .header("x-rustclaw-internal-llm-token", token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("internal extension llm request failed: {e}"))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!(
+                "internal extension llm failed status={status}: {body}"
+            ));
+        }
+        let parsed: InternalLlmApiResponse = resp
+            .json()
+            .await
+            .map_err(|e| format!("parse internal llm response failed: {e}"))?;
+        if !parsed.ok {
+            return Err(parsed
+                .error
+                .unwrap_or_else(|| "internal extension llm failed".to_string()));
+        }
+        parsed
+            .data
+            .map(|data| data.text)
+            .filter(|text| !text.trim().is_empty())
+            .ok_or_else(|| "internal extension llm returned empty content".to_string())
+    }
+    .await;
+    Some(result)
 }
 
 fn parse_temporary_fix_plan_from_text(raw: &str) -> Result<TemporaryFixPlan, String> {

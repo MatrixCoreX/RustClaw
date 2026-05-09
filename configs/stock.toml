@@ -3,10 +3,12 @@
 enable_name_lookup = true
 # 名称写错时是否启用 LLM 纠错兜底 / Use LLM fallback for typo correction
 enable_llm_name_correction = true
-# 名称纠错默认使用哪个 LLM vendor；为空时回退到 [llm].selected_vendor
-llm_vendor = "qwen"
-# 可选：覆盖名称纠错模型；为空时使用该 vendor 的默认模型
-llm_model = ""
+# 文本类 skill 默认走 configs/config.toml 的 [llm].selected_vendor / selected_model。
+# 只有确实需要让 stock 名称纠错使用独立模型时，才取消下面两行注释。
+# Text skills use the global [llm] selected vendor/model by default. Uncomment only
+# when stock name correction needs a dedicated text model.
+# llm_vendor = "qwen"
+# llm_model = "qwen-max-latest"
 # 名称纠错超时（秒）
 llm_timeout_seconds = 15
 # 送给 LLM 的候选名称数；越大越稳，越慢
