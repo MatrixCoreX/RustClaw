@@ -4608,45 +4608,86 @@ async fn restart_system(
         );
     }
 
-    if !std::path::Path::new("/.dockerenv").exists() {
+    if std::path::Path::new("/.dockerenv").exists() {
+        let mut cmd = Command::new("bash");
+        cmd.arg("-lc")
+            .arg("sleep 1 && kill -TERM 1 >/dev/null 2>&1")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+
+        if let Err(err) = cmd.spawn() {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ApiResponse {
+                    ok: false,
+                    data: None,
+                    error: Some(format!("failed to schedule restart: {err}")),
+                }),
+            );
+        }
+
         return (
-            StatusCode::BAD_REQUEST,
+            StatusCode::ACCEPTED,
             Json(ApiResponse {
-                ok: false,
-                data: None,
-                error: Some("frontend restart is only available in Docker deployment".to_string()),
+                ok: true,
+                data: Some(json!({
+                    "status": "restarting",
+                    "mode": "docker",
+                })),
+                error: None,
             }),
         );
     }
 
-    let mut cmd = Command::new("bash");
-    cmd.arg("-lc")
-        .arg("sleep 1 && kill -TERM 1 >/dev/null 2>&1")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-
-    if let Err(err) = cmd.spawn() {
-        return (
+    match schedule_binary_restart_with_start_all(&state) {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({
+                    "status": "restarting",
+                    "mode": "binary",
+                    "script": "start-all-bin.sh",
+                    "log": "logs/restart-system.log",
+                })),
+                error: None,
+            }),
+        ),
+        Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!("failed to schedule restart: {err}")),
+                error: Some(err),
             }),
-        );
+        ),
+    }
+}
+
+fn schedule_binary_restart_with_start_all(state: &AppState) -> Result<(), String> {
+    let script_path = state.skill_rt.workspace_root.join("start-all-bin.sh");
+    if !script_path.exists() {
+        return Err("start-all-bin.sh not found in workspace root".to_string());
     }
 
-    (
-        StatusCode::ACCEPTED,
-        Json(ApiResponse {
-            ok: true,
-            data: Some(json!({
-                "status": "restarting",
-                "mode": "docker",
-            })),
-            error: None,
-        }),
-    )
+    let workspace = state.skill_rt.workspace_root.to_string_lossy();
+    let script = format!(
+        "sleep 2; cd {} && mkdir -p logs .pids && RUSTCLAW_SKIP_BANNER=1 bash ./start-all-bin.sh release > logs/restart-system.log 2>&1",
+        shell_escape_arg(workspace.as_ref())
+    );
+    let mut cmd = StdCommand::new("nohup");
+    cmd.arg("bash")
+        .arg("-c")
+        .arg(&script)
+        .current_dir(&state.skill_rt.workspace_root)
+        .stdin(StdProcessStdio::null())
+        .stdout(StdProcessStdio::null())
+        .stderr(StdProcessStdio::null());
+
+    if let Err(err) = cmd.spawn() {
+        return Err(format!("failed to schedule restart: {err}"));
+    }
+    Ok(())
 }
 
 async fn get_workspace_update(
@@ -6475,31 +6516,31 @@ async fn restart_clawd(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<ApiResponse<Value>>) {
-    if let Err(resp) = require_ui_identity(&state, &headers) {
-        return resp;
+    let identity = match require_ui_identity(&state, &headers) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    if !identity.role.eq_ignore_ascii_case("admin") {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ApiResponse {
+                ok: false,
+                data: None,
+                error: Some("only admin can restart RustClaw".to_string()),
+            }),
+        );
     }
-    let workspace = state.skill_rt.workspace_root.to_string_lossy();
-    let pid = std::process::id();
-    let script = format!(
-        "sleep 2; kill {pid} 2>/dev/null; sleep 1; cd {} && ./component_start/start-clawd.sh",
-        shell_escape_arg(workspace.as_ref())
-    );
-    let mut cmd = StdCommand::new("nohup");
-    cmd.arg("bash")
-        .arg("-c")
-        .arg(&script)
-        .current_dir(&state.skill_rt.workspace_root)
-        .stdin(StdProcessStdio::null())
-        .stdout(StdProcessStdio::null())
-        .stderr(StdProcessStdio::null());
-    match cmd.spawn() {
-        Ok(_) => (
+
+    match schedule_binary_restart_with_start_all(&state) {
+        Ok(()) => (
             StatusCode::OK,
             Json(ApiResponse {
                 ok: true,
                 data: Some(json!({
-                    "message": "restart triggered; clawd will restart in a few seconds",
-                    "restart_triggered": true
+                    "message": "restart triggered; start-all-bin.sh will restart RustClaw in a few seconds",
+                    "restart_triggered": true,
+                    "script": "start-all-bin.sh",
+                    "log": "logs/restart-system.log"
                 })),
                 error: None,
             }),
@@ -6509,7 +6550,7 @@ async fn restart_clawd(
             Json(ApiResponse {
                 ok: false,
                 data: None,
-                error: Some(format!("failed to spawn restart process: {err}")),
+                error: Some(err),
             }),
         ),
     }
