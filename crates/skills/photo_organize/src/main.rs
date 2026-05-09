@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -18,6 +18,7 @@ const NON_EXIF_LIST_LIMIT: usize = 50;
 const TEXT_PATH_DELIMS: &[char] = &[
     ' ', '\n', '\t', ',', ';', '，', '；', '。', '(', ')', '[', ']', '{', '}',
 ];
+const PHOTO_CHILD_DIR_HINTS: &[&str] = &["DCIM", "Photos", "Pictures", "照片", "相机", "Camera"];
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -444,7 +445,7 @@ fn default_i18n_dict() -> HashMap<String, String> {
     );
     m.insert(
         "photo_organize.msg.linux_hint".to_string(),
-        "Common Linux path example: `/media/<user>/<disk-name>` or `/mnt/<disk-name>`.".to_string(),
+        "Common Linux / Raspberry Pi path examples: `/media/<user>/<disk-name>`, `/media/pi/<disk-name>`, `/mnt/<disk-name>`, or `/mnt/usb0`.".to_string(),
     );
     m.insert(
         "photo_organize.msg.other_os_hint".to_string(),
@@ -452,7 +453,7 @@ fn default_i18n_dict() -> HashMap<String, String> {
     );
     m.insert(
         "photo_organize.msg.directory_prompt".to_string(),
-        "Please explicitly specify the photo directory to organize.\n\nDetected external drive / USB candidate paths:\n{candidates}\n\nCall `photo_organize` again with an explicit `source_dir`. By default it organizes by brand/model/lens/focal length/year-month. Start with `mode=\"plan\"` to preview before using `copy` or `move`.\nExample: {{\"action\":\"organize\",\"source_dir\":\"/Volumes/SDCARD/DCIM\",\"mode\":\"plan\"}}\nNatural language also works: \"Organize the photos in /Volumes/SDCARD/DCIM, preview first, do not move originals\"".to_string(),
+        "The photo directory could not be determined uniquely.\n\nDetected external drive / USB candidate paths:\n{candidates}\n\nIf exactly one external drive is connected, this skill will automatically use it and continue with a preview. In the current case, call `photo_organize` again with an explicit `source_dir`. By default it organizes by brand/model/lens/focal length/year-month. Start with `mode=\"plan\"` to preview before using `copy` or `move`.\nExample: {{\"action\":\"organize\",\"source_dir\":\"/media/pi/SDCARD/DCIM\",\"mode\":\"plan\"}}\nNatural language also works: \"Organize the photos in /media/pi/SDCARD/DCIM, preview first, do not move originals\"".to_string(),
     );
     m.insert(
         "photo_organize.err.resolve_current_dir".to_string(),
@@ -694,8 +695,11 @@ fn handle_organize(obj: &Map<String, Value>, cat: &TextCatalog) -> Result<SkillO
             "photo_dir",
         ],
     ) {
-        Some(raw) if !raw.trim().is_empty() => raw.trim(),
-        _ => return Ok(build_directory_prompt(cat)),
+        Some(raw) if !raw.trim().is_empty() => raw.trim().to_string(),
+        _ => match auto_source_dir_from_external_roots() {
+            Some(path) => path.display().to_string(),
+            None => return Ok(build_directory_prompt(cat)),
+        },
     };
     let mode = OrganizeMode::parse(
         obj.get("mode")
@@ -714,7 +718,7 @@ fn handle_organize(obj: &Map<String, Value>, cat: &TextCatalog) -> Result<SkillO
         .clamp(1, 50) as usize;
     let options = resolve_organize_options(obj);
 
-    let source_dir = resolve_existing_dir(source_dir_raw, cat)?;
+    let source_dir = resolve_existing_dir(&source_dir_raw, cat)?;
     let output_dir = resolve_output_dir(obj, &source_dir)?;
     let photo_files = collect_photo_files(&source_dir, include_subdirs, &output_dir, cat)?;
     if photo_files.is_empty() {
@@ -882,6 +886,18 @@ fn build_directory_prompt(cat: &TextCatalog) -> SkillOutput {
             "external_candidates": candidates,
             "recommended_mode": "plan",
         })),
+    }
+}
+
+fn auto_source_dir_from_external_roots() -> Option<PathBuf> {
+    preferred_auto_source_root(discover_external_roots())
+}
+
+fn preferred_auto_source_root(roots: Vec<PathBuf>) -> Option<PathBuf> {
+    if roots.len() == 1 {
+        roots.into_iter().next()
+    } else {
+        None
     }
 }
 
@@ -2060,18 +2076,17 @@ fn relative_or_absolute(path: &Path, base: &Path) -> String {
 }
 
 fn discover_external_photo_candidates() -> Vec<String> {
-    let mut roots = BTreeSet::new();
+    let mut roots = Vec::new();
     for path in discover_external_roots() {
-        roots.insert(path.display().to_string());
+        push_unique_string(&mut roots, path.display().to_string());
         for child in discover_photo_children(&path) {
-            roots.insert(child.display().to_string());
+            push_unique_string(&mut roots, child.display().to_string());
         }
     }
-    roots.into_iter().collect()
+    roots
 }
 
 fn discover_photo_children(root: &Path) -> Vec<PathBuf> {
-    const HINTS: &[&str] = &["DCIM", "Photos", "Pictures", "照片", "相机", "Camera"];
     let Ok(entries) = fs::read_dir(root) else {
         return Vec::new();
     };
@@ -2085,7 +2100,10 @@ fn discover_photo_children(root: &Path) -> Vec<PathBuf> {
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or_default();
-        if HINTS.iter().any(|hint| name.eq_ignore_ascii_case(hint)) {
+        if PHOTO_CHILD_DIR_HINTS
+            .iter()
+            .any(|hint| name.eq_ignore_ascii_case(hint))
+        {
             out.push(path);
         }
     }
@@ -2096,24 +2114,137 @@ fn discover_photo_children(root: &Path) -> Vec<PathBuf> {
 fn discover_external_roots() -> Vec<PathBuf> {
     #[cfg(target_os = "macos")]
     {
-        discover_roots_in("/Volumes")
+        discover_macos_volume_roots()
     }
     #[cfg(target_os = "linux")]
     {
         let mut roots = Vec::new();
-        roots.extend(discover_roots_in("/media"));
-        roots.extend(discover_roots_in("/mnt"));
-        if let Ok(user) = std::env::var("USER") {
-            roots.extend(discover_roots_in(&format!("/run/media/{user}")));
+        for path in discover_linux_mountinfo_roots() {
+            push_unique_path(&mut roots, path);
         }
-        roots.sort();
-        roots.dedup();
+        for path in discover_linux_common_mount_roots() {
+            push_unique_path(&mut roots, path);
+        }
         roots
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         Vec::new()
     }
+}
+
+#[cfg(target_os = "macos")]
+fn discover_macos_volume_roots() -> Vec<PathBuf> {
+    discover_roots_in("/Volumes")
+        .into_iter()
+        .filter(|path| {
+            fs::canonicalize(path)
+                .map(|canonical| canonical != Path::new("/"))
+                .unwrap_or(true)
+        })
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn discover_linux_mountinfo_roots() -> Vec<PathBuf> {
+    let Ok(raw) = fs::read_to_string("/proc/self/mountinfo") else {
+        return Vec::new();
+    };
+    linux_external_roots_from_mountinfo(&raw)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_external_roots_from_mountinfo(raw: &str) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for line in raw.lines() {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        let Some(raw_mount_point) = fields.get(4) else {
+            continue;
+        };
+        let mount_point = PathBuf::from(decode_mountinfo_path(raw_mount_point));
+        if is_linux_external_mount_path(&mount_point) {
+            push_unique_path(&mut roots, mount_point);
+        }
+    }
+    roots
+}
+
+#[cfg(target_os = "linux")]
+fn discover_linux_common_mount_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for path in discover_media_style_roots("/media") {
+        push_unique_path(&mut roots, path);
+    }
+    for path in discover_media_style_roots("/run/media") {
+        push_unique_path(&mut roots, path);
+    }
+    for path in discover_roots_in("/mnt") {
+        push_unique_path(&mut roots, path);
+    }
+    roots
+}
+
+#[cfg(target_os = "linux")]
+fn discover_media_style_roots(base: &str) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for path in discover_roots_in(base) {
+        let child_dirs = discover_roots_in_path(&path);
+        if !child_dirs.is_empty() && !has_photo_child_hint(&child_dirs) {
+            for child in child_dirs {
+                push_unique_path(&mut roots, child);
+            }
+        }
+        if !is_likely_user_media_container(&path) {
+            push_unique_path(&mut roots, path);
+        }
+    }
+    roots
+}
+
+#[cfg(target_os = "linux")]
+fn is_likely_user_media_container(path: &Path) -> bool {
+    let parent = path.parent().and_then(|value| value.to_str());
+    if !matches!(parent, Some("/media") | Some("/run/media")) {
+        return false;
+    }
+    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    [std::env::var("USER").ok(), std::env::var("LOGNAME").ok()]
+        .into_iter()
+        .flatten()
+        .any(|user| user == name)
+        || Path::new("/home").join(name).is_dir()
+}
+
+#[cfg(target_os = "linux")]
+fn has_photo_child_hint(paths: &[PathBuf]) -> bool {
+    paths.iter().any(|path| {
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        PHOTO_CHILD_DIR_HINTS
+            .iter()
+            .any(|hint| name.eq_ignore_ascii_case(hint))
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn is_linux_external_mount_path(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    if text == "/media" || text == "/run/media" || text == "/mnt" {
+        return false;
+    }
+    text.starts_with("/media/") || text.starts_with("/mnt/") || text.starts_with("/run/media/")
+}
+
+#[cfg(target_os = "linux")]
+fn decode_mountinfo_path(raw: &str) -> String {
+    raw.replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\012", "\n")
+        .replace("\\134", "\\")
 }
 
 fn current_platform() -> HostPlatform {
@@ -2132,8 +2263,11 @@ fn current_platform() -> HostPlatform {
 }
 
 fn discover_roots_in(root: &str) -> Vec<PathBuf> {
-    let root_path = Path::new(root);
-    let Ok(entries) = fs::read_dir(root_path) else {
+    discover_roots_in_path(Path::new(root))
+}
+
+fn discover_roots_in_path(root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(root) else {
         return Vec::new();
     };
     let mut out = Vec::new();
@@ -2145,4 +2279,92 @@ fn discover_roots_in(root: &str) -> Vec<PathBuf> {
     }
     out.sort();
     out
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if !paths.iter().any(|existing| existing == &path) {
+        paths.push(path);
+    }
+}
+
+fn push_unique_string(items: &mut Vec<String>, item: String) {
+    if !items.iter().any(|existing| existing == &item) {
+        items.push(item);
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mountinfo_discovery_keeps_real_media_mounts() {
+        let raw = "\
+36 24 8:1 / / rw,relatime - ext4 /dev/root rw\n\
+50 24 0:20 / /media rw,relatime - tmpfs tmpfs rw\n\
+51 24 0:21 / /mnt rw,relatime - tmpfs tmpfs rw\n\
+52 24 8:17 / /media/guagua/CAMERA\\040CARD rw,nosuid,nodev,relatime - vfat /dev/sdb1 rw\n\
+53 24 8:33 / /mnt/photo-disk rw,relatime - exfat /dev/sdc1 rw\n\
+54 24 0:22 / /run/media rw,relatime - tmpfs tmpfs rw\n";
+        let roots = linux_external_roots_from_mountinfo(raw)
+            .into_iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            roots,
+            vec![
+                "/media/guagua/CAMERA CARD".to_string(),
+                "/mnt/photo-disk".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn media_style_discovery_handles_raspberry_pi_user_mounts() {
+        let base = std::env::temp_dir().join(format!(
+            "rustclaw-photo-organize-test-{}",
+            std::process::id()
+        ));
+        let media = base.join("media");
+        let pi_camera = media.join("pi").join("CAMERA_CARD");
+        let direct_usb = media.join("usb0");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(pi_camera.join("DCIM")).unwrap();
+        fs::create_dir_all(direct_usb.join("DCIM")).unwrap();
+
+        let roots = discover_media_style_roots(media.to_str().unwrap())
+            .into_iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>();
+
+        let pi_camera_text = pi_camera.display().to_string();
+        let pi_container_text = media.join("pi").display().to_string();
+        let direct_usb_text = direct_usb.display().to_string();
+        let pi_camera_pos = roots
+            .iter()
+            .position(|path| path == &pi_camera_text)
+            .expect("expected /media/pi/<disk> style root");
+        if let Some(pi_container_pos) = roots.iter().position(|path| path == &pi_container_text) {
+            assert!(pi_camera_pos < pi_container_pos);
+        }
+        assert!(roots.iter().any(|path| path == &direct_usb_text));
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn auto_source_only_selects_unique_external_root() {
+        assert_eq!(
+            preferred_auto_source_root(vec![PathBuf::from("/media/pi/CAMERA")]),
+            Some(PathBuf::from("/media/pi/CAMERA"))
+        );
+        assert_eq!(
+            preferred_auto_source_root(vec![
+                PathBuf::from("/media/pi/CAMERA"),
+                PathBuf::from("/mnt/photo-disk")
+            ]),
+            None
+        );
+        assert_eq!(preferred_auto_source_root(Vec::new()), None);
+    }
 }
