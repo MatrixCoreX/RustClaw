@@ -4232,7 +4232,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => void fetchWorkspaceUpdateStatus(false)}
-                        disabled={workspaceUpdateLoading || workspaceUpdateRunning}
+                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
                         className="theme-topbar-btn px-3 py-2 text-sm"
                       >
                         {workspaceUpdateLoading && !workspaceUpdateRunning ? (
@@ -4245,7 +4245,7 @@ export default function App() {
                       <button
                         type="button"
                         onClick={() => void startWorkspaceUpdate()}
-                        disabled={workspaceUpdateLoading || workspaceUpdateRunning}
+                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
                         className="theme-accent-btn"
                       >
                         {workspaceUpdateRunning ? (
@@ -4259,6 +4259,27 @@ export default function App() {
                             ? t("拉取并编译", "Pull and Build")
                             : t("完整编译", "Build All")}
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const confirmed = window.confirm(
+                            t(
+                              "现在重启 RustClaw？重启期间页面会短暂断开，稍后会自动恢复。",
+                              "Restart RustClaw now? The page may disconnect briefly and then recover.",
+                            ),
+                          );
+                          if (confirmed) void restartSystem();
+                        }}
+                        disabled={workspaceUpdateLoading || workspaceUpdateRunning || systemRestarting}
+                        className="theme-secondary-btn px-3 py-2 text-sm"
+                      >
+                        {systemRestarting ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4" />
+                        )}
+                        {systemRestarting ? t("重启中", "Restarting") : t("重启 RustClaw", "Restart RustClaw")}
+                      </button>
                     </div>
                   ) : (
                     <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/55">
@@ -4270,6 +4291,11 @@ export default function App() {
                 {workspaceUpdateMessage ? (
                   <p className="mt-4 rounded-xl border border-sky-400/25 bg-sky-400/10 px-3 py-2 text-sm text-sky-100">
                     {workspaceUpdateMessage}
+                  </p>
+                ) : null}
+                {systemRestartMessage ? (
+                  <p className="mt-3 rounded-xl border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-100">
+                    {systemRestartMessage}
                   </p>
                 ) : null}
 
