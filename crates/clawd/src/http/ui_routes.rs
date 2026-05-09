@@ -6,7 +6,7 @@ use rusqlite::OptionalExtension;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -133,6 +133,22 @@ struct WorkspaceUpdateCommandOutput {
     exit_code: Option<i32>,
     stdout_tail: String,
     stderr_tail: String,
+}
+
+#[derive(Debug, Default)]
+struct WorkspaceUpdateConflictPaths {
+    tracked: Vec<String>,
+    untracked: Vec<String>,
+}
+
+impl WorkspaceUpdateConflictPaths {
+    fn is_empty(&self) -> bool {
+        self.tracked.is_empty() && self.untracked.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.tracked.len() + self.untracked.len()
+    }
 }
 
 static WORKSPACE_UPDATE_STATE: OnceLock<Arc<Mutex<WorkspaceUpdateStatus>>> = OnceLock::new();
@@ -4890,18 +4906,21 @@ async fn run_workspace_update_job(
             guard.stderr_tail = out.stderr_tail;
         }
         Ok(out) => {
-            let mut guard = shared.lock().unwrap();
-            guard.exit_code = out.exit_code;
-            guard.stdout_tail = out.stdout_tail;
-            guard.stderr_tail = out.stderr_tail;
-            guard.next_step =
-                Some("远端版本检查失败，将跳过拉取并继续执行本地完整编译。".to_string());
+            fail_workspace_update(
+                &shared,
+                "git fetch failed",
+                "更新要求以远端为准；远端检查失败时不会继续编译本地代码。请确认网络、Git remote 和 SSH key 后重试。",
+                out,
+            );
+            return;
         }
         Err(err) => {
-            let mut guard = shared.lock().unwrap();
-            guard.stderr_tail = err.to_string();
-            guard.next_step =
-                Some("远端版本检查失败，将跳过拉取并继续执行本地完整编译。".to_string());
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "更新要求以远端为准；远端检查失败时不会继续编译本地代码。请确认网络、Git remote 和 SSH key 后重试。",
+            );
+            return;
         }
     }
 
@@ -4915,20 +4934,21 @@ async fn run_workspace_update_job(
     {
         Ok(out) if out.exit_code == Some(0) => first_output_line(&out.stdout_tail),
         Ok(out) => {
-            let mut guard = shared.lock().unwrap();
-            guard.exit_code = out.exit_code;
-            guard.stdout_tail = out.stdout_tail;
-            guard.stderr_tail = out.stderr_tail;
-            guard.next_step =
-                Some("未能读取 upstream，将跳过拉取并继续执行本地完整编译。".to_string());
-            None
+            fail_workspace_update(
+                &shared,
+                "git rev-parse upstream failed",
+                "未能读取 upstream，无法确认远端目标版本。请确认当前分支已设置 upstream 后重试。",
+                out,
+            );
+            return;
         }
         Err(err) => {
-            let mut guard = shared.lock().unwrap();
-            guard.stderr_tail = err.to_string();
-            guard.next_step =
-                Some("未能读取 upstream，将跳过拉取并继续执行本地完整编译。".to_string());
-            None
+            fail_workspace_update_with_error(
+                &shared,
+                err,
+                "未能读取 upstream，无法确认远端目标版本。请确认当前分支已设置 upstream 后重试。",
+            );
+            return;
         }
     };
     {
@@ -4951,26 +4971,99 @@ async fn run_workspace_update_job(
                 guard.stdout_tail = out.stdout_tail;
                 guard.stderr_tail = out.stderr_tail;
             }
-            Ok(out) => {
-                let mut guard = shared.lock().unwrap();
-                guard.exit_code = out.exit_code;
-                guard.stdout_tail = out.stdout_tail;
-                guard.stderr_tail = out.stderr_tail;
-                guard.next_step =
-                    Some("拉取最新代码失败，将跳过升级并继续编译当前本地代码。".to_string());
+            Ok(first_pull_out) => {
+                let conflict_paths = match detect_workspace_update_conflict_paths(&workspace_root)
+                    .await
+                {
+                    Ok(paths) => paths,
+                    Err(err) => {
+                        fail_workspace_update_with_error(
+                            &shared,
+                            err,
+                            "拉取失败，且无法可靠识别冲突文件；已保留本地文件，请手动处理后重试。",
+                        );
+                        return;
+                    }
+                };
+                if conflict_paths.is_empty() {
+                    fail_workspace_update(
+                        &shared,
+                        "git pull --ff-only failed",
+                        "拉取失败，但没有发现远端变更与本地未提交文件的直接冲突；已保留本地文件，请手动检查分支是否分叉或权限是否正常。",
+                        first_pull_out,
+                    );
+                    return;
+                }
+
+                set_workspace_update_step(&shared, "resolving_conflicting_files");
+                if let Err(err) =
+                    overwrite_workspace_update_conflict_paths(&workspace_root, &conflict_paths)
+                        .await
+                {
+                    fail_workspace_update_with_error(
+                        &shared,
+                        err,
+                        "覆盖冲突文件失败；未冲突的本地文件已保持不动，请手动处理后重试。",
+                    );
+                    return;
+                }
+                {
+                    let mut guard = shared.lock().unwrap();
+                    guard.next_step = Some(format!(
+                        "已只覆盖 {} 个冲突路径；其他本地改动和额外文件保持不动，正在重新拉取远端。",
+                        conflict_paths.len()
+                    ));
+                }
+
+                set_workspace_update_step(&shared, "pulling_latest_code");
+                match run_workspace_update_command(
+                    "git",
+                    &["pull", "--ff-only"],
+                    &workspace_root,
+                    600,
+                )
+                .await
+                {
+                    Ok(out) if out.exit_code == Some(0) => {
+                        let mut guard = shared.lock().unwrap();
+                        guard.exit_code = out.exit_code;
+                        guard.stdout_tail = out.stdout_tail;
+                        guard.stderr_tail = out.stderr_tail;
+                    }
+                    Ok(out) => {
+                        fail_workspace_update(
+                            &shared,
+                            "git pull --ff-only failed after resolving conflicts",
+                            "已覆盖识别到的冲突文件，但重新拉取仍失败；其他本地文件未动，请查看 Git 输出后手动处理。",
+                            out,
+                        );
+                        return;
+                    }
+                    Err(err) => {
+                        fail_workspace_update_with_error(
+                            &shared,
+                            err,
+                            "已覆盖识别到的冲突文件，但重新拉取仍失败；其他本地文件未动，请查看 Git 输出后手动处理。",
+                        );
+                        return;
+                    }
+                }
             }
             Err(err) => {
-                let mut guard = shared.lock().unwrap();
-                guard.stderr_tail = err.to_string();
-                guard.next_step =
-                    Some("拉取最新代码失败，将跳过升级并继续编译当前本地代码。".to_string());
+                fail_workspace_update_with_error(
+                    &shared,
+                    err,
+                    "拉取远端失败；已保留本地文件，请确认 Git 和网络状态后重试。",
+                );
+                return;
             }
         }
     } else {
         let mut guard = shared.lock().unwrap();
         guard.step = "skipping_pull_latest_code".to_string();
         if old_commit.is_some() && remote_commit.is_some() {
-            guard.next_step = Some("远端没有新版本，将继续执行本地完整编译。".to_string());
+            guard.next_step =
+                Some("远端没有新版本；本地文件保持不动，将继续执行完整编译。".to_string());
         }
     }
 
@@ -5092,9 +5185,132 @@ fn fail_workspace_update_with_error(
     guard.next_step = Some(next_step.to_string());
 }
 
+async fn detect_workspace_update_conflict_paths(
+    workspace_root: &Path,
+) -> Result<WorkspaceUpdateConflictPaths, String> {
+    let remote_changed = git_workspace_name_list(
+        &["diff", "--name-only", "HEAD", "@{upstream}"],
+        workspace_root,
+    )
+    .await?;
+    let local_unstaged = git_workspace_name_list(&["diff", "--name-only"], workspace_root).await?;
+    let local_staged =
+        git_workspace_name_list(&["diff", "--cached", "--name-only"], workspace_root).await?;
+    let local_untracked = git_workspace_name_list(
+        &["ls-files", "--others", "--exclude-standard"],
+        workspace_root,
+    )
+    .await?;
+
+    let remote_changed = remote_changed.into_iter().collect::<BTreeSet<_>>();
+    let mut tracked_dirty = local_unstaged.into_iter().collect::<BTreeSet<_>>();
+    tracked_dirty.extend(local_staged);
+
+    Ok(WorkspaceUpdateConflictPaths {
+        tracked: tracked_dirty
+            .into_iter()
+            .filter(|path| remote_changed.contains(path))
+            .collect(),
+        untracked: local_untracked
+            .into_iter()
+            .filter(|path| remote_changed.contains(path))
+            .collect(),
+    })
+}
+
+async fn overwrite_workspace_update_conflict_paths(
+    workspace_root: &Path,
+    paths: &WorkspaceUpdateConflictPaths,
+) -> Result<(), String> {
+    if !paths.tracked.is_empty() {
+        let mut args = vec![
+            "restore".to_string(),
+            "--source".to_string(),
+            "HEAD".to_string(),
+            "--staged".to_string(),
+            "--worktree".to_string(),
+            "--".to_string(),
+        ];
+        args.extend(paths.tracked.iter().cloned());
+        let out = run_workspace_update_command_args("git", &args, workspace_root, 600).await?;
+        if out.exit_code != Some(0) {
+            return Err(format!(
+                "git restore conflict files failed: {}",
+                workspace_update_output_detail(&out)
+            ));
+        }
+    }
+
+    if !paths.untracked.is_empty() {
+        let mut args = vec!["clean".to_string(), "-fd".to_string(), "--".to_string()];
+        args.extend(paths.untracked.iter().cloned());
+        let out = run_workspace_update_command_args("git", &args, workspace_root, 600).await?;
+        if out.exit_code != Some(0) {
+            return Err(format!(
+                "git clean conflict files failed: {}",
+                workspace_update_output_detail(&out)
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+async fn git_workspace_name_list(
+    args: &[&str],
+    workspace_root: &Path,
+) -> Result<Vec<String>, String> {
+    let out = run_workspace_update_command("git", args, workspace_root, 60).await?;
+    if out.exit_code != Some(0) {
+        return Err(format!(
+            "git {} failed: {}",
+            args.join(" "),
+            workspace_update_output_detail(&out)
+        ));
+    }
+    parse_git_name_list_output(&out.stdout_tail)
+}
+
+fn parse_git_name_list_output(raw: &str) -> Result<Vec<String>, String> {
+    if raw.starts_with("... output truncated ...") {
+        return Err("git path list output is too large to process safely".to_string());
+    }
+    Ok(raw
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+fn workspace_update_output_detail(out: &WorkspaceUpdateCommandOutput) -> String {
+    let stderr = out.stderr_tail.trim();
+    if !stderr.is_empty() {
+        return stderr.to_string();
+    }
+    let stdout = out.stdout_tail.trim();
+    if !stdout.is_empty() {
+        return stdout.to_string();
+    }
+    format!("exit_code={:?}", out.exit_code)
+}
+
 async fn run_workspace_update_command(
     program: &str,
     args: &[&str],
+    cwd: &Path,
+    timeout_seconds: u64,
+) -> Result<WorkspaceUpdateCommandOutput, String> {
+    let args = args
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect::<Vec<_>>();
+    run_workspace_update_command_args(program, &args, cwd, timeout_seconds).await
+}
+
+async fn run_workspace_update_command_args(
+    program: &str,
+    args: &[String],
     cwd: &Path,
     timeout_seconds: u64,
 ) -> Result<WorkspaceUpdateCommandOutput, String> {
