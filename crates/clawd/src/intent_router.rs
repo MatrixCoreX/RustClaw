@@ -9,7 +9,8 @@
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::path::{Component, Path};
+use std::collections::BTreeSet;
+use std::path::{Component, Path, PathBuf};
 use tracing::{info, warn};
 
 use crate::{
@@ -24,7 +25,46 @@ pub(crate) use crate::{
 
 const CLARIFY_QUESTION_PROMPT_LOGICAL_PATH: &str = "prompts/clarify_question_prompt.md";
 const INTENT_NORMALIZER_PROMPT_LOGICAL_PATH: &str = "prompts/intent_normalizer_prompt.md";
+const CONTRACT_REPAIR_JUDGE_PROMPT_LOGICAL_PATH: &str = "prompts/contract_repair_judge_prompt.md";
 const ROUTING_POLICY_PERSONA_PROMPT: &str = "Neutral routing policy classifier. Ignore style/persona preferences and optimize for correct intent resolution, clarification, and guard decisions.";
+
+#[derive(Clone, Debug, Default)]
+struct ContractRepairReport {
+    sources: BTreeSet<&'static str>,
+    details: BTreeSet<&'static str>,
+}
+
+impl ContractRepairReport {
+    fn add(&mut self, source: &'static str, detail: &'static str) {
+        self.sources.insert(source);
+        self.details.insert(detail);
+    }
+
+    fn source_csv(&self) -> String {
+        if self.sources.is_empty() {
+            "none".to_string()
+        } else {
+            self.sources.iter().copied().collect::<Vec<_>>().join(",")
+        }
+    }
+
+    fn detail_csv(&self) -> String {
+        if self.details.is_empty() {
+            "none".to_string()
+        } else {
+            self.details.iter().copied().collect::<Vec<_>>().join(",")
+        }
+    }
+
+    fn needs_llm_semantic_repair(&self) -> bool {
+        self.sources.contains("conservative_none")
+    }
+
+    fn merge(&mut self, other: &Self) {
+        self.sources.extend(other.sources.iter().copied());
+        self.details.extend(other.details.iter().copied());
+    }
+}
 
 fn render_auth_policy_context(state: &AppState, task: &ClaimedTask) -> String {
     let auth_role = task
@@ -229,6 +269,28 @@ struct IntentNormalizerOut {
     state_patch: Option<Value>,
     #[serde(default)]
     attachment_processing_required: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct ContractRepairJudgeOut {
+    #[serde(default)]
+    apply: bool,
+    #[serde(default)]
+    reason: String,
+    #[serde(default)]
+    confidence: f64,
+    #[serde(default)]
+    mode: String,
+    #[serde(default)]
+    needs_clarify: bool,
+    #[serde(default)]
+    clarify_question: String,
+    #[serde(default)]
+    resolved_user_intent: String,
+    #[serde(default)]
+    output_contract: Option<IntentOutputContractOut>,
+    #[serde(default)]
+    execution_recipe: Option<IntentExecutionRecipeOut>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -605,6 +667,17 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         "sqlite_schema_version" | "sqlite_db_schema_version" => {
             OutputSemanticKind::SqliteSchemaVersion
         }
+        "archive_list" | "archive_listing" | "archive_contents" => OutputSemanticKind::ArchiveList,
+        "archive_pack" | "archive_create" | "archive_compress" => OutputSemanticKind::ArchivePack,
+        "archive_unpack" | "archive_extract" | "archive_decompress" => {
+            OutputSemanticKind::ArchiveUnpack
+        }
+        "docker_ps" | "docker_containers" | "docker_container_list" => OutputSemanticKind::DockerPs,
+        "docker_images" | "docker_image_list" => OutputSemanticKind::DockerImages,
+        "docker_logs" => OutputSemanticKind::DockerLogs,
+        "docker_container_lifecycle" | "docker_lifecycle" => {
+            OutputSemanticKind::DockerContainerLifecycle
+        }
         _ => OutputSemanticKind::None,
     }
 }
@@ -794,7 +867,8 @@ fn apply_current_turn_structural_contract_repair(
     req: &str,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     workspace_root: &Path,
-    _answer_candidate: &str,
+    routed_mode: RoutedMode,
+    answer_candidate: &str,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
 ) -> Option<&'static str> {
@@ -821,8 +895,13 @@ fn apply_current_turn_structural_contract_repair(
         reason = Some("structured_file_scalar_repair");
     }
 
+    let scalar_direct_chat_answer = matches!(routed_mode, RoutedMode::Chat)
+        && !answer_candidate.trim().is_empty()
+        && !req_surface.has_structured_target_refinement();
+
     if matches!(output_contract.response_shape, OutputResponseShape::Scalar)
         && !output_contract.delivery_required
+        && !scalar_direct_chat_answer
         && (req_surface.has_explicit_path_or_url() || req_surface.has_single_filename_candidate())
     {
         output_contract.requires_content_evidence = true;
@@ -918,17 +997,29 @@ fn state_patch_requests_filename_only_output(state_patch: Option<&Value>) -> boo
 }
 
 fn state_patch_deictic_reference_requires_clarify(state_patch: Option<&Value>) -> bool {
+    state_patch_deictic_reference_target(state_patch).is_some_and(|target| {
+        matches!(
+            target,
+            "unresolved_prior_object" | "missing_locator" | "ambiguous_locator"
+        )
+    })
+}
+
+fn state_patch_deictic_reference_target(state_patch: Option<&Value>) -> Option<&str> {
     state_patch
         .and_then(|patch| patch.get("deictic_reference"))
         .and_then(Value::as_object)
         .and_then(|obj| obj.get("target"))
         .and_then(Value::as_str)
-        .is_some_and(|target| {
-            matches!(
-                target,
-                "unresolved_prior_object" | "missing_locator" | "ambiguous_locator"
-            )
-        })
+}
+
+fn state_patch_deictic_reference_is_resolved(state_patch: Option<&Value>) -> bool {
+    state_patch_deictic_reference_target(state_patch).is_some_and(|target| {
+        matches!(
+            target,
+            "current_action_result" | "current_turn_locator" | "comparison_result"
+        )
+    })
 }
 
 fn apply_answer_candidate_path_evidence_repair(
@@ -1121,6 +1212,131 @@ fn sanitize_resolved_intent_for_current_turn_locator(
     Some(trimmed_req.to_string())
 }
 
+fn normalize_compare_path(path: PathBuf) -> PathBuf {
+    path.canonicalize().unwrap_or(path)
+}
+
+fn locator_hint_compare_path(locator_hint: &str, workspace_root: &Path) -> Option<PathBuf> {
+    let hint = locator_hint.trim();
+    if hint.is_empty()
+        || hint.contains('\n')
+        || hint.contains('|')
+        || hint.contains("->")
+        || hint.starts_with("http://")
+        || hint.starts_with("https://")
+    {
+        return None;
+    }
+    let path = Path::new(hint);
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        workspace_root.join(path)
+    };
+    Some(normalize_compare_path(path))
+}
+
+fn first_compare_path_from_text(text: &str, workspace_root: &Path) -> Option<PathBuf> {
+    let locator = crate::intent::locator_extractor::extract_explicit_locator_for_fallback(text)?;
+    locator_hint_compare_path(&locator.locator_hint, workspace_root)
+}
+
+fn compare_path_targets_current_anchor(candidate: &Path, current_anchor: &Path) -> bool {
+    candidate == current_anchor || candidate.starts_with(current_anchor)
+}
+
+fn normalizer_target_drifted_from_current_anchor(
+    output_contract: &IntentOutputContract,
+    resolved_user_intent: &str,
+    current_anchor_path: &str,
+    workspace_root: &Path,
+) -> bool {
+    let Some(current_anchor) = locator_hint_compare_path(current_anchor_path, workspace_root)
+    else {
+        return false;
+    };
+
+    let mut saw_model_target = false;
+    if let Some(contract_target) =
+        locator_hint_compare_path(&output_contract.locator_hint, workspace_root)
+    {
+        saw_model_target = true;
+        if compare_path_targets_current_anchor(&contract_target, &current_anchor) {
+            return false;
+        }
+    }
+    if let Some(resolved_target) =
+        first_compare_path_from_text(resolved_user_intent, workspace_root)
+    {
+        saw_model_target = true;
+        if compare_path_targets_current_anchor(&resolved_target, &current_anchor) {
+            return false;
+        }
+    }
+
+    saw_model_target
+}
+
+fn apply_current_turn_anchor_drift_repair(
+    output_contract: &mut IntentOutputContract,
+    resolved_user_intent: &str,
+    current_anchor_path: &str,
+    workspace_root: &Path,
+) -> Option<&'static str> {
+    if !normalizer_target_drifted_from_current_anchor(
+        output_contract,
+        resolved_user_intent,
+        current_anchor_path,
+        workspace_root,
+    ) {
+        return None;
+    }
+
+    output_contract.response_shape = OutputResponseShape::Free;
+    output_contract.exact_sentence_count = None;
+    output_contract.requires_content_evidence = true;
+    output_contract.delivery_required = false;
+    output_contract.locator_kind = OutputLocatorKind::Path;
+    output_contract.delivery_intent = OutputDeliveryIntent::None;
+    output_contract.semantic_kind = OutputSemanticKind::None;
+    output_contract.locator_hint = current_anchor_path.trim().to_string();
+    output_contract.self_extension = Default::default();
+    Some("current_turn_anchor_overrides_contextual_target")
+}
+
+fn resolve_current_turn_anchor_path(state: &AppState, req: &str) -> Option<String> {
+    match crate::worker::try_resolve_implicit_locator_path(
+        state,
+        req,
+        "",
+        OutputLocatorKind::Path,
+        None,
+    ) {
+        Some(crate::worker::LocatorAutoResolution::Direct(path)) => Some(path),
+        Some(crate::worker::LocatorAutoResolution::Fuzzy(_)) | None => None,
+    }
+}
+
+fn current_turn_anchor_drift_repair_allowed(
+    routed_mode: RoutedMode,
+    needs_clarify: bool,
+    output_contract: &IntentOutputContract,
+    wants_file_delivery: bool,
+    schedule_kind: ScheduleKind,
+    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+) -> bool {
+    if needs_clarify {
+        return false;
+    }
+    matches!(routed_mode, RoutedMode::Act | RoutedMode::ChatAct)
+        || route_has_structured_execution_signal(
+            output_contract,
+            wants_file_delivery,
+            schedule_kind,
+            execution_recipe_hint,
+        )
+}
+
 fn downgrade_executionless_route_to_chat(
     routed_mode: &mut RoutedMode,
     needs_clarify: bool,
@@ -1204,6 +1420,13 @@ fn output_semantic_kind_requires_fresh_evidence(kind: OutputSemanticKind) -> boo
             | OutputSemanticKind::SqliteTableNamesOnly
             | OutputSemanticKind::SqliteDatabaseKindJudgment
             | OutputSemanticKind::SqliteSchemaVersion
+            | OutputSemanticKind::ArchiveList
+            | OutputSemanticKind::ArchivePack
+            | OutputSemanticKind::ArchiveUnpack
+            | OutputSemanticKind::DockerPs
+            | OutputSemanticKind::DockerImages
+            | OutputSemanticKind::DockerLogs
+            | OutputSemanticKind::DockerContainerLifecycle
     )
 }
 
@@ -1256,7 +1479,11 @@ fn prompt_has_concrete_fileish_cue(
 
 fn active_task_turn_can_reuse_semantic_patch(
     surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    state_patch: Option<&Value>,
 ) -> bool {
+    if state_patch_deictic_reference_requires_clarify(state_patch) {
+        return false;
+    }
     !prompt_has_concrete_fileish_cue(surface)
         && !surface.is_structural_locator_only_reply()
         && surface.inline_json_shape.is_none()
@@ -1265,7 +1492,14 @@ fn active_task_turn_can_reuse_semantic_patch(
 fn unresolved_deictic_observable_target_should_clarify(
     surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     output_contract: &IntentOutputContract,
+    state_patch: Option<&Value>,
 ) -> bool {
+    if state_patch_deictic_reference_requires_clarify(state_patch) {
+        return true;
+    }
+    if state_patch_deictic_reference_is_resolved(state_patch) {
+        return false;
+    }
     if !surface.has_deictic_reference() || !output_contract.requires_content_evidence {
         return false;
     }
@@ -1292,6 +1526,7 @@ fn should_resolve_task_scope_update_clarify_with_active_task(
     attachment_processing_required: bool,
     routed_mode: RoutedMode,
     output_contract: &IntentOutputContract,
+    state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
         || !matches!(routed_mode, RoutedMode::AskClarify)
@@ -1302,10 +1537,10 @@ fn should_resolve_task_scope_update_clarify_with_active_task(
         return false;
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
-    if unresolved_deictic_observable_target_should_clarify(&surface, output_contract) {
+    if unresolved_deictic_observable_target_should_clarify(&surface, output_contract, state_patch) {
         return false;
     }
-    active_task_turn_can_reuse_semantic_patch(&surface)
+    active_task_turn_can_reuse_semantic_patch(&surface, state_patch)
 }
 
 fn should_resolve_task_append_clarify_with_active_task(
@@ -1316,6 +1551,7 @@ fn should_resolve_task_append_clarify_with_active_task(
     attachment_processing_required: bool,
     routed_mode: RoutedMode,
     output_contract: &IntentOutputContract,
+    state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
         || !matches!(routed_mode, RoutedMode::AskClarify)
@@ -1329,10 +1565,10 @@ fn should_resolve_task_append_clarify_with_active_task(
         return false;
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
-    if unresolved_deictic_observable_target_should_clarify(&surface, output_contract) {
+    if unresolved_deictic_observable_target_should_clarify(&surface, output_contract, state_patch) {
         return false;
     }
-    active_task_turn_can_reuse_semantic_patch(&surface)
+    active_task_turn_can_reuse_semantic_patch(&surface, state_patch)
 }
 
 fn should_resolve_task_replace_clarify_with_active_task(
@@ -1343,6 +1579,7 @@ fn should_resolve_task_replace_clarify_with_active_task(
     attachment_processing_required: bool,
     routed_mode: RoutedMode,
     output_contract: &IntentOutputContract,
+    state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
         || !matches!(routed_mode, RoutedMode::AskClarify)
@@ -1353,10 +1590,10 @@ fn should_resolve_task_replace_clarify_with_active_task(
         return false;
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
-    if unresolved_deictic_observable_target_should_clarify(&surface, output_contract) {
+    if unresolved_deictic_observable_target_should_clarify(&surface, output_contract, state_patch) {
         return false;
     }
-    active_task_turn_can_reuse_semantic_patch(&surface)
+    active_task_turn_can_reuse_semantic_patch(&surface, state_patch)
 }
 
 fn should_route_active_task_mutation_to_chat(
@@ -1367,6 +1604,7 @@ fn should_route_active_task_mutation_to_chat(
     attachment_processing_required: bool,
     routed_mode: RoutedMode,
     output_contract: &IntentOutputContract,
+    state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
         || !matches!(routed_mode, RoutedMode::Act | RoutedMode::ChatAct)
@@ -1399,7 +1637,7 @@ fn should_route_active_task_mutation_to_chat(
         return false;
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
-    active_task_turn_can_reuse_semantic_patch(&surface)
+    active_task_turn_can_reuse_semantic_patch(&surface, state_patch)
 }
 
 fn apply_active_task_scope_refinement_repair(
@@ -1413,6 +1651,7 @@ fn apply_active_task_scope_refinement_repair(
     schedule_kind: ScheduleKind,
     should_refresh_long_term_memory: bool,
     output_contract: &mut IntentOutputContract,
+    state_patch: Option<&Value>,
 ) -> Option<&'static str> {
     if attachment_processing_required
         || active_primary_task_prompt(session_snapshot).is_none()
@@ -1430,10 +1669,10 @@ fn apply_active_task_scope_refinement_repair(
     }
 
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
-    if unresolved_deictic_observable_target_should_clarify(&surface, output_contract) {
+    if unresolved_deictic_observable_target_should_clarify(&surface, output_contract, state_patch) {
         return None;
     }
-    if !active_task_turn_can_reuse_semantic_patch(&surface) {
+    if !active_task_turn_can_reuse_semantic_patch(&surface, state_patch) {
         return None;
     }
 
@@ -1693,7 +1932,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("Allowed output_contract keys only: response_shape, exact_sentence_count, requires_content_evidence, delivery_required, locator_kind, delivery_intent, semantic_kind, locator_hint, self_extension. Do not emit exact_format, required_evidence, fields, examples, post_processing, or custom keys.".to_string());
     parts.push("locator_hint must be a clean concrete locator value or concrete target pair, not a full instruction sentence and not explanatory prose. If no clean locator is known, leave it empty and let needs_clarify/mode express the missing target.".to_string());
     parts.push("Allowed response_shape: free, one_sentence, strict, scalar, file_token. Allowed locator_kind: none, path, current_workspace, url, filename. Allowed delivery_intent: none, file_single, directory_lookup, directory_batch_files.".to_string());
-    parts.push("Allowed semantic_kind: none, raw_command_output, service_status, hidden_entries_check, file_names, directory_names, file_paths, directory_purpose_summary, content_excerpt_summary, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, execution_failed_step, generated_file_delivery, scalar_path_only, existence_with_path, existence_with_path_summary, recent_scalar_equality_check, git_commit_subject, structured_keys, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment, sqlite_schema_version.".to_string());
+    parts.push("Allowed semantic_kind: none, raw_command_output, service_status, hidden_entries_check, file_names, directory_names, file_paths, directory_purpose_summary, content_excerpt_summary, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, execution_failed_step, generated_file_delivery, scalar_path_only, existence_with_path, existence_with_path_summary, recent_scalar_equality_check, git_commit_subject, structured_keys, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment, sqlite_schema_version, archive_list, archive_pack, archive_unpack, docker_ps, docker_images, docker_logs, docker_container_lifecycle.".to_string());
     parts.push("Allowed turn_type: task_request, task_append, task_replace, task_correct, task_scope_update, run_control, approval_decision, status_query, feedback_or_error, preference_or_memory, or empty string. ask_clarify is a mode, never a turn_type or resume_behavior.".to_string());
     parts.push("state_patch must be a JSON object or null. Use null when there is no structured update; never output an empty string for state_patch. For ordered-entry follow-ups against an active ordered list, set state_patch.ordered_entry_ref to {\"index\":N,\"index_base\":1} for absolute item selection or {\"relative_offset\":K} for signed relative selection. When a standalone current REQUEST creates a new user-visible deliverable that later short corrections should edit, set state_patch.primary_task_update=\"replace\" and state_patch.active_task_boundary=\"new_deliverable\". For a clear deictic reference, set state_patch.deictic_reference={\"target\":\"current_action_result\"|\"current_turn_locator\"|\"comparison_result\"|\"unresolved_prior_object\"|\"missing_locator\"|\"ambiguous_locator\"}; unresolved/missing/ambiguous targets mean safe clarify. The runtime consumes structured numbers/targets, not language-specific ordinal words, pronouns, or connectors.".to_string());
     parts.push("Every enum field must be exactly one listed schema token. Do not output aliases, combined values, or explanatory prose in mode/output_contract/execution_recipe/turn_type/target_task_policy.".to_string());
@@ -1770,18 +2009,37 @@ fn render_compact_intent_normalizer_prompt(
     parts.join("\n")
 }
 
+#[cfg(test)]
 fn normalize_intent_normalizer_raw_for_schema(raw: &str, req: &str) -> String {
+    normalize_intent_normalizer_raw_for_schema_with_report(raw, req).0
+}
+
+fn normalize_intent_normalizer_raw_for_schema_with_report(
+    raw: &str,
+    req: &str,
+) -> (String, ContractRepairReport) {
     let parsed_value = crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<Value>(raw);
     let Some(mut value) = parsed_value else {
-        return normalize_plain_intent_normalizer_text_for_schema(raw, req);
+        let mut report = ContractRepairReport::default();
+        report.add("conservative_none", "raw_parse_failed_safe_chat_schema");
+        return (
+            normalize_plain_intent_normalizer_text_for_schema(raw, req),
+            report,
+        );
     };
+    let before = value.clone();
     let Some(obj) = value.as_object_mut() else {
         let text = value
             .as_str()
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| raw.trim());
-        return normalize_plain_intent_normalizer_text_for_schema(text, req);
+        let mut report = ContractRepairReport::default();
+        report.add("conservative_none", "non_object_output_safe_chat_schema");
+        return (
+            normalize_plain_intent_normalizer_text_for_schema(text, req),
+            report,
+        );
     };
     let mode_was_missing = obj
         .get("mode")
@@ -1870,7 +2128,390 @@ fn normalize_intent_normalizer_raw_for_schema(raw: &str, req: &str) -> String {
     }
     normalize_output_contract_for_schema(obj);
     normalize_mode_from_executable_output_contract(obj, mode_was_missing);
-    serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string())
+    let report = contract_repair_report_from_before_after(&before, &value);
+    (
+        serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string()),
+        report,
+    )
+}
+
+fn contract_repair_report_from_before_after(before: &Value, after: &Value) -> ContractRepairReport {
+    let mut report = ContractRepairReport::default();
+    let before_obj = before.as_object();
+    let after_obj = after.as_object();
+
+    let before_recipe = before_obj.and_then(|obj| obj.get("execution_recipe"));
+    if execution_recipe_value_declares_command_payload(before_recipe) {
+        report.add("command_payload", "execution_recipe_command_payload");
+    } else if output_recipe_value_declares_execution(before_recipe) {
+        report.add("enum_alias", "execution_recipe_enum");
+    } else if execution_recipe_value_has_untrusted_text(before_recipe) {
+        report.add(
+            "conservative_none",
+            "execution_recipe_untrusted_text_ignored",
+        );
+    }
+
+    if schema_field_alias_or_normalization_changed(
+        before_obj,
+        after_obj,
+        &["mode"],
+        "mode",
+        canonical_normalizer_mode_token,
+    ) {
+        report.add("enum_alias", "mode_enum_normalized");
+    }
+    if schema_field_alias_or_normalization_changed(
+        before_obj,
+        after_obj,
+        &["turn_type"],
+        "turn_type",
+        normalize_turn_type_schema_token_for_report,
+    ) {
+        report.add("enum_alias", "turn_type_enum_normalized");
+    }
+    if schema_field_alias_or_normalization_changed(
+        before_obj,
+        after_obj,
+        &["target_task_policy"],
+        "target_task_policy",
+        normalize_target_task_policy_schema_token_for_report,
+    ) {
+        report.add("enum_alias", "target_task_policy_enum_normalized");
+    }
+
+    let before_contract = before_obj
+        .and_then(|obj| obj.get("output_contract"))
+        .and_then(Value::as_object);
+    let after_contract = after_obj
+        .and_then(|obj| obj.get("output_contract"))
+        .and_then(Value::as_object);
+    if output_contract_schema_field_changed(
+        before_contract,
+        after_contract,
+        &[
+            "response_shape",
+            "shape",
+            "answer_shape",
+            "format",
+            "response_format",
+        ],
+        "response_shape",
+        normalize_output_response_shape_for_schema,
+        "free",
+    ) {
+        report.add("enum_alias", "output_contract_response_shape_normalized");
+    }
+    if output_contract_schema_field_changed(
+        before_contract,
+        after_contract,
+        &["locator_kind"],
+        "locator_kind",
+        normalize_output_locator_kind_for_schema,
+        "none",
+    ) {
+        report.add("enum_alias", "output_contract_locator_kind_normalized");
+    }
+    if output_contract_schema_field_changed(
+        before_contract,
+        after_contract,
+        &["delivery_intent"],
+        "delivery_intent",
+        normalize_output_delivery_intent_for_schema,
+        "none",
+    ) {
+        report.add("enum_alias", "output_contract_delivery_intent_normalized");
+    }
+    if output_contract_schema_field_changed(
+        before_contract,
+        after_contract,
+        &[
+            "semantic_kind",
+            "semantic",
+            "kind",
+            "answer_kind",
+            "semantic_type",
+        ],
+        "semantic_kind",
+        normalize_output_semantic_kind_for_schema,
+        "none",
+    ) {
+        report.add("enum_alias", "output_contract_semantic_kind_normalized");
+    }
+    if output_contract_unknown_semantic_was_ignored(before_contract, after_contract) {
+        report.add(
+            "conservative_none",
+            "output_contract_unknown_semantic_ignored",
+        );
+    }
+    if output_contract_requires_evidence_was_repaired(before_contract, after_contract) {
+        report.add(
+            "structured_contract",
+            "output_contract_requires_evidence_repaired",
+        );
+    }
+    if output_contract_has_executable_shape(after_contract) {
+        let before_mode = before_obj
+            .and_then(|obj| obj.get("mode"))
+            .and_then(scalar_json_value_text)
+            .and_then(|text| canonical_normalizer_mode_token(&text).map(str::to_string));
+        let after_mode = after_obj
+            .and_then(|obj| obj.get("mode"))
+            .and_then(scalar_json_value_text)
+            .and_then(|text| canonical_normalizer_mode_token(&text).map(str::to_string));
+        if matches!(before_mode.as_deref(), None | Some("chat"))
+            && matches!(after_mode.as_deref(), Some("act" | "chat_act"))
+        {
+            report.add("structured_contract", "mode_promoted_by_output_contract");
+        }
+    }
+    if execution_recipe_schema_field_changed(
+        before_recipe,
+        after_obj.and_then(|obj| obj.get("execution_recipe")),
+        "kind",
+        |raw| Some(crate::execution_recipe::parse_execution_recipe_kind_text(raw).as_str()),
+        "none",
+    ) || execution_recipe_schema_field_changed(
+        before_recipe,
+        after_obj.and_then(|obj| obj.get("execution_recipe")),
+        "profile",
+        |raw| Some(crate::execution_recipe::parse_execution_recipe_profile_text(raw).as_str()),
+        "none",
+    ) || execution_recipe_schema_field_changed(
+        before_recipe,
+        after_obj.and_then(|obj| obj.get("execution_recipe")),
+        "target_scope",
+        |raw| Some(crate::execution_recipe::parse_execution_recipe_target_scope_text(raw).as_str()),
+        "unknown",
+    ) {
+        report.add("enum_alias", "execution_recipe_fields_normalized");
+    }
+
+    report
+}
+
+fn normalize_turn_type_schema_token_for_report(raw: &str) -> Option<&'static str> {
+    match normalize_schema_token(raw).as_str() {
+        "task_request" => Some("task_request"),
+        "task_append" => Some("task_append"),
+        "task_replace" => Some("task_replace"),
+        "task_correct" => Some("task_correct"),
+        "task_scope_update" => Some("task_scope_update"),
+        "run_control" => Some("run_control"),
+        "approval_decision" => Some("approval_decision"),
+        "status_query" => Some("status_query"),
+        "feedback_or_error" => Some("feedback_or_error"),
+        "preference_or_memory" => Some("preference_or_memory"),
+        _ => None,
+    }
+}
+
+fn normalize_target_task_policy_schema_token_for_report(raw: &str) -> Option<&'static str> {
+    match normalize_schema_token(raw).as_str() {
+        "reuse_active" => Some("reuse_active"),
+        "replace_active" => Some("replace_active"),
+        "pause_and_queue" => Some("pause_and_queue"),
+        "standalone" => Some("standalone"),
+        _ => None,
+    }
+}
+
+fn schema_field_alias_or_normalization_changed(
+    before_obj: Option<&serde_json::Map<String, Value>>,
+    after_obj: Option<&serde_json::Map<String, Value>>,
+    before_keys: &[&str],
+    after_key: &str,
+    normalize: fn(&str) -> Option<&'static str>,
+) -> bool {
+    let Some(after_text) = after_obj
+        .and_then(|obj| obj.get(after_key))
+        .and_then(scalar_json_value_text)
+    else {
+        return false;
+    };
+    let Some(after_normalized) = normalize(&after_text) else {
+        return false;
+    };
+    before_keys.iter().any(|key| {
+        let Some(before_text) = before_obj
+            .and_then(|obj| obj.get(*key))
+            .and_then(scalar_json_value_text)
+        else {
+            return false;
+        };
+        normalize(&before_text).is_some_and(|candidate| candidate == after_normalized)
+            && normalize_schema_token(&before_text) != after_normalized
+    })
+}
+
+fn output_contract_schema_field_changed(
+    before_contract: Option<&serde_json::Map<String, Value>>,
+    after_contract: Option<&serde_json::Map<String, Value>>,
+    before_keys: &[&str],
+    after_key: &str,
+    normalize: fn(&str) -> &'static str,
+    default: &str,
+) -> bool {
+    let Some(after_text) = after_contract
+        .and_then(|obj| obj.get(after_key))
+        .and_then(scalar_json_value_text)
+    else {
+        return false;
+    };
+    let after_normalized = normalize(&after_text);
+    if after_normalized == default {
+        return false;
+    }
+    before_keys.iter().any(|key| {
+        let Some(before_text) = before_contract
+            .and_then(|obj| obj.get(*key))
+            .and_then(scalar_json_value_text)
+        else {
+            return false;
+        };
+        normalize(&before_text) == after_normalized
+            && normalize_schema_token(&before_text) != after_normalized
+    })
+}
+
+fn output_contract_unknown_semantic_was_ignored(
+    before_contract: Option<&serde_json::Map<String, Value>>,
+    after_contract: Option<&serde_json::Map<String, Value>>,
+) -> bool {
+    let before_text = before_contract
+        .and_then(|obj| {
+            [
+                "semantic_kind",
+                "semantic",
+                "kind",
+                "answer_kind",
+                "semantic_type",
+            ]
+            .iter()
+            .find_map(|key| obj.get(*key).and_then(scalar_json_value_text))
+        })
+        .unwrap_or_default();
+    if before_text.trim().is_empty()
+        || schema_text_is_neutral_none(&before_text)
+        || normalize_output_semantic_kind_for_schema(&before_text)
+            != OutputSemanticKind::None.as_str()
+    {
+        return false;
+    }
+    after_contract
+        .and_then(|obj| obj.get("semantic_kind"))
+        .and_then(scalar_json_value_text)
+        .is_some_and(|text| text == OutputSemanticKind::None.as_str())
+}
+
+fn output_contract_requires_evidence_was_repaired(
+    before_contract: Option<&serde_json::Map<String, Value>>,
+    after_contract: Option<&serde_json::Map<String, Value>>,
+) -> bool {
+    let before_requires = before_contract
+        .and_then(|obj| obj.get("requires_content_evidence"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let after_requires = after_contract
+        .and_then(|obj| obj.get("requires_content_evidence"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    !before_requires && after_requires
+}
+
+fn output_contract_has_executable_shape(contract: Option<&serde_json::Map<String, Value>>) -> bool {
+    let Some(contract) = contract else {
+        return false;
+    };
+    contract
+        .get("requires_content_evidence")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || contract
+            .get("delivery_required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        || contract
+            .get("locator_kind")
+            .and_then(scalar_json_value_text)
+            .is_some_and(|value| normalize_output_locator_kind_for_schema(&value) != "none")
+        || contract
+            .get("semantic_kind")
+            .and_then(scalar_json_value_text)
+            .is_some_and(|value| normalize_output_semantic_kind_for_schema(&value) != "none")
+}
+
+fn execution_recipe_schema_field_changed(
+    before_recipe: Option<&Value>,
+    after_recipe: Option<&Value>,
+    key: &str,
+    normalize: fn(&str) -> Option<&'static str>,
+    default: &str,
+) -> bool {
+    let Some(after_text) = after_recipe
+        .and_then(Value::as_object)
+        .and_then(|obj| obj.get(key))
+        .and_then(scalar_json_value_text)
+    else {
+        return false;
+    };
+    let Some(after_normalized) = normalize(&after_text) else {
+        return false;
+    };
+    if after_normalized == default {
+        return false;
+    }
+    let before_text = before_recipe
+        .and_then(Value::as_object)
+        .and_then(|obj| obj.get(key))
+        .and_then(scalar_json_value_text)
+        .or_else(|| before_recipe.and_then(scalar_json_value_text));
+    before_text.is_some_and(|text| {
+        normalize(&text).is_some_and(|candidate| candidate == after_normalized)
+            && normalize_schema_token(&text) != after_normalized
+    })
+}
+
+fn execution_recipe_value_has_untrusted_text(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::String(raw)) => {
+            !raw.trim().is_empty()
+                && !schema_text_is_neutral_none(raw)
+                && !schema_text_declares_execution_recipe(raw)
+        }
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|value| execution_recipe_value_has_untrusted_text(Some(value))),
+        Some(Value::Object(map)) => map.iter().any(|(key, value)| {
+            if matches!(
+                key.as_str(),
+                "kind"
+                    | "profile"
+                    | "target_scope"
+                    | "turn_type"
+                    | "target_task_policy"
+                    | "should_interrupt_active_run"
+                    | "state_patch"
+                    | "attachment_processing_required"
+            ) {
+                return false;
+            }
+            execution_recipe_value_has_untrusted_text(Some(value))
+        }),
+        Some(other) => scalar_json_value_text(other).is_some_and(|text| {
+            !text.trim().is_empty()
+                && !schema_text_is_neutral_none(&text)
+                && !schema_text_declares_execution_recipe(&text)
+        }),
+        None => false,
+    }
+}
+
+fn schema_text_is_neutral_none(raw: &str) -> bool {
+    matches!(
+        normalize_schema_token(raw).as_str(),
+        "" | "none" | "null" | "no" | "false"
+    )
 }
 
 fn answer_like_normalizer_payload_text(obj: &serde_json::Map<String, Value>) -> Option<String> {
@@ -2404,12 +3045,47 @@ fn normalize_resume_behavior_for_schema(obj: &mut serde_json::Map<String, Value>
 }
 
 fn normalize_schedule_intent_for_schema(obj: &mut serde_json::Map<String, Value>) {
+    let schedule_kind_is_none = obj
+        .get("schedule_kind")
+        .and_then(|value| value.as_str())
+        .map(normalize_schema_token)
+        .map(|value| value == "none" || value.is_empty())
+        .unwrap_or(true);
     let Some(value) = obj.get_mut("schedule_intent") else {
         obj.insert("schedule_intent".to_string(), Value::Null);
         return;
     };
     match value {
-        Value::Null | Value::Object(_) => {}
+        Value::Null => {}
+        Value::Object(intent) => {
+            if schedule_kind_is_none {
+                *value = Value::Null;
+                return;
+            }
+            for field in ["schedule", "task"] {
+                match intent.get_mut(field) {
+                    Some(Value::Object(_)) => {}
+                    Some(slot @ Value::String(_)) => {
+                        let raw = slot.as_str().unwrap_or_default();
+                        if let Ok(parsed) = serde_json::from_str::<Value>(raw) {
+                            *slot = if parsed.is_object() {
+                                parsed
+                            } else {
+                                Value::Object(serde_json::Map::new())
+                            };
+                        } else {
+                            *slot = Value::Object(serde_json::Map::new());
+                        }
+                    }
+                    Some(slot) => {
+                        *slot = Value::Object(serde_json::Map::new());
+                    }
+                    None => {
+                        intent.insert(field.to_string(), Value::Object(serde_json::Map::new()));
+                    }
+                }
+            }
+        }
         Value::String(raw) => {
             let normalized = normalize_schema_token(raw);
             if normalized.is_empty() || matches!(normalized.as_str(), "none" | "null" | "no") {
@@ -3081,6 +3757,151 @@ fn cap_intent_normalizer_prompt_for_llm_budget(
     format!("{head}{note}{tail}")
 }
 
+async fn run_contract_repair_judge(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_request: &str,
+    raw_normalizer_output: &str,
+    normalized_route_json: &str,
+    repair_report: &ContractRepairReport,
+) -> Option<ContractRepairJudgeOut> {
+    let resolved = match crate::bootstrap::load_required_prompt_template_for_state_with_meta(
+        state,
+        CONTRACT_REPAIR_JUDGE_PROMPT_LOGICAL_PATH,
+    ) {
+        Ok(resolved) => resolved,
+        Err(err) => {
+            info!(
+                "{} contract_repair_judge prompt_missing task_id={} err={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                err
+            );
+            return None;
+        }
+    };
+    let prompt = crate::render_prompt_template(
+        &resolved.template,
+        &[
+            ("__REQUEST__", user_request.trim()),
+            (
+                "__NORMALIZED_ROUTE_JSON__",
+                &crate::truncate_for_log(normalized_route_json),
+            ),
+            ("__CONTRACT_REPAIR_SOURCE__", &repair_report.source_csv()),
+            ("__CONTRACT_REPAIR_DETAIL__", &repair_report.detail_csv()),
+            (
+                "__RAW_NORMALIZER_OUTPUT__",
+                &crate::truncate_for_log(raw_normalizer_output),
+            ),
+        ],
+    );
+    crate::log_prompt_render_with_version(
+        state,
+        &task.task_id,
+        "contract_repair_judge_prompt",
+        &resolved.source,
+        resolved.version.as_deref(),
+        None,
+    );
+    let prompt_source = resolved.source;
+    let llm_out = match llm_gateway::run_with_fallback_with_prompt_source(
+        state,
+        task,
+        &prompt,
+        &prompt_source,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(err) => {
+            info!(
+                "{} contract_repair_judge llm_failed task_id={} err={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                err
+            );
+            return None;
+        }
+    };
+    match crate::prompt_utils::validate_against_schema::<ContractRepairJudgeOut>(
+        &llm_out,
+        crate::prompt_utils::PromptSchemaId::ContractRepairJudge,
+    ) {
+        Ok(validated) => {
+            if !validated.raw_parse_ok || validated.schema_normalized {
+                info!(
+                    "{} contract_repair_judge schema_parse_recovery task_id={} raw_parse_ok={} schema_normalized={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    validated.raw_parse_ok,
+                    validated.schema_normalized
+                );
+            }
+            Some(validated.value)
+        }
+        Err(err) => {
+            info!(
+                "{} contract_repair_judge schema_validation_failed task_id={} err={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                err
+            );
+            None
+        }
+    }
+}
+
+fn apply_contract_repair_judge_output(
+    out: &mut IntentNormalizerOut,
+    repair: ContractRepairJudgeOut,
+) -> bool {
+    if !repair.apply || repair.confidence < 0.60 {
+        return false;
+    }
+    if parse_mode_text(&repair.mode).is_none() {
+        return false;
+    }
+    let Some(output_contract) = repair.output_contract else {
+        return false;
+    };
+    let Some(execution_recipe) = repair.execution_recipe else {
+        return false;
+    };
+
+    out.mode = repair.mode;
+    out.needs_clarify = repair.needs_clarify;
+    out.clarify_question = repair.clarify_question;
+    if !repair.resolved_user_intent.trim().is_empty() {
+        out.resolved_user_intent = repair.resolved_user_intent;
+    }
+    out.output_contract = Some(output_contract);
+    out.execution_recipe = Some(execution_recipe);
+    out.confidence = repair.confidence.clamp(0.0, 1.0);
+    if repair.reason.trim().is_empty() {
+        append_route_reason(&mut out.reason, "llm_semantic_contract_repair");
+    } else {
+        append_route_reason(
+            &mut out.reason,
+            &format!("llm_semantic_contract_repair:{}", repair.reason.trim()),
+        );
+    }
+    true
+}
+
+fn append_route_reason(reason: &mut String, addition: &str) {
+    let addition = addition.trim();
+    if addition.is_empty() || reason.contains(addition) {
+        return;
+    }
+    if reason.trim().is_empty() {
+        *reason = addition.to_string();
+    } else {
+        reason.push_str("; ");
+        reason.push_str(addition);
+    }
+}
+
 /// Unified intent normalizer: one LLM call for resume decision + intent completion + schedule classification + needs_clarify + routed_mode.
 pub(crate) async fn run_intent_normalizer(
     state: &AppState,
@@ -3236,7 +4057,8 @@ pub(crate) async fn run_intent_normalizer(
             );
         }
     };
-    let llm_out_for_parse = normalize_intent_normalizer_raw_for_schema(&llm_out, req);
+    let (llm_out_for_parse, contract_repair_report) =
+        normalize_intent_normalizer_raw_for_schema_with_report(&llm_out, req);
     let parsed = crate::prompt_utils::validate_against_schema::<IntentNormalizerOut>(
         &llm_out_for_parse,
         crate::prompt_utils::PromptSchemaId::IntentNormalizer,
@@ -3244,9 +4066,11 @@ pub(crate) async fn run_intent_normalizer(
     if let Ok(validated) = &parsed {
         if !validated.raw_parse_ok {
             info!(
-                "{} intent_normalizer task_id={} parse_recovery=schema_repair input={}",
+                "{} intent_normalizer task_id={} parse_recovery=schema_repair contract_repair_source={} contract_repair_detail={} input={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
+                contract_repair_report.source_csv(),
+                contract_repair_report.detail_csv(),
                 crate::truncate_for_log(req)
             );
         }
@@ -3263,7 +4087,26 @@ pub(crate) async fn run_intent_normalizer(
             None
         }
     };
-    if let Some(out) = parsed {
+    if let Some(mut out) = parsed {
+        let mut contract_repair_report = contract_repair_report;
+        if contract_repair_report.needs_llm_semantic_repair() {
+            if let Some(repair) = run_contract_repair_judge(
+                state,
+                task,
+                req,
+                &llm_out,
+                &llm_out_for_parse,
+                &contract_repair_report,
+            )
+            .await
+            {
+                if apply_contract_repair_judge_output(&mut out, repair) {
+                    let mut repair_applied = ContractRepairReport::default();
+                    repair_applied.add("llm_semantic", "contract_repair_judge_applied");
+                    contract_repair_report.merge(&repair_applied);
+                }
+            }
+        }
         let resolved = out.resolved_user_intent.trim();
         let mut resume_behavior = parse_resume_behavior(&out.resume_behavior);
         if resume_context.is_none() && resume_behavior != ResumeBehavior::None {
@@ -3273,24 +4116,51 @@ pub(crate) async fn run_intent_normalizer(
             );
             resume_behavior = ResumeBehavior::None;
         }
-        let schedule_kind = parse_schedule_kind(&out.schedule_kind);
+        let mut schedule_kind = parse_schedule_kind(&out.schedule_kind);
         let confidence = out.confidence.clamp(0.0, 1.0);
         let routed_mode_raw = parse_mode_text(&out.mode).unwrap_or(RoutedMode::AskClarify);
         let parsed_turn_type = parse_turn_type(&out.turn_type);
         let parsed_target_task_policy = parse_target_task_policy(&out.target_task_policy);
+        let mut wants_file_delivery = out.wants_file_delivery;
         let mut output_contract =
-            parse_output_contract(out.output_contract.clone(), out.wants_file_delivery);
+            parse_output_contract(out.output_contract.clone(), wants_file_delivery);
         let structural_contract_repair = apply_current_turn_structural_contract_repair(
             &mut output_contract,
             req,
             &req_surface,
             &state.skill_rt.workspace_root,
+            routed_mode_raw,
             &out.answer_candidate,
             parsed_turn_type,
             parsed_target_task_policy,
         );
         let mut clarify_question = out.clarify_question.trim().to_string();
-        let execution_recipe_hint = parse_execution_recipe_hint(out.execution_recipe.clone());
+        let mut execution_recipe_hint = parse_execution_recipe_hint(out.execution_recipe.clone());
+        let current_turn_anchor_repair_allowed = current_turn_anchor_drift_repair_allowed(
+            routed_mode_raw,
+            out.needs_clarify,
+            &output_contract,
+            wants_file_delivery,
+            schedule_kind,
+            execution_recipe_hint,
+        );
+        let current_turn_anchor_path = current_turn_anchor_repair_allowed
+            .then(|| resolve_current_turn_anchor_path(state, req))
+            .flatten();
+        let current_turn_anchor_drift_repair =
+            current_turn_anchor_path.as_deref().and_then(|anchor_path| {
+                apply_current_turn_anchor_drift_repair(
+                    &mut output_contract,
+                    resolved,
+                    anchor_path,
+                    &state.skill_rt.workspace_root,
+                )
+            });
+        if current_turn_anchor_drift_repair.is_some() {
+            schedule_kind = ScheduleKind::None;
+            wants_file_delivery = false;
+            execution_recipe_hint = None;
+        }
         let mut routed_mode = crate::post_route_policy::enforce_content_evidence_execution_mode(
             routed_mode_raw,
             &output_contract,
@@ -3320,7 +4190,7 @@ pub(crate) async fn run_intent_normalizer(
             &mut routed_mode,
             needs_clarify,
             &output_contract,
-            out.wants_file_delivery,
+            wants_file_delivery,
             schedule_kind,
             execution_recipe_hint,
         );
@@ -3351,7 +4221,11 @@ pub(crate) async fn run_intent_normalizer(
             out.should_refresh_long_term_memory,
         );
         let mut reason = out.reason;
-        let mut force_current_request_resolved_intent = false;
+        let mut force_current_request_resolved_intent = current_turn_anchor_drift_repair.is_some();
+        if current_turn_anchor_drift_repair.is_some() {
+            turn_type = Some(TurnType::TaskRequest);
+            target_task_policy = Some(TargetTaskPolicy::Standalone);
+        }
         if should_detach_bare_acknowledgement_from_active_task(
             turn_type,
             target_task_policy,
@@ -3382,6 +4256,23 @@ pub(crate) async fn run_intent_normalizer(
             } else if !reason.contains(repair_reason) {
                 reason.push_str("; ");
                 reason.push_str(repair_reason);
+            }
+        }
+        if let Some(repair_reason) = current_turn_anchor_drift_repair {
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
+            if let Some(anchor_path) = current_turn_anchor_path.as_deref() {
+                info!(
+                    "{} intent_normalizer task_id={} current_turn_anchor_overrides_contextual_target anchor={} input={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    crate::truncate_for_log(anchor_path),
+                    crate::truncate_for_log(req)
+                );
             }
         }
         if let Some(repair_reason) = answer_candidate_path_repair {
@@ -3503,6 +4394,7 @@ pub(crate) async fn run_intent_normalizer(
             schedule_kind,
             out.should_refresh_long_term_memory,
             &mut output_contract,
+            state_patch.as_ref(),
         ) {
             clarify_question.clear();
             if reason.trim().is_empty() {
@@ -3526,6 +4418,7 @@ pub(crate) async fn run_intent_normalizer(
             out.attachment_processing_required,
             routed_mode,
             &output_contract,
+            state_patch.as_ref(),
         ) {
             needs_clarify = false;
             clarify_question.clear();
@@ -3550,6 +4443,7 @@ pub(crate) async fn run_intent_normalizer(
             out.attachment_processing_required,
             routed_mode,
             &output_contract,
+            state_patch.as_ref(),
         ) {
             routed_mode = RoutedMode::Chat;
             if reason.trim().is_empty() {
@@ -3572,6 +4466,7 @@ pub(crate) async fn run_intent_normalizer(
             out.attachment_processing_required,
             routed_mode,
             &output_contract,
+            state_patch.as_ref(),
         ) {
             needs_clarify = false;
             clarify_question.clear();
@@ -3596,6 +4491,7 @@ pub(crate) async fn run_intent_normalizer(
             out.attachment_processing_required,
             routed_mode,
             &output_contract,
+            state_patch.as_ref(),
         ) {
             needs_clarify = false;
             clarify_question.clear();
@@ -3653,7 +4549,7 @@ pub(crate) async fn run_intent_normalizer(
             );
         }
         info!(
-            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} mode={:?} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} turn_analysis={}",
+            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} mode={:?} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} contract_repair_source={} contract_repair_detail={} turn_analysis={}",
             crate::highlight_tag("routing"),
             task.task_id,
             crate::truncate_for_log(req),
@@ -3661,7 +4557,7 @@ pub(crate) async fn run_intent_normalizer(
             resume_behavior,
             schedule_kind,
             routed_mode,
-            out.wants_file_delivery,
+            wants_file_delivery,
             needs_clarify,
             crate::truncate_for_log(&reason),
             confidence,
@@ -3677,6 +4573,8 @@ pub(crate) async fn run_intent_normalizer(
                     spec.target_scope.as_str()
                 ))
                 .unwrap_or_else(|| "none".to_string()),
+            contract_repair_report.source_csv(),
+            contract_repair_report.detail_csv(),
             turn_analysis_log,
         );
         // Structural safety guard only: a single path/file token has no action verb, so
@@ -3720,7 +4618,7 @@ pub(crate) async fn run_intent_normalizer(
             resume_behavior,
             schedule_kind,
             schedule_intent,
-            wants_file_delivery: out.wants_file_delivery,
+            wants_file_delivery,
             should_refresh_long_term_memory: out.should_refresh_long_term_memory,
             agent_display_name_hint: out.agent_display_name_hint.trim().to_string(),
             needs_clarify: needs_clarify_eff,
@@ -4166,6 +5064,320 @@ mod tests {
     }
 
     #[test]
+    fn contract_repair_report_marks_structured_alias_repair() {
+        let raw = r#"{"output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":true,"locator_kind":"path","delivery_intent":"list_filenames","semantic_kind":"file_listing","locator_hint":"logs"}}"#;
+        let (_normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+            raw,
+            "列出 logs 目录下的前 10 个文件名，不要读内容",
+        );
+
+        assert!(report.source_csv().contains("enum_alias"));
+        assert!(report.source_csv().contains("structured_contract"));
+        assert!(report
+            .detail_csv()
+            .contains("output_contract_semantic_kind_normalized"));
+        assert!(report
+            .detail_csv()
+            .contains("mode_promoted_by_output_contract"));
+    }
+
+    #[test]
+    fn contract_repair_report_marks_command_payload_without_semantic_guess() {
+        let raw = r#"{
+          "resolved_user_intent":"列出 logs 目录下前 10 个文件名，不读取内容",
+          "needs_clarify":false,
+          "mode":"tools",
+          "output_contract":null,
+          "execution_recipe":{
+            "command":"ls -1 logs/ | head -n 10",
+            "working_dir":"/home/guagua/rustclaw"
+          }
+        }"#;
+        let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+            raw,
+            "列出 logs 目录下的前 10 个文件名",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+        assert_eq!(
+            value
+                .pointer("/output_contract/semantic_kind")
+                .and_then(|v| v.as_str()),
+            Some("none")
+        );
+        assert!(report.source_csv().contains("command_payload"));
+        assert!(report
+            .detail_csv()
+            .contains("execution_recipe_command_payload"));
+    }
+
+    #[test]
+    fn contract_repair_report_marks_untrusted_recipe_as_conservative_none() {
+        let raw = r#"{
+          "resolved_user_intent":"总结刚才的对话",
+          "needs_clarify":false,
+          "mode":"chat",
+          "output_contract":"summary",
+          "execution_recipe":["SUMMARIZE"]
+        }"#;
+        let (_normalized, report) =
+            super::normalize_intent_normalizer_raw_for_schema_with_report(raw, "总结刚才的对话");
+
+        assert!(report.source_csv().contains("conservative_none"));
+        assert!(report
+            .detail_csv()
+            .contains("execution_recipe_untrusted_text_ignored"));
+    }
+
+    #[test]
+    fn current_turn_anchor_drift_repair_discards_contextual_path_contract() {
+        let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::OneSentence,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            semantic_kind: OutputSemanticKind::SqliteSchemaVersion,
+            locator_hint: "/tmp/rustclaw-anchor-test/data/db-basic-contract.sqlite".to_string(),
+            ..Default::default()
+        };
+
+        let repair = super::apply_current_turn_anchor_drift_repair(
+            &mut contract,
+            "查询 /tmp/rustclaw-anchor-test/data/db-basic-contract.sqlite 的 schema version",
+            "/tmp/rustclaw-anchor-test/logs",
+            workspace,
+        );
+
+        assert_eq!(
+            repair,
+            Some("current_turn_anchor_overrides_contextual_target")
+        );
+        assert_eq!(contract.response_shape, OutputResponseShape::Free);
+        assert!(contract.requires_content_evidence);
+        assert!(!contract.delivery_required);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+        assert_eq!(contract.locator_hint, "/tmp/rustclaw-anchor-test/logs");
+    }
+
+    #[test]
+    fn current_turn_anchor_drift_repair_keeps_compatible_child_path() {
+        let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            semantic_kind: OutputSemanticKind::FileNames,
+            locator_hint: "/tmp/rustclaw-anchor-test/logs/clawd.log".to_string(),
+            ..Default::default()
+        };
+
+        let repair = super::apply_current_turn_anchor_drift_repair(
+            &mut contract,
+            "列出 /tmp/rustclaw-anchor-test/logs/clawd.log 的基本信息",
+            "/tmp/rustclaw-anchor-test/logs",
+            workspace,
+        );
+
+        assert_eq!(repair, None);
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::FileNames);
+        assert_eq!(
+            contract.locator_hint,
+            "/tmp/rustclaw-anchor-test/logs/clawd.log"
+        );
+    }
+
+    #[test]
+    fn current_turn_anchor_repair_stays_off_for_executionless_chat() {
+        let contract = IntentOutputContract::default();
+
+        assert!(!super::current_turn_anchor_drift_repair_allowed(
+            RoutedMode::Chat,
+            false,
+            &contract,
+            false,
+            crate::ScheduleKind::None,
+            None,
+        ));
+    }
+
+    #[test]
+    fn current_turn_anchor_repair_allowed_for_structured_evidence_contract() {
+        let contract = IntentOutputContract {
+            requires_content_evidence: true,
+            ..IntentOutputContract::default()
+        };
+
+        assert!(super::current_turn_anchor_drift_repair_allowed(
+            RoutedMode::Chat,
+            false,
+            &contract,
+            false,
+            crate::ScheduleKind::None,
+            None,
+        ));
+    }
+
+    #[test]
+    fn current_turn_anchor_repair_allowed_for_explicit_act_route() {
+        let contract = IntentOutputContract::default();
+
+        assert!(super::current_turn_anchor_drift_repair_allowed(
+            RoutedMode::Act,
+            false,
+            &contract,
+            false,
+            crate::ScheduleKind::None,
+            None,
+        ));
+    }
+
+    #[test]
+    fn contract_repair_judge_schema_accepts_canonical_payload() {
+        let raw = r#"{
+          "apply": true,
+          "reason": "malformed_contract_semantically_requires_directory_listing",
+          "confidence": 0.91,
+          "mode": "act",
+          "needs_clarify": false,
+          "clarify_question": "",
+          "resolved_user_intent": "列出 logs 目录下前 3 个文件名，不读取内容",
+          "output_contract": {
+            "response_shape": "strict",
+            "exact_sentence_count": null,
+            "requires_content_evidence": true,
+            "delivery_required": false,
+            "locator_kind": "path",
+            "delivery_intent": "none",
+            "semantic_kind": "file_names",
+            "locator_hint": "logs",
+            "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
+          },
+          "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "unknown"}
+        }"#;
+
+        crate::prompt_utils::validate_against_schema::<super::ContractRepairJudgeOut>(
+            raw,
+            crate::prompt_utils::PromptSchemaId::ContractRepairJudge,
+        )
+        .expect("contract repair judge payload should validate");
+    }
+
+    #[test]
+    fn contract_repair_judge_output_applies_semantic_contract() {
+        let mut out = super::IntentNormalizerOut {
+            resolved_user_intent: "列出 document 目录下的所有文件名".to_string(),
+            answer_candidate: String::new(),
+            resume_behavior: "none".to_string(),
+            schedule_kind: "none".to_string(),
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            reason: "malformed recipe text was ignored".to_string(),
+            confidence: 0.5,
+            mode: "chat".to_string(),
+            schedule_intent: None,
+            output_contract: Some(super::IntentOutputContractOut::default()),
+            execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+            turn_type: "task_request".to_string(),
+            target_task_policy: "standalone".to_string(),
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+        let repair = super::ContractRepairJudgeOut {
+            apply: true,
+            reason: "malformed_contract_semantically_requires_directory_listing".to_string(),
+            confidence: 0.91,
+            mode: "act".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            resolved_user_intent: "列出 document 目录下所有文件名，只输出文件名列表".to_string(),
+            output_contract: Some(super::IntentOutputContractOut {
+                response_shape: "strict".to_string(),
+                exact_sentence_count: None,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: "path".to_string(),
+                delivery_intent: "none".to_string(),
+                semantic_kind: "file_names".to_string(),
+                locator_hint: "document".to_string(),
+                self_extension: None,
+            }),
+            execution_recipe: Some(super::IntentExecutionRecipeOut {
+                kind: "none".to_string(),
+                profile: "none".to_string(),
+                target_scope: "unknown".to_string(),
+            }),
+        };
+
+        assert!(super::apply_contract_repair_judge_output(&mut out, repair));
+
+        assert_eq!(out.mode, "act");
+        assert_eq!(out.confidence, 0.91);
+        assert!(out.reason.contains("llm_semantic_contract_repair"));
+        let contract = super::parse_output_contract(out.output_contract, false);
+        assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::FileNames);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_hint, "document");
+    }
+
+    #[test]
+    fn contract_repair_judge_output_rejects_low_confidence() {
+        let mut out = super::IntentNormalizerOut {
+            resolved_user_intent: "总结刚才的对话".to_string(),
+            answer_candidate: String::new(),
+            resume_behavior: "none".to_string(),
+            schedule_kind: "none".to_string(),
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            reason: String::new(),
+            confidence: 0.8,
+            mode: "chat".to_string(),
+            schedule_intent: None,
+            output_contract: Some(super::IntentOutputContractOut::default()),
+            execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+            turn_type: String::new(),
+            target_task_policy: String::new(),
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+        let repair = super::ContractRepairJudgeOut {
+            apply: true,
+            reason: "uncertain".to_string(),
+            confidence: 0.59,
+            mode: "act".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            resolved_user_intent: "bad".to_string(),
+            output_contract: Some(super::IntentOutputContractOut {
+                response_shape: "strict".to_string(),
+                exact_sentence_count: None,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: "current_workspace".to_string(),
+                delivery_intent: "none".to_string(),
+                semantic_kind: "file_names".to_string(),
+                locator_hint: String::new(),
+                self_extension: None,
+            }),
+            execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+        };
+
+        assert!(!super::apply_contract_repair_judge_output(&mut out, repair));
+        assert_eq!(out.mode, "chat");
+        assert_eq!(out.resolved_user_intent, "总结刚才的对话");
+    }
+
+    #[test]
     fn observed_context_summary_followup_does_not_force_fresh_evidence() {
         let mut contract = IntentOutputContract::default();
         contract.response_shape = OutputResponseShape::OneSentence;
@@ -4181,6 +5393,7 @@ mod tests {
             "in one sentence tell me if anything looks abnormal",
             &surface,
             std::path::Path::new("/workspace"),
+            RoutedMode::Chat,
             "",
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
@@ -4205,6 +5418,7 @@ mod tests {
             "summarize app.log briefly",
             &surface,
             std::path::Path::new("/workspace"),
+            RoutedMode::Chat,
             "",
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
@@ -5297,6 +6511,73 @@ mod tests {
                 .get("resolved_user_intent")
                 .and_then(|value| value.as_str()),
             Some("用户想获取刚才记住的测试编号 RC-CONT-CN-0428-A")
+        );
+        crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+            &normalized,
+            crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+        )
+        .expect("schema validation");
+    }
+
+    #[test]
+    fn normalizer_schema_normalization_drops_none_schedule_intent_object_with_string_nested_fields()
+    {
+        let raw = r#"{
+          "resolved_user_intent":"logs ディレクトリのファイル名を3つだけ一覧して。",
+          "resume_behavior":"none",
+          "schedule_kind":"none",
+          "schedule_intent":{
+            "kind":"none",
+            "timezone":"",
+            "schedule":"",
+            "task":"",
+            "target_job_id":"",
+            "raw":"",
+            "reason":"",
+            "needs_clarify":false,
+            "clarify_question":"",
+            "confidence":0.0
+          },
+          "wants_file_delivery":false,
+          "should_refresh_long_term_memory":false,
+          "agent_display_name_hint":"",
+          "needs_clarify":false,
+          "clarify_question":"",
+          "reason":"",
+          "confidence":0.98,
+          "mode":"act",
+          "output_contract":{
+            "response_shape":"strict",
+            "requires_content_evidence":true,
+            "delivery_required":false,
+            "locator_kind":"current_workspace",
+            "delivery_intent":"none",
+            "semantic_kind":"file_names",
+            "locator_hint":"logs",
+            "self_extension":{"mode":"none","trigger":"none","execute_now":false}
+          },
+          "execution_recipe":{"kind":"none","profile":"none","target_scope":"unknown"},
+          "turn_type":"task_request",
+          "target_task_policy":"standalone",
+          "should_interrupt_active_run":false,
+          "state_patch":{},
+          "attachment_processing_required":false
+        }"#;
+        let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "");
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        assert!(value
+            .get("schedule_intent")
+            .is_some_and(|value| value.is_null()));
+        assert_eq!(
+            value.get("mode").and_then(|value| value.as_str()),
+            Some("act")
+        );
+        assert_eq!(
+            value
+                .get("output_contract")
+                .and_then(|value| value.get("semantic_kind"))
+                .and_then(|value| value.as_str()),
+            Some("file_names")
         );
         crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
             &normalized,
@@ -6736,6 +8017,7 @@ mod tests {
             req,
             &surface,
             workspace_root,
+            RoutedMode::Act,
             "",
             None,
             None,
@@ -6771,6 +8053,7 @@ mod tests {
             req,
             &surface,
             workspace_root,
+            RoutedMode::Act,
             "",
             None,
             None,
@@ -6801,6 +8084,7 @@ mod tests {
                 .ancestors()
                 .nth(2)
                 .expect("workspace root"),
+            RoutedMode::Act,
             "没有 (路径未找到)",
             None,
             None,
@@ -6829,6 +8113,7 @@ mod tests {
                 .ancestors()
                 .nth(2)
                 .expect("workspace root"),
+            RoutedMode::Act,
             "rustclaw",
             None,
             None,
@@ -6838,6 +8123,35 @@ mod tests {
         assert!(contract.requires_content_evidence);
         assert_eq!(contract.locator_kind, OutputLocatorKind::Filename);
         assert_eq!(contract.locator_hint, "package.json");
+    }
+
+    #[test]
+    fn scalar_direct_answer_candidate_is_not_promoted_by_filename_like_text() {
+        let req = "Literal text: app.log, answer only acknowledged.";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Scalar,
+            ..IntentOutputContract::default()
+        };
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(2)
+                .expect("workspace root"),
+            RoutedMode::Chat,
+            "acknowledged",
+            None,
+            None,
+        );
+
+        assert_eq!(reason, None);
+        assert!(!contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+        assert!(contract.locator_hint.is_empty());
     }
 
     #[test]
@@ -6969,6 +8283,7 @@ mod tests {
             req,
             &surface,
             &workspace_root,
+            RoutedMode::Act,
             "",
             None,
             None,
@@ -6997,6 +8312,7 @@ mod tests {
             req,
             &surface,
             &workspace_root,
+            RoutedMode::Chat,
             "",
             None,
             None,
@@ -7671,6 +8987,7 @@ mod tests {
                 false,
                 RoutedMode::AskClarify,
                 &IntentOutputContract::default(),
+                None,
             )
         );
     }
@@ -7695,6 +9012,7 @@ mod tests {
                 false,
                 RoutedMode::AskClarify,
                 &IntentOutputContract::default(),
+                None,
             )
         );
     }
@@ -7718,6 +9036,7 @@ mod tests {
             false,
             RoutedMode::AskClarify,
             &IntentOutputContract::default(),
+            None,
         ));
     }
 
@@ -7740,6 +9059,7 @@ mod tests {
             false,
             RoutedMode::AskClarify,
             &IntentOutputContract::default(),
+            None,
         ));
     }
 
@@ -7762,6 +9082,7 @@ mod tests {
             false,
             RoutedMode::Act,
             &IntentOutputContract::default(),
+            None,
         ));
     }
 
@@ -7803,6 +9124,7 @@ mod tests {
             super::ScheduleKind::None,
             false,
             &mut contract,
+            None,
         );
 
         assert_eq!(reason, Some("active_task_scope_refinement_repair"));
@@ -7853,6 +9175,7 @@ mod tests {
             super::ScheduleKind::None,
             false,
             &mut contract,
+            None,
         );
 
         assert_eq!(reason, None);
@@ -7903,6 +9226,7 @@ mod tests {
             super::ScheduleKind::None,
             false,
             &mut contract,
+            None,
         );
 
         assert_eq!(reason, None);
@@ -7933,6 +9257,7 @@ mod tests {
             false,
             RoutedMode::ChatAct,
             &IntentOutputContract::default(),
+            None,
         ));
     }
 
@@ -7958,6 +9283,7 @@ mod tests {
             false,
             RoutedMode::Act,
             &IntentOutputContract::default(),
+            None,
         ));
     }
 
@@ -7982,6 +9308,7 @@ mod tests {
             false,
             RoutedMode::Act,
             &IntentOutputContract::default(),
+            None,
         ));
     }
 
@@ -8012,6 +9339,7 @@ mod tests {
             false,
             RoutedMode::ChatAct,
             &contract,
+            None,
         ));
     }
 
@@ -8043,8 +9371,52 @@ mod tests {
                 false,
                 RoutedMode::AskClarify,
                 &contract,
+                None,
             )
         );
+    }
+
+    #[test]
+    fn structured_deictic_unresolved_target_blocks_non_chinese_pronoun_fallback_gap() {
+        let surface =
+            crate::intent::surface_signals::analyze_prompt_surface("それの最後の2行を見せて");
+        assert!(!surface.has_deictic_reference());
+        let contract = IntentOutputContract {
+            requires_content_evidence: true,
+            ..IntentOutputContract::default()
+        };
+        let patch = serde_json::json!({
+            "deictic_reference": {"target": "unresolved_prior_object"}
+        });
+
+        assert!(super::unresolved_deictic_observable_target_should_clarify(
+            &surface,
+            &contract,
+            Some(&patch),
+        ));
+        assert!(!super::active_task_turn_can_reuse_semantic_patch(
+            &surface,
+            Some(&patch),
+        ));
+    }
+
+    #[test]
+    fn structured_deictic_resolved_target_overrides_local_pronoun_fallback() {
+        let surface = crate::intent::surface_signals::analyze_prompt_surface("看看那个最后 5 行");
+        assert!(surface.has_deictic_reference());
+        let contract = IntentOutputContract {
+            requires_content_evidence: true,
+            ..IntentOutputContract::default()
+        };
+        let patch = serde_json::json!({
+            "deictic_reference": {"target": "current_action_result"}
+        });
+
+        assert!(!super::unresolved_deictic_observable_target_should_clarify(
+            &surface,
+            &contract,
+            Some(&patch),
+        ));
     }
 
     #[test]
@@ -8085,6 +9457,7 @@ mod tests {
             super::ScheduleKind::None,
             false,
             &mut contract,
+            None,
         );
 
         assert_eq!(reason, None);
@@ -8117,6 +9490,7 @@ mod tests {
             false,
             RoutedMode::AskClarify,
             &IntentOutputContract::default(),
+            None,
         ));
     }
 
@@ -8140,6 +9514,7 @@ mod tests {
             false,
             RoutedMode::AskClarify,
             &IntentOutputContract::default(),
+            None,
         ));
     }
 
@@ -8163,6 +9538,7 @@ mod tests {
             false,
             RoutedMode::AskClarify,
             &IntentOutputContract::default(),
+            None,
         ));
     }
 

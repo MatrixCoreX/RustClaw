@@ -2,43 +2,130 @@ use std::borrow::Cow;
 
 use crate::{AppState, ClaimedTask};
 
-pub(crate) fn text_contains_cjk(text: &str) -> bool {
-    text.chars().any(|ch| {
-        matches!(
-            ch as u32,
-            0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
-        )
-    })
+#[derive(Debug, Clone, Copy, Default)]
+struct TextLanguageCounts {
+    cjk: usize,
+    kana: usize,
+    hangul: usize,
+    ascii_alpha: usize,
+    latin_extended: usize,
+    cyrillic: usize,
+    arabic: usize,
+    devanagari: usize,
+    greek: usize,
+    hebrew: usize,
+    thai: usize,
+    other_alpha: usize,
 }
 
-pub(crate) fn text_contains_ascii_alpha(text: &str) -> bool {
-    text.chars().any(|ch| ch.is_ascii_alphabetic())
+impl TextLanguageCounts {
+    fn non_cjk_alpha(self) -> usize {
+        self.kana
+            + self.hangul
+            + self.ascii_alpha
+            + self.latin_extended
+            + self.cyrillic
+            + self.arabic
+            + self.devanagari
+            + self.greek
+            + self.hebrew
+            + self.thai
+            + self.other_alpha
+    }
+
+    fn non_cjk_non_ascii_alpha(self) -> usize {
+        self.kana
+            + self.hangul
+            + self.latin_extended
+            + self.cyrillic
+            + self.arabic
+            + self.devanagari
+            + self.greek
+            + self.hebrew
+            + self.thai
+            + self.other_alpha
+    }
 }
 
-fn text_language_counts(text: &str) -> (usize, usize) {
+fn char_in_ranges(ch: char, ranges: &[(u32, u32)]) -> bool {
+    let codepoint = ch as u32;
+    ranges
+        .iter()
+        .any(|(start, end)| (*start..=*end).contains(&codepoint))
+}
+
+fn text_language_counts(text: &str) -> TextLanguageCounts {
+    const CJK_RANGES: &[(u32, u32)] = &[(0x3400, 0x4DBF), (0x4E00, 0x9FFF), (0xF900, 0xFAFF)];
+    const KANA_RANGES: &[(u32, u32)] = &[
+        (0x3040, 0x309F),
+        (0x30A0, 0x30FF),
+        (0x31F0, 0x31FF),
+        (0xFF66, 0xFF9D),
+    ];
+    const HANGUL_RANGES: &[(u32, u32)] = &[
+        (0x1100, 0x11FF),
+        (0x3130, 0x318F),
+        (0xA960, 0xA97F),
+        (0xAC00, 0xD7AF),
+        (0xD7B0, 0xD7FF),
+    ];
+    const LATIN_EXTENDED_RANGES: &[(u32, u32)] =
+        &[(0x00C0, 0x024F), (0x1E00, 0x1EFF), (0xA720, 0xA7FF)];
+    const CYRILLIC_RANGES: &[(u32, u32)] = &[(0x0400, 0x052F), (0x2DE0, 0x2DFF), (0xA640, 0xA69F)];
+    const ARABIC_RANGES: &[(u32, u32)] = &[
+        (0x0600, 0x06FF),
+        (0x0750, 0x077F),
+        (0x08A0, 0x08FF),
+        (0xFB50, 0xFDFF),
+        (0xFE70, 0xFEFF),
+    ];
+    const DEVANAGARI_RANGES: &[(u32, u32)] = &[(0x0900, 0x097F), (0xA8E0, 0xA8FF)];
+    const GREEK_RANGES: &[(u32, u32)] = &[(0x0370, 0x03FF), (0x1F00, 0x1FFF)];
+    const HEBREW_RANGES: &[(u32, u32)] = &[(0x0590, 0x05FF)];
+    const THAI_RANGES: &[(u32, u32)] = &[(0x0E00, 0x0E7F)];
+
+    let mut counts = TextLanguageCounts::default();
     let mut cjk = 0usize;
-    let mut ascii_alpha = 0usize;
     for ch in text.chars() {
-        if matches!(
-            ch as u32,
-            0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
-        ) {
+        if char_in_ranges(ch, CJK_RANGES) {
+            counts.cjk += 1;
             cjk += 1;
+        } else if char_in_ranges(ch, KANA_RANGES) {
+            counts.kana += 1;
+        } else if char_in_ranges(ch, HANGUL_RANGES) {
+            counts.hangul += 1;
+        } else if char_in_ranges(ch, LATIN_EXTENDED_RANGES) && ch.is_alphabetic() {
+            counts.latin_extended += 1;
+        } else if char_in_ranges(ch, CYRILLIC_RANGES) {
+            counts.cyrillic += 1;
+        } else if char_in_ranges(ch, ARABIC_RANGES) {
+            counts.arabic += 1;
+        } else if char_in_ranges(ch, DEVANAGARI_RANGES) {
+            counts.devanagari += 1;
+        } else if char_in_ranges(ch, GREEK_RANGES) {
+            counts.greek += 1;
+        } else if char_in_ranges(ch, HEBREW_RANGES) {
+            counts.hebrew += 1;
+        } else if char_in_ranges(ch, THAI_RANGES) {
+            counts.thai += 1;
         } else if ch.is_ascii_alphabetic() {
-            ascii_alpha += 1;
+            counts.ascii_alpha += 1;
+        } else if ch.is_alphabetic() {
+            counts.other_alpha += 1;
         }
     }
-    (cjk, ascii_alpha)
+    debug_assert_eq!(cjk, counts.cjk);
+    counts
 }
 
 pub(crate) fn text_language_conflicts_with_hint(text: &str, language_hint: &str) -> bool {
-    let (cjk, ascii_alpha) = text_language_counts(text);
+    let counts = text_language_counts(text);
     let hint = language_hint.trim().to_ascii_lowercase();
     if hint.starts_with("en") {
-        return cjk > 0 && cjk.saturating_mul(2) > ascii_alpha;
+        return counts.cjk > 0 && counts.cjk.saturating_mul(2) > counts.ascii_alpha;
     }
     if hint.starts_with("zh") {
-        return cjk == 0 && ascii_alpha > 16;
+        return counts.cjk == 0 && counts.ascii_alpha > 16;
     }
     false
 }
@@ -48,29 +135,97 @@ pub(crate) fn request_language_hint(user_text: &str) -> &'static str {
     if trimmed.is_empty() {
         return "config_default";
     }
-    match (
-        text_contains_cjk(trimmed),
-        text_contains_ascii_alpha(trimmed),
-    ) {
-        (true, false) => "zh-CN",
-        (false, true) => "en",
-        (true, true) => "mixed",
-        (false, false) => "config_default",
+    let counts = text_language_counts(trimmed);
+    if counts.kana > 0 {
+        return "ja";
     }
+    if counts.hangul > 0 {
+        return "ko";
+    }
+    if counts.cjk > 0 {
+        return if counts.non_cjk_alpha() == 0 {
+            "zh-CN"
+        } else {
+            "mixed"
+        };
+    }
+    let non_ascii_alpha = counts.non_cjk_non_ascii_alpha();
+    if counts.ascii_alpha > 0 && non_ascii_alpha == 0 {
+        return "en";
+    }
+    if counts.latin_extended > 0 {
+        return if counts.ascii_alpha > 0 || non_ascii_alpha == counts.latin_extended {
+            "und-Latn"
+        } else {
+            "mixed"
+        };
+    }
+    if counts.cyrillic > 0 && non_ascii_alpha == counts.cyrillic {
+        return "und-Cyrl";
+    }
+    if counts.arabic > 0 && non_ascii_alpha == counts.arabic {
+        return "und-Arab";
+    }
+    if counts.devanagari > 0 && non_ascii_alpha == counts.devanagari {
+        return "und-Deva";
+    }
+    if counts.greek > 0 && non_ascii_alpha == counts.greek {
+        return "und-Grek";
+    }
+    if counts.hebrew > 0 && non_ascii_alpha == counts.hebrew {
+        return "he";
+    }
+    if counts.thai > 0 && non_ascii_alpha == counts.thai {
+        return "th";
+    }
+    if non_ascii_alpha > 0 {
+        return "mixed";
+    }
+    "config_default"
 }
 
-fn locale_hint_to_language_hint(locale_hint: &str) -> Option<&'static str> {
+fn canonical_locale_hint(locale_hint: &str) -> Option<String> {
     let trimmed = locale_hint.trim();
     if trimmed.is_empty() {
         return None;
     }
-    let normalized = trimmed.to_ascii_lowercase();
-    if normalized.starts_with("zh") {
-        Some("zh-CN")
-    } else if normalized.starts_with("en") {
-        Some("en")
+    let normalized = trimmed.replace('_', "-");
+    if normalized.len() > 32
+        || normalized
+            .chars()
+            .any(|ch| !(ch.is_ascii_alphanumeric() || ch == '-'))
+    {
+        return None;
+    }
+    let mut parts = normalized.split('-');
+    let primary = parts.next()?.to_ascii_lowercase();
+    if !(2..=3).contains(&primary.len()) || !primary.chars().all(|ch| ch.is_ascii_alphabetic()) {
+        return None;
+    }
+    if primary == "zh" {
+        return Some("zh-CN".to_string());
+    }
+    if primary == "en" {
+        return Some("en".to_string());
+    }
+    let rest = parts
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            if part.len() == 2 && part.chars().all(|ch| ch.is_ascii_alphabetic()) {
+                part.to_ascii_uppercase()
+            } else if part.len() == 4 && part.chars().all(|ch| ch.is_ascii_alphabetic()) {
+                let mut chars = part.chars();
+                let first = chars.next().unwrap_or('x').to_ascii_uppercase();
+                format!("{}{}", first, chars.as_str().to_ascii_lowercase())
+            } else {
+                part.to_ascii_lowercase()
+            }
+        })
+        .collect::<Vec<_>>();
+    if rest.is_empty() {
+        Some(primary)
     } else {
-        None
+        Some(format!("{}-{}", primary, rest.join("-")))
     }
 }
 
@@ -82,8 +237,8 @@ pub(crate) fn preferred_response_language_hint(
     if request_hint != "config_default" {
         return request_hint.to_string();
     }
-    if let Some(locale_hint) = session_locale_hint.and_then(locale_hint_to_language_hint) {
-        return locale_hint.to_string();
+    if let Some(locale_hint) = session_locale_hint.and_then(canonical_locale_hint) {
+        return locale_hint;
     }
     "config_default".to_string()
 }
@@ -181,6 +336,23 @@ mod tests {
             "en"
         );
         assert_eq!(request_language_hint("用 English 解释 README"), "mixed");
+        assert_eq!(
+            request_language_hint("logs ディレクトリのファイル名を一覧して"),
+            "ja"
+        );
+        assert_eq!(
+            request_language_hint("logs 디렉터리의 파일명을 보여줘"),
+            "ko"
+        );
+        assert_eq!(
+            request_language_hint("покажи имена файлов в logs"),
+            "und-Cyrl"
+        );
+        assert_eq!(request_language_hint("اكتب ملخصا قصيرا"), "und-Arab");
+        assert_eq!(
+            request_language_hint("résume le fichier README"),
+            "und-Latn"
+        );
         assert_eq!(request_language_hint("12345"), "config_default");
     }
 
@@ -216,7 +388,11 @@ mod tests {
         );
         assert_eq!(
             preferred_response_language_hint("12345", Some("fr-FR")),
-            "config_default"
+            "fr-FR"
+        );
+        assert_eq!(
+            preferred_response_language_hint("12345", Some("ja_JP")),
+            "ja-JP"
         );
     }
 

@@ -88,10 +88,10 @@ Rules:
 - If `Output contract.response_shape` is `scalar` or `file_token`, never wrap the answer in labels or add explanatory prose.
 - If the observed outputs are insufficient to answer reliably, set `qualified=false`, `publishable=false`, and keep `answer` empty.
 - Never output internal trace labels, planner objects, or protocol artifacts.
-- Language policy (strict): follow `__REQUEST_LANGUAGE_HINT__` when it is clear (`zh-CN`, `en`, or `mixed`) and use `__CONFIG_RESPONSE_LANGUAGE__` only as the fallback default.
+- Language policy (strict): follow `__REQUEST_LANGUAGE_HINT__` when it is clear and use `__CONFIG_RESPONSE_LANGUAGE__` only as the fallback default. Clear hints include `zh-CN`, `en`, `mixed`, BCP-47 style language tags such as `ja`/`ko`/`fr-FR`, and script hints such as `und-Latn`/`und-Cyrl`/`und-Arab`.
 - If `__REQUEST_LANGUAGE_HINT__` is `zh-CN`, answer fully in Chinese unless the current request explicitly asks for another language.
-- If `__REQUEST_LANGUAGE_HINT__` is `en`, answer fully in English unless the current request explicitly asks for another language.
-- If `__REQUEST_LANGUAGE_HINT__` is `mixed`, follow the dominant surrounding sentence language from the current user request and do not switch languages mid-answer unless quoting observed filenames, paths, or raw field values.
+- If `__REQUEST_LANGUAGE_HINT__` is `en`, answer in English unless the current user request is clearly another Latin-script human language; in that case follow the current request language.
+- If `__REQUEST_LANGUAGE_HINT__` is `mixed` or a script hint, follow the dominant surrounding sentence language from the current user request and do not switch languages mid-answer unless quoting observed filenames, paths, or raw field values. If it is another clear BCP-47 language tag, answer in that language unless the current request explicitly asks otherwise.
 
 Output JSON only:
 {"answer":"...","qualified":true,"needs_clarify":false,"is_meta_instruction":false,"publishable":true,"confidence":0.0,"reason":"..."}

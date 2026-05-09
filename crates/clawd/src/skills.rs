@@ -126,12 +126,183 @@ use crate::{AppState, ClaimedTask, RuntimeChannel};
 const READ_FILE_NOT_FOUND_PREFIX: &str = "__RC_READ_FILE_NOT_FOUND__:";
 const POLICY_BLOCK_ERROR_PREFIX: &str = "__RC_POLICY_BLOCK__:";
 const CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX: &str = "__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:";
+const STRUCTURED_SKILL_ERROR_PREFIX: &str = "__RC_SKILL_ERROR__:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PolicyBlockError {
     pub(crate) reason_code: String,
     pub(crate) observed_facts: Vec<String>,
     pub(crate) policy_boundary: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StructuredSkillError {
+    pub(crate) skill: String,
+    pub(crate) error_kind: String,
+    pub(crate) error_text: String,
+    pub(crate) platform: Option<String>,
+    pub(crate) manager_type: Option<String>,
+    pub(crate) service_name: Option<String>,
+    pub(crate) extra: Option<Value>,
+}
+
+fn string_field(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+}
+
+fn child_text_object(value: &Value) -> Option<Value> {
+    string_field(value, "text").and_then(|text| serde_json::from_str::<Value>(&text).ok())
+}
+
+fn structured_skill_error_string(skill: &str, value: &Value) -> String {
+    let text_object = child_text_object(value).unwrap_or(Value::Null);
+    let error_kind = string_field(value, "error_kind")
+        .or_else(|| string_field(&text_object, "error_kind"))
+        .or_else(|| {
+            value
+                .get("extra")
+                .and_then(|extra| string_field(extra, "error_kind"))
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    let error_text = string_field(value, "error_text")
+        .or_else(|| string_field(&text_object, "failure_reason"))
+        .unwrap_or_else(|| "skill execution failed".to_string());
+    let payload = json!({
+        "skill": skill.trim(),
+        "error_kind": error_kind,
+        "error_text": error_text,
+        "platform": string_field(value, "platform").or_else(|| string_field(&text_object, "platform")),
+        "manager_type": string_field(&text_object, "manager_type"),
+        "service_name": string_field(&text_object, "service_name"),
+        "extra": value.get("extra").cloned().unwrap_or(Value::Null),
+        "text": text_object,
+    });
+    let encoded = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+    format!("{STRUCTURED_SKILL_ERROR_PREFIX}{encoded}")
+}
+
+pub(crate) fn structured_skill_error_from_parts(
+    skill: &str,
+    error_kind: &str,
+    error_text: &str,
+    platform: Option<&str>,
+    extra: Option<Value>,
+) -> String {
+    let payload = json!({
+        "skill": skill.trim(),
+        "error_kind": error_kind,
+        "error_text": error_text,
+        "platform": platform,
+        "extra": extra.unwrap_or(Value::Null),
+        "text": Value::Null,
+    });
+    let encoded = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+    format!("{STRUCTURED_SKILL_ERROR_PREFIX}{encoded}")
+}
+
+pub(crate) fn parse_structured_skill_error(err: &str) -> Option<StructuredSkillError> {
+    let payload = err.trim().strip_prefix(STRUCTURED_SKILL_ERROR_PREFIX)?;
+    let value = serde_json::from_str::<Value>(payload).ok()?;
+    let error_kind = string_field(&value, "error_kind").unwrap_or_else(|| "unknown".to_string());
+    let error_text =
+        string_field(&value, "error_text").unwrap_or_else(|| "skill execution failed".to_string());
+    Some(StructuredSkillError {
+        skill: string_field(&value, "skill").unwrap_or_default(),
+        error_kind,
+        error_text,
+        platform: string_field(&value, "platform"),
+        manager_type: string_field(&value, "manager_type"),
+        service_name: string_field(&value, "service_name"),
+        extra: value.get("extra").cloned().filter(|value| !value.is_null()),
+    })
+}
+
+fn structured_extra_value<'a>(
+    structured: &'a StructuredSkillError,
+    key: &str,
+) -> Option<&'a Value> {
+    structured.extra.as_ref()?.get(key)
+}
+
+fn structured_extra_string(structured: &StructuredSkillError, key: &str) -> Option<String> {
+    structured_extra_value(structured, key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn structured_extra_i64(structured: &StructuredSkillError, key: &str) -> Option<i64> {
+    structured_extra_value(structured, key).and_then(|value| value.as_i64())
+}
+
+fn structured_extra_bool(structured: &StructuredSkillError, key: &str) -> bool {
+    structured_extra_value(structured, key)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+fn compact_stream_for_user(text: &str) -> String {
+    let compact = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" | ");
+    crate::truncate_for_agent_trace(&compact)
+}
+
+fn normalize_run_cmd_structured_error_for_user(structured: &StructuredSkillError) -> String {
+    let mut message = match structured.error_kind.as_str() {
+        "nonzero_exit" => {
+            if let Some(exit_code) = structured_extra_i64(structured, "exit_code") {
+                match structured_extra_string(structured, "exit_category").as_deref() {
+                    Some("command_not_found") => {
+                        format!("command failed: command not found (exit code {exit_code})")
+                    }
+                    Some("command_not_executable") => {
+                        format!("command failed: command is not executable (exit code {exit_code})")
+                    }
+                    Some("terminated_by_signal_or_shell_status") => {
+                        format!("command failed: terminated by signal or shell status (exit code {exit_code})")
+                    }
+                    _ => format!("command failed with exit code {exit_code}"),
+                }
+            } else {
+                "command failed with a non-zero exit status".to_string()
+            }
+        }
+        "timeout" => "command timed out".to_string(),
+        "idle_timeout" => "command idle timed out".to_string(),
+        "spawn_failed" => "command failed to start".to_string(),
+        "wait_failed" => "command wait failed".to_string(),
+        "output_read_failed" => "command output read failed".to_string(),
+        "status_unavailable" => "command status unavailable".to_string(),
+        "invalid_input" => "command input is invalid".to_string(),
+        _ => structured.error_text.trim().to_string(),
+    };
+
+    if let Some(stderr) = structured_extra_string(structured, "stderr") {
+        message.push_str("; stderr: ");
+        message.push_str(&compact_stream_for_user(&stderr));
+    }
+    if let Some(stdout) = structured_extra_string(structured, "stdout") {
+        message.push_str("; stdout: ");
+        message.push_str(&compact_stream_for_user(&stdout));
+    }
+    if structured_extra_bool(structured, "output_truncated") {
+        message.push_str("; output was truncated");
+    }
+    if message.trim().is_empty() {
+        structured.error_text.trim().to_string()
+    } else {
+        message
+    }
 }
 
 pub(crate) fn policy_block_error(
@@ -307,20 +478,23 @@ enum RequestReplyLanguage {
 pub(crate) struct SkillRunOutcome {
     pub(crate) text: String,
     pub(crate) notify: Option<bool>,
+    pub(crate) validation: Option<Value>,
 }
 
 pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
-    if skill_name.eq_ignore_ascii_case("read_file") && err.starts_with(READ_FILE_NOT_FOUND_PREFIX) {
-        return true;
+    if let Some(structured) = parse_structured_skill_error(err) {
+        let effective_skill = if structured.skill.trim().is_empty() {
+            skill_name
+        } else {
+            structured.skill.as_str()
+        };
+        return effective_skill.eq_ignore_ascii_case("system_basic")
+            && matches!(
+                structured.error_kind.as_str(),
+                "not_found" | "permission_denied" | "not_a_directory" | "is_directory"
+            );
     }
-    // system_basic 的 read 类 action 拿到 OS error（permission denied / not a directory / ...）
-    // 时，把任务整体标 failed 不利于用户体验：本质是"读不到"语义，应该让 finalizer
-    // 把错误 wrap 成自然语言对话回复（observed scalar fallback 路径），而不是丢出
-    // raw OS error。判别基于 system_basic 的 read 错误前缀（见 system_basic/src/main.rs
-    // 与 builtin.rs read_file 分支），不依赖 path / args。
-    if skill_name.eq_ignore_ascii_case("system_basic")
-        && (err.starts_with("read file failed:") || err.starts_with("read_file failed:"))
-    {
+    if skill_name.eq_ignore_ascii_case("read_file") && err.starts_with(READ_FILE_NOT_FOUND_PREFIX) {
         return true;
     }
     if skill_name.eq_ignore_ascii_case("crypto")
@@ -331,12 +505,60 @@ pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
     false
 }
 
+pub(crate) fn is_observable_run_cmd_error(skill_name: &str, err: &str) -> bool {
+    let Some(structured) = parse_structured_skill_error(err) else {
+        return false;
+    };
+    let effective_skill = if structured.skill.trim().is_empty() {
+        skill_name
+    } else {
+        structured.skill.as_str()
+    };
+    effective_skill.eq_ignore_ascii_case("run_cmd")
+        && matches!(
+            structured.error_kind.as_str(),
+            "nonzero_exit"
+                | "timeout"
+                | "idle_timeout"
+                | "spawn_failed"
+                | "wait_failed"
+                | "output_read_failed"
+                | "status_unavailable"
+        )
+}
+
 pub(crate) fn error_looks_like_os_permission_denied(error: &str) -> bool {
-    let lower = error.to_ascii_lowercase();
-    lower.contains("permission denied") || lower.contains("os error 13")
+    parse_structured_skill_error(error)
+        .is_some_and(|structured| structured.error_kind == "permission_denied")
 }
 
 pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> String {
+    if let Some(structured) = parse_structured_skill_error(err) {
+        let effective_skill = if structured.skill.trim().is_empty() {
+            skill_name
+        } else {
+            structured.skill.as_str()
+        };
+        if effective_skill.eq_ignore_ascii_case("system_basic") {
+            return match structured.error_kind.as_str() {
+                "permission_denied" => {
+                    "read operation failed: permission denied by the operating system".to_string()
+                }
+                "is_directory" => {
+                    "read operation failed: target is a directory, not a regular file".to_string()
+                }
+                "not_a_directory" => {
+                    "directory operation failed: target is not a directory".to_string()
+                }
+                "not_found" => "read operation failed: target path was not found".to_string(),
+                _ => structured.error_text,
+            };
+        }
+        if effective_skill.eq_ignore_ascii_case("run_cmd") {
+            return normalize_run_cmd_structured_error_for_user(&structured);
+        }
+        return structured.error_text;
+    }
     if let Some(policy_block) = parse_policy_block_error(err) {
         return format!("blocked by runtime policy: {}", policy_block.reason_code);
     }
@@ -347,23 +569,6 @@ pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> Str
                 return format!("file not found: {trimmed}");
             }
             return "file not found".to_string();
-        }
-    }
-    if skill_name.eq_ignore_ascii_case("system_basic") {
-        if let Some(rest) = err
-            .strip_prefix("read file failed: ")
-            .or_else(|| err.strip_prefix("read_file failed: "))
-        {
-            let trimmed = rest.trim();
-            if trimmed.contains("Permission denied") {
-                return "read file failed: permission denied (operating-system level)".to_string();
-            }
-            if trimmed.contains("Is a directory") {
-                return "read file failed: target is a directory, not a regular file".to_string();
-            }
-            if trimmed.contains("No such file") || trimmed.contains("(os error 2)") {
-                return "read file failed: file not found".to_string();
-            }
         }
     }
     if skill_name.eq_ignore_ascii_case("crypto") {
@@ -810,7 +1015,11 @@ pub(crate) async fn run_skill_with_runner_outcome(
         SkillKind::Builtin => {
             return execute_builtin_skill_for_task(state, task, &skill_name, &args)
                 .await
-                .map(|text| SkillRunOutcome { text, notify: None });
+                .map(|text| SkillRunOutcome {
+                    text,
+                    notify: None,
+                    validation: None,
+                });
         }
         SkillKind::External | SkillKind::Runner => {}
     }
@@ -885,11 +1094,7 @@ pub(crate) async fn run_skill_with_runner_outcome(
         .to_string();
 
     if status != "ok" {
-        return Err(value
-            .get("error_text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("skill execution failed")
-            .to_string());
+        return Err(structured_skill_error_string(&skill_name, &value));
     }
 
     if let Some((provider, model, model_kind)) = extract_skill_provider_model(&value) {
@@ -933,23 +1138,33 @@ pub(crate) async fn run_skill_with_runner_outcome(
         .and_then(|v| v.as_object())
         .and_then(|m| m.get("notify"))
         .and_then(|v| v.as_bool());
+    let validation = value.get("validation").cloned().or_else(|| {
+        value
+            .get("extra")
+            .and_then(|v| v.get("validation"))
+            .cloned()
+    });
     let text = value
         .get("text")
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
-    Ok(SkillRunOutcome { text, notify })
+    Ok(SkillRunOutcome {
+        text,
+        notify,
+        validation,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         collect_whitelisted_env_pairs, extract_task_request_text, is_recoverable_skill_error,
-        normalize_skill_error_for_user, parse_policy_block_error, policy_block_default_text,
-        policy_block_error, request_reply_language, skill_runner_env_strict_enabled,
-        task_allows_path_outside_workspace, task_allows_sudo, task_request_locale_tag,
-        RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX, READ_FILE_NOT_FOUND_PREFIX,
-        SKILL_RUNNER_ENV_WHITELIST,
+        normalize_skill_error_for_user, parse_policy_block_error, parse_structured_skill_error,
+        policy_block_default_text, policy_block_error, request_reply_language,
+        skill_runner_env_strict_enabled, task_allows_path_outside_workspace, task_allows_sudo,
+        task_request_locale_tag, RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX,
+        READ_FILE_NOT_FOUND_PREFIX, SKILL_RUNNER_ENV_WHITELIST, STRUCTURED_SKILL_ERROR_PREFIX,
     };
     use crate::{
         runtime::state::ClaimedTask, AgentRuntimeConfig, AppState, CommandIntentRuntime,
@@ -1142,18 +1357,125 @@ mod tests {
         let perm_err = "read file failed: Permission denied (os error 13)";
         let dir_err = "read file failed: Is a directory (os error 21)";
         let nf_err = "read file failed: No such file or directory (os error 2)";
+        let structured_perm_err = format!(
+            "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
+            json!({
+                "skill": "system_basic",
+                "error_kind": "permission_denied",
+                "error_text": "read_range failed for /tmp/demo",
+                "platform": "linux"
+            })
+        );
+        let structured_nf_err = format!(
+            "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
+            json!({
+                "skill": "system_basic",
+                "error_kind": "not_found",
+                "error_text": "path was not found: /tmp/demo",
+                "platform": "linux"
+            })
+        );
+        let structured_dir_err = format!(
+            "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
+            json!({
+                "skill": "system_basic",
+                "error_kind": "is_directory",
+                "error_text": "read_range requires a file, but target is a directory: /tmp/demo",
+                "platform": "linux"
+            })
+        );
 
-        assert!(is_recoverable_skill_error("system_basic", perm_err));
-        assert!(is_recoverable_skill_error("system_basic", dir_err));
-        assert!(is_recoverable_skill_error("system_basic", nf_err));
-        assert!(is_recoverable_skill_error("SYSTEM_BASIC", perm_err));
+        assert!(!is_recoverable_skill_error("system_basic", perm_err));
+        assert!(!is_recoverable_skill_error("system_basic", dir_err));
+        assert!(!is_recoverable_skill_error("system_basic", nf_err));
+        assert!(!is_recoverable_skill_error("SYSTEM_BASIC", perm_err));
+        assert!(is_recoverable_skill_error(
+            "system_basic",
+            &structured_perm_err
+        ));
+        assert!(is_recoverable_skill_error(
+            "system_basic",
+            &structured_nf_err
+        ));
+        assert!(is_recoverable_skill_error(
+            "system_basic",
+            &structured_dir_err
+        ));
 
-        let n1 = normalize_skill_error_for_user("system_basic", perm_err);
+        let n1 = normalize_skill_error_for_user("system_basic", &structured_perm_err);
         assert!(n1.contains("permission denied"), "got: {n1}");
-        let n2 = normalize_skill_error_for_user("system_basic", dir_err);
+        let n2 = normalize_skill_error_for_user("system_basic", &structured_dir_err);
         assert!(n2.contains("directory"), "got: {n2}");
-        let n3 = normalize_skill_error_for_user("system_basic", nf_err);
-        assert!(n3.contains("file not found"), "got: {n3}");
+        let n3 = normalize_skill_error_for_user("system_basic", &structured_nf_err);
+        assert!(n3.contains("not found"), "got: {n3}");
+        let n4 = normalize_skill_error_for_user("system_basic", &structured_dir_err);
+        assert_eq!(
+            n4,
+            "read operation failed: target is a directory, not a regular file"
+        );
+    }
+
+    #[test]
+    fn run_cmd_structured_error_normalization_uses_extra_streams() {
+        let err = format!(
+            "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
+            json!({
+                "skill": "run_cmd",
+                "error_kind": "nonzero_exit",
+                "error_text": "Command failed with exit code 7",
+                "platform": "linux",
+                "extra": {
+                    "exit_code": 7,
+                    "stderr": "problem",
+                    "stdout": "progress",
+                    "output_truncated": false
+                }
+            })
+        );
+
+        let structured = parse_structured_skill_error(&err).expect("structured run_cmd error");
+        assert_eq!(structured.error_kind, "nonzero_exit");
+        assert_eq!(
+            structured
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("stderr"))
+                .and_then(|value| value.as_str()),
+            Some("problem")
+        );
+
+        let normalized = normalize_skill_error_for_user("run_cmd", &err);
+        assert_eq!(
+            normalized,
+            "command failed with exit code 7; stderr: problem; stdout: progress"
+        );
+    }
+
+    #[test]
+    fn run_cmd_structured_error_normalization_uses_exit_category() {
+        let err = format!(
+            "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
+            json!({
+                "skill": "run_cmd",
+                "error_kind": "nonzero_exit",
+                "error_text": "Command failed with exit code 127",
+                "platform": "linux",
+                "extra": {
+                    "exit_code": 127,
+                    "exit_category": "command_not_found",
+                    "exit_classification_source": "exit_code",
+                    "stderr": "shell-specific message",
+                    "output_truncated": false
+                }
+            })
+        );
+
+        let normalized = normalize_skill_error_for_user("run_cmd", &err);
+
+        assert_eq!(
+            normalized,
+            "command failed: command not found (exit code 127); stderr: shell-specific message"
+        );
     }
 
     #[test]

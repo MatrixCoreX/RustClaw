@@ -35,6 +35,14 @@ struct SkillResponse {
     status: String,
     text: String,
     buttons: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    platform: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    validation: Option<Value>,
     extra: Option<Value>,
     error_text: Option<String>,
 }
@@ -45,6 +53,10 @@ struct ChildSkillResponse {
     status: Option<String>,
     text: Option<String>,
     buttons: Option<Value>,
+    error_kind: Option<String>,
+    platform: Option<String>,
+    exit_code: Option<i32>,
+    validation: Option<Value>,
     extra: Option<Value>,
     error_text: Option<String>,
 }
@@ -75,6 +87,10 @@ async fn main() -> anyhow::Result<()> {
                 status: "error".to_string(),
                 text: String::new(),
                 buttons: None,
+                error_kind: Some("invalid_input".to_string()),
+                platform: Some(std::env::consts::OS.to_string()),
+                exit_code: None,
+                validation: None,
                 extra: None,
                 error_text: Some(format!("invalid request: {err}")),
             },
@@ -104,6 +120,10 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
                 status: "error".to_string(),
                 text: String::new(),
                 buttons: None,
+                error_kind: Some("runner_resolution_failed".to_string()),
+                platform: Some(std::env::consts::OS.to_string()),
+                exit_code: None,
+                validation: None,
                 extra: None,
                 error_text: Some(err),
             }
@@ -134,6 +154,10 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
                     status: v.status.unwrap_or_else(|| "ok".to_string()),
                     text: v.text.unwrap_or_default(),
                     buttons: v.buttons,
+                    error_kind: v.error_kind,
+                    platform: v.platform,
+                    exit_code: v.exit_code,
+                    validation: v.validation,
                     extra: v.extra,
                     error_text: v.error_text,
                 },
@@ -142,6 +166,10 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
                     status: "error".to_string(),
                     text: String::new(),
                     buttons: None,
+                    error_kind: Some("invalid_child_response".to_string()),
+                    platform: Some(std::env::consts::OS.to_string()),
+                    exit_code: None,
+                    validation: None,
                     extra: None,
                     error_text: Some(format!("invalid child response: {err}; raw={out}")),
                 },
@@ -152,6 +180,10 @@ async fn execute_skill(req: SkillRequest) -> SkillResponse {
             status: "error".to_string(),
             text: String::new(),
             buttons: None,
+            error_kind: Some("child_execution_failed".to_string()),
+            platform: Some(std::env::consts::OS.to_string()),
+            exit_code: None,
+            validation: None,
             extra: None,
             error_text: Some(err),
         },
@@ -265,23 +297,17 @@ mod tests {
 
     #[tokio::test]
     async fn run_child_skill_times_out_and_kills_child() {
-        // tail -f /dev/null 永不退出，必然触发我们的 tokio::time::timeout 分支；
-        // 顺带证明 kill_on_drop 真的会清理子进程（否则 cargo test 会挂在退出阶段）。
-        let dir = std::env::temp_dir();
-        let script = dir.join(format!("p43_timeout_{}.sh", std::process::id()));
-        std::fs::write(&script, "#!/bin/sh\nexec tail -f /dev/null\n").unwrap();
-        let mut perms = std::fs::metadata(&script).unwrap().permissions();
-        use std::os::unix::fs::PermissionsExt;
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&script, perms).unwrap();
+        // `yes` runs until killed, so it reliably exercises the timeout branch
+        // without depending on executing a just-written temp script.
+        let Some(child) = ["/usr/bin/yes", "/bin/yes"]
+            .into_iter()
+            .find(|path| Path::new(path).exists())
+        else {
+            eprintln!("skipping timeout assertion: no `yes` executable found");
+            return;
+        };
 
-        let result = run_child_skill(
-            script.to_str().unwrap(),
-            "ignored",
-            Duration::from_millis(150),
-        )
-        .await;
-        let _ = std::fs::remove_file(&script);
+        let result = run_child_skill(child, "ignored", Duration::from_millis(150)).await;
         assert!(
             matches!(result, Err(ref e) if e == "child skill timeout"),
             "expected timeout, got {:?}",

@@ -30,7 +30,7 @@ __SKILL_CONTRACTS__
 - If key schedule fields or required skill args are missing, set `needs_clarify=true` and provide one concise `clarify_question`. Do not create a placeholder task just to ask the question later.
 - Request language hint: `__REQUEST_LANGUAGE_HINT__`.
 - Configured fallback language: `__CONFIG_RESPONSE_LANGUAGE__`.
-- Language policy (strict): follow `__REQUEST_LANGUAGE_HINT__` when it is clear (`zh-CN`, `en`, or `mixed`) for any user-visible text in `clarify_question`. Use `__CONFIG_RESPONSE_LANGUAGE__` only when the hint is `config_default` or otherwise unclear.
+- Language policy (strict): follow `__REQUEST_LANGUAGE_HINT__` when it is clear for any user-visible text in `clarify_question`. Clear hints include `zh-CN`, `en`, `mixed`, BCP-47 style language tags such as `ja`/`ko`/`fr-FR`, and script hints such as `und-Latn`/`und-Cyrl`/`und-Arab`; if the hint is `en` but the current request is clearly another Latin-script human language, follow the current request language. Use `__CONFIG_RESPONSE_LANGUAGE__` only when the hint is `config_default` or otherwise unclear.
 - Do not switch `clarify_question` language just because a downstream skill prefers normalized English arguments.
 
 Output JSON only. Never output <think> tags, code fences, or extra explanation before/after the JSON:

@@ -103,6 +103,8 @@
 - Paths reject `..` traversal.
 - Relative paths resolve under workspace.
 - Explicit absolute paths are allowed for these read-only actions and are resolved as provided.
+- Error responses include structured `error_kind` and `platform` fields, with `error_text` kept as the human-readable explanation. Callers should use `error_kind` for recovery and routing instead of matching OS-specific error text.
+- Common `error_kind` values include `invalid_input`, `path_denied`, `not_found`, `permission_denied`, `not_a_directory`, `is_directory`, `invalid_data`, `unsupported_action`, and `io_error`.
 - `extract_field` / `extract_fields` return explicit parse errors for unsupported/invalid JSON, TOML, or YAML.
 - `dir_compare` requires both target paths to be directories and reports summary diffs instead of a full recursive listing.
 - `read_range` and `compare_paths` return explicit read/metadata errors for missing or unreadable target paths.
@@ -179,6 +181,16 @@ Request:
 Response:
 ```json
 {"request_id":"demo-7","status":"ok","text":"{\"action\":\"inventory_dir\",\"names\":[\"Cargo.toml\",\"rustfmt.toml\"],\"counts\":{\"total\":2}}","extra":{"action":"inventory_dir","names":["Cargo.toml","rustfmt.toml"],"counts":{"total":2}},"error_text":null}
+```
+
+### Error Example
+Request:
+```json
+{"request_id":"demo-error","args":{"action":"read_range","path":"."}}
+```
+Response:
+```json
+{"request_id":"demo-error","status":"error","text":"","extra":null,"error_text":"read_range requires a file, but target is a directory: /workspace","error_kind":"is_directory","platform":"linux"}
 ```
 
 ## Output Contract

@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 
 use super::{
@@ -252,6 +253,8 @@ fn build_auto_sudo_retry_args(
         let mut retry_args = args.clone();
         let obj = retry_args.as_object_mut()?;
         obj.remove(super::CLAWD_CONTINUE_ON_ERROR_ARG);
+        obj.remove(super::CLAWD_LITERAL_COMMAND_ARG);
+        obj.remove(crate::execution_recipe::CLAWD_VALIDATION_ARG);
         obj.insert(
             "command".to_string(),
             Value::String(format!("sudo -n bash -lc {}", shell_single_quote(command))),
@@ -788,6 +791,7 @@ async fn handle_skill_step_failure(
         step_in_round,
         &format!("skill({normalized_skill})"),
         &user_visible_err,
+        Some(err),
     )
     .await;
     Err(resume_err)
@@ -846,6 +850,7 @@ pub(super) async fn execute_prepared_skill_action(
     args_summary: String,
     action_trace_kind: &str,
 ) -> Result<SkillActionOutcome, String> {
+    let classification_args = recovery_args.as_ref().unwrap_or(&exec_args);
     info!(
         "{} executor_step_execute task_id={} round={} step={} type={} skill={} args={}",
         crate::highlight_tag("skill"),
@@ -856,25 +861,44 @@ pub(super) async fn execute_prepared_skill_action(
         normalized_skill,
         crate::truncate_for_log(&exec_args.to_string())
     );
+    let structured_validation = Arc::new(Mutex::new(None::<Value>));
+    let structured_validation_slot = Arc::clone(&structured_validation);
+    let exec_args_for_run = exec_args.clone();
     let step_execution =
-        crate::executor::execute_step(&format!("step_{global_step}"), action, || async {
-            run_skill_with_runner_outcome(state, task, normalized_skill, exec_args.clone())
-                .await
-                .map(|outcome| outcome.text)
+        crate::executor::execute_step(&format!("step_{global_step}"), action, || {
+            let structured_validation_slot = Arc::clone(&structured_validation_slot);
+            let exec_args_for_run = exec_args_for_run.clone();
+            async move {
+                let outcome =
+                    run_skill_with_runner_outcome(state, task, normalized_skill, exec_args_for_run)
+                        .await?;
+                if let Ok(mut slot) = structured_validation_slot.lock() {
+                    *slot = outcome.validation.clone();
+                }
+                Ok(outcome.text)
+            }
         })
         .await;
-    let raw_action_effect =
-        crate::execution_recipe::classify_skill_action_effect(state, normalized_skill, &exec_args);
+    let structured_validation = structured_validation
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone());
+    let raw_action_effect = crate::execution_recipe::classify_skill_action_effect(
+        state,
+        normalized_skill,
+        classification_args,
+    );
     let action_effect = crate::execution_recipe::effective_action_effect_for_recipe(
         loop_state.execution_recipe,
         raw_action_effect,
     );
     let validation_observation = if raw_action_effect.validates {
-        crate::execution_recipe::assess_validation_output(
+        crate::execution_recipe::assess_validation_output_with_structured(
             state,
             normalized_skill,
-            &exec_args,
+            classification_args,
             step_execution.output.as_deref().unwrap_or_default(),
+            structured_validation.as_ref(),
         )
     } else {
         crate::execution_recipe::ValidationObservation::Passed
@@ -1089,7 +1113,16 @@ mod tests {
                 "path": "/etc/shadow",
                 "n": 1
             })),
-            "read file failed: Permission denied (os error 13)",
+            &crate::skills::structured_skill_error_from_parts(
+                "system_basic",
+                "permission_denied",
+                "read_range failed for /etc/shadow",
+                Some("linux"),
+                Some(serde_json::json!({
+                    "operation": "metadata",
+                    "path": "/etc/shadow"
+                })),
+            ),
         )
         .expect("admin permission denial should trigger sudo retry");
 
@@ -1121,7 +1154,16 @@ mod tests {
                 "path": "/var/log",
                 "max_entries": 5
             })),
-            "read_dir failed: Permission denied (os error 13)",
+            &crate::skills::structured_skill_error_from_parts(
+                "system_basic",
+                "permission_denied",
+                "read_dir failed for /var/log",
+                Some("linux"),
+                Some(serde_json::json!({
+                    "operation": "read_dir",
+                    "path": "/var/log"
+                })),
+            ),
         )
         .expect("admin permission denial should trigger sudo retry");
 

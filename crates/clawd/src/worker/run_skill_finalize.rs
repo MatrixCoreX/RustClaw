@@ -172,15 +172,10 @@ async fn finalize_run_skill_failure(
     }));
     repo::update_task_failure_with_result(state, &task.task_id, &result.to_string(), err_text)?;
     super::maybe_notify_schedule_result(state, task, payload, false, err_text).await;
-    let action = if err_text.contains("timeout") {
-        "timeout"
-    } else {
-        "run_skill"
-    };
     let _ = repo::insert_audit_log(
         state,
         Some(task.user_id),
-        action,
+        "run_skill",
         Some(
             &json!({
                 "task_id": task.task_id,

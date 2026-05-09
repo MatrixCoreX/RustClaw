@@ -534,6 +534,13 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
             Some(crate::OutputSemanticKind::SqliteDatabaseKindJudgment)
         }
         "sqlite_schema_version" => Some(crate::OutputSemanticKind::SqliteSchemaVersion),
+        "archive_list" => Some(crate::OutputSemanticKind::ArchiveList),
+        "archive_pack" => Some(crate::OutputSemanticKind::ArchivePack),
+        "archive_unpack" => Some(crate::OutputSemanticKind::ArchiveUnpack),
+        "docker_ps" => Some(crate::OutputSemanticKind::DockerPs),
+        "docker_images" => Some(crate::OutputSemanticKind::DockerImages),
+        "docker_logs" => Some(crate::OutputSemanticKind::DockerLogs),
+        "docker_container_lifecycle" => Some(crate::OutputSemanticKind::DockerContainerLifecycle),
         "service_status" => Some(crate::OutputSemanticKind::ServiceStatus),
         _ => None,
     }

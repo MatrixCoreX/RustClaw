@@ -1604,6 +1604,10 @@ name = "{skill_name}"
 enabled = false
 kind = "runner"
 aliases = []
+description = "External skill {skill_name}; see its INTERFACE.md for the capability contract."
+semantic_tags = []
+preferred_over_run_cmd = false
+validation_actions = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/{skill_name}.md"
 output_kind = "text"
@@ -2754,6 +2758,8 @@ mod tests {
         let (updated, changed) = add_registry_entry_text(raw, "demo_skill");
         assert!(changed);
         assert!(updated.contains("name = \"demo_skill\""));
+        assert!(updated.contains("description = \"External skill demo_skill"));
+        assert!(updated.contains("semantic_tags = []"));
         assert!(updated.contains("requires_confirmation = true"));
     }
 

@@ -74,6 +74,7 @@ Execution preferences:
 - When the request semantically asks for a specific key/field/dot-path value inside a structured file, use `system_basic.extract_field` / `extract_fields` rather than broad `read_file`; the runtime now expects structured field observations for direct scalar/equality answers.
 - For directory inventory with filename or extension filtering, prefer `system_basic` with `action="inventory_dir"`, `files_only=true`, `names_only=true`, and `ext_filter`. Do not use `extract_field` / `extract_fields` merely because the file extension is `json`, `toml`, or `yaml`; use those only when the user explicitly asks for keys, fields, values, sections, or a dot-path inside a specific structured file.
 - For bounded directory recency or modification-time ranking, prefer `system_basic` with `action="inventory_dir"`, the needed `sort_by`, `max_entries`, and metadata visibility. Use `names_only=true` only when names alone satisfy the request.
+- For any directory listing or inventory request with a semantic numeric bound, encode that bound in the observation action itself. Use `limit`/`max_entries` for `list_dir`, and `max_entries` for `system_basic.inventory_dir`; never emit an unbounded listing plan and rely on synthesis or `respond` to trim a larger result later.
 - For bounded comparison of two concrete paths by metadata, size, modification time, kind, or content equality, prefer `system_basic` with `action="compare_paths"`. For batch existence or metadata facts over several explicit paths, prefer `system_basic` with `action="path_batch_facts"`.
 - For existence + path, prefer `system_basic.path_batch_facts` when a concrete path is known; use `fs_search.find_name` only when the target is still filename-only.
 - For bounded local listing, prefer `list_dir` or one bounded local query. Do not widen to recursive repo exploration unless the user explicitly asked for that.
@@ -95,11 +96,12 @@ Terminal-step rule:
 
 Output-shape guard:
 - Respect the requested output shape strictly: only path, only value, only number, only filename list, only final answer, one sentence, etc.
+- Before returning the plan, self-check every directory listing action against the requested output shape. If the request asks for a bounded number of names, rows, entries, newest/oldest items, or direct children, the corresponding action arguments must carry that same bound.
 - If the request is scalar/value-only, do not add explanation around the value.
 - If the request is delivery-only, finish with the required delivery token or exact path already produced by runtime.
 
 Language and platform:
-- Any user-visible `respond.content` should follow `__REQUEST_LANGUAGE_HINT__` when it is clear (`zh-CN`, `en`, or `mixed`).
+- Any user-visible `respond.content` should follow `__REQUEST_LANGUAGE_HINT__` when it is clear. Clear hints include `zh-CN`, `en`, `mixed`, BCP-47 style language tags such as `ja`/`ko`/`fr-FR`, and script hints such as `und-Latn`/`und-Cyrl`/`und-Arab`; if the hint is `en` but the current request is clearly another Latin-script human language, follow the current request language.
 - Use `__CONFIG_RESPONSE_LANGUAGE__` only as the fallback default when `__REQUEST_LANGUAGE_HINT__` is `config_default` or otherwise unclear.
 - If the hint is `mixed`, follow the dominant surrounding sentence language from the current user request and do not switch languages mid-answer unless quoting raw names, paths, commands, code, or other observed values.
 - Do not let `Goal/context`, `Turn analysis`, or merged-task scaffolding override the reply language selected by the rules above. Those blocks may be written in another language for normalization/merge purposes; they are semantic context, not reply-language authority.
