@@ -3784,8 +3784,10 @@ export default function App() {
   const workspaceUpdateStdoutPreview = workspaceUpdateStatus?.stdout_tail?.trim() || "";
   const workspaceUpdateStderrPreview = workspaceUpdateStatus?.stderr_tail?.trim() || "";
   const workspaceUpdateLogPreview = [
-    workspaceUpdateStdoutPreview ? `${t("标准输出", "Standard output")}\n${workspaceUpdateStdoutPreview}` : "",
-    workspaceUpdateStderrPreview ? `${t("错误输出", "Error output")}\n${workspaceUpdateStderrPreview}` : "",
+    workspaceUpdateStdoutPreview ? `${t("构建输出", "Build output")}\n${workspaceUpdateStdoutPreview}` : "",
+    workspaceUpdateStderrPreview
+      ? `${t("构建日志（stderr，不一定是错误）", "Build log (stderr, not necessarily errors)")}\n${workspaceUpdateStderrPreview}`
+      : "",
   ]
     .filter(Boolean)
     .join("\n\n");

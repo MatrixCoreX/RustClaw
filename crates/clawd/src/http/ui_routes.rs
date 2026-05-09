@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio as StdProcessStdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader as TokioBufReader};
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 
@@ -5620,13 +5620,17 @@ async fn read_workspace_update_stream<R>(
 ) where
     R: AsyncRead + Unpin + Send + 'static,
 {
-    let mut lines = TokioBufReader::new(reader).lines();
+    let mut reader = reader;
+    let mut buf = [0_u8; 4096];
     loop {
-        match lines.next_line().await {
-            Ok(Some(line)) => append_workspace_update_log_line(&shared, is_stdout, &line),
-            Ok(None) => break,
+        match reader.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => {
+                let chunk = String::from_utf8_lossy(&buf[..n]);
+                append_workspace_update_log_chunk(&shared, is_stdout, &chunk);
+            }
             Err(err) => {
-                append_workspace_update_log_line(
+                append_workspace_update_log_chunk(
                     &shared,
                     false,
                     &format!("failed to read build log stream: {err}"),
@@ -5637,21 +5641,21 @@ async fn read_workspace_update_stream<R>(
     }
 }
 
-fn append_workspace_update_log_line(
+fn append_workspace_update_log_chunk(
     shared: &Arc<Mutex<WorkspaceUpdateStatus>>,
     is_stdout: bool,
-    line: &str,
+    chunk: &str,
 ) {
+    if chunk.is_empty() {
+        return;
+    }
     let mut guard = shared.lock().unwrap();
     let target = if is_stdout {
         &mut guard.stdout_tail
     } else {
         &mut guard.stderr_tail
     };
-    if !target.is_empty() {
-        target.push('\n');
-    }
-    target.push_str(line);
+    target.push_str(&chunk.replace('\r', "\n"));
     let truncated = truncate_tail(target.as_str());
     *target = truncated;
 }
