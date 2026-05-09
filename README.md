@@ -14,8 +14,8 @@ Current repository highlights:
 
 - multi-channel entry points: Telegram, WeChat, Feishu, Lark, WhatsApp Cloud, WhatsApp Web, browser UI, and optional `webd`
 - task runtime and HTTP API in `clawd`
-- skill subprocess model through `skill-runner`
-- built-in and runner-based skills for system, files, web, images, audio, crypto, KB, and automation tasks
+- shared skill dispatch with in-process builtins, external adapters, and runner subprocesses through `skill-runner`
+- built-in, external, and runner-based skills for system, files, web, images, audio, crypto, KB, and automation tasks
 - local browser UI in `UI/`
 - Raspberry Pi / small-screen desktop app in `pi_app/`
 
@@ -37,7 +37,8 @@ flowchart TD
     C0 -->|no| C[Session snapshot + local surface hints]
     C --> D[Binding / resume / active-task context]
     D --> E[Intent normalizer LLM]
-    E --> E2[Post-route policy<br/>locator + contract guards]
+    E --> EC[Build ask context bundle<br/>memory + attachments + recent execution]
+    EC --> E2[Post-route policy<br/>locator + contract guards]
     E2 -->|schedule direct| SD[Schedule direct finalize]
     E2 -->|resume discussion| RD[Resume discussion prompt]
     E2 -->|resume execution| H
@@ -45,22 +46,28 @@ flowchart TD
     F -->|AskClarify| G[Clarify question]
     F -->|chat| CH[Build chat context + prompt]
     CH --> CR[Chat response LLM]
-    F -->|execute| H[Build execution context<br/>state + memory + attachments]
+    F -->|execute| H[Use execution prompt/context]
     SK[Skill registry + generated skill docs<br/>configs/skills_registry.toml] --> I
     H --> I[Planner / runtime loop]
     I --> L{Planner action}
     L -->|respond| M[Respond]
     L -->|synthesize_answer| SS[Grounded synthesis LLM]
     L -->|tool| N[Tool execution]
-    L -->|call_skill| N1[run_skill_with_runner]
+    L -->|call_skill| N1[run_skill_with_runner<br/>skill dispatch]
     RS --> N1
-    N1 --> N2[skill-runner subprocess]
-    N2 --> P
+    N1 -->|builtin| N1B[In-process builtin skill]
+    N1 -->|external| N1E[External skill adapter]
+    N1 -->|runner| N2[skill-runner subprocess]
+    N2 --> N3[Concrete skill binary]
+    N1B --> SR[Skill result]
+    N1E --> SR
+    N3 --> SR
+    SR -->|planner call_skill| P
+    SR -->|direct run_skill| RSK[run_skill finalize<br/>task result + journal]
     N --> P[Loop observations]
     SS --> P
     P -->|next round| I
     P -->|observation-only finish| OF[Observed-output finalizer<br/>direct answer or synthesis]
-    P -->|direct run_skill finalize| RSK[run_skill finalize<br/>task result + journal]
     M --> VP[Visible process summary<br/>sanitized messages]
     CR --> VP
     G --> VP
@@ -81,15 +88,16 @@ flowchart TD
 - `Session snapshot + local surface hints`: attaches each turn to the active conversation and extracts bounded local facts before routing; this is not a separate “taxonomy engine” LLM.
 - `Intent normalizer LLM`: one call that emits `routed_mode`, `needs_clarify`, `output_contract`, and optional `turn_type` / `target_task_policy` style fields—**clarify vs chat vs act is decided here**, not via a `clarify` action inside the planner JSON.
 - `Task queue`: HTTP callers submit `POST /v1/tasks`; channel daemons also hand work to the same queued worker path.
-- `Task kind`: `kind=ask` enters the normalizer / post-route / ask dispatch flow; `kind=run_skill` bypasses LLM routing and runs the named skill directly through the shared runner path.
-- `Post-route policy`: applies locator resolution, missing-locator clarification, and contract guards after normalization and before dispatch. It can refine the gate, but it is not a semantic fast path.
+- `Task kind`: `kind=ask` enters the normalizer / post-route / ask dispatch flow; `kind=run_skill` bypasses LLM routing and runs the named skill directly through the shared skill dispatch path.
+- `Ask context bundle`: built once after normalization and before ask dispatch; it supplies chat context, execution prompt context, attachments, durable memory, and recent execution context used by post-route locator policy.
+- `Post-route policy`: applies locator resolution, missing-locator clarification, and contract guards after the ask context bundle is available and before dispatch. It can refine the gate, but it is not a semantic fast path.
 - `Schedule / resume branches`: scheduler-triggered direct-text tasks can finalize before the normalizer; normal schedule-direct requests can finalize after routing but before the planner; resume-discussion uses a recovery prompt; resume-execution returns to the normal execution runtime.
 - `Ask gate`: keeps only a thin `AskClarify / chat / execute` split. Code dispatches through `AskMode` (`ClarifyOrChat` vs `Act`), while `RoutedMode` (`AskClarify`, `Chat`, `Act`, `ChatAct`) remains the normalizer-facing compatibility shape.
 - `Chat response LLM`: handles `mode=chat` directly; chat requests do not enter the execution planner loop.
 - `Planner / runtime loop`: for act / chat_act, runs multiple rounds; planner steps are `think`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today—execution steps are traced as subtasks in logs, not a nested child loop).
-- `Execution context`: combines run state, current working context, attachments, recent execution context, and durable memory so memory cannot override the latest user instruction.
+- `Execution prompt/context`: reuses the ask context bundle and resolved prompt for act / chat_act execution, so memory cannot override the latest user instruction.
 - `Skill registry + generated skill docs`: planner-visible skills come from runtime skill views and generated interface docs, primarily `configs/skills_registry.toml`, `crates/skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`. New skills should extend those contracts instead of adding language-specific planner branches.
-- `call_skill` / direct `run_skill`: both go through `run_skill_with_runner`, which launches `skill-runner` and then the concrete skill binary.
+- `call_skill` / direct `run_skill`: both go through `run_skill_with_runner`, which applies policy and skill switches, then dispatches by registry kind: builtins run in-process, external skills run through their external adapter, and runner skills launch `skill-runner` plus the concrete skill binary.
 - `Loop observations` and `Observed-output finalizer`: tool, skill, and synthesis outputs remain grounded evidence inside the loop; observation-only plans can still finish through direct structured answers or runtime-owned synthesis.
 - `Visible process summary`: the user-visible process block is assembled as sanitized `messages`, separate from the final deliverable body, so execution stays visible without exposing raw prompts, stack traces, or secrets.
 - `Final delivery / output-contract guard`: normalizes file tokens, `messages`, exact scalar/strict output shapes, and delivery consistency before the result is saved.
@@ -103,7 +111,8 @@ flowchart TD
     B --> C[LLM request 1<br/>Intent normalizer]
     C --> D[Parse JSON]
     D --> E{Structured result}
-    E --> E2[Post-route policy<br/>locator + contract guards]
+    E --> Ec[Build ask context bundle<br/>memory + attachments + recent execution]
+    Ec --> E2[Post-route policy<br/>locator + contract guards]
     E2 -->|schedule direct| Fs[Schedule direct finalize<br/>no planner if already grounded]
     E2 -->|resume discussion| Fr[Resume discussion prompt]
     E2 -->|resume execution| H
@@ -118,10 +127,16 @@ flowchart TD
     J --> K{Step type}
     K -->|respond| L[Respond text]
     K -->|call_tool| M[Execute tool]
-    K -->|call_skill| Ms[run_skill_with_runner<br/>skill-runner subprocess]
+    K -->|call_skill| Ms[run_skill_with_runner<br/>skill dispatch]
+    Ms -->|builtin| Msb[In-process builtin skill]
+    Ms -->|external| Mse[External skill adapter]
+    Ms -->|runner| Msr[skill-runner subprocess]
+    Msr --> Msbinary[Concrete skill binary]
     K -->|synthesize_answer| N[Synthesis LLM from evidence]
     M --> O[Record loop observations]
-    Ms --> O
+    Msb --> O
+    Mse --> O
+    Msbinary --> O
     N --> O
     O --> P{Need another planner round?}
     P -->|yes| H
@@ -143,7 +158,7 @@ flowchart TD
 - `Build chat / planner prompt`: combines mode, session state, working context, and output contract for follow-on requests.
 - `Skill registry + generated skill docs`: planner prompts are built from enabled skill views and generated interface documents, so skill capability growth should be data/contract driven.
 - `LLM request 2`: **Chat** mode uses one chat-completion call, then finalize. **Act / chat_act** uses one-or-more **planner** calls per loop round; the planner emits JSON steps in `{think, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types).
-- `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened.
+- `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened. Skill execution uses the shared dispatch layer; only runner skills spawn `skill-runner`.
 - `synthesize_answer`: an extra LLM call **scheduled inside the planner loop** when the plan includes that step—**not** always a single fixed “LLM 3 after all planning is done”; rounds can interleave execution, synthesis, and further planning.
 - `Observed-output finalizer`: if a plan ends after observation steps without a terminal `respond`, runtime can still publish a grounded direct answer or run the observed-answer synthesis path.
 - `Visible process summary`: normal replies, clarifications, and execution results all pass through a sanitized visible-process message layer before final delivery.
@@ -153,7 +168,7 @@ flowchart TD
 ## Main Components
 
 - `crates/clawd`: core runtime, HTTP API, routing, memory, scheduling, auth, task queue
-- `crates/skill-runner`: launches skill binaries using the registry and runner convention
+- `crates/skill-runner`: launches runner skill binaries; `clawd` resolves registry kind / `runner_name` before invoking it
 - `crates/clawcli`: terminal CLI for talking to `clawd`
 - `crates/webd`: optional reverse proxy and login session bridge for public/browser access
 - `crates/telegramd`, `crates/wechatd`, `crates/feishud`, `crates/larkd`, `crates/whatsappd`, `crates/whatsapp_webd`: channel daemons
