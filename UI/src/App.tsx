@@ -3781,8 +3781,14 @@ export default function App() {
       hour12: false,
     });
   };
-  const workspaceUpdateLogPreview =
-    workspaceUpdateStatus?.stderr_tail?.trim() || workspaceUpdateStatus?.stdout_tail?.trim() || "";
+  const workspaceUpdateStdoutPreview = workspaceUpdateStatus?.stdout_tail?.trim() || "";
+  const workspaceUpdateStderrPreview = workspaceUpdateStatus?.stderr_tail?.trim() || "";
+  const workspaceUpdateLogPreview = [
+    workspaceUpdateStdoutPreview ? `${t("标准输出", "Standard output")}\n${workspaceUpdateStdoutPreview}` : "",
+    workspaceUpdateStderrPreview ? `${t("错误输出", "Error output")}\n${workspaceUpdateStderrPreview}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const isDashboardPage = currentPage === "dashboard";
 
   if (!uiAuthReady) {
@@ -4365,7 +4371,9 @@ export default function App() {
                 {workspaceUpdateLogPreview ? (
                   <details className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
                     <summary className="cursor-pointer text-sm font-medium text-white/75">
-                      {t("查看最近日志摘要", "View recent log summary")}
+                      {workspaceUpdateRunning
+                        ? t("查看实时编译日志", "View live build logs")
+                        : t("查看最近日志摘要", "View recent log summary")}
                     </summary>
                     <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/30 p-3 text-xs leading-5 text-white/65">
                       {workspaceUpdateLogPreview}

@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio as StdProcessStdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader as TokioBufReader};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 
@@ -4972,19 +4973,18 @@ async fn run_workspace_update_job(
                 guard.stderr_tail = out.stderr_tail;
             }
             Ok(first_pull_out) => {
-                let conflict_paths = match detect_workspace_update_conflict_paths(&workspace_root)
-                    .await
-                {
-                    Ok(paths) => paths,
-                    Err(err) => {
-                        fail_workspace_update_with_error(
+                let conflict_paths =
+                    match detect_workspace_update_conflict_paths(&workspace_root).await {
+                        Ok(paths) => paths,
+                        Err(err) => {
+                            fail_workspace_update_with_error(
                             &shared,
                             err,
                             "拉取失败，且无法可靠识别冲突文件；已保留本地文件，请手动处理后重试。",
                         );
-                        return;
-                    }
-                };
+                            return;
+                        }
+                    };
                 if conflict_paths.is_empty() {
                     fail_workspace_update(
                         &shared,
@@ -5083,11 +5083,19 @@ async fn run_workspace_update_job(
     }
 
     set_workspace_update_step(&shared, "building_workspace");
-    match run_workspace_update_command(
+    {
+        let mut guard = shared.lock().unwrap();
+        guard.exit_code = None;
+        guard.stdout_tail.clear();
+        guard.stderr_tail.clear();
+        guard.next_step = Some("正在编译，编译日志会持续刷新。".to_string());
+    }
+    match run_workspace_update_command_streaming(
         "bash",
         &["./build-all.sh"],
         &workspace_root,
         WORKSPACE_UPDATE_TIMEOUT_SECONDS,
+        shared.clone(),
     )
     .await
     {
@@ -5332,6 +5340,105 @@ async fn run_workspace_update_command_args(
         stdout_tail: truncate_tail(&String::from_utf8_lossy(&output.stdout)),
         stderr_tail: truncate_tail(&String::from_utf8_lossy(&output.stderr)),
     })
+}
+
+async fn run_workspace_update_command_streaming(
+    program: &str,
+    args: &[&str],
+    cwd: &Path,
+    timeout_seconds: u64,
+    shared: Arc<Mutex<WorkspaceUpdateStatus>>,
+) -> Result<WorkspaceUpdateCommandOutput, String> {
+    let mut cmd = Command::new(program);
+    cmd.args(args)
+        .current_dir(cwd)
+        .stdin(StdProcessStdio::null())
+        .stdout(StdProcessStdio::piped())
+        .stderr(StdProcessStdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|err| format!("failed to run {program}: {err}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("failed to capture {program} stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| format!("failed to capture {program} stderr"))?;
+
+    let stdout_task = tokio::spawn(read_workspace_update_stream(stdout, shared.clone(), true));
+    let stderr_task = tokio::spawn(read_workspace_update_stream(stderr, shared.clone(), false));
+
+    let status = match tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_seconds),
+        child.wait(),
+    )
+    .await
+    {
+        Ok(Ok(status)) => status,
+        Ok(Err(err)) => return Err(format!("failed to wait for {program}: {err}")),
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+            return Err(format!("{program} timed out after {timeout_seconds}s"));
+        }
+    };
+
+    let _ = stdout_task.await;
+    let _ = stderr_task.await;
+
+    let guard = shared.lock().unwrap();
+    Ok(WorkspaceUpdateCommandOutput {
+        exit_code: status.code(),
+        stdout_tail: guard.stdout_tail.clone(),
+        stderr_tail: guard.stderr_tail.clone(),
+    })
+}
+
+async fn read_workspace_update_stream<R>(
+    reader: R,
+    shared: Arc<Mutex<WorkspaceUpdateStatus>>,
+    is_stdout: bool,
+) where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    let mut lines = TokioBufReader::new(reader).lines();
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => append_workspace_update_log_line(&shared, is_stdout, &line),
+            Ok(None) => break,
+            Err(err) => {
+                append_workspace_update_log_line(
+                    &shared,
+                    false,
+                    &format!("failed to read build log stream: {err}"),
+                );
+                break;
+            }
+        }
+    }
+}
+
+fn append_workspace_update_log_line(
+    shared: &Arc<Mutex<WorkspaceUpdateStatus>>,
+    is_stdout: bool,
+    line: &str,
+) {
+    let mut guard = shared.lock().unwrap();
+    let target = if is_stdout {
+        &mut guard.stdout_tail
+    } else {
+        &mut guard.stderr_tail
+    };
+    if !target.is_empty() {
+        target.push('\n');
+    }
+    target.push_str(line);
+    let truncated = truncate_tail(target.as_str());
+    *target = truncated;
 }
 
 fn truncate_tail(raw: &str) -> String {
