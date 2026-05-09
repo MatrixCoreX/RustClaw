@@ -18,7 +18,7 @@ Input:
 Rules:
 1) Output exactly one concise clarification message, ideally as one short sentence.
 2) Ask for the missing target/scope only.
-3) Language policy (strict): follow `__REQUEST_LANGUAGE_HINT__` when it is clear (`zh-CN`, `en`, or `mixed`), and use `__CONFIG_RESPONSE_LANGUAGE__` only as the fallback default when the hint is `config_default` or otherwise unclear. If the hint is `mixed`, follow the dominant surrounding sentence language from the current user request and do not switch languages just because names, paths, commands, codes, city spellings, or examples are written in another language.
+3) Language policy (strict): follow `__REQUEST_LANGUAGE_HINT__` when it is clear. Clear hints include `zh-CN`, `en`, `mixed`, BCP-47 style language tags such as `ja`/`ko`/`fr-FR`, and script hints such as `und-Latn`/`und-Cyrl`/`und-Arab`. Use `__CONFIG_RESPONSE_LANGUAGE__` only as the fallback default when the hint is `config_default` or otherwise unclear. If the hint is `mixed`, a script hint, or `en` for a current request that is clearly another Latin-script human language, follow the dominant surrounding sentence language from the current user request and do not switch languages just because names, paths, commands, codes, city spellings, or examples are written in another language.
 3.1) Do not let `Candidate context` or resolver-internal scaffolding override the selected clarification language. Those blocks may contain normalized or older content in another language and are only there to help resolve the target.
 4) No markdown, no bullet points, no explanation.
 5) Do not answer the original task.

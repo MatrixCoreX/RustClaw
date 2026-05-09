@@ -349,9 +349,25 @@ fn registry_capability_shape_consistency_is_clean() {
 fn registry_capabilities_declared_match_expected_demo_skill() {
     // (canonical, sorted-tokens) — sorted 顺序与 SkillsRegistry::load_from_path
     // 内部 dedup+sort 后的结果一致。
-    let expected_with_caps: &[(&str, &[&str])] = &[
+    let main_expected_with_caps: &[(&str, &[&str])] = &[
+        // 主配置中 image_edit / image_vision 可复用同厂商全局 key，不声明专用
+        // secrets capability；image_generate 仍显式要求专用生成 key。
+        ("image_edit", &["fs.write", "llm", "net"]),
         // 注意 sort 顺序：`fs.write` < `llm` < `net` < `secrets.*`（按字典序）。
         // 新增 vendor 段时（openai/google/qwen/...），同步加 secrets.<usage>_<vendor>_api_key。
+        (
+            "image_generate",
+            &[
+                "fs.write",
+                "llm",
+                "net",
+                "secrets.image_generation_minimax_api_key",
+            ],
+        ),
+        ("image_vision", &["llm", "net"]),
+    ];
+    let docker_expected_with_caps: &[(&str, &[&str])] = &[
+        // Docker 模板保持专用 image_edit / image_vision secret 声明。
         (
             "image_edit",
             &[
@@ -383,6 +399,11 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
 
     for path in registry_paths.iter() {
         let registry = SkillsRegistry::load_from_path(path).expect("load registry");
+        let expected_with_caps = if path.to_string_lossy().contains("/docker/config/") {
+            docker_expected_with_caps
+        } else {
+            main_expected_with_caps
+        };
 
         for (skill, expected) in expected_with_caps {
             let actual: Vec<String> = registry
@@ -471,9 +492,14 @@ fn provision_secret_envs_matches_manifest_expectation() {
         }
     }
 
-    // 期望：skill canonical name -> 子进程应当看到的 ENV_VAR_NAME 集合（已排序）
-    let expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
+    // 期望：skill canonical name -> 子进程应当看到的 ENV_VAR_NAME 集合（已排序）。
+    // 主配置中 image_edit / image_vision 可复用全局 provider key，因此不在
+    // manifest 声明专用 secrets capability；Docker 模板仍声明专用 secret。
+    let main_expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
         // §E1.c：image_generate 当前默认 default_vendor=minimax（见 configs/image.toml）。
+        ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
+    ]);
+    let docker_expected_secrets_envs: HashMap<&str, Vec<&str>> = HashMap::from([
         ("image_generate", vec!["IMAGE_GENERATION_MINIMAX_API_KEY"]),
         // §E1.d：image_edit / image_vision 同样默认 default_vendor=minimax。
         // 新启用别的 vendor 段时，同步加对应 ENV_VAR_NAME。
@@ -489,6 +515,11 @@ fn provision_secret_envs_matches_manifest_expectation() {
 
     for path in registry_paths.iter() {
         let registry = SkillsRegistry::load_from_path(path).expect("load registry");
+        let expected_secrets_envs = if path.to_string_lossy().contains("/docker/config/") {
+            &docker_expected_secrets_envs
+        } else {
+            &main_expected_secrets_envs
+        };
         for name in registry.all_names() {
             let caps = registry.capabilities(&name).to_vec();
             let provisioned = provision_secret_envs(&broker, &caps).unwrap_or_else(|err| {

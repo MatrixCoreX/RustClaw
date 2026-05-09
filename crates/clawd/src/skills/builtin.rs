@@ -277,7 +277,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 .and_then(|v| v.as_u64())
                 .and_then(|v| usize::try_from(v).ok())
                 .unwrap_or(state.skill_rt.cmd_max_output_bytes);
-            run_safe_command(
+            run_safe_command_detailed(
                 &cwd_path,
                 &sanitized_command,
                 state.skill_rt.max_cmd_length,
@@ -287,6 +287,19 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 crate::skills::task_allows_sudo(state, task),
             )
             .await
+            .map_err(|err| match err {
+                RunSafeCommandError::Policy(text) => text,
+                RunSafeCommandError::Command(failure) => {
+                    let extra = failure.extra(&sanitized_command, &cwd_path);
+                    super::structured_skill_error_from_parts(
+                        "run_cmd",
+                        failure.kind,
+                        &failure.message,
+                        Some(std::env::consts::OS),
+                        Some(extra),
+                    )
+                }
+            })
         }
         "make_dir" => {
             ensure_only_keys(map, &["path"])?;
@@ -583,6 +596,90 @@ fn combine_command_output(
     (text, stdout_text, stderr_text)
 }
 
+#[derive(Debug, Clone)]
+struct CommandRunFailure {
+    kind: &'static str,
+    message: String,
+    exit_code: Option<i32>,
+    exit_category: Option<&'static str>,
+    stdout: Option<String>,
+    stderr: Option<String>,
+    output_truncated: bool,
+}
+
+impl CommandRunFailure {
+    fn new(kind: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            exit_code: None,
+            exit_category: None,
+            stdout: None,
+            stderr: None,
+            output_truncated: false,
+        }
+    }
+
+    fn with_output(
+        mut self,
+        exit_code: i32,
+        stdout: String,
+        stderr: String,
+        output_truncated: bool,
+    ) -> Self {
+        self.exit_code = Some(exit_code);
+        self.exit_category = run_cmd_exit_category(exit_code);
+        self.stdout = (!stdout.trim().is_empty()).then_some(stdout);
+        self.stderr = (!stderr.trim().is_empty()).then_some(stderr);
+        self.output_truncated = output_truncated;
+        self
+    }
+
+    fn extra(&self, command: &str, cwd: &Path) -> Value {
+        serde_json::json!({
+            "command": command.trim(),
+            "cwd": cwd.display().to_string(),
+            "exit_code": self.exit_code,
+            "exit_category": self.exit_category,
+            "exit_classification_source": self.exit_category.map(|_| "exit_code"),
+            "stdout": self.stdout,
+            "stderr": self.stderr,
+            "output_truncated": self.output_truncated,
+        })
+    }
+}
+
+fn run_cmd_exit_category(exit_code: i32) -> Option<&'static str> {
+    match exit_code {
+        126 => Some("command_not_executable"),
+        127 => Some("command_not_found"),
+        128..=255 => Some("terminated_by_signal_or_shell_status"),
+        1..=125 => Some("command_reported_failure"),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone)]
+enum RunSafeCommandError {
+    Policy(String),
+    Command(CommandRunFailure),
+}
+
+impl RunSafeCommandError {
+    fn into_text(self) -> String {
+        match self {
+            Self::Policy(text) => text,
+            Self::Command(failure) => failure.message,
+        }
+    }
+}
+
+impl From<String> for RunSafeCommandError {
+    fn from(message: String) -> Self {
+        Self::Command(CommandRunFailure::new("output_read_failed", message))
+    }
+}
+
 async fn kill_shell_pid(child_pid: Option<u32>) {
     if let Some(pid) = child_pid {
         let _ = Command::new("kill")
@@ -602,23 +699,51 @@ pub(crate) async fn run_safe_command(
     cmd_max_output_bytes: usize,
     allow_sudo: bool,
 ) -> Result<String, String> {
+    run_safe_command_detailed(
+        cwd,
+        command,
+        max_cmd_length,
+        cmd_timeout_seconds,
+        cmd_idle_timeout_seconds,
+        cmd_max_output_bytes,
+        allow_sudo,
+    )
+    .await
+    .map_err(RunSafeCommandError::into_text)
+}
+
+async fn run_safe_command_detailed(
+    cwd: &Path,
+    command: &str,
+    max_cmd_length: usize,
+    cmd_timeout_seconds: u64,
+    cmd_idle_timeout_seconds: u64,
+    cmd_max_output_bytes: usize,
+    allow_sudo: bool,
+) -> Result<String, RunSafeCommandError> {
     if command.len() > max_cmd_length {
-        return Err("command too long".to_string());
+        return Err(RunSafeCommandError::Command(CommandRunFailure::new(
+            "invalid_input",
+            "command too long",
+        )));
     }
 
     if command.trim().is_empty() {
-        return Err("empty command".to_string());
+        return Err(RunSafeCommandError::Command(CommandRunFailure::new(
+            "invalid_input",
+            "empty command",
+        )));
     }
 
     if !allow_sudo && command.split_whitespace().any(|p| p == "sudo") {
-        return Err(crate::skills::policy_block_error(
+        return Err(RunSafeCommandError::Policy(crate::skills::policy_block_error(
             "sudo_not_allowed",
             vec!["command_requested_sudo: true".to_string()],
             vec![
                 "Do not run sudo when allow_sudo is false for this task.".to_string(),
                 "Explain that elevated access requires an admin-authorized run and sudo-enabled policy.".to_string(),
             ],
-        ));
+        )));
     }
 
     let mut cmd = Command::new("bash");
@@ -641,9 +766,12 @@ pub(crate) async fn run_safe_command(
     } else {
         soft_timeout
     };
-    let mut child = cmd
-        .spawn()
-        .map_err(|err| format!("run command failed: {err}"))?;
+    let mut child = cmd.spawn().map_err(|err| {
+        RunSafeCommandError::Command(CommandRunFailure::new(
+            "spawn_failed",
+            format!("run command failed: {err}"),
+        ))
+    })?;
     let child_pid = child.id();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -666,14 +794,19 @@ pub(crate) async fn run_safe_command(
     let mut output_truncated = false;
     let mut output_limit_reached = false;
     let mut detached_timeout = false;
-    let mut timeout_error: Option<String> = None;
+    let mut timeout_failure: Option<CommandRunFailure> = None;
     let mut status = None;
     let mut pipes_closed = false;
 
     loop {
         tokio::select! {
             result = &mut wait_fut => {
-                status = Some(result.map_err(|err| format!("run command failed: {err}"))?);
+                status = Some(result.map_err(|err| {
+                    RunSafeCommandError::Command(CommandRunFailure::new(
+                        "wait_failed",
+                        format!("run command failed: {err}"),
+                    ))
+                })?);
                 while let Ok(Some(event)) = tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
                     let limit_hit = record_command_output_event(
                         event,
@@ -725,9 +858,12 @@ pub(crate) async fn run_safe_command(
                 );
                 kill_shell_pid(child_pid).await;
                 let _ = tokio::time::timeout(Duration::from_secs(5), &mut wait_fut).await;
-                timeout_error = Some(format!(
-                    "Command idle timed out after {} seconds without output",
-                    idle_timeout
+                timeout_failure = Some(CommandRunFailure::new(
+                    "idle_timeout",
+                    format!(
+                        "Command idle timed out after {} seconds without output",
+                        idle_timeout
+                    ),
                 ));
                 break;
             }
@@ -749,15 +885,18 @@ pub(crate) async fn run_safe_command(
                 if detached_background {
                     detached_timeout = true;
                 } else {
-                    timeout_error = Some(format!("Command timed out after {} seconds", soft_timeout));
+                    timeout_failure = Some(CommandRunFailure::new(
+                        "timeout",
+                        format!("Command timed out after {} seconds", soft_timeout),
+                    ));
                 }
                 break;
             }
         }
     }
 
-    if let Some(err) = timeout_error {
-        return Err(err);
+    if let Some(failure) = timeout_failure {
+        return Err(RunSafeCommandError::Command(failure));
     }
 
     let (text, stdout_text, stderr_text) =
@@ -779,7 +918,12 @@ pub(crate) async fn run_safe_command(
         };
     }
 
-    let status = status.ok_or_else(|| "run command status unavailable".to_string())?;
+    let status = status.ok_or_else(|| {
+        RunSafeCommandError::Command(CommandRunFailure::new(
+            "status_unavailable",
+            "run command status unavailable",
+        ))
+    })?;
     let exit_code = status.code().unwrap_or(-1);
     if exit_code == 0 {
         if text.trim().is_empty() {
@@ -788,7 +932,13 @@ pub(crate) async fn run_safe_command(
             Ok(text)
         }
     } else if text.trim().is_empty() {
-        Err(format!("Command failed with exit code {}", exit_code))
+        Err(RunSafeCommandError::Command(
+            CommandRunFailure::new(
+                "nonzero_exit",
+                format!("Command failed with exit code {}", exit_code),
+            )
+            .with_output(exit_code, stdout_text, stderr_text, output_truncated),
+        ))
     } else {
         let mut detail = String::new();
         if !stderr_text.trim().is_empty() {
@@ -808,9 +958,12 @@ pub(crate) async fn run_safe_command(
             }
             detail.push_str("...");
         }
-        Err(format!(
-            "Command failed with exit code {}\n{}",
-            exit_code, detail
+        Err(RunSafeCommandError::Command(
+            CommandRunFailure::new(
+                "nonzero_exit",
+                format!("Command failed with exit code {}\n{}", exit_code, detail),
+            )
+            .with_output(exit_code, stdout_text, stderr_text, output_truncated),
         ))
     }
 }
@@ -1083,6 +1236,127 @@ mod tests {
             .expect_err("silent command should hit idle timeout");
 
         assert!(err.contains("idle timed out"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn run_cmd_nonzero_exit_returns_structured_error() {
+        let root = TempDirGuard::new("run_cmd_structured_nonzero");
+        let state = test_state(root.path.clone());
+        let err = execute_builtin_skill(
+            &state,
+            "run_cmd",
+            &json!({
+                "command": "printf problem >&2; exit 7",
+                "timeout_seconds": 10,
+                "idle_timeout_seconds": 10,
+                "max_output_bytes": 8000
+            }),
+        )
+        .await
+        .expect_err("non-zero command should fail");
+
+        let structured =
+            crate::skills::parse_structured_skill_error(&err).expect("structured run_cmd error");
+        assert_eq!(structured.skill, "run_cmd");
+        assert_eq!(structured.error_kind, "nonzero_exit");
+        assert!(structured.error_text.contains("exit code 7"));
+        assert_eq!(
+            structured
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("exit_code"))
+                .and_then(|value| value.as_i64()),
+            Some(7)
+        );
+        assert_eq!(
+            structured
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("exit_category"))
+                .and_then(|value| value.as_str()),
+            Some("command_reported_failure")
+        );
+        assert_eq!(
+            structured
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("exit_classification_source"))
+                .and_then(|value| value.as_str()),
+            Some("exit_code")
+        );
+        assert_eq!(
+            structured
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("stderr"))
+                .and_then(|value| value.as_str()),
+            Some("problem")
+        );
+    }
+
+    #[tokio::test]
+    async fn run_cmd_sudo_policy_error_stays_policy_block() {
+        let root = TempDirGuard::new("run_cmd_policy_sudo");
+        let state = test_state(root.path.clone());
+        let err = execute_builtin_skill(
+            &state,
+            "run_cmd",
+            &json!({
+                "command": "sudo id",
+                "timeout_seconds": 10,
+                "idle_timeout_seconds": 10,
+                "max_output_bytes": 8000
+            }),
+        )
+        .await
+        .expect_err("sudo should be policy blocked");
+
+        assert!(
+            crate::skills::parse_policy_block_error(&err).is_some(),
+            "policy block should stay parseable: {err}"
+        );
+        assert!(
+            crate::skills::parse_structured_skill_error(&err).is_none(),
+            "policy block should not be wrapped as run_cmd command failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_cmd_command_not_found_uses_exit_code_category() {
+        let root = TempDirGuard::new("run_cmd_exit_category_127");
+        let state = test_state(root.path.clone());
+        let err = execute_builtin_skill(
+            &state,
+            "run_cmd",
+            &json!({
+                "command": "definitely_missing_rustclaw_command_for_exit_category",
+                "timeout_seconds": 10,
+                "idle_timeout_seconds": 10,
+                "max_output_bytes": 8000
+            }),
+        )
+        .await
+        .expect_err("missing command should fail");
+
+        let structured =
+            crate::skills::parse_structured_skill_error(&err).expect("structured run_cmd error");
+        assert_eq!(structured.error_kind, "nonzero_exit");
+        assert_eq!(
+            structured
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("exit_code"))
+                .and_then(|value| value.as_i64()),
+            Some(127)
+        );
+        assert_eq!(
+            structured
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("exit_category"))
+                .and_then(|value| value.as_str()),
+            Some("command_not_found")
+        );
     }
 
     #[tokio::test]

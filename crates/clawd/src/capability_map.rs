@@ -58,6 +58,21 @@ impl CapabilityDomain {
             }
         }
     }
+
+    fn from_registry_group(group: &str) -> Option<Self> {
+        match group.trim().to_ascii_lowercase().as_str() {
+            "filesystem" | "file" | "files" | "fs" => Some(Self::Filesystem),
+            "system" | "developer" | "dev" => Some(Self::System),
+            "ops" | "status" | "ops/status" | "service" | "runtime" => Some(Self::OpsStatus),
+            "market" | "market/data" | "finance" => Some(Self::MarketData),
+            "news" | "web" | "news/web" => Some(Self::NewsContent),
+            "image" | "vision" => Some(Self::ImageMedia),
+            "audio" | "voice" => Some(Self::AudioMedia),
+            "publishing" | "social" => Some(Self::Publishing),
+            "chat" | "general_chat" => Some(Self::GeneralChat),
+            _ => None,
+        }
+    }
 }
 
 fn classify_skill(state: &AppState, skill: &str) -> CapabilityDomain {
@@ -86,6 +101,13 @@ fn infer_domain_from_skill_metadata(state: &AppState, skill: &str) -> Option<Cap
 }
 
 fn infer_domain_from_registry_entry(entry: &SkillRegistryEntry) -> Option<CapabilityDomain> {
+    if let Some(domain) = entry
+        .group
+        .as_deref()
+        .and_then(CapabilityDomain::from_registry_group)
+    {
+        return Some(domain);
+    }
     let canonical = entry.name.trim();
     if canonical.is_empty() {
         return None;
@@ -156,12 +178,43 @@ pub(crate) fn build_capability_map_for_task(state: &AppState, task: &ClaimedTask
                 .as_deref()
                 .map(str::trim)
                 .filter(|description| !description.is_empty());
-            if aliases.is_empty() && description.is_none() {
+            let semantic_tags = entry
+                .semantic_tags
+                .iter()
+                .map(|tag| tag.trim())
+                .filter(|tag| !tag.is_empty())
+                .take(8)
+                .collect::<Vec<_>>();
+            let validation_actions = entry
+                .validation_actions
+                .iter()
+                .map(|action| action.trim())
+                .filter(|action| !action.is_empty())
+                .take(6)
+                .collect::<Vec<_>>();
+            if aliases.is_empty()
+                && description.is_none()
+                && semantic_tags.is_empty()
+                && validation_actions.is_empty()
+                && !entry.preferred_over_run_cmd
+            {
                 continue;
             }
             let mut parts = Vec::new();
             if let Some(description) = description {
                 parts.push(description.to_string());
+            }
+            if !semantic_tags.is_empty() {
+                parts.push(format!("semantic_tags: {}", semantic_tags.join(", ")));
+            }
+            if entry.preferred_over_run_cmd {
+                parts.push("prefer over run_cmd when semantics match".to_string());
+            }
+            if !validation_actions.is_empty() {
+                parts.push(format!(
+                    "validation_actions: {}",
+                    validation_actions.join(", ")
+                ));
             }
             if !aliases.is_empty() {
                 parts.push(format!("aliases: {}", aliases.join(", ")));

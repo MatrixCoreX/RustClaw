@@ -63,11 +63,15 @@ pub(crate) fn should_attempt_observed_fallback(
 
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX: &str = "**执行过程**";
 pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX_EN: &str = "**Execution**";
+pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX_JA: &str = "**実行過程**";
+pub(crate) const EXECUTION_SUMMARY_MESSAGE_PREFIX_KO: &str = "**실행 과정**";
 
 pub(crate) fn is_execution_summary_message(message: &str) -> bool {
     let trimmed = message.trim_start();
     trimmed.starts_with(EXECUTION_SUMMARY_MESSAGE_PREFIX)
         || trimmed.starts_with(EXECUTION_SUMMARY_MESSAGE_PREFIX_EN)
+        || trimmed.starts_with(EXECUTION_SUMMARY_MESSAGE_PREFIX_JA)
+        || trimmed.starts_with(EXECUTION_SUMMARY_MESSAGE_PREFIX_KO)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

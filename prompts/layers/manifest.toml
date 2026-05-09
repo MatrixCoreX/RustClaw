@@ -49,6 +49,15 @@ overlay = ["prompts/layers/overlays/intent_normalizer_prompt.md"]
 vendor_patch = "routing/common.md"
 
 [[prompts]]
+logical_path = "prompts/contract_repair_judge_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/routing/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/contract_repair_judge_prompt.md"]
+vendor_patch = "routing/common.md"
+
+[[prompts]]
 logical_path = "prompts/clarify_question_prompt.md"
 base = [
   "prompts/layers/base/system_truth.md",
@@ -64,6 +73,15 @@ base = [
   "prompts/layers/base/recovery/common_rules.md",
 ]
 overlay = ["prompts/layers/overlays/user_response_composer_prompt.md"]
+vendor_patch = "recovery/common.md"
+
+[[prompts]]
+logical_path = "prompts/user_response_contract_validator_prompt.md"
+base = [
+  "prompts/layers/base/system_truth.md",
+  "prompts/layers/base/recovery/common_rules.md",
+]
+overlay = ["prompts/layers/overlays/user_response_contract_validator_prompt.md"]
 vendor_patch = "recovery/common.md"
 
 [[prompts]]

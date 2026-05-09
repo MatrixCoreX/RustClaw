@@ -23,6 +23,77 @@ struct Resp {
     text: String,
     extra: Option<Value>,
     error_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    platform: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct SkillError {
+    kind: &'static str,
+    message: String,
+    extra: Option<Value>,
+}
+
+type SkillResult<T> = Result<T, SkillError>;
+
+impl SkillError {
+    fn new(kind: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            extra: None,
+        }
+    }
+
+    fn with_extra(mut self, extra: Value) -> Self {
+        self.extra = Some(extra);
+        self
+    }
+
+    fn invalid_input(message: impl Into<String>) -> Self {
+        Self::new("invalid_input", message)
+    }
+
+    fn invalid_data(message: impl Into<String>) -> Self {
+        Self::new("invalid_data", message)
+    }
+
+    fn unsupported_action(message: impl Into<String>) -> Self {
+        Self::new("unsupported_action", message)
+    }
+
+    fn path_denied(message: impl Into<String>) -> Self {
+        Self::new("path_denied", message)
+    }
+
+    fn not_a_directory(message: impl Into<String>) -> Self {
+        Self::new("not_a_directory", message)
+    }
+
+    fn is_directory(message: impl Into<String>) -> Self {
+        Self::new("is_directory", message)
+    }
+
+    fn io(operation: &'static str, path: &Path, err: io::Error) -> Self {
+        let kind = io_error_kind(&err);
+        let path_text = path.display().to_string();
+        Self::new(kind, format!("{operation} failed for {path_text}: {err}")).with_extra(json!({
+            "operation": operation,
+            "path": path_text,
+        }))
+    }
+}
+
+fn io_error_kind(err: &io::Error) -> &'static str {
+    match err.kind() {
+        io::ErrorKind::NotFound => "not_found",
+        io::ErrorKind::PermissionDenied => "permission_denied",
+        io::ErrorKind::InvalidInput => "invalid_input",
+        io::ErrorKind::InvalidData => "invalid_data",
+        _ => "io_error",
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -40,6 +111,8 @@ fn main() -> anyhow::Result<()> {
                 text: String::new(),
                 extra: None,
                 error_text: Some(format!("invalid input: {err}")),
+                error_kind: Some("invalid_input".to_string()),
+                platform: Some(std::env::consts::OS.to_string()),
             },
         };
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
@@ -63,13 +136,17 @@ fn handle(req: Req) -> Resp {
             extra: serde_json::from_str(&text).ok(),
             text,
             error_text: None,
+            error_kind: None,
+            platform: None,
         },
         Err(err) => Resp {
             request_id: req.request_id,
             status: "error".to_string(),
             text: String::new(),
-            extra: None,
-            error_text: Some(err),
+            extra: err.extra,
+            error_text: Some(err.message),
+            error_kind: Some(err.kind.to_string()),
+            platform: Some(std::env::consts::OS.to_string()),
         },
     }
 }
@@ -78,10 +155,10 @@ fn execute_action(
     workspace_root: &Path,
     args: Value,
     allow_path_outside_workspace: bool,
-) -> Result<String, String> {
+) -> SkillResult<String> {
     let obj = args
         .as_object()
-        .ok_or_else(|| "args must be object".to_string())?;
+        .ok_or_else(|| SkillError::invalid_input("args must be object"))?;
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
@@ -103,9 +180,9 @@ fn execute_action(
         "compare_paths" => compare_paths(workspace_root, obj, allow_path_outside_workspace),
         "path_batch_facts" => path_batch_facts(workspace_root, obj, allow_path_outside_workspace),
         "diagnose_runtime" => diagnose_runtime(workspace_root, obj),
-        other => Err(format!(
+        other => Err(SkillError::unsupported_action(format!(
             "unknown action: {other}; allowed: info|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|find_path|read_range|compare_paths|path_batch_facts|diagnose_runtime"
-        )),
+        ))),
     }
 }
 
@@ -120,7 +197,7 @@ fn context_allows_path_outside_workspace(context: Option<&Value>) -> bool {
         .unwrap_or(false)
 }
 
-fn system_info(workspace_root: &Path) -> Result<String, String> {
+fn system_info(workspace_root: &Path) -> SkillResult<String> {
     let hostname = detect_hostname();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -181,7 +258,7 @@ fn inventory_dir(
     workspace_root: &Path,
     obj: &Map<String, Value>,
     allow_path_outside_workspace: bool,
-) -> Result<String, String> {
+) -> SkillResult<String> {
     let path = obj.get("path").and_then(Value::as_str).unwrap_or(".");
     let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let include_hidden = bool_arg(obj, "include_hidden", false);
@@ -196,10 +273,18 @@ fn inventory_dir(
         .to_ascii_lowercase();
     let ext_filters = ext_filters(obj);
 
+    let meta = std::fs::metadata(&real).map_err(|err| SkillError::io("metadata", &real, err))?;
+    if !meta.is_dir() {
+        return Err(SkillError::not_a_directory(format!(
+            "inventory_dir requires a directory: {}",
+            real.display()
+        )));
+    }
+
     let mut entries = Vec::new();
-    let iter = std::fs::read_dir(&real).map_err(|err| format!("read_dir failed: {err}"))?;
+    let iter = std::fs::read_dir(&real).map_err(|err| SkillError::io("read_dir", &real, err))?;
     for item in iter {
-        let item = item.map_err(|err| format!("dir entry failed: {err}"))?;
+        let item = item.map_err(|err| SkillError::io("dir_entry", &real, err))?;
         let entry_path = item.path();
         let file_name = item.file_name().to_string_lossy().to_string();
         let is_hidden = file_name.starts_with('.');
@@ -208,7 +293,7 @@ fn inventory_dir(
         }
         let meta = item
             .metadata()
-            .map_err(|err| format!("metadata failed for {}: {err}", entry_path.display()))?;
+            .map_err(|err| SkillError::io("metadata", &entry_path, err))?;
         let kind = if meta.is_dir() {
             "dir"
         } else if meta.is_file() {
@@ -298,7 +383,7 @@ fn count_inventory(
     workspace_root: &Path,
     obj: &Map<String, Value>,
     allow_path_outside_workspace: bool,
-) -> Result<String, String> {
+) -> SkillResult<String> {
     let path = obj.get("path").and_then(Value::as_str).unwrap_or(".");
     let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let include_hidden = bool_arg(obj, "include_hidden", false);
@@ -383,7 +468,7 @@ fn workspace_glance(
     workspace_root: &Path,
     obj: &Map<String, Value>,
     allow_path_outside_workspace: bool,
-) -> Result<String, String> {
+) -> SkillResult<String> {
     let path = obj.get("path").and_then(Value::as_str).unwrap_or(".");
     let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let include_hidden = bool_arg(obj, "include_hidden", false);
@@ -394,9 +479,17 @@ fn workspace_glance(
     let mut hidden_count = 0usize;
     let mut ext_counts = std::collections::BTreeMap::<String, usize>::new();
 
-    let iter = std::fs::read_dir(&real).map_err(|err| format!("read_dir failed: {err}"))?;
+    let meta = std::fs::metadata(&real).map_err(|err| SkillError::io("metadata", &real, err))?;
+    if !meta.is_dir() {
+        return Err(SkillError::not_a_directory(format!(
+            "workspace_glance requires a directory: {}",
+            real.display()
+        )));
+    }
+
+    let iter = std::fs::read_dir(&real).map_err(|err| SkillError::io("read_dir", &real, err))?;
     for item in iter {
-        let item = item.map_err(|err| format!("dir entry failed: {err}"))?;
+        let item = item.map_err(|err| SkillError::io("dir_entry", &real, err))?;
         let entry_path = item.path();
         let file_name = item.file_name().to_string_lossy().to_string();
         let is_hidden = file_name.starts_with('.');
@@ -405,7 +498,7 @@ fn workspace_glance(
         }
         let meta = item
             .metadata()
-            .map_err(|err| format!("metadata failed for {}: {err}", entry_path.display()))?;
+            .map_err(|err| SkillError::io("metadata", &entry_path, err))?;
         let kind = path_kind(&meta);
         match kind {
             "file" => {
@@ -468,7 +561,7 @@ fn tree_summary(
     workspace_root: &Path,
     obj: &Map<String, Value>,
     allow_path_outside_workspace: bool,
-) -> Result<String, String> {
+) -> SkillResult<String> {
     let path = obj.get("path").and_then(Value::as_str).unwrap_or(".");
     let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let include_hidden = bool_arg(obj, "include_hidden", false);
@@ -508,7 +601,7 @@ fn dir_compare(
     workspace_root: &Path,
     obj: &Map<String, Value>,
     allow_path_outside_workspace: bool,
-) -> Result<String, String> {
+) -> SkillResult<String> {
     let left = required_str(obj, "left_path")?;
     let right = required_str(obj, "right_path")?;
     let left_real = resolve_path(workspace_root, left, allow_path_outside_workspace)?;
@@ -518,11 +611,13 @@ fn dir_compare(
     let max_diffs = u64_arg(obj, "max_diffs", 100).clamp(1, 500) as usize;
 
     let left_meta =
-        std::fs::metadata(&left_real).map_err(|err| format!("left metadata failed: {err}"))?;
-    let right_meta =
-        std::fs::metadata(&right_real).map_err(|err| format!("right metadata failed: {err}"))?;
+        std::fs::metadata(&left_real).map_err(|err| SkillError::io("metadata", &left_real, err))?;
+    let right_meta = std::fs::metadata(&right_real)
+        .map_err(|err| SkillError::io("metadata", &right_real, err))?;
     if !left_meta.is_dir() || !right_meta.is_dir() {
-        return Err("dir_compare requires both paths to be directories".to_string());
+        return Err(SkillError::not_a_directory(
+            "dir_compare requires both paths to be directories",
+        ));
     }
 
     let left_entries =
@@ -597,7 +692,7 @@ fn extract_field(
     workspace_root: &Path,
     obj: &Map<String, Value>,
     allow_path_outside_workspace: bool,
-) -> Result<String, String> {
+) -> SkillResult<String> {
     let path = required_str(obj, "path")?;
     let field_path = required_str(obj, "field_path")?;
     let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
@@ -633,12 +728,12 @@ fn extract_fields(
     workspace_root: &Path,
     obj: &Map<String, Value>,
     allow_path_outside_workspace: bool,
-) -> Result<String, String> {
+) -> SkillResult<String> {
     let path = required_str(obj, "path")?;
     let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let field_paths = string_list_arg(obj, "field_paths");
     if field_paths.is_empty() {
-        return Err("field_paths is required".to_string());
+        return Err(SkillError::invalid_input("field_paths is required"));
     }
     let (format, root_value) =
         parse_structured_root(&real, obj.get("format").and_then(Value::as_str))?;
@@ -679,7 +774,7 @@ fn structured_keys(
     workspace_root: &Path,
     obj: &Map<String, Value>,
     allow_path_outside_workspace: bool,
-) -> Result<String, String> {
+) -> SkillResult<String> {
     let path = required_str(obj, "path")?;
     let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
     let field_path = obj.get("field_path").and_then(Value::as_str).unwrap_or("");
@@ -774,14 +869,14 @@ fn find_path(
     workspace_root: &Path,
     obj: &Map<String, Value>,
     allow_path_outside_workspace: bool,
-) -> Result<String, String> {
+) -> SkillResult<String> {
     let root = obj.get("root").and_then(Value::as_str).unwrap_or(".");
     let real_root = resolve_path(workspace_root, root, allow_path_outside_workspace)?;
     let needle = obj
         .get("name")
         .or_else(|| obj.get("pattern"))
         .and_then(Value::as_str)
-        .ok_or_else(|| "name or pattern is required".to_string())?;
+        .ok_or_else(|| SkillError::invalid_input("name or pattern is required"))?;
     let needle_norm = needle.to_ascii_lowercase();
     let match_mode = obj
         .get("match_mode")
@@ -848,10 +943,18 @@ fn read_range(
     workspace_root: &Path,
     obj: &Map<String, Value>,
     allow_path_outside_workspace: bool,
-) -> Result<String, String> {
+) -> SkillResult<String> {
     let path = required_str(obj, "path")?;
     let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
-    let text = std::fs::read_to_string(&real).map_err(|err| format!("read file failed: {err}"))?;
+    let meta = std::fs::metadata(&real).map_err(|err| SkillError::io("metadata", &real, err))?;
+    if meta.is_dir() {
+        return Err(SkillError::is_directory(format!(
+            "read_range requires a file, but target is a directory: {}",
+            real.display()
+        )));
+    }
+    let text =
+        std::fs::read_to_string(&real).map_err(|err| SkillError::io("read_file", &real, err))?;
     let lines: Vec<&str> = text.lines().collect();
     let total_lines = lines.len();
     let start = obj
@@ -921,15 +1024,15 @@ fn compare_paths(
     workspace_root: &Path,
     obj: &Map<String, Value>,
     allow_path_outside_workspace: bool,
-) -> Result<String, String> {
+) -> SkillResult<String> {
     let left = required_str(obj, "left_path")?;
     let right = required_str(obj, "right_path")?;
     let left_real = resolve_path(workspace_root, left, allow_path_outside_workspace)?;
     let right_real = resolve_path(workspace_root, right, allow_path_outside_workspace)?;
     let left_meta =
-        std::fs::metadata(&left_real).map_err(|err| format!("left metadata failed: {err}"))?;
-    let right_meta =
-        std::fs::metadata(&right_real).map_err(|err| format!("right metadata failed: {err}"))?;
+        std::fs::metadata(&left_real).map_err(|err| SkillError::io("metadata", &left_real, err))?;
+    let right_meta = std::fs::metadata(&right_real)
+        .map_err(|err| SkillError::io("metadata", &right_real, err))?;
 
     let left_kind = path_kind(&left_meta);
     let right_kind = path_kind(&right_meta);
@@ -966,10 +1069,10 @@ fn path_batch_facts(
     workspace_root: &Path,
     obj: &Map<String, Value>,
     allow_path_outside_workspace: bool,
-) -> Result<String, String> {
+) -> SkillResult<String> {
     let paths = string_list_arg(obj, "paths");
     if paths.is_empty() {
-        return Err("paths is required".to_string());
+        return Err(SkillError::invalid_input("paths is required"));
     }
     let include_missing = bool_arg(obj, "include_missing", true);
     let mut facts = Vec::new();
@@ -986,9 +1089,8 @@ fn path_batch_facts(
                 if let Some(resolved) =
                     resolve_case_insensitive_leaf(&real).or_else(|| resolve_unique_stem_leaf(&real))
                 {
-                    let meta = std::fs::metadata(&resolved).map_err(|err| {
-                        format!("metadata failed for {}: {err}", resolved.display())
-                    })?;
+                    let meta = std::fs::metadata(&resolved)
+                        .map_err(|err| SkillError::io("metadata", &resolved, err))?;
                     facts.push(json!({
                         "path": path,
                         "exists": true,
@@ -1004,7 +1106,7 @@ fn path_batch_facts(
                     }))
                 }
             }
-            Err(err) => return Err(format!("metadata failed for {}: {err}", real.display())),
+            Err(err) => return Err(SkillError::io("metadata", &real, err)),
         }
     }
 
@@ -1085,9 +1187,9 @@ fn resolve_unique_stem_leaf(path: &Path) -> Option<PathBuf> {
     matched
 }
 
-fn diagnose_runtime(workspace_root: &Path, obj: &Map<String, Value>) -> Result<String, String> {
+fn diagnose_runtime(workspace_root: &Path, obj: &Map<String, Value>) -> SkillResult<String> {
     let info = serde_json::from_str::<Value>(&system_info(workspace_root)?)
-        .map_err(|err| format!("system info encode failed: {err}"))?;
+        .map_err(|err| SkillError::invalid_data(format!("system info encode failed: {err}")))?;
     let include_process = bool_arg(obj, "include_process", false);
     let include_ports = bool_arg(obj, "include_ports", false);
     let include_env_summary = bool_arg(obj, "include_env_summary", false);
@@ -1339,9 +1441,9 @@ fn run_command_lines(cmd: &str, args: &[&str], max_lines: usize) -> Option<Vec<S
 fn walk_inventory(
     path: &Path,
     recursive: bool,
-    f: &mut dyn FnMut(&Path, &std::fs::Metadata, usize) -> Result<bool, String>,
-) -> Result<(), String> {
-    let meta = std::fs::metadata(path).map_err(|err| format!("metadata failed: {err}"))?;
+    f: &mut dyn FnMut(&Path, &std::fs::Metadata, usize) -> SkillResult<bool>,
+) -> SkillResult<()> {
+    let meta = std::fs::metadata(path).map_err(|err| SkillError::io("metadata", path, err))?;
     if meta.is_file() {
         let _ = f(path, &meta, 0)?;
         return Ok(());
@@ -1353,15 +1455,22 @@ fn walk_inventory_inner(
     dir: &Path,
     recursive: bool,
     depth: usize,
-    f: &mut dyn FnMut(&Path, &std::fs::Metadata, usize) -> Result<bool, String>,
-) -> Result<(), String> {
-    let iter = std::fs::read_dir(dir).map_err(|err| format!("read_dir failed: {err}"))?;
+    f: &mut dyn FnMut(&Path, &std::fs::Metadata, usize) -> SkillResult<bool>,
+) -> SkillResult<()> {
+    let meta = std::fs::metadata(dir).map_err(|err| SkillError::io("metadata", dir, err))?;
+    if !meta.is_dir() {
+        return Err(SkillError::not_a_directory(format!(
+            "directory traversal requires a directory: {}",
+            dir.display()
+        )));
+    }
+    let iter = std::fs::read_dir(dir).map_err(|err| SkillError::io("read_dir", dir, err))?;
     for entry in iter {
-        let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
+        let entry = entry.map_err(|err| SkillError::io("dir_entry", dir, err))?;
         let p = entry.path();
         let meta = entry
             .metadata()
-            .map_err(|err| format!("metadata failed for {}: {err}", p.display()))?;
+            .map_err(|err| SkillError::io("metadata", &p, err))?;
         let descend = f(&p, &meta, depth + 1)?;
         if recursive && meta.is_dir() && descend {
             walk_inventory_inner(&p, recursive, depth + 1, f)?;
@@ -1427,10 +1536,10 @@ fn u64_arg_any(obj: &Map<String, Value>, keys: &[&str], default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-fn required_str<'a>(obj: &'a Map<String, Value>, key: &str) -> Result<&'a str, String> {
+fn required_str<'a>(obj: &'a Map<String, Value>, key: &str) -> SkillResult<&'a str> {
     obj.get(key)
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("{key} is required"))
+        .ok_or_else(|| SkillError::invalid_input(format!("{key} is required")))
 }
 
 fn string_list_arg(obj: &Map<String, Value>, key: &str) -> Vec<String> {
@@ -1471,26 +1580,36 @@ fn detect_format_from_path(path: &Path) -> String {
     .to_string()
 }
 
-fn parse_structured_root(
-    path: &Path,
-    format_hint: Option<&str>,
-) -> Result<(String, Value), String> {
+fn parse_structured_root(path: &Path, format_hint: Option<&str>) -> SkillResult<(String, Value)> {
     let format = format_hint
         .map(|v| v.to_ascii_lowercase())
         .unwrap_or_else(|| detect_format_from_path(path));
-    let raw = std::fs::read_to_string(path).map_err(|err| format!("read file failed: {err}"))?;
+    let meta = std::fs::metadata(path).map_err(|err| SkillError::io("metadata", path, err))?;
+    if meta.is_dir() {
+        return Err(SkillError::is_directory(format!(
+            "structured document parsing requires a file, but target is a directory: {}",
+            path.display()
+        )));
+    }
+    let raw =
+        std::fs::read_to_string(path).map_err(|err| SkillError::io("read_file", path, err))?;
     let root_value = match format.as_str() {
         "json" => serde_json::from_str::<Value>(&raw)
-            .map_err(|err| format!("json parse failed: {err}"))?,
+            .map_err(|err| SkillError::invalid_data(format!("json parse failed: {err}")))?,
         "toml" => {
             let value = raw
                 .parse::<toml::Value>()
-                .map_err(|err| format!("toml parse failed: {err}"))?;
-            serde_json::to_value(value).map_err(|err| format!("toml convert failed: {err}"))?
+                .map_err(|err| SkillError::invalid_data(format!("toml parse failed: {err}")))?;
+            serde_json::to_value(value)
+                .map_err(|err| SkillError::invalid_data(format!("toml convert failed: {err}")))?
         }
         "yaml" | "yml" => serde_yaml::from_str::<Value>(&raw)
-            .map_err(|err| format!("yaml parse failed: {err}"))?,
-        other => return Err(format!("unsupported format: {other}; use json|toml|yaml")),
+            .map_err(|err| SkillError::invalid_data(format!("yaml parse failed: {err}")))?,
+        other => {
+            return Err(SkillError::invalid_input(format!(
+                "unsupported format: {other}; use json|toml|yaml"
+            )))
+        }
     };
     Ok((format, root_value))
 }
@@ -1500,7 +1619,7 @@ fn collect_dir_signatures(
     include_hidden: bool,
     recursive: bool,
     max_entries: usize,
-) -> Result<std::collections::BTreeMap<String, String>, String> {
+) -> SkillResult<std::collections::BTreeMap<String, String>> {
     let mut out = std::collections::BTreeMap::new();
     walk_inventory(root, recursive, &mut |entry_path, meta, depth| {
         if depth == 0 {
@@ -1603,7 +1722,7 @@ fn build_tree_summary_node(
     max_children_per_dir: usize,
     depth: usize,
     state: &mut TreeSummaryState,
-) -> Result<Value, String> {
+) -> SkillResult<Value> {
     if state.remaining_nodes == 0 {
         state.truncated_nodes += 1;
         return Ok(json!({
@@ -1613,15 +1732,14 @@ fn build_tree_summary_node(
     }
     state.remaining_nodes -= 1;
 
-    let meta = std::fs::metadata(path)
-        .map_err(|err| format!("metadata failed for {}: {err}", path.display()))?;
+    let meta = std::fs::metadata(path).map_err(|err| SkillError::io("metadata", path, err))?;
     let mut node = build_path_fact(workspace_root, path, &meta);
     if !meta.is_dir() {
         return Ok(node);
     }
 
     let mut visible_entries: Vec<PathBuf> = std::fs::read_dir(path)
-        .map_err(|err| format!("read_dir failed: {err}"))?
+        .map_err(|err| SkillError::io("read_dir", path, err))?
         .filter_map(|entry| entry.ok().map(|v| v.path()))
         .filter(|p| {
             include_hidden
@@ -1668,24 +1786,24 @@ fn build_tree_summary_node(
     Ok(node)
 }
 
-fn same_file_content(left: &Path, right: &Path) -> Result<bool, String> {
+fn same_file_content(left: &Path, right: &Path) -> SkillResult<bool> {
     const MAX_COMPARE_BYTES: u64 = 4 * 1024 * 1024;
-    let left_meta =
-        std::fs::metadata(left).map_err(|err| format!("left metadata failed: {err}"))?;
+    let left_meta = std::fs::metadata(left).map_err(|err| SkillError::io("metadata", left, err))?;
     let right_meta =
-        std::fs::metadata(right).map_err(|err| format!("right metadata failed: {err}"))?;
+        std::fs::metadata(right).map_err(|err| SkillError::io("metadata", right, err))?;
     if left_meta.len() != right_meta.len() {
         return Ok(false);
     }
     if left_meta.len() > MAX_COMPARE_BYTES {
-        return Err(format!(
+        return Err(SkillError::invalid_input(format!(
             "file too large to compare content directly: {} bytes exceeds {}",
             left_meta.len(),
             MAX_COMPARE_BYTES
-        ));
+        )));
     }
-    let left_bytes = std::fs::read(left).map_err(|err| format!("left read failed: {err}"))?;
-    let right_bytes = std::fs::read(right).map_err(|err| format!("right read failed: {err}"))?;
+    let left_bytes = std::fs::read(left).map_err(|err| SkillError::io("read_file", left, err))?;
+    let right_bytes =
+        std::fs::read(right).map_err(|err| SkillError::io("read_file", right, err))?;
     Ok(left_bytes == right_bytes)
 }
 
@@ -1693,7 +1811,7 @@ fn resolve_path(
     workspace_root: &Path,
     input: &str,
     allow_path_outside_workspace: bool,
-) -> Result<PathBuf, String> {
+) -> SkillResult<PathBuf> {
     let raw = Path::new(input);
     if allow_path_outside_workspace {
         return if raw.is_absolute() {
@@ -1706,7 +1824,9 @@ fn resolve_path(
     let mut normalized = PathBuf::new();
     for comp in raw.components() {
         match comp {
-            Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
+            Component::ParentDir => {
+                return Err(SkillError::path_denied("path with '..' is not allowed"))
+            }
             Component::CurDir => {}
             other => normalized.push(other.as_os_str()),
         }
@@ -1724,12 +1844,12 @@ fn resolve_path(
         .canonicalize()
         .unwrap_or_else(|_| candidate.clone());
     if !normalized_candidate.starts_with(normalized_root) {
-        return Err("path is outside workspace".to_string());
+        return Err(SkillError::path_denied("path is outside workspace"));
     }
     Ok(candidate)
 }
 
-fn walk_collect(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> Result<(), String> {
+fn walk_collect(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> SkillResult<()> {
     if path.is_file() {
         let _ = f(path);
         return Ok(());
@@ -1737,9 +1857,16 @@ fn walk_collect(path: &Path, f: &mut dyn FnMut(&Path) -> bool) -> Result<(), Str
     if path.is_dir() && f(path) {
         return Ok(());
     }
-    let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
+    let meta = std::fs::metadata(path).map_err(|err| SkillError::io("metadata", path, err))?;
+    if !meta.is_dir() {
+        return Err(SkillError::not_a_directory(format!(
+            "path search requires a directory: {}",
+            path.display()
+        )));
+    }
+    let iter = std::fs::read_dir(path).map_err(|err| SkillError::io("read_dir", path, err))?;
     for entry in iter {
-        let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
+        let entry = entry.map_err(|err| SkillError::io("dir_entry", path, err))?;
         let p = entry.path();
         if p.is_dir() {
             walk_collect(&p, f)?;
@@ -1780,7 +1907,8 @@ mod tests {
     fn resolve_path_blocks_absolute_outside_workspace_without_permission() {
         let root = temp_root("deny_abs");
         let denied = resolve_path(&root, "/etc/passwd", false).expect_err("should deny");
-        assert_eq!(denied, "path is outside workspace");
+        assert_eq!(denied.kind, "path_denied");
+        assert_eq!(denied.message, "path is outside workspace");
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -1902,6 +2030,44 @@ mod tests {
             .get("excerpt")
             .and_then(Value::as_str)
             .is_some_and(|excerpt| excerpt.contains("8|8") && !excerpt.contains("9|9")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_range_directory_error_is_structured() {
+        let root = temp_root("read_range_directory_error");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!("."));
+
+        let err = read_range(&root, &obj, true).expect_err("directory read should fail");
+        assert_eq!(err.kind, "is_directory");
+        assert!(err.message.contains("target is a directory"));
+
+        let resp = handle(Req {
+            request_id: "structured-dir".to_string(),
+            args: json!({"action": "read_range", "path": "."}),
+            context: Some(json!({"allow_path_outside_workspace": true})),
+        });
+        assert_eq!(resp.status, "error");
+        assert_eq!(resp.error_kind.as_deref(), Some("is_directory"));
+        assert_eq!(resp.platform.as_deref(), Some(std::env::consts::OS));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inventory_missing_path_error_is_structured() {
+        let root = temp_root("inventory_missing_error");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!("missing-directory"));
+
+        let err = inventory_dir(&root, &obj, true).expect_err("missing directory should fail");
+        assert_eq!(err.kind, "not_found");
+        assert!(err
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("operation"))
+            .and_then(Value::as_str)
+            .is_some_and(|operation| operation == "metadata"));
         let _ = std::fs::remove_dir_all(root);
     }
 

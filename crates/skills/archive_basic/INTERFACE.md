@@ -20,13 +20,13 @@
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | `list` | `action` | yes | string | - | Must be `list`. |
-| `list` | `archive` | yes | string(path) | - | Archive file path (relative to workspace or explicit absolute path). |
+| `list` | `archive` | yes | string(path) | - | Archive file path (relative to workspace or explicit absolute path). Runtime also accepts `archive_path` or `path` as aliases and normalizes to `archive`. |
 | `pack` | `action` | yes | string | - | Must be `pack`. |
 | `pack` | `source` | yes | string(path) | - | Source file or directory to archive. |
-| `pack` | `archive` | yes | string(path) | - | Output archive file path. Parent dir is auto-created. |
+| `pack` | `archive` | yes | string(path) | - | Output archive file path. Parent dir is auto-created. Runtime also accepts `archive_path` as an alias and normalizes to `archive`. |
 | `pack` | `format` | no | string | `zip` | Supported: `zip`, `tar.gz`, `tgz` (`tgz` handled as `tar.gz`). |
 | `unpack` | `action` | yes | string | - | Must be `unpack`. |
-| `unpack` | `archive` | yes | string(path) | - | Input archive file path. |
+| `unpack` | `archive` | yes | string(path) | - | Input archive file path. Runtime also accepts `archive_path` or `path` as aliases and normalizes to `archive`. |
 | `unpack` | `dest` | yes | string(path) | - | Extraction destination directory (auto-created; relative to workspace or explicit absolute path). |
 
 ## Error Contract

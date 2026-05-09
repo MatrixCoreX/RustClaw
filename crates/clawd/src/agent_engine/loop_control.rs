@@ -89,21 +89,9 @@ fn route_needs_workspace_text_evidence_before_observed_finalize(route: &RouteRes
 }
 
 pub(crate) fn requested_success_marker(
-    agent_run_context: Option<&AgentRunContext>,
+    _agent_run_context: Option<&AgentRunContext>,
 ) -> Option<&'static str> {
-    let request = agent_run_context
-        .and_then(|ctx| ctx.user_request.as_deref())
-        .or_else(|| {
-            agent_run_context
-                .and_then(|ctx| ctx.route_result.as_ref())
-                .map(|route| route.resolved_intent.as_str())
-        })?;
-    let upper = request.to_ascii_uppercase();
-    if upper.contains("VALIDATION_PASSED") {
-        Some("VALIDATION_PASSED")
-    } else {
-        None
-    }
+    None
 }
 
 fn observed_answer_contains_required_success_marker(
@@ -793,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn recipe_done_still_waits_for_requested_success_marker() {
+    fn recipe_done_does_not_scan_user_text_for_success_marker() {
         let mut loop_state = LoopState::new(2);
         loop_state.execution_recipe = ExecutionRecipeRuntimeState {
             kind: ExecutionRecipeKind::OpsClosedLoop,
@@ -813,7 +801,7 @@ mod tests {
             skill: "run_cmd".to_string(),
             args: json!({"command":"curl -s http://127.0.0.1:52752/ | grep -o ops-demo-ok"}),
         }];
-        assert!(!should_stop_for_observed_finalize(
+        assert!(should_stop_for_observed_finalize(
             Some(&AgentRunContext {
                 route_result: Some(route_result(OutputResponseShape::Scalar)),
                 user_request: Some(

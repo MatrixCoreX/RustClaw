@@ -6,10 +6,83 @@ const REDACTED: &str = "[REDACTED]";
 
 pub(crate) fn sanitize_user_visible_text(text: &str) -> String {
     let stripped = strip_ansi_sequences(text);
+    let stripped = replace_structured_skill_error_payloads(&stripped);
     let redacted = redact_sensitive_url_params(&stripped);
     let redacted = redact_sensitive_key_value_pairs(&redacted);
     let redacted = redact_sensitive_json_string_fields(&redacted);
     redact_authorization_values(&redacted)
+}
+
+fn replace_structured_skill_error_payloads(text: &str) -> String {
+    const PREFIX: &str = "__RC_SKILL_ERROR__:";
+    let mut remaining = text;
+    let mut out = String::new();
+    while let Some(pos) = remaining.find(PREFIX) {
+        out.push_str(&remaining[..pos]);
+        let after_prefix = &remaining[pos + PREFIX.len()..];
+        let Some((payload, consumed)) = take_json_object_prefix(after_prefix) else {
+            out.push_str("skill execution failed");
+            remaining = "";
+            continue;
+        };
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) {
+            let replacement = value
+                .get("error_text")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .or_else(|| {
+                    value
+                        .get("text")
+                        .and_then(|text| text.get("failure_reason"))
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())
+                })
+                .unwrap_or("skill execution failed");
+            out.push_str(replacement);
+        } else {
+            out.push_str("skill execution failed");
+        }
+        remaining = &after_prefix[consumed..];
+    }
+    out.push_str(remaining);
+    out
+}
+
+fn take_json_object_prefix(text: &str) -> Option<(&str, usize)> {
+    let bytes = text.as_bytes();
+    if bytes.first().copied()? != b'{' {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (idx, ch) in text.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth = depth.saturating_add(1),
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    let end = idx + ch.len_utf8();
+                    return Some((&text[..end], end));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn strip_ansi_sequences(text: &str) -> String {
@@ -187,5 +260,30 @@ mod tests {
         assert!(sanitized.contains(r#""api_secret":"[REDACTED]""#));
         assert!(!sanitized.contains("abc123456789"));
         assert!(!sanitized.contains("plain"));
+    }
+
+    #[test]
+    fn sanitizes_structured_skill_error_payloads() {
+        let raw = r#"已尝试访问文件，但执行失败：__RC_SKILL_ERROR__:{"skill":"archive_basic","error_kind":"unknown","error_text":"archive is required","text":null}。"#;
+
+        let sanitized = sanitize_user_visible_text(raw);
+
+        assert_eq!(
+            sanitized,
+            "已尝试访问文件，但执行失败：archive is required。"
+        );
+        assert!(!sanitized.contains("__RC_SKILL_ERROR__"));
+        assert!(!sanitized.contains("\"skill\""));
+    }
+
+    #[test]
+    fn malformed_structured_skill_error_payload_does_not_leak_marker_tail() {
+        let raw = r#"执行失败：__RC_SKILL_ERROR__:{"skill":"archive_basic","error_text":"broken""#;
+
+        let sanitized = sanitize_user_visible_text(raw);
+
+        assert_eq!(sanitized, "执行失败：skill execution failed");
+        assert!(!sanitized.contains("__RC_SKILL_ERROR__"));
+        assert!(!sanitized.contains("archive_basic"));
     }
 }

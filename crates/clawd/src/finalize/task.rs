@@ -103,13 +103,10 @@ fn resume_context_body(value: &Value) -> &Value {
 }
 
 fn text_looks_like_missing_file_target(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower.contains("no such file or directory")
-        || lower.contains("__rc_read_file_not_found__")
-        || lower.contains("file not found")
-        || lower.contains("doesn't exist")
-        || lower.contains("does not exist")
-        || lower.contains("cannot access")
+    let trimmed = text.trim();
+    trimmed.starts_with("__RC_READ_FILE_NOT_FOUND__:")
+        || crate::skills::parse_structured_skill_error(trimmed)
+            .is_some_and(|structured| structured.error_kind == "not_found")
 }
 
 fn resume_context_has_remaining_actions(resume_ctx: &Value) -> bool {
@@ -159,6 +156,72 @@ fn resume_failure_is_missing_file_delivery_result(
                 .any(|text| text_looks_like_missing_file_target(text)))
 }
 
+fn resume_context_failed_structured_skill_error(
+    resume_ctx: &Value,
+) -> Option<crate::skills::StructuredSkillError> {
+    resume_context_body(resume_ctx)
+        .get("failed_step")
+        .and_then(|step| {
+            step.get("structured_error")
+                .and_then(resume_context_structured_skill_error_from_value)
+                .or_else(|| {
+                    step.get("error")
+                        .and_then(|value| value.as_str())
+                        .and_then(crate::skills::parse_structured_skill_error)
+                })
+        })
+}
+
+fn resume_context_string_field(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn resume_context_structured_skill_error_from_value(
+    value: &Value,
+) -> Option<crate::skills::StructuredSkillError> {
+    Some(crate::skills::StructuredSkillError {
+        skill: resume_context_string_field(value, "skill")?,
+        error_kind: resume_context_string_field(value, "error_kind")?,
+        error_text: resume_context_string_field(value, "error_text")?,
+        platform: resume_context_string_field(value, "platform"),
+        manager_type: resume_context_string_field(value, "manager_type"),
+        service_name: resume_context_string_field(value, "service_name"),
+        extra: value.get("extra").cloned().filter(|value| !value.is_null()),
+    })
+}
+
+fn structured_service_status_error_is_answerable(
+    error: &crate::skills::StructuredSkillError,
+) -> bool {
+    error.skill == "service_control"
+        && matches!(
+            error.error_kind.as_str(),
+            "not_found" | "service_inactive" | "service_failed" | "service_control_failed"
+        )
+}
+
+fn resume_failure_is_structured_service_status_result(
+    route_result: &crate::RouteResult,
+    resume_ctx: &Value,
+) -> bool {
+    route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+        && !resume_context_has_remaining_actions(resume_ctx)
+        && resume_context_failed_structured_skill_error(resume_ctx)
+            .as_ref()
+            .is_some_and(structured_service_status_error_is_answerable)
+}
+
+fn resume_context_user_visible_step_error(error: &str) -> String {
+    crate::skills::parse_structured_skill_error(error)
+        .map(|structured| crate::skills::normalize_skill_error_for_user(&structured.skill, error))
+        .unwrap_or_else(|| error.to_string())
+}
+
 fn resume_context_execution_summary_messages(
     resume_ctx: &Value,
     prefer_english: bool,
@@ -179,6 +242,7 @@ fn resume_context_execution_summary_messages(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("Execution failed.");
+    let error = resume_context_user_visible_step_error(error);
     let prefix = if prefer_english {
         crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX_EN
     } else {
@@ -192,7 +256,7 @@ fn resume_context_execution_summary_messages(
     };
     vec![format!(
         "{prefix}\n{line}\n   {label}：\n```text\n{}\n```",
-        crate::truncate_for_agent_trace(error).replace("```", "'''")
+        crate::truncate_for_agent_trace(&error).replace("```", "'''")
     )]
 }
 
@@ -531,7 +595,7 @@ pub(crate) async fn run_direct_classifier_reply(
         resolved_prompt_for_execution,
     );
     let prompt = format!(
-        "You are producing the final user-facing reply directly.\n\nRequest language hint: {request_language_hint}\nConfigured fallback language: {}\n\nLanguage policy (strict): follow the Request language hint when it is clear (`zh-CN`, `en`, or `mixed`). Use the configured fallback language only when the hint is `config_default` or otherwise unclear. Do not switch languages just because names, paths, commands, code, or other normalized values are in English.\n\nReturn only the user-facing reply.\n\n{}",
+        "You are producing the final user-facing reply directly.\n\nRequest language hint: {request_language_hint}\nConfigured fallback language: {}\n\nLanguage policy (strict): follow the Request language hint when it is clear. Clear hints include `zh-CN`, `en`, `mixed`, BCP-47 style language tags such as `ja`/`ko`/`fr-FR`, and script hints such as `und-Latn`/`und-Cyrl`/`und-Arab`. Use the configured fallback language only when the hint is `config_default` or otherwise unclear. If the hint is `en` but the current request is clearly another Latin-script human language, follow the current request language. Do not switch languages just because names, paths, commands, code, or other normalized values are in English.\n\nReturn only the user-facing reply.\n\n{}",
         state.policy.command_intent.default_locale,
         resolved_prompt_for_execution
     );
@@ -811,11 +875,21 @@ pub(crate) async fn finalize_ask_result(
                 let language_hint =
                     crate::language_policy::task_response_language_hint(state, task, prompt);
                 let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
-                if resume_failure_is_missing_file_delivery_result(
+                let qualified_resume_completion = if resume_failure_is_missing_file_delivery_result(
                     route_result,
                     &user_error,
                     &resume_payload,
                 ) {
+                    Some("missing_file_delivery")
+                } else if resume_failure_is_structured_service_status_result(
+                    route_result,
+                    &resume_payload,
+                ) {
+                    Some("structured_service_status")
+                } else {
+                    None
+                };
+                if let Some(qualified_resume_reason) = qualified_resume_completion {
                     let mut answer_messages =
                         resume_context_execution_summary_messages(&resume_payload, prefer_english);
                     answer_messages.push(user_error.clone());
@@ -863,13 +937,14 @@ pub(crate) async fn finalize_ask_result(
                         &task.task_id,
                         Some(crate::AskState::Finalizing),
                         crate::AskState::Completed,
-                        "finalize_missing_file_delivery_resume_success",
+                        &format!("finalize_{qualified_resume_reason}_resume_success"),
                         None,
                     );
                     journal.transitions.push(completed_transition);
                     info!(
-                        "task_journal_summary task_id={} kind=ask phase=missing_file_delivery_resume_success {}",
+                        "task_journal_summary task_id={} kind=ask phase=qualified_resume_success reason={} {}",
                         task.task_id,
+                        qualified_resume_reason,
                         journal.to_log_json()
                     );
                     state.clear_task_llm_call_count(&task.task_id);
@@ -1165,7 +1240,7 @@ mod tests {
         let resume_ctx = json!({
             "failed_step": {
                 "action": "skill(run_cmd)",
-                "error": "ls: cannot access '/tmp/missing.txt': No such file or directory"
+                "error": "__RC_READ_FILE_NOT_FOUND__:/tmp/missing.txt"
             },
             "remaining_actions": []
         });
@@ -1175,6 +1250,54 @@ mod tests {
             "I couldn't send the requested file because it doesn't exist at the path `/tmp/missing.txt`.",
             &resume_ctx
         ));
+    }
+
+    #[test]
+    fn resume_failure_structured_service_status_is_success_result() {
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+        let resume_ctx = json!({
+            "failed_step": {
+                "action": "skill(service_control)",
+                "error": "no matching service found for the given target",
+                "structured_error": {
+                    "skill": "service_control",
+                    "error_kind": "not_found",
+                    "error_text": "no matching service found for the given target",
+                    "service_name": "definitely_missing_rustclaw_demo",
+                    "platform": "linux",
+                    "manager_type": "unknown"
+                }
+            },
+            "remaining_actions": []
+        });
+
+        assert!(super::resume_failure_is_structured_service_status_result(
+            &route,
+            &resume_ctx
+        ));
+
+        let messages = super::resume_context_execution_summary_messages(&resume_ctx, false);
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].contains("no matching service found"));
+        assert!(!messages[0].contains("__RC_SKILL_ERROR__"));
     }
 
     #[test]

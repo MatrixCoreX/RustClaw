@@ -23,6 +23,8 @@ Independent base skill for running shell commands. Use `{"type":"call_skill","sk
 ## Output
 - stdout/stderr of the command, streamed and truncated with `...` if very long.
 - Interactive or endless commands must be bounded, for example `top -b -n 1`, `timeout 5s top -b`, `tail -n 200 file`, or `journalctl -n 200 --no-pager`.
+- Non-zero exits are structured errors. `extra.exit_code` is always included when available; `extra.exit_category` is derived from the exit code (`command_not_found` for 127, `command_not_executable` for 126, `command_reported_failure` for 1-125, `terminated_by_signal_or_shell_status` for 128-255), with `extra.exit_classification_source="exit_code"`.
+- Use `extra.exit_category` and `extra.exit_code` for recovery or summaries instead of matching stderr text.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.
