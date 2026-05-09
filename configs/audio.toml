@@ -189,8 +189,11 @@ oss_url_ttl_seconds = 3600
 # timeout_seconds = 90
 #
 # Local whisper.cpp example / 本地 whisper.cpp 示例：
+# 0. Download a multilingual model by device memory / 按设备内存下载多语言模型：
+#    bash scripts/download-whisper-model.sh
 # 1. Start whisper-server with an OpenAI-compatible route / 先启动兼容 OpenAI 路由的 whisper-server：
-#    ./build/bin/whisper-server -m models/ggml-small.bin --host 127.0.0.1 --port 8178 --request-path /v1 --inference-path /audio/transcriptions --convert --language auto
+#    MODEL_PATH="$(bash scripts/download-whisper-model.sh --print-path-only)"
+#    data/vendor/whisper.cpp/build/bin/whisper-server -m "$MODEL_PATH" --host 127.0.0.1 --port 8178 --request-path /v1 --inference-path /audio/transcriptions --convert --language auto
 # 2. To use local STT, change the active values above / 要选用本地 STT，把上面的实际值改成：
 #    default_vendor = "custom"
 #    adapter_mode = "compat"
