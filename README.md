@@ -64,11 +64,11 @@ flowchart TD
     N3 --> SR
     SR -->|planner call_skill| P
     SR -->|direct run_skill| RSK[run_skill finalize<br/>task result + journal]
-    N --> P[Loop observations]
+    N --> P[Loop observations<br/>failure classification]
     SS --> P
-    P -->|next round| I
+    P -->|repair / next round| I
     P -->|observation-only finish| OF[Observed-output finalizer<br/>direct answer or synthesis]
-    M --> VP[Visible process summary<br/>sanitized messages]
+    M --> VP[User-visible message assembly<br/>execution process when present]
     CR --> VP
     G --> VP
     OF --> VP
@@ -98,8 +98,8 @@ flowchart TD
 - `Execution prompt/context`: reuses the ask context bundle and resolved prompt for act / chat_act execution, so memory cannot override the latest user instruction.
 - `Skill registry + generated skill docs`: planner-visible skills come from runtime skill views and generated interface docs, primarily `configs/skills_registry.toml`, `crates/skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`. New skills should extend those contracts instead of adding language-specific planner branches.
 - `call_skill` / direct `run_skill`: both go through `run_skill_with_runner`, which applies policy and skill switches, then dispatches by registry kind: builtins run in-process, external skills run through their external adapter, and runner skills launch `skill-runner` plus the concrete skill binary.
-- `Loop observations` and `Observed-output finalizer`: tool, skill, and synthesis outputs remain grounded evidence inside the loop; observation-only plans can still finish through direct structured answers or runtime-owned synthesis.
-- `Visible process summary`: the user-visible process block is assembled as sanitized `messages`, separate from the final deliverable body, so execution stays visible without exposing raw prompts, stack traces, or secrets.
+- `Loop observations` and `Observed-output finalizer`: tool, skill, and synthesis outputs remain grounded evidence inside the loop; recoverable failures publish progress and re-enter the planner with compact history, while terminal failures finish with a grounded result; observation-only plans can still finish through direct structured answers or runtime-owned synthesis.
+- `User-visible message assembly`: pure chat can remain a single answer. Execution, clarification, retry, and skill paths can attach sanitized `messages` separate from the final deliverable body, so execution stays visible without exposing raw prompts, stack traces, or secrets.
 - `Final delivery / output-contract guard`: normalizes file tokens, `messages`, exact scalar/strict output shapes, and delivery consistency before the result is saved.
 - `Finalize result`: can emit one `text` field and a `messages` array; channel adapters send each publishable message separately when present.
 
@@ -133,7 +133,7 @@ flowchart TD
     Ms -->|runner| Msr[skill-runner subprocess]
     Msr --> Msbinary[Concrete skill binary]
     K -->|synthesize_answer| N[Synthesis LLM from evidence]
-    M --> O[Record loop observations]
+    M --> O[Record loop observations<br/>failure/progress state]
     Msb --> O
     Mse --> O
     Msbinary --> O
@@ -141,7 +141,7 @@ flowchart TD
     O --> P{Need another planner round?}
     P -->|yes| H
     P -->|no| Q[Observed-output finalizer<br/>direct answer or synthesis if needed]
-    L --> VP[Visible process summary<br/>sanitized messages]
+    L --> VP[User-visible message assembly<br/>execution process when present]
     Q --> VP
     Ic --> VP
     Ir --> VP
@@ -160,8 +160,8 @@ flowchart TD
 - `LLM request 2`: **Chat** mode uses one chat-completion call, then finalize. **Act / chat_act** uses one-or-more **planner** calls per loop round; the planner emits JSON steps in `{think, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types).
 - `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened. Skill execution uses the shared dispatch layer; only runner skills spawn `skill-runner`.
 - `synthesize_answer`: an extra LLM call **scheduled inside the planner loop** when the plan includes that step—**not** always a single fixed “LLM 3 after all planning is done”; rounds can interleave execution, synthesis, and further planning.
-- `Observed-output finalizer`: if a plan ends after observation steps without a terminal `respond`, runtime can still publish a grounded direct answer or run the observed-answer synthesis path.
-- `Visible process summary`: normal replies, clarifications, and execution results all pass through a sanitized visible-process message layer before final delivery.
+- `Observed-output finalizer`: if a plan ends after observation steps without a terminal `respond`, runtime can still publish a grounded direct answer or run the observed-answer synthesis path. Recoverable failures are fed back to later planner rounds as attempted-method evidence instead of being hidden inside shell fallbacks.
+- `User-visible message assembly`: pure chat replies can pass through without an execution-process block. Clarifications and execution paths can include sanitized progress/process messages before final delivery.
 - `Final delivery / output-contract guard`: applies delivery normalization and output-contract verification before final task persistence.
 - `Finalize`: may also start background memory work after the user-visible result is saved, including long-term summary refresh and optional preference extraction controlled by `configs/memory.toml`.
 
