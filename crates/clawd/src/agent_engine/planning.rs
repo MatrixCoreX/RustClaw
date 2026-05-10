@@ -2443,7 +2443,83 @@ fn action_is_run_cmd(state: &AppState, action: &AgentAction) -> bool {
         .unwrap_or(false)
 }
 
-fn mark_explicit_literal_run_cmd_actions(actions: Vec<AgentAction>) -> Vec<AgentAction> {
+fn literal_command_failure_can_replan(route_result: Option<&RouteResult>) -> bool {
+    route_result.is_some_and(|route| {
+        route.is_execute_gate()
+            && !matches!(
+                route.output_contract.semantic_kind,
+                crate::OutputSemanticKind::RawCommandOutput
+                    | crate::OutputSemanticKind::ExecutionFailedStep
+            )
+    })
+}
+
+fn missing_target_failure_can_replan(route_result: Option<&RouteResult>) -> bool {
+    route_result.is_some_and(|route| {
+        route.is_execute_gate()
+            && route.output_contract.requires_content_evidence
+            && matches!(
+                route.output_contract.semantic_kind,
+                crate::OutputSemanticKind::FilePaths
+                    | crate::OutputSemanticKind::FileNames
+                    | crate::OutputSemanticKind::DirectoryNames
+                    | crate::OutputSemanticKind::DirectoryPurposeSummary
+                    | crate::OutputSemanticKind::ContentExcerptSummary
+                    | crate::OutputSemanticKind::ExistenceWithPathSummary
+            )
+    })
+}
+
+fn mark_missing_target_repairable_actions(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if !missing_target_failure_can_replan(route_result) {
+        return actions;
+    }
+    actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallSkill { skill, mut args } => {
+                let canonical = state.resolve_canonical_skill_name(&skill);
+                if matches!(
+                    canonical.as_str(),
+                    "read_file" | "list_dir" | "system_basic"
+                ) {
+                    if let Some(obj) = args.as_object_mut() {
+                        obj.insert(
+                            super::CLAWD_MISSING_TARGET_REPAIRABLE_ARG.to_string(),
+                            Value::Bool(true),
+                        );
+                    }
+                }
+                AgentAction::CallSkill { skill, args }
+            }
+            AgentAction::CallTool { tool, mut args } => {
+                let canonical = state.resolve_canonical_skill_name(&tool);
+                if matches!(
+                    canonical.as_str(),
+                    "read_file" | "list_dir" | "system_basic"
+                ) {
+                    if let Some(obj) = args.as_object_mut() {
+                        obj.insert(
+                            super::CLAWD_MISSING_TARGET_REPAIRABLE_ARG.to_string(),
+                            Value::Bool(true),
+                        );
+                    }
+                }
+                AgentAction::CallTool { tool, args }
+            }
+            other => other,
+        })
+        .collect()
+}
+
+fn mark_explicit_literal_run_cmd_actions(
+    actions: Vec<AgentAction>,
+    failure_repairable: bool,
+) -> Vec<AgentAction> {
     actions
         .into_iter()
         .map(|action| match action {
@@ -2454,6 +2530,12 @@ fn mark_explicit_literal_run_cmd_actions(actions: Vec<AgentAction>) -> Vec<Agent
                             super::CLAWD_LITERAL_COMMAND_ARG.to_string(),
                             Value::Bool(true),
                         );
+                        if failure_repairable {
+                            obj.insert(
+                                super::CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG.to_string(),
+                                Value::Bool(true),
+                            );
+                        }
                     }
                 }
                 AgentAction::CallSkill { skill, args }
@@ -2465,6 +2547,12 @@ fn mark_explicit_literal_run_cmd_actions(actions: Vec<AgentAction>) -> Vec<Agent
                             super::CLAWD_LITERAL_COMMAND_ARG.to_string(),
                             Value::Bool(true),
                         );
+                        if failure_repairable {
+                            obj.insert(
+                                super::CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG.to_string(),
+                                Value::Bool(true),
+                            );
+                        }
                     }
                 }
                 AgentAction::CallTool { tool, args }
@@ -2500,7 +2588,10 @@ fn replace_explicit_command_substitute_plan_with_run_cmd(
         .iter()
         .any(|action| action_is_run_cmd(state, action))
     {
-        return mark_explicit_literal_run_cmd_actions(actions);
+        return mark_explicit_literal_run_cmd_actions(
+            actions,
+            literal_command_failure_can_replan(route_result),
+        );
     }
     let Some(first_observation_idx) = actions.iter().position(|action| {
         matches!(
@@ -2521,6 +2612,9 @@ fn replace_explicit_command_substitute_plan_with_run_cmd(
         args["command"] = serde_json::Value::String(command);
     }
     args[super::CLAWD_LITERAL_COMMAND_ARG] = Value::Bool(true);
+    if literal_command_failure_can_replan(route_result) {
+        args[super::CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG] = Value::Bool(true);
+    }
     rewritten[first_observation_idx] = AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args,
@@ -2667,7 +2761,8 @@ fn normalize_planned_actions_with_original(
         actions,
     );
     let actions = prune_unscoped_workspace_summary_evidence_for_scope(route_result, actions);
-    let actions = strip_unrequested_workspace_artifact_mutations(route_result, loop_state, actions);
+    let actions =
+        strip_unrequested_workspace_artifact_mutations(state, route_result, loop_state, actions);
     let actions =
         ensure_workspace_synthesis_has_default_text_evidence(route_result, loop_state, actions);
     let actions =
@@ -2693,6 +2788,7 @@ fn normalize_planned_actions_with_original(
         actions,
     );
     let actions = strip_service_status_discussion_actions(route_result, actions);
+    let actions = mark_missing_target_repairable_actions(state, route_result, actions);
     mark_non_mutating_run_cmd_sequences_continue_on_error(state, actions)
 }
 
@@ -2941,6 +3037,22 @@ fn normalize_arg_alias(
     }
 }
 
+fn normalize_path_batch_facts_args(obj: &mut serde_json::Map<String, Value>) {
+    if obj.contains_key("paths") {
+        return;
+    }
+    if let Some(paths) = obj
+        .remove("targets")
+        .or_else(|| obj.remove("target_paths"))
+        .or_else(|| obj.remove("path_list"))
+        .or_else(|| obj.remove("path_array"))
+    {
+        obj.insert("paths".to_string(), paths);
+    } else if let Some(path) = obj.remove("path") {
+        obj.insert("paths".to_string(), Value::Array(vec![path]));
+    }
+}
+
 fn normalize_system_basic_args(mut args: Value) -> Value {
     let Some(obj) = args.as_object_mut() else {
         return args;
@@ -2986,19 +3098,28 @@ fn normalize_system_basic_args(mut args: Value) -> Value {
         "count_inventory" => {
             normalize_path_alias_to_path(obj, &["dir_path", "directory_path", "directory", "dir"]);
         }
+        "check_exists" | "exists" | "path_exists" => {
+            obj.insert(
+                "action".to_string(),
+                Value::String("path_batch_facts".to_string()),
+            );
+            normalize_path_alias_to_path(
+                obj,
+                &[
+                    "target",
+                    "target_path",
+                    "file",
+                    "file_path",
+                    "dir_path",
+                    "directory_path",
+                    "directory",
+                    "dir",
+                ],
+            );
+            normalize_path_batch_facts_args(obj);
+        }
         "path_batch_facts" => {
-            if !obj.contains_key("paths") {
-                if let Some(paths) = obj
-                    .remove("targets")
-                    .or_else(|| obj.remove("target_paths"))
-                    .or_else(|| obj.remove("path_list"))
-                    .or_else(|| obj.remove("path_array"))
-                {
-                    obj.insert("paths".to_string(), paths);
-                } else if let Some(path) = obj.remove("path") {
-                    obj.insert("paths".to_string(), Value::Array(vec![path]));
-                }
-            }
+            normalize_path_batch_facts_args(obj);
         }
         "find_name" => {
             obj.insert("action".to_string(), Value::String("find_path".to_string()));
@@ -4005,7 +4126,70 @@ fn route_disallows_unrequested_workspace_artifact_mutation(
         && !loop_state.execution_recipe.is_active()
 }
 
+fn route_locator_hint_is_path_like(route: &RouteResult) -> bool {
+    let hint = route.output_contract.locator_hint.trim();
+    if hint.is_empty() {
+        return false;
+    }
+    if matches!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
+    ) {
+        return true;
+    }
+    let path = Path::new(hint);
+    path.is_absolute()
+        || path.components().count() > 1
+        || path.extension().is_some()
+        || hint.starts_with('.')
+        || hint.starts_with('~')
+}
+
+fn action_path_arg(args: &Value) -> Option<&str> {
+    args.get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn action_targets_route_locator_artifact(
+    state: &AppState,
+    route: &RouteResult,
+    action: &AgentAction,
+) -> bool {
+    if !route_locator_hint_is_path_like(route) {
+        return false;
+    }
+    let locator = resolve_workspace_path(
+        &state.skill_rt.workspace_root,
+        route.output_contract.locator_hint.trim(),
+    );
+    match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            let Some(raw_path) = action_path_arg(args) else {
+                return false;
+            };
+            let action_path = resolve_workspace_path(&state.skill_rt.workspace_root, raw_path);
+            match state.resolve_canonical_skill_name(skill).as_str() {
+                "write_file" | "remove_file" => {
+                    same_existing_or_display_path(&locator, &action_path)
+                }
+                "make_dir" => {
+                    same_existing_or_display_path(&locator, &action_path)
+                        || locator.parent().is_some_and(|parent| {
+                            same_existing_or_display_path(parent, &action_path)
+                        })
+                }
+                _ => false,
+            }
+        }
+        AgentAction::SynthesizeAnswer { .. } => false,
+        AgentAction::Respond { .. } | AgentAction::Think { .. } => false,
+    }
+}
+
 fn strip_unrequested_workspace_artifact_mutations(
+    state: &AppState,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
     actions: Vec<AgentAction>,
@@ -4026,6 +4210,9 @@ fn strip_unrequested_workspace_artifact_mutations(
         .into_iter()
         .filter(|action| {
             if action_is_likely_mutating(action) {
+                if action_targets_route_locator_artifact(state, route, action) {
+                    return true;
+                }
                 removed_mutations += 1;
                 return false;
             }
@@ -5718,8 +5905,74 @@ fn split_shell_sequence_command_with_policy(
     Some(parts)
 }
 
+fn planner_failure_fallback_first_command(
+    command: &str,
+    split_conditionals: bool,
+) -> Option<String> {
+    if !split_conditionals || command.contains("<<") {
+        return None;
+    }
+    let split_at = top_level_shell_or_operator_byte_index(command)?;
+    let first = command[..split_at].trim();
+    let fallback = command[split_at + 2..].trim();
+    if first.is_empty() || fallback.is_empty() {
+        return None;
+    }
+    let parts = vec![first.to_string(), fallback.to_string()];
+    if !shell_sequence_parts_can_run_independently(&parts) {
+        return None;
+    }
+    Some(first.to_string())
+}
+
+fn top_level_shell_or_operator_byte_index(command: &str) -> Option<usize> {
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    let mut command_sub_depth = 0usize;
+    let mut chars = command.char_indices().peekable();
+    while let Some((idx, ch)) = chars.next() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            if quote != Some('\'') {
+                escaped = true;
+            }
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            if ch == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(ch, '\'' | '"' | '`') {
+            quote = Some(ch);
+            continue;
+        }
+        if ch == '$' && chars.peek().is_some_and(|(_, next)| *next == '(') {
+            chars.next();
+            command_sub_depth += 1;
+            continue;
+        }
+        if command_sub_depth > 0 {
+            if ch == '(' {
+                command_sub_depth += 1;
+            } else if ch == ')' {
+                command_sub_depth = command_sub_depth.saturating_sub(1);
+            }
+            continue;
+        }
+        if ch == '|' && chars.peek().is_some_and(|(_, next)| *next == '|') {
+            return Some(idx);
+        }
+    }
+    None
+}
+
 fn request_text_contains_shell_conditional_operator(text: &str) -> bool {
-    text.contains("&&")
+    text.contains("&&") || text.contains("||")
 }
 
 fn should_split_planner_introduced_shell_conditionals(
@@ -5812,15 +6065,24 @@ fn split_sequential_run_cmd_actions(
                         original_user_text,
                     ) {
                         None
+                    } else if let Some(first_attempt) =
+                        planner_failure_fallback_first_command(command, split_conditionals)
+                    {
+                        Some(vec![first_attempt])
                     } else {
                         split_shell_sequence_command_with_policy(command, split_conditionals)
                     }
                 });
                 if let Some(parts) = parts {
+                    let continue_on_error = parts.len() > 1;
                     for command in parts {
                         rewritten.push(AgentAction::CallSkill {
                             skill: skill.clone(),
-                            args: run_cmd_args_with_command(&args, command),
+                            args: run_cmd_args_for_rewritten_command(
+                                &args,
+                                command,
+                                continue_on_error,
+                            ),
                         });
                     }
                     changed = true;
@@ -5836,15 +6098,24 @@ fn split_sequential_run_cmd_actions(
                         original_user_text,
                     ) {
                         None
+                    } else if let Some(first_attempt) =
+                        planner_failure_fallback_first_command(command, split_conditionals)
+                    {
+                        Some(vec![first_attempt])
                     } else {
                         split_shell_sequence_command_with_policy(command, split_conditionals)
                     }
                 });
                 if let Some(parts) = parts {
+                    let continue_on_error = parts.len() > 1;
                     for command in parts {
                         rewritten.push(AgentAction::CallTool {
                             tool: tool.clone(),
-                            args: run_cmd_args_with_command(&args, command),
+                            args: run_cmd_args_for_rewritten_command(
+                                &args,
+                                command,
+                                continue_on_error,
+                            ),
                         });
                     }
                     changed = true;
@@ -5869,7 +6140,11 @@ fn run_cmd_command_from_args(args: &Value) -> Option<&str> {
         .filter(|command| !command.is_empty())
 }
 
-fn run_cmd_args_with_command(args: &Value, command: String) -> Value {
+fn run_cmd_args_for_rewritten_command(
+    args: &Value,
+    command: String,
+    continue_on_error: bool,
+) -> Value {
     let mut next_args = args.clone();
     if let Some(obj) = next_args.as_object_mut() {
         let key = if obj.contains_key("command") {
@@ -5878,10 +6153,16 @@ fn run_cmd_args_with_command(args: &Value, command: String) -> Value {
             "cmd"
         };
         obj.insert(key.to_string(), Value::String(command));
-        obj.insert(
-            super::CLAWD_CONTINUE_ON_ERROR_ARG.to_string(),
-            Value::Bool(true),
-        );
+        if continue_on_error {
+            obj.insert(
+                super::CLAWD_CONTINUE_ON_ERROR_ARG.to_string(),
+                Value::Bool(true),
+            );
+        } else {
+            obj.remove(super::CLAWD_CONTINUE_ON_ERROR_ARG);
+            obj.remove(super::CLAWD_LITERAL_COMMAND_ARG);
+            obj.remove(super::CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG);
+        }
     }
     next_args
 }
@@ -8880,6 +9161,80 @@ name = "clawd"
     }
 
     #[test]
+    fn explicit_literal_scalar_route_marks_failure_repairable() {
+        let mut state = test_state_with_registry();
+        state.policy.command_intent.execute_prefixes = vec!["执行 ".to_string()];
+        let loop_state = LoopState::new(1);
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Scalar);
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({"command": "missing_probe --version"}),
+        }];
+
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "执行 missing_probe --version；如果该命令不存在，则执行 which bash，并只返回 bash 的路径。",
+            Some("执行 missing_probe --version；如果该命令不存在，则执行 which bash，并只返回 bash 的路径。"),
+            None,
+            actions,
+        );
+
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "run_cmd");
+                assert_eq!(
+                    args.get(super::super::CLAWD_LITERAL_COMMAND_ARG)
+                        .and_then(Value::as_bool),
+                    Some(true)
+                );
+                assert_eq!(
+                    args.get(super::super::CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG)
+                        .and_then(Value::as_bool),
+                    Some(true)
+                );
+            }
+            other => panic!("expected run_cmd action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn file_paths_route_marks_missing_target_repairable() {
+        let state = test_state_with_registry();
+        let loop_state = LoopState::new(1);
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "read_file".to_string(),
+            args: json!({"path": "plan/missing.md"}),
+        }];
+
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "read missing, then find a related file",
+            Some("read missing, then find a related file"),
+            None,
+            actions,
+        );
+
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "read_file");
+                assert_eq!(
+                    args.get(super::super::CLAWD_MISSING_TARGET_REPAIRABLE_ARG)
+                        .and_then(Value::as_bool),
+                    Some(true)
+                );
+            }
+            other => panic!("expected read_file action, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn raw_command_output_route_does_not_force_preferred_skill_repair() {
         let state = test_state_with_registry();
         let loop_state = LoopState::new(2);
@@ -10758,6 +11113,62 @@ name = "clawd"
     }
 
     #[test]
+    fn system_basic_check_exists_alias_is_normalized_to_path_batch_facts() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "check_exists",
+                "path": "plan/extra_missing_repair_probe.md",
+            }),
+        }];
+
+        let normalized = normalize_system_basic_schema_aliases(actions);
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("path_batch_facts")
+                );
+                assert_eq!(
+                    args.get("paths").and_then(|value| value.as_array()),
+                    Some(&vec![json!("plan/extra_missing_repair_probe.md")])
+                );
+                assert!(args.get("path").is_none());
+            }
+            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn system_basic_check_exists_target_alias_keeps_batch_shape() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "check_exists",
+                "target_path": "README.md",
+            }),
+        }];
+
+        let normalized = normalize_system_basic_schema_aliases(actions);
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("path_batch_facts")
+                );
+                assert_eq!(
+                    args.get("paths").and_then(|value| value.as_array()),
+                    Some(&vec![json!("README.md")])
+                );
+                assert!(args.get("target_path").is_none());
+            }
+            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn missing_read_range_path_uses_route_locator_hint() {
         let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
         route.output_contract.locator_kind = OutputLocatorKind::Filename;
@@ -12017,6 +12428,55 @@ name = "clawd"
             None,
             actions,
         );
+        assert!(normalized.iter().any(|action| {
+            matches!(
+                action,
+                AgentAction::CallSkill { skill, .. } if skill == "write_file"
+            )
+        }));
+    }
+
+    #[test]
+    fn explicit_workspace_file_locator_keeps_requested_file_mutation_plan() {
+        let root = TempDirGuard::new("workspace_text_evidence_requested_mutation");
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::OneSentence);
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_hint = "plan/p2_expand_test.md".to_string();
+        route.resolved_intent = "Create plan/p2_expand_test.md and write p2 hello".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "make_dir".to_string(),
+                args: json!({"path":"plan"}),
+            },
+            AgentAction::CallSkill {
+                skill: "write_file".to_string(),
+                args: json!({
+                    "path":"plan/p2_expand_test.md",
+                    "content":"p2 hello"
+                }),
+            },
+            AgentAction::Respond {
+                content: "created".to_string(),
+            },
+        ];
+
+        let normalized = super::normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            &route.resolved_intent,
+            None,
+            actions,
+        );
+        assert!(normalized.iter().any(|action| {
+            matches!(
+                action,
+                AgentAction::CallSkill { skill, .. } if skill == "make_dir"
+            )
+        }));
         assert!(normalized.iter().any(|action| {
             matches!(
                 action,
@@ -13614,6 +14074,28 @@ name = "clawd"
     }
 
     #[test]
+    fn user_supplied_or_operator_is_preserved_as_one_command() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({"command": "missing_probe --version || which bash"}),
+        }];
+
+        let rewritten = super::split_sequential_run_cmd_actions(
+            "Run `missing_probe --version || which bash` exactly.",
+            Some("Run `missing_probe --version || which bash` exactly."),
+            actions,
+        );
+
+        assert_eq!(rewritten.len(), 1);
+        assert!(matches!(
+            &rewritten[0],
+            AgentAction::CallSkill { args, .. }
+                if args.get("command").and_then(Value::as_str)
+                    == Some("missing_probe --version || which bash")
+        ));
+    }
+
+    #[test]
     fn user_supplied_semicolon_command_is_preserved_as_one_command() {
         let actions = vec![AgentAction::CallSkill {
             skill: "run_cmd".to_string(),
@@ -13632,6 +14114,34 @@ name = "clawd"
             AgentAction::CallSkill { args, .. }
                 if args.get("command").and_then(Value::as_str)
                     == Some("printf problem >&2; exit 7")
+        ));
+    }
+
+    #[test]
+    fn planner_introduced_or_operator_becomes_first_visible_attempt() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({
+                "command": "missing_probe --version 2>/dev/null || which bash",
+                "_clawd_continue_on_error": true,
+                "_clawd_literal_command": true
+            }),
+        }];
+
+        let rewritten = super::split_sequential_run_cmd_actions(
+            "Run missing_probe --version. If it is missing, run which bash.",
+            Some("Run missing_probe --version. If it is missing, run which bash."),
+            actions,
+        );
+
+        assert_eq!(rewritten.len(), 1);
+        assert!(matches!(
+            &rewritten[0],
+            AgentAction::CallSkill { args, .. }
+                if args.get("command").and_then(Value::as_str)
+                    == Some("missing_probe --version 2>/dev/null")
+                    && args.get("_clawd_continue_on_error").is_none()
+                    && args.get("_clawd_literal_command").is_none()
         ));
     }
 

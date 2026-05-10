@@ -8,6 +8,78 @@ use tokio::sync::mpsc;
 
 use crate::{AppState, ClaimedTask};
 
+fn builtin_error(
+    skill: &str,
+    error_kind: &str,
+    error_text: impl Into<String>,
+    requested_path: Option<&str>,
+    resolved_path: Option<&Path>,
+    extra: Option<Value>,
+) -> String {
+    let error_text = error_text.into();
+    let mut payload = extra.unwrap_or(Value::Null);
+    if !payload.is_object() {
+        payload = serde_json::json!({});
+    }
+    if let Some(object) = payload.as_object_mut() {
+        if let Some(path) = requested_path
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        {
+            object.insert(
+                "requested_path".to_string(),
+                Value::String(path.to_string()),
+            );
+        }
+        if let Some(path) = resolved_path {
+            object.insert(
+                "resolved_path".to_string(),
+                Value::String(path.display().to_string()),
+            );
+        }
+    }
+    crate::skills::structured_skill_error_from_parts(
+        skill,
+        error_kind,
+        &error_text,
+        Some(std::env::consts::OS),
+        Some(payload),
+    )
+}
+
+fn io_error_kind(err: &std::io::Error) -> &'static str {
+    match err.kind() {
+        std::io::ErrorKind::NotFound => "not_found",
+        std::io::ErrorKind::PermissionDenied => "permission_denied",
+        std::io::ErrorKind::AlreadyExists => "already_exists",
+        std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => "invalid_args",
+        std::io::ErrorKind::IsADirectory => "is_directory",
+        std::io::ErrorKind::NotADirectory => "not_a_directory",
+        _ => "io_error",
+    }
+}
+
+fn io_builtin_error(
+    skill: &str,
+    operation: &str,
+    err: &std::io::Error,
+    requested_path: Option<&str>,
+    resolved_path: Option<&Path>,
+) -> String {
+    let target = resolved_path
+        .map(|path| path.display().to_string())
+        .or_else(|| requested_path.map(str::to_string))
+        .unwrap_or_else(|| "<unknown>".to_string());
+    builtin_error(
+        skill,
+        io_error_kind(err),
+        format!("{operation} failed for {target}: {err}"),
+        requested_path,
+        resolved_path,
+        None,
+    )
+}
+
 pub(crate) async fn execute_builtin_skill_for_task(
     state: &AppState,
     task: &ClaimedTask,
@@ -89,6 +161,19 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 path,
                 crate::skills::task_allows_path_outside_workspace(state, task),
             )?;
+            if real_path.is_dir() {
+                return Err(builtin_error(
+                    "read_file",
+                    "is_directory",
+                    format!(
+                        "read_file requires a file, but target is a directory: {}",
+                        real_path.display()
+                    ),
+                    Some(path),
+                    Some(&real_path),
+                    None,
+                ));
+            }
             let bytes = std::fs::read(&real_path).map_err(|err| {
                 if err.kind() == std::io::ErrorKind::NotFound {
                     format!(
@@ -97,7 +182,7 @@ pub(crate) async fn execute_builtin_skill_with_task(
                         real_path.display()
                     )
                 } else {
-                    format!("read file failed: {err}")
+                    io_builtin_error("read_file", "read file", &err, Some(path), Some(&real_path))
                 }
             })?;
             let clip = if bytes.len() > crate::MAX_READ_FILE_BYTES {
@@ -112,7 +197,17 @@ pub(crate) async fn execute_builtin_skill_with_task(
             let path = required_string(map, "path")?;
             let content = required_string(map, "content")?;
             if content.len() > crate::MAX_WRITE_FILE_BYTES {
-                return Err(format!("content too large: {} bytes", content.len()));
+                return Err(builtin_error(
+                    "write_file",
+                    "content_too_large",
+                    format!("content too large: {} bytes", content.len()),
+                    Some(path),
+                    None,
+                    Some(serde_json::json!({
+                        "content_bytes": content.len(),
+                        "max_content_bytes": crate::MAX_WRITE_FILE_BYTES,
+                    })),
+                ));
             }
             let effective_path =
                 crate::ensure_default_file_path(&state.skill_rt.workspace_root, path);
@@ -122,10 +217,19 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 crate::skills::task_allows_path_outside_workspace(state, task),
             )?;
             if let Some(parent) = real_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|err| format!("mkdir failed: {err}"))?;
+                std::fs::create_dir_all(parent).map_err(|err| {
+                    io_builtin_error("write_file", "mkdir", &err, Some(path), Some(parent))
+                })?;
             }
-            std::fs::write(&real_path, content)
-                .map_err(|err| format!("write file failed: {err}"))?;
+            std::fs::write(&real_path, content).map_err(|err| {
+                io_builtin_error(
+                    "write_file",
+                    "write file",
+                    &err,
+                    Some(path),
+                    Some(&real_path),
+                )
+            })?;
             Ok(format!(
                 "written {} bytes to {}",
                 content.len(),
@@ -165,24 +269,65 @@ pub(crate) async fn execute_builtin_skill_with_task(
                             .into_iter()
                             .map(|candidate| candidate.display().to_string())
                             .collect::<Vec<_>>()
-                            .join("; ");
-                        return Err(format!(
-                            "directory locator matched multiple candidates: {candidates}"
+                            ;
+                        return Err(builtin_error(
+                            "list_dir",
+                            "ambiguous_target",
+                            format!(
+                                "directory locator matched multiple candidates: {}",
+                                candidates.join("; ")
+                            ),
+                            Some(path),
+                            None,
+                            Some(serde_json::json!({ "candidates": candidates })),
                         ));
                     }
                     Some(crate::delivery_utils::DirectoryLocatorExecutionResolution::NotFound) => {
-                        return Err(format!(
-                            "directory not found under system root and project root: {path}"
+                        return Err(builtin_error(
+                            "list_dir",
+                            "not_found",
+                            format!("directory not found under system root and project root: {path}"),
+                            Some(path),
+                            Some(&requested_path),
+                            None,
                         ));
                     }
                     None => requested_path,
                 }
             };
+            if !real_path.exists() {
+                return Err(builtin_error(
+                    "list_dir",
+                    "not_found",
+                    format!("directory not found: {}", real_path.display()),
+                    Some(path),
+                    Some(&real_path),
+                    None,
+                ));
+            }
+            if !real_path.is_dir() {
+                return Err(builtin_error(
+                    "list_dir",
+                    "not_a_directory",
+                    format!("list_dir requires a directory: {}", real_path.display()),
+                    Some(path),
+                    Some(&real_path),
+                    None,
+                ));
+            }
             let mut items = Vec::new();
-            for entry in
-                std::fs::read_dir(&real_path).map_err(|err| format!("read_dir failed: {err}"))?
-            {
-                let e = entry.map_err(|err| format!("dir entry failed: {err}"))?;
+            for entry in std::fs::read_dir(&real_path).map_err(|err| {
+                io_builtin_error("list_dir", "read_dir", &err, Some(path), Some(&real_path))
+            })? {
+                let e = entry.map_err(|err| {
+                    io_builtin_error(
+                        "list_dir",
+                        "read directory entry",
+                        &err,
+                        Some(path),
+                        Some(&real_path),
+                    )
+                })?;
                 let name = e.file_name();
                 let mut label = name.to_string_lossy().to_string();
                 if e.path().is_dir() {
@@ -309,8 +454,9 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 path,
                 crate::skills::task_allows_path_outside_workspace(state, task),
             )?;
-            std::fs::create_dir_all(&real_path)
-                .map_err(|err| format!("create_dir failed: {err}"))?;
+            std::fs::create_dir_all(&real_path).map_err(|err| {
+                io_builtin_error("make_dir", "create_dir", &err, Some(path), Some(&real_path))
+            })?;
             Ok(format!("created directory {}", real_path.display()))
         }
         "remove_file" => {
@@ -322,12 +468,27 @@ pub(crate) async fn execute_builtin_skill_with_task(
                 crate::skills::task_allows_path_outside_workspace(state, task),
             )?;
             if real_path.is_dir() {
-                return Err(
-                    "remove_file only supports files; use run_cmd for directory removal"
-                        .to_string(),
-                );
+                return Err(builtin_error(
+                    "remove_file",
+                    "is_directory",
+                    format!(
+                        "remove_file only supports files, but target is a directory: {}",
+                        real_path.display()
+                    ),
+                    Some(path),
+                    Some(&real_path),
+                    None,
+                ));
             }
-            std::fs::remove_file(&real_path).map_err(|err| format!("remove_file failed: {err}"))?;
+            std::fs::remove_file(&real_path).map_err(|err| {
+                io_builtin_error(
+                    "remove_file",
+                    "remove_file",
+                    &err,
+                    Some(path),
+                    Some(&real_path),
+                )
+            })?;
             Ok(format!("removed {}", real_path.display()))
         }
         _ => Err(format!("unknown skill: {skill_name}")),
@@ -1204,8 +1365,58 @@ mod tests {
         .await
         .expect_err("missing directory should fail");
 
-        assert!(err.contains("directory not found under system root and project root"));
-        assert!(err.contains("definitely_missing_directory"));
+        let structured =
+            crate::skills::parse_structured_skill_error(&err).expect("structured list_dir error");
+        assert_eq!(structured.skill, "list_dir");
+        assert_eq!(structured.error_kind, "not_found");
+        assert!(structured
+            .error_text
+            .contains("directory not found under system root and project root"));
+        assert_eq!(
+            structured
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("requested_path"))
+                .and_then(|value| value.as_str()),
+            Some("definitely_missing_directory")
+        );
+        assert!(crate::skills::is_recoverable_skill_error("list_dir", &err));
+    }
+
+    #[tokio::test]
+    async fn list_dir_file_target_returns_structured_not_a_directory() {
+        let root = TempDirGuard::new("list_dir_file_target");
+        fs::write(root.path.join("target.txt"), "x").expect("write target");
+        let state = test_state(root.path.clone());
+
+        let err = execute_builtin_skill(&state, "list_dir", &json!({"path": "target.txt"}))
+            .await
+            .expect_err("file target should fail");
+
+        let structured =
+            crate::skills::parse_structured_skill_error(&err).expect("structured list_dir error");
+        assert_eq!(structured.skill, "list_dir");
+        assert_eq!(structured.error_kind, "not_a_directory");
+        assert!(crate::skills::is_recoverable_skill_error("list_dir", &err));
+    }
+
+    #[tokio::test]
+    async fn remove_file_missing_path_is_structured_but_not_recoverable() {
+        let root = TempDirGuard::new("remove_file_missing_path");
+        let state = test_state(root.path.clone());
+
+        let err = execute_builtin_skill(&state, "remove_file", &json!({"path": "missing.txt"}))
+            .await
+            .expect_err("missing remove target should fail");
+
+        let structured = crate::skills::parse_structured_skill_error(&err)
+            .expect("structured remove_file error");
+        assert_eq!(structured.skill, "remove_file");
+        assert_eq!(structured.error_kind, "not_found");
+        assert!(!crate::skills::is_recoverable_skill_error(
+            "remove_file",
+            &err
+        ));
     }
 
     #[tokio::test]

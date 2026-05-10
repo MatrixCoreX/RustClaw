@@ -12,3 +12,7 @@ Use these optional subheading labels when needed:
 - ...
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
+### zh-CN
+- 中文技能请求要按 capability 和参数契约做语义映射，不要依赖固定短语；示例只能帮助理解，不是触发词表。
+- 如果中文请求已经给出明确目标和动作，直接生成最小合法 skill args；如果只缺一个必要参数，问一个简短澄清问题。
+- 保留中文的简短、只要结果、发文件、不要贴内容等交付约束，并映射到现有结构化参数或最终回答格式。

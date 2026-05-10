@@ -405,6 +405,10 @@ fn recent_file_path_candidate_for_scalar_path(
 
 fn route_prefers_plain_fs_search_paths(route: &crate::RouteResult) -> bool {
     route_requests_scalar_path_only(route)
+        || (route.output_contract.response_shape == crate::OutputResponseShape::Strict
+            && route.output_contract.locator_kind == crate::OutputLocatorKind::Path
+            && route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+            && !route.output_contract.delivery_required)
         || (matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
@@ -445,6 +449,16 @@ fn route_scalar_has_plain_path_terminal_respond(
 fn route_allows_raw_listing_direct_answer(route: Option<&crate::RouteResult>) -> bool {
     route.is_none_or(|route| {
         if !route.output_contract.requires_content_evidence {
+            return true;
+        }
+        if !route.output_contract.delivery_required
+            && route.output_contract.locator_kind == crate::OutputLocatorKind::Path
+            && matches!(
+                route.output_contract.semantic_kind,
+                crate::OutputSemanticKind::None | crate::OutputSemanticKind::ExistenceWithPath
+            )
+            && route.ask_mode.is_plain_act()
+        {
             return true;
         }
         matches!(
@@ -1397,6 +1411,48 @@ fn run_cmd_directory_entry_list_candidate(
         .flatten()
 }
 
+fn run_cmd_semantic_listing_text_candidate(
+    route: &crate::RouteResult,
+    body: &str,
+) -> Option<String> {
+    if !matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::FilePaths
+    ) {
+        return None;
+    }
+    if matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar
+    ) {
+        return None;
+    }
+    let lines = body
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| *line != "exit=0")
+        .filter(|line| !is_ignorable_shell_warning(line))
+        .collect::<Vec<_>>();
+    if lines.is_empty()
+        || lines.len() > 200
+        || lines
+            .iter()
+            .any(|line| looks_like_shell_long_listing_line(line))
+    {
+        return None;
+    }
+    if lines
+        .iter()
+        .any(|line| serde_json::from_str::<serde_json::Value>(line).is_ok())
+    {
+        return None;
+    }
+    normalized_listing_text(&lines.join("\n"))
+}
+
 fn run_cmd_listing_text_candidate(body: &str, auto_locator_path: Option<&str>) -> Option<String> {
     run_cmd_shell_listing_entry_names(body)
         .map(|names| names.join("\n"))
@@ -1859,7 +1915,7 @@ fn fs_search_scalar_candidate(
     prefer_full_path: bool,
     prefer_english: bool,
 ) -> Option<String> {
-    let (results, count, pattern) = fs_search_find_name_results(value)?;
+    let (mut results, count, pattern) = fs_search_find_name_results(value)?;
     if count == 0 || results.is_empty() {
         return Some(observed_t(
             state,
@@ -1868,6 +1924,18 @@ fn fs_search_scalar_candidate(
             "No matches found.",
             prefer_english,
         ));
+    }
+    if results.len() > 1 {
+        if let Some(locator_ext) = locator_hint.and_then(path_extension_hint) {
+            let filtered = results
+                .iter()
+                .filter(|path| path_has_extension(path, &locator_ext))
+                .cloned()
+                .collect::<Vec<_>>();
+            if !filtered.is_empty() {
+                results = filtered;
+            }
+        }
     }
     if results.len() == 1 {
         let root = value
@@ -1917,6 +1985,23 @@ fn fs_search_scalar_candidate(
         })
         .or_else(|| resolve_listing_entry_full_path(&preferred, auto_locator_path))
         .or_else(|| Some(preferred))
+}
+
+fn path_extension_hint(path: &str) -> Option<String> {
+    Path::new(path.trim())
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::trim)
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| ext.trim_start_matches('.').to_ascii_lowercase())
+}
+
+fn path_has_extension(path: &str, expected_ext: &str) -> bool {
+    Path::new(path.trim())
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .is_some_and(|ext| ext == expected_ext)
 }
 
 fn fs_search_direct_answer_candidate(
@@ -1983,6 +2068,45 @@ fn fs_search_direct_answer_candidate(
     }
     let matches = results.into_iter().take(3).collect::<Vec<_>>().join("\n");
     allow_multi_result_list.then_some(matches)
+}
+
+fn parent_directory_listing_from_paths(paths: &[String]) -> Option<String> {
+    let mut dirs = Vec::new();
+    for path in paths {
+        let path = path.trim();
+        if path.is_empty() {
+            continue;
+        }
+        let parent = Path::new(path)
+            .parent()
+            .map(|parent| {
+                let display = parent.to_string_lossy().trim().to_string();
+                if display.is_empty() {
+                    ".".to_string()
+                } else {
+                    display
+                }
+            })
+            .unwrap_or_else(|| ".".to_string());
+        if !dirs.iter().any(|seen| seen == &parent) {
+            dirs.push(parent);
+        }
+    }
+    (!dirs.is_empty()).then(|| dirs.join("\n"))
+}
+
+fn fs_search_semantic_listing_candidate(
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+) -> Option<String> {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryNames {
+        return None;
+    }
+    let (results, count, _ext) = fs_search_find_ext_results(value)?;
+    if count == 0 || results.is_empty() {
+        return None;
+    }
+    parent_directory_listing_from_paths(&results)
 }
 
 fn structured_scalar_candidate(
@@ -2945,10 +3069,19 @@ fn extract_direct_answer_from_generic_output_impl(
                         (allow_raw_listing_direct_answer
                             && !existence_with_path_should_use_llm_synthesis)
                             .then(|| {
-                                run_cmd_listing_text_candidate(
-                                    &observed_output.body,
-                                    auto_locator_path,
-                                )
+                                route
+                                    .and_then(|route| {
+                                        run_cmd_semantic_listing_text_candidate(
+                                            route,
+                                            &observed_output.body,
+                                        )
+                                    })
+                                    .or_else(|| {
+                                        run_cmd_listing_text_candidate(
+                                            &observed_output.body,
+                                            auto_locator_path,
+                                        )
+                                    })
                             })
                             .flatten()
                     })
@@ -2986,14 +3119,18 @@ fn extract_direct_answer_from_generic_output_impl(
                 "fs_search" => serde_json::from_str::<serde_json::Value>(&observed_output.body)
                     .ok()
                     .and_then(|value| {
-                        fs_search_direct_answer_candidate(
-                            state,
-                            &value,
-                            locator_hint,
-                            prefers_english_free_text,
-                            allow_raw_listing_direct_answer,
-                            prefer_full_path,
-                        )
+                        route
+                            .and_then(|route| fs_search_semantic_listing_candidate(route, &value))
+                            .or_else(|| {
+                                fs_search_direct_answer_candidate(
+                                    state,
+                                    &value,
+                                    locator_hint,
+                                    prefers_english_free_text,
+                                    allow_raw_listing_direct_answer,
+                                    prefer_full_path,
+                                )
+                            })
                     }),
                 "git_basic" => None,
                 "db_basic" => route.and_then(|route| {
@@ -4354,6 +4491,26 @@ version.workspace = true
     }
 
     #[test]
+    fn direct_scalar_prefers_locator_extension_when_fs_search_pattern_is_broad() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_search",
+            r#"{"action":"find_name","pattern":"execution_intent","count":2,"results":["plan/execution_intent_route_trace_cases.txt","plan/execution_intent_routing_repair_plan_20260509.md"],"root":"plan"}"#,
+        ));
+        assert_eq!(
+            extract_direct_scalar_from_generic_output_with_locator_hint(
+                &loop_state,
+                Some("plan/extra_missing_repair_probe.md"),
+                None,
+                false,
+            )
+            .as_deref(),
+            Some("plan/execution_intent_routing_repair_plan_20260509.md")
+        );
+    }
+
+    #[test]
     fn fs_search_find_ext_direct_answer_returns_paths_list() {
         let value = serde_json::json!({
             "action": "find_ext",
@@ -4365,6 +4522,50 @@ version.workspace = true
             super::fs_search_direct_answer_candidate(None, &value, None, false, true, false)
                 .as_deref(),
             Some("Cargo.toml\nconfigs/config.toml\nconfigs/git_basic.toml")
+        );
+    }
+
+    #[test]
+    fn fs_search_find_ext_directory_contract_returns_parent_dirs() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_search",
+            r#"{"action":"find_ext","ext":"sh","count":4,"results":["system_report.sh","scripts/run.sh","scripts/dev/check.sh","component_start/start-clawd.sh"],"root":""}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "list directories containing sh files".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                semantic_kind: OutputSemanticKind::DirectoryNames,
+                ..IntentOutputContract::default()
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/home/guagua/rustclaw".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some(".\nscripts\nscripts/dev\ncomponent_start")
         );
     }
 
@@ -8060,6 +8261,57 @@ version.workspace = true
             Some("act_plan.log\nclawd.log\nfeishud.log")
         );
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn direct_answer_preserves_run_cmd_semantic_directory_path_list() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "run_cmd",
+            ".\n./scripts\n./scripts/nl_tests\n./crates/skills/browser_web/node_modules/playwright-core/bin\n",
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent:
+                "查找当前工作目录中哪些文件夹存放了 .sh 脚本文件，列出这些文件夹的名称".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::DirectoryNames,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/home/guagua/rustclaw".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some(
+                ".\n./scripts\n./scripts/nl_tests\n./crates/skills/browser_web/node_modules/playwright-core/bin"
+            )
+        );
     }
 
     #[test]

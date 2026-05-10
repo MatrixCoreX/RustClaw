@@ -488,11 +488,17 @@ pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
         } else {
             structured.skill.as_str()
         };
-        return effective_skill.eq_ignore_ascii_case("system_basic")
-            && matches!(
-                structured.error_kind.as_str(),
-                "not_found" | "permission_denied" | "not_a_directory" | "is_directory"
-            );
+        return matches_ignore_ascii_case(
+            effective_skill,
+            &["system_basic", "read_file", "list_dir"],
+        ) && matches!(
+            structured.error_kind.as_str(),
+            "not_found"
+                | "permission_denied"
+                | "not_a_directory"
+                | "is_directory"
+                | "ambiguous_target"
+        );
     }
     if skill_name.eq_ignore_ascii_case("read_file") && err.starts_with(READ_FILE_NOT_FOUND_PREFIX) {
         return true;
@@ -503,6 +509,21 @@ pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
         return true;
     }
     false
+}
+
+pub(crate) fn is_missing_target_skill_error(skill_name: &str, err: &str) -> bool {
+    if let Some(structured) = parse_structured_skill_error(err) {
+        let effective_skill = if structured.skill.trim().is_empty() {
+            skill_name
+        } else {
+            structured.skill.as_str()
+        };
+        return matches_ignore_ascii_case(
+            effective_skill,
+            &["system_basic", "read_file", "list_dir"],
+        ) && structured.error_kind == "not_found";
+    }
+    skill_name.eq_ignore_ascii_case("read_file") && err.starts_with(READ_FILE_NOT_FOUND_PREFIX)
 }
 
 pub(crate) fn is_observable_run_cmd_error(skill_name: &str, err: &str) -> bool {
@@ -539,6 +560,35 @@ pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> Str
         } else {
             structured.skill.as_str()
         };
+        if matches_ignore_ascii_case(
+            effective_skill,
+            &[
+                "read_file",
+                "write_file",
+                "list_dir",
+                "make_dir",
+                "remove_file",
+            ],
+        ) {
+            return match structured.error_kind.as_str() {
+                "permission_denied" => {
+                    "file operation failed: permission denied by the operating system".to_string()
+                }
+                "is_directory" => {
+                    "file operation failed: target is a directory, not a regular file".to_string()
+                }
+                "not_a_directory" => {
+                    "directory operation failed: target is not a directory".to_string()
+                }
+                "not_found" => "file operation failed: target path was not found".to_string(),
+                "ambiguous_target" => {
+                    "directory operation failed: target matched multiple candidates".to_string()
+                }
+                "content_too_large" => "write operation failed: content is too large".to_string(),
+                "invalid_args" => "file operation failed: invalid arguments".to_string(),
+                _ => structured.error_text,
+            };
+        }
         if effective_skill.eq_ignore_ascii_case("system_basic") {
             return match structured.error_kind.as_str() {
                 "permission_denied" => {
@@ -580,6 +630,12 @@ pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> Str
         }
     }
     err.trim().to_string()
+}
+
+fn matches_ignore_ascii_case(value: &str, candidates: &[&str]) -> bool {
+    candidates
+        .iter()
+        .any(|candidate| value.eq_ignore_ascii_case(candidate))
 }
 
 /// 历史遗留入口：只在 [`crate::runtime::state::AppState::resolve_canonical_skill_name`]
@@ -1159,12 +1215,13 @@ pub(crate) async fn run_skill_with_runner_outcome(
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_whitelisted_env_pairs, extract_task_request_text, is_recoverable_skill_error,
-        normalize_skill_error_for_user, parse_policy_block_error, parse_structured_skill_error,
-        policy_block_default_text, policy_block_error, request_reply_language,
-        skill_runner_env_strict_enabled, task_allows_path_outside_workspace, task_allows_sudo,
-        task_request_locale_tag, RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX,
-        READ_FILE_NOT_FOUND_PREFIX, SKILL_RUNNER_ENV_WHITELIST, STRUCTURED_SKILL_ERROR_PREFIX,
+        collect_whitelisted_env_pairs, extract_task_request_text, is_missing_target_skill_error,
+        is_recoverable_skill_error, normalize_skill_error_for_user, parse_policy_block_error,
+        parse_structured_skill_error, policy_block_default_text, policy_block_error,
+        request_reply_language, skill_runner_env_strict_enabled,
+        task_allows_path_outside_workspace, task_allows_sudo, task_request_locale_tag,
+        RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX, READ_FILE_NOT_FOUND_PREFIX,
+        SKILL_RUNNER_ENV_WHITELIST, STRUCTURED_SKILL_ERROR_PREFIX,
     };
     use crate::{
         runtime::state::ClaimedTask, AgentRuntimeConfig, AppState, CommandIntentRuntime,
@@ -1350,6 +1407,49 @@ mod tests {
         let normalized = normalize_skill_error_for_user("read_file", &err);
         assert!(normalized.contains("file not found"));
         assert!(normalized.contains("/etc/missing"));
+        assert!(is_missing_target_skill_error("read_file", &err));
+    }
+
+    #[test]
+    fn builtin_read_only_structured_file_errors_are_recoverable() {
+        let read_err = format!(
+            "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
+            json!({
+                "skill": "read_file",
+                "error_kind": "is_directory",
+                "error_text": "read_file requires a file",
+                "platform": "linux",
+                "extra": { "requested_path": "docs" }
+            })
+        );
+        let list_err = format!(
+            "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
+            json!({
+                "skill": "list_dir",
+                "error_kind": "ambiguous_target",
+                "error_text": "directory locator matched multiple candidates",
+                "platform": "linux",
+                "extra": { "candidates": ["/tmp/a", "/tmp/b"] }
+            })
+        );
+        let remove_err = format!(
+            "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
+            json!({
+                "skill": "remove_file",
+                "error_kind": "not_found",
+                "error_text": "remove_file failed",
+                "platform": "linux",
+                "extra": { "requested_path": "missing.txt" }
+            })
+        );
+
+        assert!(is_recoverable_skill_error("read_file", &read_err));
+        assert!(is_recoverable_skill_error("list_dir", &list_err));
+        assert!(!is_recoverable_skill_error("remove_file", &remove_err));
+        assert_eq!(
+            normalize_skill_error_for_user("list_dir", &list_err),
+            "directory operation failed: target matched multiple candidates"
+        );
     }
 
     #[test]
@@ -1396,6 +1496,14 @@ mod tests {
         assert!(is_recoverable_skill_error(
             "system_basic",
             &structured_nf_err
+        ));
+        assert!(is_missing_target_skill_error(
+            "system_basic",
+            &structured_nf_err
+        ));
+        assert!(!is_missing_target_skill_error(
+            "system_basic",
+            &structured_perm_err
         ));
         assert!(is_recoverable_skill_error(
             "system_basic",

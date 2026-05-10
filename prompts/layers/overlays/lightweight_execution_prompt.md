@@ -73,12 +73,15 @@ Execution preferences:
 - For `system_basic.extract_field`, the canonical file target argument name is `path` (not `file_path` or `target`).
 - When the request semantically asks for a specific key/field/dot-path value inside a structured file, use `system_basic.extract_field` / `extract_fields` rather than broad `read_file`; the runtime now expects structured field observations for direct scalar/equality answers.
 - For directory inventory with filename or extension filtering, prefer `system_basic` with `action="inventory_dir"`, `files_only=true`, `names_only=true`, and `ext_filter`. Do not use `extract_field` / `extract_fields` merely because the file extension is `json`, `toml`, or `yaml`; use those only when the user explicitly asks for keys, fields, values, sections, or a dot-path inside a specific structured file.
+- If the route/output contract carries `semantic_kind=directory_names` and the user asks which folders/directories contain files matching an extension, suffix, or filename pattern, the deliverable is the unique parent directories, not the matching files. Use an observation that directly emits parent directories when available; otherwise use a bounded shell command to derive unique parent directories from matching file paths. Do not return a raw `fs_search.find_ext` file list as the final answer for this contract.
+- For `fs_search`, use only `find_name`, `find_ext`, `grep_text`, or `find_images`. There is no `find_text` action. When the user asks where a likely filename, prompt name, module name, skill name, config artifact, or path fragment is located, first use `find_name` with `pattern`; use `grep_text` with `query` only when the user explicitly asks to search inside file contents or when a prior name/path lookup failed and content search is the next bounded fallback.
 - For bounded directory recency or modification-time ranking, prefer `system_basic` with `action="inventory_dir"`, the needed `sort_by`, `max_entries`, and metadata visibility. Use `names_only=true` only when names alone satisfy the request.
 - For any directory listing or inventory request with a semantic numeric bound, encode that bound in the observation action itself. Use `limit`/`max_entries` for `list_dir`, and `max_entries` for `system_basic.inventory_dir`; never emit an unbounded listing plan and rely on synthesis or `respond` to trim a larger result later.
 - For bounded comparison of two concrete paths by metadata, size, modification time, kind, or content equality, prefer `system_basic` with `action="compare_paths"`. For batch existence or metadata facts over several explicit paths, prefer `system_basic` with `action="path_batch_facts"`.
 - For existence + path, prefer `system_basic.path_batch_facts` when a concrete path is known; use `fs_search.find_name` only when the target is still filename-only.
 - For bounded local listing, prefer `list_dir` or one bounded local query. Do not widen to recursive repo exploration unless the user explicitly asked for that.
 - For compound listing requests that combine matching-name retrieval with a brief explanation or judgment, first collect the matching names, then use `synthesize_answer` before the terminal `respond`; do not skip the listing step or replace it with structured-field extraction.
+- For conditional fallback requests, do not stop after the first target returns missing/zero-match if the original user request semantically asked for an alternate bounded search or similar-name lookup. Plan the initial probe plus the fallback search when both are safe and bounded; otherwise let the next round replan from the structured miss.
 - Use `run_cmd` only when shell semantics themselves are the task, the user supplied a concrete command to execute, or no enabled skill covers the capability directly.
 - If `Goal/context` or `Turn analysis` carries `semantic_kind=generated_file_delivery`, the task is to create a new artifact and deliver it. If no filename was supplied but the artifact type/content is clear, choose a safe concise workspace filename, create it, and deliver that exact path with `FILE:<path>` instead of asking for a filename.
 
@@ -110,6 +113,7 @@ Language and platform:
 Stop conditions:
 - If one bounded local step already gives the exact requested result, finish immediately with a terminal `respond`.
 - Do not add extra read/list/search steps once enough grounded evidence already exists.
+- A missing/zero-match observation is not enough grounded evidence when the same user request asked for a fallback search after that miss.
 
 Do not output markdown fences.
 Do not add extra top-level fields.

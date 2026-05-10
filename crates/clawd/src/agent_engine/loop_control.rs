@@ -88,6 +88,33 @@ fn route_needs_workspace_text_evidence_before_observed_finalize(route: &RouteRes
         && route.output_contract.locator_hint.trim().is_empty()
 }
 
+fn latest_path_batch_facts_all_missing(loop_state: &LoopState) -> bool {
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok() || step.skill != "system_basic" {
+            continue;
+        }
+        let Some(output) = step.output.as_deref() else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+            continue;
+        };
+        if value.get("action").and_then(|value| value.as_str()) != Some("path_batch_facts") {
+            continue;
+        }
+        let Some(facts) = value.get("facts").and_then(|value| value.as_array()) else {
+            return false;
+        };
+        if facts.is_empty() {
+            return false;
+        }
+        return facts
+            .iter()
+            .all(|fact| fact.get("exists").and_then(|value| value.as_bool()) == Some(false));
+    }
+    false
+}
+
 pub(crate) fn requested_success_marker(
     _agent_run_context: Option<&AgentRunContext>,
 ) -> Option<&'static str> {
@@ -137,6 +164,13 @@ fn should_stop_for_observed_finalize(
     if route_needs_workspace_text_evidence_before_observed_finalize(route_result)
         && !has_discussion_followup_action(actions)
         && !last_executable_action(actions).is_some_and(action_reads_text_content)
+    {
+        return false;
+    }
+    if route_result.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        && loop_state.round_no < loop_state.max_rounds
+        && latest_path_batch_facts_all_missing(loop_state)
+        && !has_discussion_followup_action(actions)
     {
         return false;
     }
@@ -219,6 +253,38 @@ fn evaluate_round_outcome(
     }
     if let Some(reason) = &outcome.stop_signal {
         if reason == "recoverable_failure_continue_round" {
+            if !policy.multi_round_enabled {
+                info!(
+                    "loop_round_stop task_id={} round={} reason=recoverable_failure_multi_round_disabled",
+                    task.task_id, loop_state.round_no
+                );
+                return true;
+            }
+            if loop_state.round_no >= loop_state.max_rounds {
+                if loop_state.recoverable_failure_extra_rounds_used
+                    >= policy.recoverable_failure_extra_rounds
+                {
+                    info!(
+                        "loop_round_stop task_id={} round={} reason=recoverable_failure_extra_rounds_exhausted used={} limit={}",
+                        task.task_id,
+                        loop_state.round_no,
+                        loop_state.recoverable_failure_extra_rounds_used,
+                        policy.recoverable_failure_extra_rounds
+                    );
+                    return true;
+                }
+                loop_state.recoverable_failure_extra_rounds_used += 1;
+                loop_state.max_rounds += 1;
+                info!(
+                    "loop_round_extend task_id={} round={} reason={} new_max_rounds={} used_extra={}",
+                    task.task_id,
+                    loop_state.round_no,
+                    reason,
+                    loop_state.max_rounds,
+                    loop_state.recoverable_failure_extra_rounds_used
+                );
+            }
+            loop_state.consecutive_no_progress = 0;
             info!(
                 "loop_round_continue task_id={} round={} reason={}",
                 task.task_id, loop_state.round_no, reason
@@ -365,7 +431,8 @@ pub(super) async fn run_agent_with_loop(
     let policy = base_policy.adjusted_for_recipe(loop_state.execution_recipe);
     loop_state.max_rounds = policy.max_rounds.max(1);
     base_policy.apply_recipe_runtime_overrides(&mut loop_state.execution_recipe);
-    for round in 1..=loop_state.max_rounds {
+    let mut round = 1usize;
+    while round <= loop_state.max_rounds {
         ensure_task_running(state, task)?;
         loop_state.round_no = round;
         super::maybe_publish_execution_recipe_phase_hint(state, task, &mut loop_state);
@@ -383,6 +450,7 @@ pub(super) async fn run_agent_with_loop(
         if evaluate_round_outcome(task, &mut loop_state, &policy, &outcome) {
             break;
         }
+        round += 1;
     }
     crate::finalize::finalize_loop_reply(state, task, user_text, loop_state, agent_run_context)
         .await
@@ -468,6 +536,7 @@ mod tests {
         AgentLoopGuardPolicy {
             max_steps: 8,
             max_rounds: 4,
+            recoverable_failure_extra_rounds: 1,
             repeat_action_limit: 3,
             no_progress_limit: 1,
             multi_round_enabled: true,
@@ -616,6 +685,7 @@ mod tests {
     #[test]
     fn existence_with_path_free_output_can_stop_before_second_round() {
         let mut loop_state = LoopState::new(2);
+        loop_state.round_no = 1;
         loop_state.has_tool_or_skill_output = true;
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -633,6 +703,37 @@ mod tests {
             args: json!({"action":"path_batch_facts","paths":["/home/guagua/rustclaw/rustclaw.service"]}),
         }];
         assert!(should_stop_for_observed_finalize(
+            Some(&AgentRunContext {
+                route_result: Some(route),
+                ..Default::default()
+            }),
+            &loop_state,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn missing_path_batch_facts_free_output_continues_for_possible_fallback() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.round_no = 1;
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"path":"plan/missing.md"}],"include_missing":true}"#,
+        ));
+        let mut route = route_result(OutputResponseShape::Free);
+        route.resolved_intent =
+            "Read plan/missing.md; if it is absent, search plan for related markdown files"
+                .to_string();
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_hint = "plan/missing.md".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({"action":"path_batch_facts","paths":["plan/missing.md"]}),
+        }];
+        assert!(!should_stop_for_observed_finalize(
             Some(&AgentRunContext {
                 route_result: Some(route),
                 ..Default::default()
@@ -851,6 +952,59 @@ mod tests {
             crate::execution_recipe::ExecutionRecipePhase::Repair
         );
         assert_eq!(loop_state.consecutive_no_progress, 0);
+    }
+
+    #[test]
+    fn recoverable_failure_at_round_cap_extends_loop_once() {
+        let task = test_task();
+        let mut policy = test_policy();
+        policy.max_rounds = 2;
+        policy.recoverable_failure_extra_rounds = 1;
+        let mut loop_state = LoopState::new(2);
+        loop_state.round_no = 2;
+        let outcome = RoundOutcome {
+            executed_actions: 1,
+            had_error: false,
+            stop_signal: Some("recoverable_failure_continue_round".to_string()),
+            next_goal_hint: Some("try alternate locator".to_string()),
+            no_progress: false,
+        };
+
+        assert!(!evaluate_round_outcome(
+            &task,
+            &mut loop_state,
+            &policy,
+            &outcome
+        ));
+        assert_eq!(loop_state.max_rounds, 3);
+        assert_eq!(loop_state.recoverable_failure_extra_rounds_used, 1);
+    }
+
+    #[test]
+    fn recoverable_failure_extra_round_exhaustion_stops() {
+        let task = test_task();
+        let mut policy = test_policy();
+        policy.max_rounds = 2;
+        policy.recoverable_failure_extra_rounds = 1;
+        let mut loop_state = LoopState::new(2);
+        loop_state.round_no = 2;
+        loop_state.recoverable_failure_extra_rounds_used = 1;
+        let outcome = RoundOutcome {
+            executed_actions: 1,
+            had_error: false,
+            stop_signal: Some("recoverable_failure_continue_round".to_string()),
+            next_goal_hint: Some("try alternate locator".to_string()),
+            no_progress: false,
+        };
+
+        assert!(evaluate_round_outcome(
+            &task,
+            &mut loop_state,
+            &policy,
+            &outcome
+        ));
+        assert_eq!(loop_state.max_rounds, 2);
+        assert_eq!(loop_state.recoverable_failure_extra_rounds_used, 1);
     }
 
     #[test]

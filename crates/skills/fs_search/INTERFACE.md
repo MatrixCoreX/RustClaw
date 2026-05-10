@@ -7,6 +7,17 @@
 - `fs_search` performs filesystem-level search by name, extension, text, or images.
 - It is intended for bounded queries with optional root scoping and result caps.
 - `find_name` can return directory names as well as file names; use `target_kind` to narrow when needed.
+- For locating likely filenames, prompt names, module names, or path fragments, use `find_name`.
+- `find_ext` may also take a name `pattern`/`patterns` filter when the request asks for files with a specific extension and a filename fragment.
+- For discovering which config/docs/skill/prompt files are related to a topic, first search or enumerate candidate filenames/paths (`find_name`, `find_ext`, or directory inventory) before searching inside file contents.
+- For searching inside file contents, use `grep_text`.
+- Do not invent alias actions such as `find_text` or `search_text`; unsupported action names fail at runtime.
+
+## Config Entry Points
+- Optional environment variables:
+  - `RUSTCLAW_FS_SEARCH_MAX_DEPTH`: default traversal depth for this skill.
+  - `RUSTCLAW_FS_SEARCH_MAX_FILES`: default scanned-file cap for this skill.
+- If those are unset, `fs_search` may read locator scan env values as a lower-bound compatibility source, but it keeps deeper defaults suitable for explicit search tasks.
 
 ## Actions
 - `find_name`
@@ -18,12 +29,15 @@
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | all | `action` | yes | string | - | Must be one of supported search actions. |
-| `find_name` | `pattern` (or `name`/`keyword`) | yes | string | - | Name pattern/keyword; matches basename contains. |
-| `find_name` | `target_kind` | no | string | `any` | `any|file|dir`; narrow name search to files or directories. |
+| `find_name` | `pattern` / `patterns` (or `name`/`keyword`/`query`) | yes | string or string[] | - | Name pattern/keyword; matches basename contains; simple wildcard and alternation patterns are accepted. |
+| `find_name` | `target_kind` | no | string | `any` | `any|file|dir`; narrow name search to files or directories. `files_only=true` and `dirs_only=true` are accepted aliases. |
 | `find_ext` | `ext` (or `extension`) | yes | string | - | Extension selector (e.g. `rs`). |
+| `find_ext` | `pattern` / `patterns` (or `name`/`keyword`/`query`) | no | string or string[] | none | Optional basename fragment filter; simple wildcard and alternation patterns are accepted. |
 | `grep_text` | `query` | yes | string | - | Text/regex query for content search. |
 | optional | `root` | no | string(path) | workspace | Search root path. |
 | optional | `max_results` | no | number | impl default | Cap result volume. |
+| optional | `max_depth` | no | number | env/default | Traversal depth cap. |
+| optional | `max_files` | no | number | env/default | Scanned-file cap. |
 
 ## Error Contract
 - Missing required query key for selected action.

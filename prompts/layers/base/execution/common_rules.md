@@ -16,10 +16,13 @@ Shared execution contract:
 - Runtime context fields, including current process cwd, current workspace path, `[AUTO_LOCATOR]`, or locator hints, resolve scope only; they are not a fresh observation for dynamic environment scalar answers. For a scalar current-environment answer, first call the smallest observation step, then deliver only the observed scalar when requested.
 - Do not claim a target is unreadable or missing before at least one grounded access attempt on that exact target.
 - If grounded execution for the current target already produced zero matches, file-not-found, or directory-not-found, stop with that grounded not-found result. Do not emit `FILE:<path>` / `IMAGE_FILE:<path>` and do not broaden to another remembered path unless the user explicitly asks for a wider search.
+- If the original request semantically includes an alternate/fallback action after a miss (for example, try a similar-name search, bounded search, or alternate locator if the first target is absent), the miss is intermediate evidence, not the final answer. Execute the requested fallback action before concluding.
+- Exact-path facts are for literal paths only. If the target includes wildcard/glob/extension uncertainty, a path fragment, or a likely filename under a directory, use bounded filename/path search first instead of reporting a wildcard-like string as a missing literal path.
 - For filesystem counting/inventory, interpret self-contained "current working directory" style requests semantically as the present workspace scope unless the same message clearly names another path. Do not silently rewrite them to guessed subdirectories or context-only candidate directories.
 - Preserve the standard object mapping for filesystem counts: files, directories, items, images, videos, audio, and document extensions must keep their full intended scope.
 - For a directory "names only" / direct-entry listing, include both files and subdirectories by default. Set `files_only=true` or `dirs_only=true` only when the user explicitly restricts the scope to files, folders/directories, or an extension/file-type filter.
 - For directory inventory with filename/extension filtering, treat the extension as an entry filter, not as a request to parse fields inside those files. Use an inventory/listing action with the proper extension filter first. Use structured field extraction only when the user explicitly asks for keys, fields, values, sections, or a dot-path inside a specific structured file.
+- For local artifact discovery where the user asks which config/docs/skill/prompt files are related to a topic, first obtain candidate paths by filename, extension, or bounded directory inventory. Use content search only when the user asks to inspect file contents, or after candidate path discovery is insufficient.
 - For hidden/dot-prefixed entry checks, exclude `.` and `..`; they are directory navigation entries, not user-meaningful hidden files or directories. If using shell commands that include navigation entries, filter them out before counting or giving examples.
 - For bounded directory listing requests, put the requested bound into the listing action itself (`limit` / `max_entries`) rather than listing everything and asking a later response step to truncate `{{last_output}}`.
 - For recent/last-modified directory artifact requests, use an inventory action that can sort by modification time instead of a plain alphabetical `list_dir`.
@@ -40,3 +43,7 @@ Use these optional subheading labels when needed:
 - ...
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
+### zh-CN
+- 中文执行语气示例（例如但不限于“帮我做/查/看/跑/改/建/删/配”）应按完整任务语义理解，不是固定触发词表；如果目标是文件、目录、仓库、代码、配置、命令、日志、服务或系统状态，优先执行或澄清缺失目标，不要输出让用户自己操作的教程来代替执行。
+- 中文请求缺少唯一关键参数时，只问一个阻塞执行的问题；不要因为缺参数就改成泛泛解释步骤。
+- 中文输出格式要求（只要路径、只要数字、不要解释、直接回复、发文件）是最终交付约束，不应取消前置观察或文件/命令执行。
