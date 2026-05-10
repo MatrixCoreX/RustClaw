@@ -21,6 +21,7 @@ pub(super) struct LoopRecipeOverrides {
 pub(super) struct AgentLoopGuardPolicy {
     pub(super) max_steps: usize,
     pub(super) max_rounds: usize,
+    pub(super) recoverable_failure_extra_rounds: usize,
     pub(super) repeat_action_limit: usize,
     pub(super) no_progress_limit: usize,
     pub(super) multi_round_enabled: bool,
@@ -100,6 +101,20 @@ fn parse_usize_from_toml(root: &TomlValue, path: &[&str], fallback: usize) -> us
         .unwrap_or(fallback)
 }
 
+fn parse_usize_allow_zero_from_toml(root: &TomlValue, path: &[&str], fallback: usize) -> usize {
+    let mut cursor = root;
+    for key in path {
+        let Some(next) = cursor.get(*key) else {
+            return fallback;
+        };
+        cursor = next;
+    }
+    cursor
+        .as_integer()
+        .and_then(|v| usize::try_from(v).ok())
+        .unwrap_or(fallback)
+}
+
 fn parse_optional_usize_from_toml(root: &TomlValue, path: &[&str]) -> Option<usize> {
     let mut cursor = root;
     for key in path {
@@ -155,6 +170,11 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
             crate::AGENT_MAX_STEPS,
         ),
         max_rounds: parse_usize_from_toml(&parsed, &["agent", "loop_guard", "max_rounds"], 2),
+        recoverable_failure_extra_rounds: parse_usize_allow_zero_from_toml(
+            &parsed,
+            &["agent", "loop_guard", "recoverable_failure_extra_rounds"],
+            1,
+        ),
         repeat_action_limit: parse_usize_from_toml(
             &parsed,
             &["agent", "loop_guard", "repeat_action_limit"],
@@ -587,6 +607,7 @@ mod tests {
         AgentLoopGuardPolicy {
             max_steps: 32,
             max_rounds: 2,
+            recoverable_failure_extra_rounds: 1,
             repeat_action_limit: 4,
             no_progress_limit: 1,
             multi_round_enabled: true,

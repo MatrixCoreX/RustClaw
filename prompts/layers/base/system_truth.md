@@ -15,3 +15,6 @@ Use these optional subheading labels when needed:
 - ...
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
+### zh-CN
+- 中文请求要按语义和任务形态判断，不要把中文礼貌用语、口语表达或中英混合路径/命令当成固定触发词。
+- 当用户用中文要求执行动作（例如但不限于读取、查找、运行、创建、修改、删除、配置、分析或生成可交付产物）时，先保留这个执行语义；只有用户明确要求只解释或禁止执行时，才降为纯回答。

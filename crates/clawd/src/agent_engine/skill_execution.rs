@@ -254,6 +254,8 @@ fn build_auto_sudo_retry_args(
         let obj = retry_args.as_object_mut()?;
         obj.remove(super::CLAWD_CONTINUE_ON_ERROR_ARG);
         obj.remove(super::CLAWD_LITERAL_COMMAND_ARG);
+        obj.remove(super::CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG);
+        obj.remove(super::CLAWD_MISSING_TARGET_REPAIRABLE_ARG);
         obj.remove(crate::execution_recipe::CLAWD_VALIDATION_ARG);
         obj.insert(
             "command".to_string(),
@@ -290,6 +292,82 @@ fn auto_sudo_retry_failed_delivery(
     }
 }
 
+fn compact_progress_error(err: &str) -> String {
+    crate::truncate_for_agent_trace(
+        &crate::visible_text::sanitize_user_visible_text(err)
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" | "),
+    )
+}
+
+fn publish_failure_progress(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    step_in_round: usize,
+    normalized_skill: &str,
+    user_visible_err: &str,
+) {
+    let step = step_in_round.to_string();
+    let error = compact_progress_error(user_visible_err);
+    super::append_progress_hint(
+        state,
+        task,
+        &mut loop_state.progress_messages,
+        super::encode_progress_i18n(
+            "telegram.progress.step_failed",
+            &[
+                ("step", &step),
+                ("skill", normalized_skill),
+                ("error", &error),
+            ],
+        ),
+    );
+}
+
+fn publish_retry_progress(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    stop_reason: &str,
+) {
+    let key = match stop_reason {
+        "recoverable_failure_continue_in_round" => "telegram.progress.retry_continue",
+        "recoverable_failure_continue_round" => "telegram.progress.retry_replan",
+        "auto_sudo_retry" => "telegram.progress.retry_sudo",
+        _ => return,
+    };
+    super::append_progress_hint(
+        state,
+        task,
+        &mut loop_state.progress_messages,
+        super::encode_progress_i18n(key, &[]),
+    );
+}
+
+fn publish_failure_recovery_progress(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    step_in_round: usize,
+    normalized_skill: &str,
+    user_visible_err: &str,
+    stop_reason: &str,
+) {
+    publish_failure_progress(
+        state,
+        task,
+        loop_state,
+        step_in_round,
+        normalized_skill,
+        user_visible_err,
+    );
+    publish_retry_progress(state, task, loop_state, stop_reason);
+}
+
 async fn try_auto_sudo_retry_after_permission_denied(
     state: &AppState,
     task: &ClaimedTask,
@@ -307,6 +385,16 @@ async fn try_auto_sudo_retry_after_permission_denied(
     else {
         return Ok(None);
     };
+    let user_visible_err = crate::skills::normalize_skill_error_for_user(normalized_skill, err);
+    publish_failure_recovery_progress(
+        state,
+        task,
+        loop_state,
+        step_in_round,
+        normalized_skill,
+        &user_visible_err,
+        "auto_sudo_retry",
+    );
     let retry_action = crate::AgentAction::CallSkill {
         skill: "run_cmd".to_string(),
         args: retry_args.clone(),
@@ -777,6 +865,15 @@ async fn handle_skill_step_failure(
             normalized_skill,
             crate::truncate_for_agent_trace(&user_visible_err)
         ));
+        publish_failure_recovery_progress(
+            state,
+            task,
+            loop_state,
+            step_in_round,
+            normalized_skill,
+            &user_visible_err,
+            stop_reason,
+        );
         return Ok(Some(stop_reason.to_string()));
     }
     let resume_err = build_resume_context_error(
@@ -1089,6 +1186,7 @@ mod tests {
         AgentLoopGuardPolicy {
             max_steps: 16,
             max_rounds: 2,
+            recoverable_failure_extra_rounds: 1,
             repeat_action_limit: 4,
             no_progress_limit: 1,
             multi_round_enabled: true,
@@ -1338,6 +1436,115 @@ mod tests {
             .and_then(|v| v.get("error"))
             .and_then(|v| v.as_str())
             .is_some_and(|value| value.contains("missing field")));
+    }
+
+    #[tokio::test]
+    async fn missing_target_failure_without_fallback_publishes_failure_only() {
+        let state = test_state();
+        let task = test_task();
+        let mut loop_state = LoopState::new(4);
+        loop_state.round_no = 1;
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "system_basic",
+                "error_kind": "not_found",
+                "error_text": "path not found: missing.md"
+            })
+        );
+        let step = failed_step("step_1", "system_basic", &err);
+        let actions = vec![crate::AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: serde_json::json!({"action":"read_range","path":"missing.md"}),
+        }];
+
+        let stop = handle_skill_step_failure(
+            &state,
+            &task,
+            &step,
+            &actions,
+            &["skill(system_basic)".to_string()],
+            &mut loop_state,
+            0,
+            1,
+            1,
+            "Read missing.md, then recover if needed.",
+            "Read missing.md, then recover if needed.",
+            &test_policy(),
+            "system_basic",
+            Some(&serde_json::json!({"action":"read_range","path":"missing.md"})),
+            &err,
+            "skill",
+        )
+        .await
+        .expect("recoverable skill failure should not raise resume context");
+
+        assert_eq!(stop.as_deref(), Some("recoverable_failure_finalize"));
+        assert!(loop_state.has_recoverable_failure_context);
+        let failed_error = loop_state
+            .output_vars
+            .get("failed_step.error")
+            .map(String::as_str)
+            .unwrap_or_default();
+        assert!(
+            failed_error.contains("target path was not found"),
+            "failed_error={failed_error}"
+        );
+        assert_eq!(loop_state.progress_messages.len(), 1);
+        assert!(loop_state.progress_messages[0].contains("telegram.progress.step_failed"));
+        assert!(loop_state.progress_messages[0].contains("system_basic"));
+        assert!(!loop_state
+            .progress_messages
+            .iter()
+            .any(|message| message.contains("telegram.progress.retry_")));
+    }
+
+    #[tokio::test]
+    async fn recoverable_protocol_failure_publishes_replan_progress() {
+        let state = test_state();
+        let task = test_task();
+        let mut loop_state = LoopState::new(4);
+        loop_state.round_no = 1;
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "system_basic",
+                "error_kind": "unsupported_action",
+                "error_text": "unknown action: check_exists"
+            })
+        );
+        let step = failed_step("step_1", "system_basic", &err);
+        let actions = vec![crate::AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: serde_json::json!({"action":"check_exists","path":"README.md"}),
+        }];
+
+        let stop = handle_skill_step_failure(
+            &state,
+            &task,
+            &step,
+            &actions,
+            &["skill(system_basic)".to_string()],
+            &mut loop_state,
+            0,
+            1,
+            1,
+            "Check README.md exists.",
+            "Check README.md exists.",
+            &test_policy(),
+            "system_basic",
+            Some(&serde_json::json!({"action":"check_exists","path":"README.md"})),
+            &err,
+            "skill",
+        )
+        .await
+        .expect("protocol failure should be recoverable");
+
+        assert_eq!(stop.as_deref(), Some("recoverable_failure_continue_round"));
+        assert_eq!(loop_state.progress_messages.len(), 2);
+        assert!(loop_state.progress_messages[0].contains("telegram.progress.step_failed"));
+        assert!(loop_state.progress_messages[0].contains("system_basic"));
+        assert!(loop_state.progress_messages[1].contains("telegram.progress.retry_replan"));
     }
 
     #[tokio::test]

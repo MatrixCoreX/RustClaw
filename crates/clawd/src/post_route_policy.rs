@@ -95,6 +95,16 @@ fn file_delivery_can_materialize_target_without_existing_locator(
         && route_result.output_contract.locator_hint.trim().is_empty()
 }
 
+fn scalar_path_output_can_be_observed_without_input_locator(route_result: &RouteResult) -> bool {
+    route_result.is_execute_gate()
+        && !route_result.needs_clarify
+        && route_result.output_contract.response_shape == OutputResponseShape::Scalar
+        && route_result.output_contract.semantic_kind == OutputSemanticKind::ScalarPathOnly
+        && !route_result.output_contract.delivery_required
+        && route_result.output_contract.locator_kind == OutputLocatorKind::Path
+        && route_result.output_contract.locator_hint.trim().is_empty()
+}
+
 fn path_is_existing_directory(path: &str) -> bool {
     let trimmed = path.trim();
     !trimmed.is_empty() && Path::new(trimmed).is_dir()
@@ -167,10 +177,13 @@ pub(crate) fn apply_post_route_policy(
         !route_result.output_contract.locator_hint.trim().is_empty();
     let file_delivery_can_materialize_target =
         file_delivery_can_materialize_target_without_existing_locator(&route_result);
+    let scalar_path_output_can_be_observed =
+        scalar_path_output_can_be_observed_without_input_locator(&route_result);
     let mut missing_locator_for_path_scoped_content = path_scoped_content_request
         && !locator_kind_is_current_workspace(route_result.output_contract.locator_kind)
         && !normalizer_locator_hint_present
-        && !file_delivery_can_materialize_target;
+        && !file_delivery_can_materialize_target
+        && !scalar_path_output_can_be_observed;
 
     match locator_resolution {
         LocatorResolution::Direct(path) => {
@@ -843,6 +856,31 @@ mod tests {
             result.execution_route_result.output_contract.semantic_kind,
             OutputSemanticKind::ScalarPathOnly
         );
+    }
+
+    #[test]
+    fn scalar_path_only_output_without_input_locator_can_execute() {
+        let mut route = route_result();
+        route.routed_mode = RoutedMode::Act;
+        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::Act);
+        route.resolved_intent = "执行 which bash，只输出 bash 的路径".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+
+        let result = apply_post_route_policy(route, LocatorResolution::None);
+
+        assert!(!result.missing_locator_for_path_scoped_content);
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::ScalarPathOnly
+        );
+        assert!(matches!(
+            result.execution_route_result.routed_mode,
+            RoutedMode::Act
+        ));
     }
 
     #[test]

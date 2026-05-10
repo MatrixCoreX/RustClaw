@@ -225,10 +225,68 @@ fn run_cmd_should_continue_after_split_failure(args: Option<&Value>) -> bool {
         .unwrap_or(false)
 }
 
+fn run_cmd_is_literal_user_command(args: Option<&Value>) -> bool {
+    args.and_then(|value| value.get(super::CLAWD_LITERAL_COMMAND_ARG))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn run_cmd_literal_failure_is_repairable(args: Option<&Value>) -> bool {
+    args.and_then(|value| value.get(super::CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn missing_target_failure_is_repairable(args: Option<&Value>) -> bool {
+    args.and_then(|value| value.get(super::CLAWD_MISSING_TARGET_REPAIRABLE_ARG))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn structured_error_kind(err: &str) -> Option<String> {
+    crate::skills::parse_structured_skill_error(err).map(|structured| structured.error_kind)
+}
+
+fn planner_can_repair_structured_skill_error(err: &str) -> bool {
+    structured_error_kind(err).is_some_and(|kind| {
+        matches!(
+            kind.as_str(),
+            "unsupported_action"
+                | "invalid_input"
+                | "invalid_args"
+                | "schema_error"
+                | "missing_required_field"
+                | "timeout"
+                | "idle_timeout"
+                | "spawn_failed"
+                | "wait_failed"
+                | "output_read_failed"
+                | "status_unavailable"
+        )
+    })
+}
+
+fn run_cmd_error_is_observable(normalized_skill: &str, err: &str) -> bool {
+    if crate::skills::is_observable_run_cmd_error(normalized_skill, err) {
+        return true;
+    }
+    if !normalized_skill.eq_ignore_ascii_case("run_cmd") {
+        return false;
+    }
+    let err = err.to_ascii_lowercase();
+    err.contains("command failed")
+        || err.contains("exit code")
+        || err.contains("command not found")
+        || err.contains("timed out")
+        || err.contains("timeout")
+}
+
 fn strip_internal_execution_args(args: &mut Value) {
     if let Some(obj) = args.as_object_mut() {
         obj.remove(super::CLAWD_CONTINUE_ON_ERROR_ARG);
         obj.remove(super::CLAWD_LITERAL_COMMAND_ARG);
+        obj.remove(super::CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG);
+        obj.remove(super::CLAWD_MISSING_TARGET_REPAIRABLE_ARG);
         obj.remove(crate::execution_recipe::CLAWD_VALIDATION_ARG);
     }
 }
@@ -243,10 +301,24 @@ pub(super) fn classify_skill_failure_recovery(
     err: &str,
 ) -> Option<&'static str> {
     if crate::skills::is_recoverable_skill_error(normalized_skill, err) {
-        if has_remaining_action_after(actions, current_idx, max_steps) {
+        if has_remaining_action_after(actions, current_idx, max_steps)
+            && !remaining_actions_are_discussion_only(actions, current_idx, max_steps)
+        {
             return Some("recoverable_failure_continue_in_round");
         }
-        return Some("recoverable_failure_finalize");
+        if crate::skills::is_missing_target_skill_error(normalized_skill, err) {
+            if missing_target_failure_is_repairable(call_args) {
+                return Some("recoverable_failure_continue_round");
+            }
+            return Some("recoverable_failure_finalize");
+        }
+        if remaining_actions_after_round_cap_are_discussion_only(actions, current_idx, max_steps) {
+            return Some("recoverable_failure_finalize");
+        }
+        if remaining_actions_are_discussion_only(actions, current_idx, max_steps) {
+            return Some("recoverable_failure_continue_round");
+        }
+        return Some("recoverable_failure_continue_round");
     }
     if normalized_skill.eq_ignore_ascii_case("run_cmd")
         && run_cmd_should_continue_after_split_failure(call_args)
@@ -255,10 +327,50 @@ pub(super) fn classify_skill_failure_recovery(
         return Some("recoverable_failure_continue_in_round");
     }
     if normalized_skill.eq_ignore_ascii_case("run_cmd")
-        && crate::skills::is_observable_run_cmd_error(normalized_skill, err)
+        && run_cmd_error_is_observable(normalized_skill, err)
         && !has_remaining_action_after(actions, current_idx, max_steps)
     {
+        if current_idx > 0 && !has_remaining_action_after_full(actions, current_idx) {
+            return Some("recoverable_failure_finalize");
+        }
+        if remaining_actions_after_round_cap_are_discussion_only(actions, current_idx, max_steps) {
+            return Some("recoverable_failure_finalize");
+        }
+        if run_cmd_is_literal_user_command(call_args)
+            && run_cmd_literal_failure_is_repairable(call_args)
+        {
+            return Some("recoverable_failure_continue_round");
+        }
+        if !run_cmd_is_literal_user_command(call_args)
+            && !run_cmd_should_continue_after_split_failure(call_args)
+        {
+            return Some("recoverable_failure_continue_round");
+        }
         return Some("recoverable_failure_finalize");
+    }
+    if normalized_skill.eq_ignore_ascii_case("run_cmd")
+        && run_cmd_error_is_observable(normalized_skill, err)
+        && !run_cmd_is_literal_user_command(call_args)
+        && !run_cmd_should_continue_after_split_failure(call_args)
+        && remaining_actions_are_discussion_only(actions, current_idx, max_steps)
+    {
+        return Some("recoverable_failure_continue_round");
+    }
+    if normalized_skill.eq_ignore_ascii_case("run_cmd")
+        && run_cmd_error_is_observable(normalized_skill, err)
+        && run_cmd_is_literal_user_command(call_args)
+        && run_cmd_literal_failure_is_repairable(call_args)
+        && remaining_actions_are_discussion_only(actions, current_idx, max_steps)
+    {
+        return Some("recoverable_failure_continue_round");
+    }
+    if planner_can_repair_structured_skill_error(err) {
+        if has_remaining_action_after(actions, current_idx, max_steps)
+            && !remaining_actions_are_discussion_only(actions, current_idx, max_steps)
+        {
+            return Some("recoverable_failure_continue_in_round");
+        }
+        return Some("recoverable_failure_continue_round");
     }
     if state.skill_is_retryable(normalized_skill)
         && !state.skill_requires_confirmation_policy(normalized_skill)
@@ -267,8 +379,9 @@ pub(super) fn classify_skill_failure_recovery(
             return Some("recoverable_failure_continue_in_round");
         }
         if remaining_actions_are_discussion_only(actions, current_idx, max_steps) {
-            return Some("recoverable_failure_continue_in_round");
+            return Some("recoverable_failure_finalize");
         }
+        return Some("recoverable_failure_continue_round");
     }
     if has_remaining_action_after(actions, current_idx, max_steps)
         && call_args
@@ -644,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn single_structured_run_cmd_failure_finalizes_as_observed_result() {
+    fn single_literal_structured_run_cmd_failure_finalizes_as_observed_result() {
         let state = test_state_with_registry();
         let actions = vec![AgentAction::CallSkill {
             skill: "run_cmd".to_string(),
@@ -672,10 +785,328 @@ mod tests {
                 0,
                 4,
                 "run_cmd",
-                Some(&serde_json::json!({"command":"printf problem >&2; exit 7"})),
+                Some(&serde_json::json!({
+                    "command":"printf problem >&2; exit 7",
+                    "_clawd_literal_command": true
+                })),
                 &err,
             ),
             Some("recoverable_failure_finalize")
+        );
+    }
+
+    #[test]
+    fn retryable_permission_failure_without_remaining_action_continues_next_round() {
+        let state = test_state_with_registry();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: serde_json::json!({"action":"read_range","path":"/root/secret.txt"}),
+        }];
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "system_basic",
+                "error_kind": "permission_denied",
+                "error_text": "permission denied: /root/secret.txt"
+            })
+        );
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                0,
+                4,
+                "system_basic",
+                Some(&serde_json::json!({"action":"read_range","path":"/root/secret.txt"})),
+                &err,
+            ),
+            Some("recoverable_failure_continue_round")
+        );
+    }
+
+    #[test]
+    fn explicit_missing_target_without_fallback_finalizes_not_found() {
+        let state = test_state_with_registry();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: serde_json::json!({"action":"read_range","path":"missing.md"}),
+        }];
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "system_basic",
+                "error_kind": "not_found",
+                "error_text": "path not found: missing.md"
+            })
+        );
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                0,
+                4,
+                "system_basic",
+                Some(&serde_json::json!({"action":"read_range","path":"missing.md"})),
+                &err,
+            ),
+            Some("recoverable_failure_finalize")
+        );
+    }
+
+    #[test]
+    fn repairable_missing_target_continues_next_round() {
+        let state = test_state_with_registry();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "read_file".to_string(),
+            args: serde_json::json!({
+                "path":"missing.md",
+                "_clawd_missing_target_repairable": true
+            }),
+        }];
+        let err = "__RC_READ_FILE_NOT_FOUND__:/tmp/missing.md";
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                0,
+                4,
+                "read_file",
+                Some(&serde_json::json!({
+                    "path":"missing.md",
+                    "_clawd_missing_target_repairable": true
+                })),
+                err,
+            ),
+            Some("recoverable_failure_continue_round")
+        );
+    }
+
+    #[test]
+    fn planner_protocol_failure_replans_next_round() {
+        let state = test_state_with_registry();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: serde_json::json!({"action":"check_exists","path":"README.md"}),
+        }];
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "system_basic",
+                "error_kind": "unsupported_action",
+                "error_text": "unknown action: check_exists"
+            })
+        );
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                0,
+                4,
+                "system_basic",
+                Some(&serde_json::json!({"action":"check_exists","path":"README.md"})),
+                &err,
+            ),
+            Some("recoverable_failure_continue_round")
+        );
+    }
+
+    #[test]
+    fn planner_generated_terminal_command_failure_replans_but_literal_command_finalizes() {
+        let state = test_state_with_registry();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: serde_json::json!({"command":"missing_tool --version"}),
+        }];
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "run_cmd",
+                "error_kind": "nonzero_exit",
+                "error_text": "Command failed with exit code 127",
+                "extra": {
+                    "exit_code": 127,
+                    "exit_category": "command_not_found",
+                    "stderr": "missing_tool: command not found"
+                }
+            })
+        );
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                0,
+                4,
+                "run_cmd",
+                Some(&serde_json::json!({"command":"missing_tool --version"})),
+                &err,
+            ),
+            Some("recoverable_failure_continue_round")
+        );
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                0,
+                4,
+                "run_cmd",
+                Some(&serde_json::json!({
+                    "command":"missing_tool --version",
+                    "_clawd_literal_command": true
+                })),
+                &err,
+            ),
+            Some("recoverable_failure_finalize")
+        );
+    }
+
+    #[test]
+    fn literal_command_failure_with_structured_repairable_marker_replans() {
+        let state = test_state_with_registry();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: serde_json::json!({
+                "command":"missing_tool --version",
+                "_clawd_literal_command": true,
+                "_clawd_literal_failure_repairable": true
+            }),
+        }];
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "run_cmd",
+                "error_kind": "nonzero_exit",
+                "error_text": "Command failed with exit code 127",
+                "extra": {
+                    "exit_code": 127,
+                    "exit_category": "command_not_found",
+                    "stderr": "missing_tool: command not found"
+                }
+            })
+        );
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                0,
+                4,
+                "run_cmd",
+                Some(&serde_json::json!({
+                    "command":"missing_tool --version",
+                    "_clawd_literal_command": true,
+                    "_clawd_literal_failure_repairable": true
+                })),
+                &err,
+            ),
+            Some("recoverable_failure_continue_round")
+        );
+    }
+
+    #[test]
+    fn visible_run_cmd_error_without_structured_payload_replans() {
+        let state = test_state_with_registry();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: serde_json::json!({"command":"missing_tool --version"}),
+        }];
+        let err = "command failed: command not found (exit code 127); stderr: missing_tool: command not found";
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                0,
+                4,
+                "run_cmd",
+                Some(&serde_json::json!({"command":"missing_tool --version"})),
+                err,
+            ),
+            Some("recoverable_failure_continue_round")
+        );
+    }
+
+    #[test]
+    fn planner_generated_command_failure_replans_before_discussion_only_tail() {
+        let state = test_state_with_registry();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: serde_json::json!({"command":"missing_tool --version"}),
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "run_cmd",
+                "error_kind": "nonzero_exit",
+                "error_text": "Command failed with exit code 127",
+                "extra": {
+                    "exit_code": 127,
+                    "exit_category": "command_not_found",
+                    "stderr": "missing_tool: command not found"
+                }
+            })
+        );
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                0,
+                4,
+                "run_cmd",
+                Some(&serde_json::json!({"command":"missing_tool --version"})),
+                &err,
+            ),
+            Some("recoverable_failure_continue_round")
+        );
+    }
+
+    #[test]
+    fn recoverable_nonterminal_failure_with_only_discussion_remaining_continues_next_round() {
+        let state = test_state_with_registry();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "list_dir".to_string(),
+                args: serde_json::json!({"path":"missing_dir"}),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "list_dir",
+                "error_kind": "ambiguous_target",
+                "error_text": "directory locator matched multiple candidates",
+                "extra": { "candidates": ["/tmp/a", "/tmp/b"] }
+            })
+        );
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                0,
+                4,
+                "list_dir",
+                Some(&serde_json::json!({"path":"missing_dir"})),
+                &err,
+            ),
+            Some("recoverable_failure_continue_round")
         );
     }
 

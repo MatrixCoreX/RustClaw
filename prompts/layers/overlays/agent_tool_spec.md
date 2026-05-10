@@ -452,6 +452,10 @@ Skill behavior notes (file/path):
 - Prefer `system_basic.inventory_dir` for immediate directory listing / hidden-file / names-only inventory tasks, especially recent/last-modified listings where `sort_by="mtime_desc"` exactly and `max_entries` are required. If the user asks for files, set `files_only=true`; do not use unsupported sort aliases, including `mtime`.
 - When the user specifies a folder/directory and asks to find files inside it, treat search as recursive under `root` (traverse all subdirectories).
 - For repository/workspace-wide extension searches or final answers that must be file paths rather than basenames, prefer `fs_search.find_ext` over `system_basic.inventory_dir`; `inventory_dir` is an immediate directory inventory.
+- Use `system_basic.path_batch_facts` only for exact literal paths already known from the user, context, or a previous observation. Do not pass wildcard/glob strings, extension placeholders, or basename fragments to `path_batch_facts`; use `fs_search.find_name`/`find_ext` under the bounded root to resolve candidates first.
+- `fs_search.find_ext` returns matching files. If the user asks for folders/directories that contain matching files and the route contract is `semantic_kind=directory_names`, do not deliver the raw file list; either synthesize the unique parent directories from the observed file paths or use `run_cmd` to emit those parent directories directly.
+- Do not invent unsupported fs_search actions. There is no `find_text` action. Use `find_name` with `pattern` first when locating a likely filename, prompt name, module name, skill name, config artifact, or path fragment; use `grep_text` with `query` only for explicit content/text searches or as a bounded fallback after name/path lookup fails.
+- For "which files/configs/docs/artifacts are related to X" discovery, the primary evidence should be candidate paths from filename/extension/directory inventory. Do not turn topic words into a `grep_text` query as the first and only step unless the user explicitly asked to search inside file contents.
 - Path matching rule for file search: case-insensitive exact basename match can be used directly; if only fuzzy/approximate matches exist, ask one concise clarification with 1-3 candidate full absolute paths before execution.
 
 #### fs_search JSON-schema style contract (strict)
@@ -665,3 +669,8 @@ Use these optional subheading labels when needed:
 - ...
 Keep only language-specific nuances here; keep general rules in the main prompt body.
 -->
+### zh-CN
+- 中文请求如果语义上要求执行基础动作（例如但不限于查目录、读文件、写文件、建目录、删文件、运行命令、检查日志/服务/配置），优先使用已列出的最小 skill；不要回复“你可以运行/建议你执行”的手动教程来代替可执行步骤。
+- 中文里的“当前目录/这个仓库/这里/项目里”在没有另一个明确路径时，按当前 workspace 语义处理；有明确路径、文件名或目录名时，先按该目标执行或做 bounded resolution。
+- 如果中文请求已经明确要保存、创建或发送文件，必须产生对应的 `write_file`/文件交付步骤；如果只是要求口头写一句、解释、总结，除非用户要求保存，不要误用 `write_file`。
+- 当中文请求缺少唯一必需参数时，只问一个具体缺失项；不要把可执行任务改写成泛泛操作说明。

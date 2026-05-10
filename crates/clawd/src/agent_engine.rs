@@ -40,6 +40,8 @@ use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
 const AGENT_TOOL_SPEC_PATH: &str = "prompts/agent_tool_spec.md";
 const CLAWD_CONTINUE_ON_ERROR_ARG: &str = "_clawd_continue_on_error";
 const CLAWD_LITERAL_COMMAND_ARG: &str = "_clawd_literal_command";
+const CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG: &str = "_clawd_literal_failure_repairable";
+const CLAWD_MISSING_TARGET_REPAIRABLE_ARG: &str = "_clawd_missing_target_repairable";
 const SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/single_plan_execution_prompt.md";
 const LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/lightweight_execution_prompt.md";
 const LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
@@ -246,6 +248,7 @@ pub(crate) struct LoopState {
     pub(crate) repeat_action_counts: HashMap<String, usize>,
     pub(crate) successful_action_fingerprints: HashMap<String, usize>,
     pub(crate) consecutive_no_progress: usize,
+    pub(crate) recoverable_failure_extra_rounds_used: usize,
     pub(crate) last_output: Option<String>,
     pub(crate) output_vars: HashMap<String, String>,
     pub(crate) has_tool_or_skill_output: bool,

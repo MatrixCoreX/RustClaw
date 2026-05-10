@@ -888,6 +888,131 @@ fn direct_scalar_observed_answer(
     ))
 }
 
+fn latest_scalar_observed_answer_from_loop_contract(
+    loop_state: &LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let contract = loop_state.output_contract.as_ref()?;
+    if contract.response_shape != crate::OutputResponseShape::Scalar {
+        return None;
+    }
+    let body = latest_successful_observation_body(loop_state)?;
+    let mut lines = body.lines().map(str::trim).filter(|line| !line.is_empty());
+    let answer = lines.next()?;
+    if lines.next().is_some() {
+        return None;
+    }
+    if answer.is_empty()
+        || crate::finalize::parse_delivery_token(answer).is_some()
+        || crate::finalize::looks_like_planner_artifact(answer)
+        || crate::finalize::looks_like_internal_trace_artifact(answer)
+        || looks_like_structured_machine_output(answer)
+        || crate::finalize::is_execution_summary_message(answer)
+    {
+        return None;
+    }
+    Some((
+        answer.to_string(),
+        crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            contract_ok: true,
+            used_evidence_ids_count: loop_state.executed_step_results.len(),
+            ..Default::default()
+        },
+    ))
+}
+
+fn latest_successful_observation_body(loop_state: &LoopState) -> Option<&str> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rfind(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+        })
+        .filter(|step| step.is_ok())
+        .and_then(|step| step.output.as_deref())
+}
+
+fn latest_path_observed_answer_from_loop_contract(
+    loop_state: &LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let contract = loop_state.output_contract.as_ref()?;
+    if !matches!(
+        contract.semantic_kind,
+        crate::OutputSemanticKind::FilePaths
+            | crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+    ) {
+        return None;
+    }
+    let body = latest_successful_observation_body(loop_state)?.trim();
+    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let results = value.get("results").and_then(serde_json::Value::as_array)?;
+    if results.len() != 1 {
+        return None;
+    }
+    let answer = results
+        .first()
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    if crate::finalize::looks_like_planner_artifact(answer)
+        || crate::finalize::looks_like_internal_trace_artifact(answer)
+    {
+        return None;
+    }
+    Some((
+        answer.to_string(),
+        crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            contract_ok: true,
+            used_evidence_ids_count: loop_state.executed_step_results.len(),
+            ..Default::default()
+        },
+    ))
+}
+
+fn replace_delivery_with_loop_contract_observed_answer(
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some((answer, summary)) = latest_scalar_observed_answer_from_loop_contract(loop_state)
+        .or_else(|| latest_path_observed_answer_from_loop_contract(loop_state))
+    else {
+        return false;
+    };
+    if loop_state
+        .delivery_messages
+        .last()
+        .map(|message| message.trim() == answer.trim())
+        .unwrap_or(false)
+    {
+        loop_state.last_user_visible_respond = Some(answer);
+        *finalizer_summary = Some(summary);
+        return true;
+    }
+    loop_state
+        .delivery_messages
+        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    append_delivery_message(
+        &task.task_id,
+        &mut loop_state.delivery_messages,
+        answer.clone(),
+    );
+    loop_state.last_user_visible_respond = Some(answer);
+    *finalizer_summary = Some(summary);
+    info!(
+        "delivery replace_with_loop_contract_observed task_id={}",
+        task.task_id
+    );
+    true
+}
+
 fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
     match crate::language_policy::request_language_hint(user_text) {
         "zh-CN" => false,
@@ -1322,24 +1447,25 @@ fn direct_structured_observed_answer(
     {
         return None;
     }
+    let successful_observation_count = loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| {
+            step.is_ok()
+                && !matches!(
+                    step.skill.as_str(),
+                    "respond" | "synthesize_answer" | "think"
+                )
+                && step
+                    .output
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|output| !output.is_empty())
+        })
+        .count();
     if route.output_contract.requires_content_evidence
-        && loop_state
-            .executed_step_results
-            .iter()
-            .filter(|step| {
-                step.is_ok()
-                    && !matches!(
-                        step.skill.as_str(),
-                        "respond" | "synthesize_answer" | "think"
-                    )
-                    && step
-                        .output
-                        .as_deref()
-                        .map(str::trim)
-                        .is_some_and(|output| !output.is_empty())
-            })
-            .count()
-            > 1
+        && successful_observation_count > 1
+        && !route_prefers_observed_answer(route)
     {
         return None;
     }
@@ -1389,11 +1515,13 @@ fn prefer_observed_answer_for_exact_contract(
     if delivery_messages.is_empty() {
         return;
     }
-    if loop_state
+    let has_prior_step_error = loop_state
         .executed_step_results
         .iter()
-        .any(|step| matches!(step.status, crate::executor::StepExecutionStatus::Error))
-    {
+        .any(|step| matches!(step.status, crate::executor::StepExecutionStatus::Error));
+    let allow_prior_step_error_replacement =
+        route_allows_prior_step_error_observed_replacement(route);
+    if has_prior_step_error && !allow_prior_step_error_replacement {
         return;
     }
     if let Some(synthesis) = loop_state
@@ -1406,6 +1534,7 @@ fn prefer_observed_answer_for_exact_contract(
             .last()
             .map(|message| message.trim() == synthesis)
             .unwrap_or(false)
+            && !(has_prior_step_error && allow_prior_step_error_replacement)
         {
             info!(
                 "delivery exact_contract_keep_synthesis task_id={} answer={}",
@@ -1649,6 +1778,33 @@ fn route_prefers_observed_answer(route: &crate::RouteResult) -> bool {
             | crate::OutputSemanticKind::GitCommitSubject
             | crate::OutputSemanticKind::HiddenEntriesCheck
             | crate::OutputSemanticKind::StructuredKeys
+    ) || route_path_locator_plain_act_allows_observed_listing(route)
+}
+
+fn route_path_locator_plain_act_allows_observed_listing(route: &crate::RouteResult) -> bool {
+    !route.output_contract.delivery_required
+        && route.output_contract.locator_kind == crate::OutputLocatorKind::Path
+        && matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None | crate::OutputSemanticKind::ExistenceWithPath
+        )
+        && route.ask_mode.is_plain_act()
+}
+
+fn route_allows_prior_step_error_observed_replacement(route: &crate::RouteResult) -> bool {
+    if route_path_locator_plain_act_allows_observed_listing(route) {
+        return true;
+    }
+    if route.output_contract.response_shape == crate::OutputResponseShape::Scalar {
+        return true;
+    }
+    matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::FilePaths
+            | crate::OutputSemanticKind::ScalarPathOnly
+            | crate::OutputSemanticKind::ExistenceWithPath
     )
 }
 
@@ -3319,15 +3475,24 @@ pub(crate) async fn finalize_loop_reply(
     enforce_delivery_output_contract(state, task, user_text, &mut loop_state, agent_run_context)
         .await;
     replace_placeholder_delivery_with_synthesis(task, &mut loop_state);
-    let replaced_failed_step = replace_delivery_with_deterministic_execution_failed_step_answer(
-        state,
+    let replaced_contract_answer = replace_delivery_with_loop_contract_observed_answer(
         task,
-        user_text,
         &mut loop_state,
-        agent_run_context,
         &mut finalizer_summary,
     );
-    if !replaced_failed_step {
+    let replaced_failed_step = if !replaced_contract_answer {
+        replace_delivery_with_deterministic_execution_failed_step_answer(
+            state,
+            task,
+            user_text,
+            &mut loop_state,
+            agent_run_context,
+            &mut finalizer_summary,
+        )
+    } else {
+        false
+    };
+    if !replaced_contract_answer && !replaced_failed_step {
         replace_delivery_with_deterministic_observed_execution_status_answer(
             state,
             task,
@@ -4900,6 +5065,433 @@ mod tests {
         assert!(answer.contains("第 1 步 `health_check` 成功"));
         assert!(answer.contains("第 2 步 `run_cmd` 失败"));
         assert!(answer.contains("exit code 127"));
+    }
+
+    #[test]
+    fn direct_structured_observed_answer_prefers_latest_path_result_for_exact_contract() {
+        let state = test_state();
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "plan".to_string();
+        route.resolved_intent =
+            "If the first plan path is missing, find execution_intent markdown files under plan"
+                .to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "system_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":false,"path":"plan/missing.md"}]}"#,
+        ));
+        loop_state.executed_step_results.push(err_step_result(
+            "step_2",
+            "read_file",
+            "file not found: /home/guagua/rustclaw/plan/missing.md",
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_3",
+            "fs_search",
+            r#"{"action":"find_name","count":2,"patterns":["execution_intent"],"results":["plan/execution_intent_route_trace_cases.txt","plan/execution_intent_routing_repair_plan_20260509.md"],"root":"plan"}"#,
+        ));
+
+        let (answer, summary) =
+            direct_structured_observed_answer(Some(&state), &loop_state, Some(&agent_run_context))
+                .expect("latest structured path result should answer exact path contract");
+
+        assert!(answer.contains("plan/execution_intent_route_trace_cases.txt"));
+        assert!(answer.contains("plan/execution_intent_routing_repair_plan_20260509.md"));
+        assert!(!answer.contains("第 1 步"), "answer: {answer}");
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
+    fn exact_path_observed_answer_replaces_step_status_after_fallback_success() {
+        let state = test_state();
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "plan".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state.executed_step_results.push(err_step_result(
+            "step_1",
+            "read_file",
+            "file not found: /home/guagua/rustclaw/plan/missing.md",
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "fs_search",
+            r#"{"action":"find_ext","count":1,"ext":"md","patterns":["execution_intent.md"],"results":["plan/execution_intent_routing_repair_plan_20260509.md"],"root":"plan"}"#,
+        ));
+        let status_summary = "第 1 步 read_file 失败。第 2 步 fs_search 成功。".to_string();
+        loop_state.last_publishable_synthesis_output = Some(status_summary.clone());
+        let mut delivery_messages = vec![status_summary];
+        let mut finalizer_summary = None;
+
+        prefer_observed_answer_for_exact_contract(
+            &state,
+            "task-exact-path-fallback",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut delivery_messages,
+            &mut finalizer_summary,
+        );
+
+        assert_eq!(
+            delivery_messages,
+            vec!["plan/execution_intent_routing_repair_plan_20260509.md".to_string()]
+        );
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some("plan/execution_intent_routing_repair_plan_20260509.md")
+        );
+        assert!(
+            !delivery_messages[0].contains("第 1 步"),
+            "answer: {}",
+            delivery_messages[0]
+        );
+    }
+
+    #[test]
+    fn path_locator_observed_answer_replaces_step_status_after_fallback_success() {
+        let state = test_state();
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::Act;
+        route.ask_mode = crate::AskMode::from_routed_mode(route.routed_mode);
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "plan/extra_missing_repair_probe.md".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state.executed_step_results.push(err_step_result(
+            "step_1",
+            "read_file",
+            "file not found: /home/guagua/rustclaw/plan/extra_missing_repair_probe.md",
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "fs_search",
+            r#"{"action":"find_name","count":2,"patterns":["execution_intent"],"results":["plan/execution_intent_route_trace_cases.txt","plan/execution_intent_routing_repair_plan_20260509.md"],"root":"plan"}"#,
+        ));
+        let status_summary = "第 1 步 `read_file` 失败。第 2 步 `fs_search` 成功。".to_string();
+        loop_state.last_publishable_synthesis_output = Some(status_summary.clone());
+        let mut delivery_messages = vec![status_summary];
+        let mut finalizer_summary = None;
+
+        prefer_observed_answer_for_exact_contract(
+            &state,
+            "task-path-locator-fallback",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut delivery_messages,
+            &mut finalizer_summary,
+        );
+
+        assert_eq!(
+            delivery_messages,
+            vec![
+                "plan/execution_intent_route_trace_cases.txt\nplan/execution_intent_routing_repair_plan_20260509.md"
+                    .to_string()
+            ]
+        );
+        assert!(
+            !delivery_messages[0].contains("第 1 步"),
+            "answer: {}",
+            delivery_messages[0]
+        );
+    }
+
+    #[test]
+    fn strict_existence_path_observed_answer_replaces_step_status_after_fallback_success() {
+        let state = test_state();
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::Act;
+        route.ask_mode = crate::AskMode::from_routed_mode(route.routed_mode);
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "plan/extra_missing_repair_probe.md".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state.executed_step_results.push(err_step_result(
+            "step_1",
+            "read_file",
+            "file not found: /home/guagua/rustclaw/plan/extra_missing_repair_probe.md",
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "fs_search",
+            r#"{"action":"find_name","count":1,"patterns":["execution_intent.md"],"results":["plan/execution_intent_routing_repair_plan_20260509.md"],"root":"plan"}"#,
+        ));
+        let status_summary = "第 1 步 `read_file` 失败。第 2 步 `fs_search` 成功。".to_string();
+        loop_state.last_publishable_synthesis_output = Some(status_summary.clone());
+        let mut delivery_messages = vec![status_summary];
+        let mut finalizer_summary = None;
+
+        prefer_observed_answer_for_exact_contract(
+            &state,
+            "task-strict-existence-path-fallback",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut delivery_messages,
+            &mut finalizer_summary,
+        );
+
+        assert_eq!(
+            delivery_messages,
+            vec!["plan/execution_intent_routing_repair_plan_20260509.md".to_string()]
+        );
+        assert!(
+            !delivery_messages[0].contains("第 1 步"),
+            "answer: {}",
+            delivery_messages[0]
+        );
+    }
+
+    #[test]
+    fn scalar_path_observed_answer_replaces_step_status_after_broad_fallback_search() {
+        let state = test_state();
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::Act;
+        route.ask_mode = crate::AskMode::from_routed_mode(route.routed_mode);
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+        route.output_contract.locator_kind = OutputLocatorKind::Filename;
+        route.output_contract.locator_hint = "plan/extra_missing_repair_probe.md".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state.executed_step_results.push(err_step_result(
+            "step_1",
+            "read_file",
+            "file not found: /home/guagua/rustclaw/plan/extra_missing_repair_probe.md",
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "fs_search",
+            r#"{"action":"find_name","count":2,"patterns":["execution_intent"],"results":["plan/execution_intent_route_trace_cases.txt","plan/execution_intent_routing_repair_plan_20260509.md"],"root":"plan"}"#,
+        ));
+        let status_summary = "第 1 步 `read_file` 失败。第 2 步 `fs_search` 成功。".to_string();
+        loop_state.last_publishable_synthesis_output = Some(status_summary.clone());
+        let mut delivery_messages = vec![status_summary];
+        let mut finalizer_summary = None;
+
+        prefer_observed_answer_for_exact_contract(
+            &state,
+            "task-scalar-path-fallback",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut delivery_messages,
+            &mut finalizer_summary,
+        );
+
+        assert!(
+            delivery_messages[0].ends_with("plan/execution_intent_routing_repair_plan_20260509.md"),
+            "answer: {}",
+            delivery_messages[0]
+        );
+        assert!(
+            !delivery_messages[0].contains("第 1 步"),
+            "answer: {}",
+            delivery_messages[0]
+        );
+    }
+
+    #[test]
+    fn scalar_observed_answer_replaces_run_cmd_step_status_after_fallback_success() {
+        let state = test_state();
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::Act;
+        route.ask_mode = crate::AskMode::from_routed_mode(route.routed_mode);
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "run_cmd",
+                "error_kind": "nonzero_exit",
+                "error_text": "Command failed with exit code 127",
+                "platform": "linux",
+                "extra": {
+                    "exit_code": 127,
+                    "exit_category": "command_not_found",
+                    "stderr": "missing command",
+                    "output_truncated": false
+                }
+            })
+        );
+        loop_state
+            .executed_step_results
+            .push(err_step_result("step_1", "run_cmd", &err));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "run_cmd",
+            "/usr/bin/bash\n",
+        ));
+        let status_summary = "第 1 步 `run_cmd` 失败。第 2 步 `run_cmd` 成功。".to_string();
+        loop_state.last_publishable_synthesis_output = Some(status_summary.clone());
+        let mut delivery_messages = vec![status_summary];
+        let mut finalizer_summary = None;
+
+        prefer_observed_answer_for_exact_contract(
+            &state,
+            "task-scalar-run-cmd-fallback",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut delivery_messages,
+            &mut finalizer_summary,
+        );
+
+        assert_eq!(delivery_messages, vec!["/usr/bin/bash".to_string()]);
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some("/usr/bin/bash")
+        );
+    }
+
+    #[test]
+    fn loop_contract_scalar_observed_answer_replaces_status_but_keeps_progress() {
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        let mut contract = scalar_route_result().output_contract;
+        contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+        loop_state.output_contract = Some(contract);
+        loop_state.executed_step_results.push(err_step_result(
+            "step_1",
+            "run_cmd",
+            "command failed",
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "run_cmd",
+            "/usr/bin/bash\n",
+        ));
+        loop_state.delivery_messages.push(
+            "**执行过程**\n1. 调用命令 `missing`\n   错误：\n```text\ncommand failed\n```"
+                .to_string(),
+        );
+        loop_state
+            .delivery_messages
+            .push("第 1 步 `run_cmd` 失败。第 2 步 `run_cmd` 成功。".to_string());
+        let task = claimed_task("task-loop-contract-scalar");
+        let mut finalizer_summary = None;
+
+        assert!(super::replace_delivery_with_loop_contract_observed_answer(
+            &task,
+            &mut loop_state,
+            &mut finalizer_summary,
+        ));
+
+        assert_eq!(loop_state.delivery_messages.len(), 2);
+        assert!(loop_state.delivery_messages[0].contains("执行过程"));
+        assert_eq!(loop_state.delivery_messages[1], "/usr/bin/bash");
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some("/usr/bin/bash")
+        );
+    }
+
+    #[test]
+    fn loop_contract_path_observed_answer_replaces_status_but_keeps_progress() {
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        let mut contract = scalar_route_result().output_contract;
+        contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+        loop_state.output_contract = Some(contract);
+        loop_state.executed_step_results.push(err_step_result(
+            "step_1",
+            "read_file",
+            "file not found: plan/missing.md",
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "fs_search",
+            r#"{"action":"find_ext","count":1,"results":["plan/execution_intent_routing_repair_plan_20260509.md"]}"#,
+        ));
+        loop_state.delivery_messages.push(
+            "**执行过程**\n1. 调用技能 `read_file`\n   错误：\n```text\nfile not found\n```"
+                .to_string(),
+        );
+        loop_state
+            .delivery_messages
+            .push("Step 1 `read_file` failed. Step 2 `fs_search` succeeded.".to_string());
+        let task = claimed_task("task-loop-contract-path");
+        let mut finalizer_summary = None;
+
+        assert!(super::replace_delivery_with_loop_contract_observed_answer(
+            &task,
+            &mut loop_state,
+            &mut finalizer_summary,
+        ));
+
+        assert_eq!(loop_state.delivery_messages.len(), 2);
+        assert!(loop_state.delivery_messages[0].contains("执行过程"));
+        assert_eq!(
+            loop_state.delivery_messages[1],
+            "plan/execution_intent_routing_repair_plan_20260509.md"
+        );
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some("plan/execution_intent_routing_repair_plan_20260509.md")
+        );
+    }
+
+    #[test]
+    fn loop_contract_observed_answer_does_not_hide_later_failure() {
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        let mut contract = scalar_route_result().output_contract;
+        contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+        loop_state.output_contract = Some(contract);
+        loop_state
+            .executed_step_results
+            .push(ok_step_result("step_1", "run_cmd", "/tmp/value\n"));
+        loop_state.executed_step_results.push(err_step_result(
+            "step_2",
+            "run_cmd",
+            "command failed",
+        ));
+        loop_state
+            .delivery_messages
+            .push("Step 2 `run_cmd` failed.".to_string());
+        let task = claimed_task("task-loop-contract-later-failure");
+        let mut finalizer_summary = None;
+
+        assert!(!super::replace_delivery_with_loop_contract_observed_answer(
+            &task,
+            &mut loop_state,
+            &mut finalizer_summary,
+        ));
+        assert_eq!(loop_state.last_user_visible_respond, None);
     }
 
     #[test]
