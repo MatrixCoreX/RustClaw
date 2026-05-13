@@ -68,6 +68,8 @@ pub(crate) fn log_prompt_render_with_version(
 pub(crate) enum PromptSchemaId {
     IntentNormalizer,
     ContractRepairJudge,
+    DirectAnswerGate,
+    AnswerVerifier,
     UserResponseContractValidator,
     PlanResult,
     FinalizerOut,
@@ -82,6 +84,8 @@ impl PromptSchemaId {
         match self {
             Self::IntentNormalizer => "intent_normalizer",
             Self::ContractRepairJudge => "contract_repair_judge",
+            Self::DirectAnswerGate => "direct_answer_gate",
+            Self::AnswerVerifier => "answer_verifier",
             Self::UserResponseContractValidator => "user_response_contract_validator",
             Self::PlanResult => "plan_result",
             Self::FinalizerOut => "finalizer_out",
@@ -99,6 +103,8 @@ impl PromptSchemaId {
 
         static INTENT_NORMALIZER: OnceLock<Value> = OnceLock::new();
         static CONTRACT_REPAIR_JUDGE: OnceLock<Value> = OnceLock::new();
+        static DIRECT_ANSWER_GATE: OnceLock<Value> = OnceLock::new();
+        static ANSWER_VERIFIER: OnceLock<Value> = OnceLock::new();
         static USER_RESPONSE_CONTRACT_VALIDATOR: OnceLock<Value> = OnceLock::new();
         static PLAN_RESULT: OnceLock<Value> = OnceLock::new();
         static FINALIZER_OUT: OnceLock<Value> = OnceLock::new();
@@ -116,6 +122,16 @@ impl PromptSchemaId {
             Self::ContractRepairJudge => CONTRACT_REPAIR_JUDGE.get_or_init(|| {
                 parse_schema(include_str!(
                     "../../../prompts/schemas/contract_repair_judge.schema.json"
+                ))
+            }),
+            Self::DirectAnswerGate => DIRECT_ANSWER_GATE.get_or_init(|| {
+                parse_schema(include_str!(
+                    "../../../prompts/schemas/direct_answer_gate.schema.json"
+                ))
+            }),
+            Self::AnswerVerifier => ANSWER_VERIFIER.get_or_init(|| {
+                parse_schema(include_str!(
+                    "../../../prompts/schemas/answer_verifier.schema.json"
                 ))
             }),
             Self::UserResponseContractValidator => {
@@ -1273,7 +1289,7 @@ fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
     }
 
     if step_type == "run_cmd" {
-        return normalize_run_cmd_call(obj, None);
+        return normalize_run_cmd_call(obj, obj.get("args").and_then(|v| v.as_object()));
     }
 
     let args = collect_bare_action_args(obj);
@@ -2163,6 +2179,27 @@ mod tests {
                     "command": "pwd",
                     "cwd": "/tmp",
                     "timeout_seconds": 3
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn normalize_agent_action_shape_preserves_bare_run_cmd_args_object() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let normalized = super::parse_agent_action_json_with_repair(
+            r#"{"type":"run_cmd","args":{"command":"git branch --show-current","cwd":"/tmp/repo"}}"#,
+            &state,
+        )
+        .expect("bare run_cmd args object should normalize");
+        assert_eq!(
+            normalized,
+            json!({
+                "type": "call_skill",
+                "skill": "run_cmd",
+                "args": {
+                    "command": "git branch --show-current",
+                    "cwd": "/tmp/repo"
                 }
             })
         );

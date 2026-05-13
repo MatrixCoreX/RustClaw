@@ -43,18 +43,21 @@ Return exactly one JSON object:
 }
 
 Allowed AgentAction forms:
-1) {"type":"call_skill","skill":"<enabled_skill_name>","args":{...}}
-2) {"type":"synthesize_answer","evidence_refs":["last_output","s1",...]}
-3) {"type":"respond","content":"<text>"}
+1) {"type":"call_tool","tool":"<enabled_tool_name>","args":{...}}  (preferred for capabilities marked `planner_kind=tool`)
+2) {"type":"call_skill","skill":"<enabled_skill_name>","args":{...}}  (use for `planner_kind=skill` or `planner_kind=workflow`; legacy-compatible for tools)
+3) {"type":"synthesize_answer","evidence_refs":["last_output","s1",...]}
+4) {"type":"respond","content":"<text>"}
 
 Core rules:
 - Treat this as a bounded local execution request, not open planning.
+- Treat any `task_contract` line in Turn analysis or the tool contract as the primary execution contract. Use `intent_kind`, `targets`, `operation`, `required_evidence_fields`, `delivery_shape`, and `failure_policy` to choose steps. Raw `semantic_kind` / `response_shape` are compatibility hints and must not override the task contract.
+- If `required_evidence_fields` includes metadata fields such as `exists`, `kind`, `size_bytes`, `modified`, or `path`, gather those facts with bounded metadata actions such as `system_basic.path_batch_facts` / `compare_paths` instead of reading whole files.
 - If `Turn analysis` or `Goal/context` indicates an active-task append/correct/scope-update/replace for writing/planning work, this lightweight prompt is not the right abstraction unless a bounded execution step is still explicitly required. Prefer a concise terminal `respond` when the active task is pure drafting/rewriting; do not reinterpret conceptual scope/audience/format terms as filesystem targets.
 - Prefer one direct observation step, or at most one bounded locator-resolution step plus one direct observation step.
 - Do not inspect unrelated files, repository history, extra directories, or extra skills.
 - Do not fabricate file paths, directory entries, counts, field values, or command output.
 - For project/product-specific setup notes, deployment notes, onboarding notes, checklists, tutorials, or user guides that require current-workspace evidence, a top-level directory listing alone is not enough evidence for concrete setup instructions. Plan a bounded docs observation before synthesis: first list/inventory the workspace root if needed, then inspect a stable setup source selected from observed root documentation or clearly named setup/deploy docs visible in the listing. Prefer the most specific enabled document/content skill whose interface covers semantic document parsing, key-point extraction, or section summarization; use `system_basic.read_range` only for exact bounded line slices, raw previews, or when no dedicated document/content skill covers the file. If no such doc is visible, finish conservatively without concrete commands.
-- Use only exact enabled skill names from the contract.
+- Use only exact enabled capability names from the contract.
 - If `Goal/context` already contains one explicit resolved path or `auto_locator_path`, treat it as authoritative.
 - If `Goal/context` contains `SESSION_ALIAS_BINDINGS`, use those targets only for aliases explicitly mentioned by the current goal/request. When multiple aliases are mentioned, each alias keeps its own target; do not place a file alias under another directory alias unless that is the alias's actual bound target.
 - If the current request already contains an explicit path, filename, URL, or inline structured literal, do not ask for it again.
@@ -75,6 +78,7 @@ Execution preferences:
 - For directory inventory with filename or extension filtering, prefer `system_basic` with `action="inventory_dir"`, `files_only=true`, `names_only=true`, and `ext_filter`. Do not use `extract_field` / `extract_fields` merely because the file extension is `json`, `toml`, or `yaml`; use those only when the user explicitly asks for keys, fields, values, sections, or a dot-path inside a specific structured file.
 - If the route/output contract carries `semantic_kind=directory_names` and the user asks which folders/directories contain files matching an extension, suffix, or filename pattern, the deliverable is the unique parent directories, not the matching files. Use an observation that directly emits parent directories when available; otherwise use a bounded shell command to derive unique parent directories from matching file paths. Do not return a raw `fs_search.find_ext` file list as the final answer for this contract.
 - For `fs_search`, use only `find_name`, `find_ext`, `grep_text`, or `find_images`. There is no `find_text` action. When the user asks where a likely filename, prompt name, module name, skill name, config artifact, or path fragment is located, first use `find_name` with `pattern`; use `grep_text` with `query` only when the user explicitly asks to search inside file contents or when a prior name/path lookup failed and content search is the next bounded fallback.
+- When the user asks whether a known file contains a phrase, identifier, code branch, config entry, function, or other content pattern, do not read the whole file just to inspect it. Use a scoped content search (`fs_search.grep_text` with the known file/root where supported) or a bounded command/range read that returns matching lines. If a prior full-file observation was truncated and the answer cannot be grounded, replan with scoped search or range read instead of asking the user for more context.
 - For bounded directory recency or modification-time ranking, prefer `system_basic` with `action="inventory_dir"`, the needed `sort_by`, `max_entries`, and metadata visibility. Use `names_only=true` only when names alone satisfy the request.
 - For any directory listing or inventory request with a semantic numeric bound, encode that bound in the observation action itself. Use `limit`/`max_entries` for `list_dir`, and `max_entries` for `system_basic.inventory_dir`; never emit an unbounded listing plan and rely on synthesis or `respond` to trim a larger result later.
 - For bounded comparison of two concrete paths by metadata, size, modification time, kind, or content equality, prefer `system_basic` with `action="compare_paths"`. For batch existence or metadata facts over several explicit paths, prefer `system_basic` with `action="path_batch_facts"`.

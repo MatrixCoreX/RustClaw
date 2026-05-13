@@ -67,6 +67,11 @@ fn synthesize_route_allows_direct_fallback(agent_run_context: Option<&AgentRunCo
     {
         return true;
     }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+        && route.output_contract.response_shape == crate::OutputResponseShape::Strict
+    {
+        return false;
+    }
     matches!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::Scalar
@@ -91,6 +96,9 @@ fn deterministic_observed_execution_status_answer(
             )
         })
         .collect::<Vec<_>>();
+    if observed_steps.last().is_some_and(|step| step.is_ok()) {
+        return None;
+    }
     if observed_steps.len() < 2 || !observed_steps.iter().any(|step| !step.is_ok()) {
         return None;
     }
@@ -373,7 +381,7 @@ pub(super) fn classify_skill_failure_recovery(
         return Some("recoverable_failure_continue_round");
     }
     if state.skill_is_retryable(normalized_skill)
-        && !state.skill_requires_confirmation_policy(normalized_skill)
+        && !state.skill_invocation_requires_confirmation_policy(normalized_skill, call_args)
     {
         if has_remaining_action_after(actions, current_idx, max_steps) {
             return Some("recoverable_failure_continue_in_round");
@@ -502,6 +510,23 @@ fn step_has_observable_synthesis_fact(step: &crate::executor::StepExecutionResul
         })
 }
 
+fn synthesize_failure_should_replan(loop_state: &LoopState) -> bool {
+    let previous_synthesis_failures = loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.skill == "synthesize_answer" && !step.is_ok())
+        .count();
+    if previous_synthesis_failures > 0 {
+        return false;
+    }
+    loop_state.executed_step_results.iter().any(|step| {
+        !matches!(
+            step.skill.as_str(),
+            "respond" | "think" | "synthesize_answer"
+        ) && step_has_observable_synthesis_fact(step)
+    })
+}
+
 async fn synthesize_failure_user_message(
     state: &AppState,
     task: &ClaimedTask,
@@ -567,7 +592,8 @@ mod tests {
     use super::{
         classify_skill_failure_recovery, deterministic_observed_execution_status_answer,
         strip_internal_execution_args, synthesize_answer_allows_direct_fallback,
-        synthesize_failure_observed_facts, synthesize_route_allows_direct_fallback,
+        synthesize_failure_observed_facts, synthesize_failure_should_replan,
+        synthesize_route_allows_direct_fallback,
     };
     use crate::agent_engine::{AgentRunContext, LoopState};
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
@@ -1139,6 +1165,30 @@ mod tests {
     }
 
     #[test]
+    fn synthesize_failure_after_observation_allows_one_replan() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "read_file",
+            "large file excerpt...\n",
+        ));
+
+        assert!(synthesize_failure_should_replan(&loop_state));
+
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "synthesize_answer".to_string(),
+            status: StepExecutionStatus::Error,
+            output: None,
+            error: Some("no publishable answer".to_string()),
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        assert!(!synthesize_failure_should_replan(&loop_state));
+    }
+
+    #[test]
     fn deterministic_status_answer_uses_observed_step_status_before_llm() {
         let state = test_state_with_registry();
         let task = crate::ClaimedTask {
@@ -1177,6 +1227,45 @@ mod tests {
         assert!(answer.contains("list_dir"));
         assert!(answer.contains("run_cmd"));
         assert!(answer.contains("exit code 127"));
+    }
+
+    #[test]
+    fn deterministic_status_answer_defers_after_recovery_success() {
+        let state = test_state_with_registry();
+        let task = crate::ClaimedTask {
+            task_id: "task-recovered".to_string(),
+            user_id: 1,
+            chat_id: 1,
+            user_key: None,
+            channel: "test".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".to_string(),
+            payload_json: String::new(),
+        };
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Error,
+            output: None,
+            error: Some("unknown action: grep_text".to_string()),
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.executed_step_results.push(ok_step(
+            "step_2",
+            "fs_search",
+            r#"{"count":1,"match_count":2}"#,
+        ));
+
+        assert!(deterministic_observed_execution_status_answer(
+            &state,
+            &task,
+            "检查文件里是否包含目标分支",
+            &loop_state,
+        )
+        .is_none());
     }
 
     #[test]
@@ -1327,7 +1416,7 @@ mod tests {
     }
 
     #[test]
-    fn synthesize_route_allows_direct_fallback_for_chat_wrapped_raw_output_contract() {
+    fn synthesize_route_uses_llm_for_strict_raw_output_contract() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
             ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
@@ -1361,7 +1450,7 @@ mod tests {
             ..AgentRunContext::default()
         };
 
-        assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
+        assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
     }
 }
 
@@ -1895,6 +1984,34 @@ pub(super) async fn handle_synthesize_answer_action(
                 .error
                 .clone()
                 .unwrap_or_else(|| "synthesize_answer failed".to_string());
+            let should_replan = synthesize_failure_should_replan(loop_state);
+            if should_replan {
+                let compact_err = err
+                    .replace('\n', " ")
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let compact_err = crate::truncate_for_agent_trace(&compact_err);
+                append_progress_hint(
+                    state,
+                    task,
+                    &mut loop_state.progress_messages,
+                    encode_progress_i18n(
+                        "telegram.progress.step_failed",
+                        &[
+                            ("step", &step_in_round.to_string()),
+                            ("skill", "synthesize_answer"),
+                            ("error", &compact_err),
+                        ],
+                    ),
+                );
+                append_progress_hint(
+                    state,
+                    task,
+                    &mut loop_state.progress_messages,
+                    encode_progress_i18n("telegram.progress.retry_replan", &[]),
+                );
+            }
             crate::append_subtask_result(
                 &mut loop_state.subtask_results,
                 global_step,
@@ -1918,9 +2035,11 @@ pub(super) async fn handle_synthesize_answer_action(
                 step_in_round,
                 crate::truncate_for_log(&err)
             );
-            Ok(ActionLoopDecision::StopRound(
-                "synthesize_answer_failed".to_string(),
-            ))
+            Ok(ActionLoopDecision::StopRound(if should_replan {
+                "recoverable_failure_continue_round".to_string()
+            } else {
+                "synthesize_answer_failed".to_string()
+            }))
         }
     }
 }

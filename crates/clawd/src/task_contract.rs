@@ -1,0 +1,688 @@
+use std::collections::BTreeSet;
+
+use serde_json::json;
+
+use crate::{
+    OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskIntentKind {
+    Clarify,
+    DirectAnswer,
+    PlannerExecute,
+}
+
+impl TaskIntentKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Clarify => "clarify",
+            Self::DirectAnswer => "direct_answer",
+            Self::PlannerExecute => "planner_execute",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskTargetObject {
+    Path,
+    Directory,
+    ConfigKey,
+    Service,
+    Process,
+    Db,
+    Web,
+    Unknown,
+}
+
+impl TaskTargetObject {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Path => "path",
+            Self::Directory => "directory",
+            Self::ConfigKey => "config_key",
+            Self::Service => "service",
+            Self::Process => "process",
+            Self::Db => "db",
+            Self::Web => "web",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum TaskOperation {
+    Inspect,
+    List,
+    Count,
+    Read,
+    Write,
+    Modify,
+    Run,
+    Configure,
+    Validate,
+    Summarize,
+    Unknown,
+}
+
+impl TaskOperation {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Inspect => "inspect",
+            Self::List => "list",
+            Self::Count => "count",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Modify => "modify",
+            Self::Run => "run",
+            Self::Configure => "configure",
+            Self::Validate => "validate",
+            Self::Summarize => "summarize",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum TaskDeliveryShape {
+    OneSentence,
+    List,
+    Table,
+    Raw,
+    File,
+    Summary,
+}
+
+impl TaskDeliveryShape {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::OneSentence => "one_sentence",
+            Self::List => "list",
+            Self::Table => "table",
+            Self::Raw => "raw",
+            Self::File => "file",
+            Self::Summary => "summary",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskFailurePolicy {
+    NoRetry,
+    RetryWithAlternatives,
+    Clarify,
+}
+
+impl TaskFailurePolicy {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::NoRetry => "no_retry",
+            Self::RetryWithAlternatives => "retry_with_alternatives",
+            Self::Clarify => "clarify",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum TaskTargetRole {
+    Primary,
+    Delivery,
+    Context,
+}
+
+impl TaskTargetRole {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Primary => "primary",
+            Self::Delivery => "delivery",
+            Self::Context => "context",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TargetContract {
+    pub(crate) role: TaskTargetRole,
+    pub(crate) kind: TaskTargetObject,
+    pub(crate) locator: String,
+}
+
+impl TargetContract {
+    fn compact_json(&self) -> serde_json::Value {
+        json!({
+            "role": self.role.as_str(),
+            "kind": self.kind.as_str(),
+            "locator": self.locator,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TaskContract {
+    pub(crate) intent_kind: TaskIntentKind,
+    pub(crate) targets: Vec<TargetContract>,
+    pub(crate) target_object: TaskTargetObject,
+    pub(crate) operation: TaskOperation,
+    pub(crate) evidence_required: bool,
+    pub(crate) required_evidence_fields: Vec<String>,
+    pub(crate) delivery_shape: TaskDeliveryShape,
+    pub(crate) missing_parameters: Vec<String>,
+    pub(crate) failure_policy: TaskFailurePolicy,
+}
+
+impl TaskContract {
+    pub(crate) fn from_route_result(route: &RouteResult) -> Self {
+        let missing_parameters = missing_parameters_for_route(route);
+        let evidence_required = route.output_contract.requires_content_evidence
+            || route.output_contract.delivery_required
+            || !required_evidence_fields_for_route(route).is_empty();
+        Self {
+            intent_kind: if route.needs_clarify || route.is_clarify_gate() {
+                TaskIntentKind::Clarify
+            } else if route.is_execute_gate() {
+                TaskIntentKind::PlannerExecute
+            } else {
+                TaskIntentKind::DirectAnswer
+            },
+            targets: targets_for_route(route),
+            target_object: target_object_for_route(route),
+            operation: operation_for_route(route),
+            evidence_required,
+            required_evidence_fields: required_evidence_fields_for_route(route),
+            delivery_shape: delivery_shape_for_route(route),
+            failure_policy: failure_policy_for_route(route, evidence_required, &missing_parameters),
+            missing_parameters,
+        }
+    }
+
+    pub(crate) fn compact_prompt_line(&self) -> String {
+        let required_evidence = if self.required_evidence_fields.is_empty() {
+            "none".to_string()
+        } else {
+            self.required_evidence_fields.join(",")
+        };
+        let missing_parameters = if self.missing_parameters.is_empty() {
+            "none".to_string()
+        } else {
+            self.missing_parameters.join(",")
+        };
+        let targets = if self.targets.is_empty() {
+            "none".to_string()
+        } else {
+            let values = self
+                .targets
+                .iter()
+                .map(TargetContract::compact_json)
+                .collect::<Vec<_>>();
+            serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_string())
+        };
+        format!(
+            "- task_contract intent_kind={} targets={} target_object={} operation={} evidence_required={} required_evidence_fields={} delivery_shape={} missing_parameters={} failure_policy={}",
+            self.intent_kind.as_str(),
+            targets,
+            self.target_object.as_str(),
+            self.operation.as_str(),
+            self.evidence_required,
+            required_evidence,
+            self.delivery_shape.as_str(),
+            missing_parameters,
+            self.failure_policy.as_str(),
+        )
+    }
+}
+
+fn targets_for_route(route: &RouteResult) -> Vec<TargetContract> {
+    let mut targets = Vec::new();
+    let primary_kind = target_object_for_route(route);
+    let primary_locators = target_locators_for_route(route);
+    if primary_locators.is_empty() && primary_kind != TaskTargetObject::Unknown {
+        targets.push(TargetContract {
+            role: TaskTargetRole::Primary,
+            kind: primary_kind,
+            locator: String::new(),
+        });
+    } else {
+        for locator in primary_locators {
+            targets.push(TargetContract {
+                role: TaskTargetRole::Primary,
+                kind: primary_kind,
+                locator,
+            });
+        }
+    }
+    if route.output_contract.delivery_required
+        && !matches!(
+            route.output_contract.delivery_intent,
+            OutputDeliveryIntent::None
+        )
+    {
+        let locator = route.output_contract.locator_hint.trim();
+        if !locator.is_empty() {
+            targets.push(TargetContract {
+                role: TaskTargetRole::Delivery,
+                kind: TaskTargetObject::Path,
+                locator: locator.to_string(),
+            });
+        }
+    }
+    targets
+}
+
+pub(crate) fn target_locators_for_route(route: &RouteResult) -> Vec<String> {
+    split_locator_targets(&primary_locator_for_route(route))
+}
+
+fn split_locator_targets(raw: &str) -> Vec<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Vec::new();
+    }
+
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) {
+        if let Some(items) = value.as_array() {
+            return dedup_locators(
+                items
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(normalize_target_locator),
+            );
+        }
+    }
+
+    dedup_locators(raw.split(['|', '\n', ';']).map(normalize_target_locator))
+}
+
+fn normalize_target_locator(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | '[' | ']'))
+        .trim()
+        .to_string()
+}
+
+fn dedup_locators<I>(values: I) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for value in values {
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        let key = value.to_ascii_lowercase();
+        if seen.insert(key) {
+            out.push(value.to_string());
+        }
+    }
+    out
+}
+
+fn primary_locator_for_route(route: &RouteResult) -> String {
+    let locator = route.output_contract.locator_hint.trim();
+    if !locator.is_empty() {
+        return locator.to_string();
+    }
+    match route.output_contract.locator_kind {
+        OutputLocatorKind::CurrentWorkspace => ".".to_string(),
+        _ => String::new(),
+    }
+}
+
+fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
+    match route.output_contract.semantic_kind {
+        OutputSemanticKind::ServiceStatus => return TaskTargetObject::Service,
+        OutputSemanticKind::DockerPs
+        | OutputSemanticKind::DockerLogs
+        | OutputSemanticKind::DockerImages
+        | OutputSemanticKind::DockerContainerLifecycle => return TaskTargetObject::Process,
+        OutputSemanticKind::SqliteTableListing
+        | OutputSemanticKind::SqliteTableNamesOnly
+        | OutputSemanticKind::SqliteDatabaseKindJudgment
+        | OutputSemanticKind::SqliteSchemaVersion => return TaskTargetObject::Db,
+        OutputSemanticKind::StructuredKeys => return TaskTargetObject::ConfigKey,
+        _ => {}
+    }
+    match route.output_contract.locator_kind {
+        OutputLocatorKind::Path | OutputLocatorKind::Filename => TaskTargetObject::Path,
+        OutputLocatorKind::CurrentWorkspace => TaskTargetObject::Directory,
+        OutputLocatorKind::Url => TaskTargetObject::Web,
+        OutputLocatorKind::None => TaskTargetObject::Unknown,
+    }
+}
+
+fn operation_for_route(route: &RouteResult) -> TaskOperation {
+    match route.output_contract.semantic_kind {
+        OutputSemanticKind::RawCommandOutput => TaskOperation::Run,
+        OutputSemanticKind::FileNames
+        | OutputSemanticKind::DirectoryNames
+        | OutputSemanticKind::FilePaths
+        | OutputSemanticKind::SqliteTableListing
+        | OutputSemanticKind::SqliteTableNamesOnly
+        | OutputSemanticKind::ArchiveList
+        | OutputSemanticKind::DockerPs
+        | OutputSemanticKind::DockerImages
+        | OutputSemanticKind::DockerLogs => TaskOperation::List,
+        OutputSemanticKind::ScalarCount => TaskOperation::Count,
+        OutputSemanticKind::ContentExcerptSummary
+        | OutputSemanticKind::DirectoryPurposeSummary
+        | OutputSemanticKind::WorkspaceProjectSummary
+        | OutputSemanticKind::ExistenceWithPathSummary
+        | OutputSemanticKind::RecentArtifactsJudgment
+        | OutputSemanticKind::ExcerptKindJudgment => TaskOperation::Summarize,
+        OutputSemanticKind::GeneratedFileDelivery | OutputSemanticKind::ArchivePack => {
+            TaskOperation::Write
+        }
+        OutputSemanticKind::ArchiveUnpack | OutputSemanticKind::DockerContainerLifecycle => {
+            TaskOperation::Modify
+        }
+        OutputSemanticKind::ServiceStatus
+        | OutputSemanticKind::HiddenEntriesCheck
+        | OutputSemanticKind::ScalarPathOnly
+        | OutputSemanticKind::ExistenceWithPath
+        | OutputSemanticKind::GitCommitSubject
+        | OutputSemanticKind::StructuredKeys
+        | OutputSemanticKind::SqliteDatabaseKindJudgment
+        | OutputSemanticKind::SqliteSchemaVersion => TaskOperation::Inspect,
+        OutputSemanticKind::QuantityComparison | OutputSemanticKind::RecentScalarEqualityCheck => {
+            TaskOperation::Validate
+        }
+        OutputSemanticKind::ExecutionFailedStep => TaskOperation::Validate,
+        OutputSemanticKind::None => {
+            if route.output_contract.delivery_required {
+                TaskOperation::Read
+            } else if route.is_execute_gate() {
+                TaskOperation::Inspect
+            } else {
+                TaskOperation::Unknown
+            }
+        }
+    }
+}
+
+fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape {
+    if matches!(
+        route.output_contract.semantic_kind,
+        OutputSemanticKind::FileNames
+            | OutputSemanticKind::DirectoryNames
+            | OutputSemanticKind::FilePaths
+            | OutputSemanticKind::SqliteTableListing
+            | OutputSemanticKind::SqliteTableNamesOnly
+            | OutputSemanticKind::ArchiveList
+            | OutputSemanticKind::DockerPs
+            | OutputSemanticKind::DockerImages
+    ) {
+        return TaskDeliveryShape::List;
+    }
+    match route.output_contract.response_shape {
+        OutputResponseShape::OneSentence => TaskDeliveryShape::OneSentence,
+        OutputResponseShape::Strict | OutputResponseShape::Scalar => TaskDeliveryShape::Raw,
+        OutputResponseShape::FileToken => TaskDeliveryShape::File,
+        OutputResponseShape::Free => TaskDeliveryShape::Summary,
+    }
+}
+
+fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<String> {
+    required_evidence_fields_for_output_contract(&route.output_contract)
+}
+
+pub(crate) fn required_evidence_fields_for_output_contract(
+    output_contract: &crate::IntentOutputContract,
+) -> Vec<String> {
+    let mut fields = BTreeSet::new();
+    if output_contract.delivery_required
+        || matches!(
+            output_contract.delivery_intent,
+            OutputDeliveryIntent::FileSingle
+                | OutputDeliveryIntent::DirectoryLookup
+                | OutputDeliveryIntent::DirectoryBatchFiles
+        )
+    {
+        fields.insert("path");
+    }
+    match output_contract.semantic_kind {
+        OutputSemanticKind::RawCommandOutput => {
+            fields.insert("command_output");
+        }
+        OutputSemanticKind::ScalarCount => {
+            fields.insert("count");
+        }
+        OutputSemanticKind::ScalarPathOnly | OutputSemanticKind::GitCommitSubject => {
+            fields.insert("field_value");
+        }
+        OutputSemanticKind::ExistenceWithPath | OutputSemanticKind::ExistenceWithPathSummary => {
+            fields.insert("exists");
+            fields.insert("kind");
+            fields.insert("path");
+        }
+        OutputSemanticKind::ContentExcerptSummary
+        | OutputSemanticKind::DirectoryPurposeSummary
+        | OutputSemanticKind::WorkspaceProjectSummary
+        | OutputSemanticKind::ExcerptKindJudgment => {
+            fields.insert("content_excerpt");
+        }
+        OutputSemanticKind::FileNames
+        | OutputSemanticKind::DirectoryNames
+        | OutputSemanticKind::FilePaths
+        | OutputSemanticKind::HiddenEntriesCheck
+        | OutputSemanticKind::SqliteTableListing
+        | OutputSemanticKind::SqliteTableNamesOnly
+        | OutputSemanticKind::ArchiveList
+        | OutputSemanticKind::DockerPs
+        | OutputSemanticKind::DockerImages
+        | OutputSemanticKind::DockerLogs => {
+            fields.insert("candidates");
+        }
+        OutputSemanticKind::ServiceStatus
+        | OutputSemanticKind::StructuredKeys
+        | OutputSemanticKind::SqliteDatabaseKindJudgment
+        | OutputSemanticKind::SqliteSchemaVersion
+        | OutputSemanticKind::RecentScalarEqualityCheck => {
+            fields.insert("field_value");
+        }
+        OutputSemanticKind::QuantityComparison => {
+            fields.insert("field_value");
+            fields.insert("size_bytes");
+            if matches!(
+                output_contract.locator_kind,
+                OutputLocatorKind::Path
+                    | OutputLocatorKind::Filename
+                    | OutputLocatorKind::CurrentWorkspace
+            ) {
+                fields.insert("exists");
+                fields.insert("kind");
+            }
+        }
+        _ => {}
+    }
+    if output_contract.semantic_kind == OutputSemanticKind::ExistenceWithPathSummary {
+        fields.insert("content_excerpt");
+    }
+    fields.into_iter().map(str::to_string).collect()
+}
+
+fn missing_parameters_for_route(route: &RouteResult) -> Vec<String> {
+    if !route.needs_clarify {
+        return Vec::new();
+    }
+    let mut missing = BTreeSet::new();
+    if route.output_contract.locator_hint.trim().is_empty()
+        && !matches!(route.output_contract.locator_kind, OutputLocatorKind::None)
+    {
+        missing.insert("locator");
+    }
+    if route.output_contract.delivery_required
+        && route.output_contract.locator_hint.trim().is_empty()
+    {
+        missing.insert("delivery_target");
+    }
+    if missing.is_empty() {
+        missing.insert("required_detail");
+    }
+    missing.into_iter().map(str::to_string).collect()
+}
+
+fn failure_policy_for_route(
+    route: &RouteResult,
+    evidence_required: bool,
+    missing_parameters: &[String],
+) -> TaskFailurePolicy {
+    if route.needs_clarify || !missing_parameters.is_empty() {
+        TaskFailurePolicy::Clarify
+    } else if route.is_execute_gate() || evidence_required {
+        TaskFailurePolicy::RetryWithAlternatives
+    } else {
+        TaskFailurePolicy::NoRetry
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AskMode, IntentOutputContract, RoutedMode};
+
+    fn route_with_contract(
+        routed_mode: RoutedMode,
+        output_contract: IntentOutputContract,
+    ) -> RouteResult {
+        RouteResult {
+            routed_mode,
+            ask_mode: AskMode::from_routed_mode(routed_mode),
+            resolved_intent: "test intent".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "test".to_string(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract,
+        }
+    }
+
+    #[test]
+    fn file_path_search_contract_is_list_with_candidate_evidence() {
+        let route = route_with_contract(
+            RoutedMode::Act,
+            IntentOutputContract {
+                response_shape: OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                semantic_kind: OutputSemanticKind::FilePaths,
+                ..IntentOutputContract::default()
+            },
+        );
+
+        let contract = TaskContract::from_route_result(&route);
+
+        assert_eq!(contract.intent_kind, TaskIntentKind::PlannerExecute);
+        assert_eq!(contract.target_object, TaskTargetObject::Directory);
+        assert_eq!(contract.operation, TaskOperation::List);
+        assert_eq!(contract.delivery_shape, TaskDeliveryShape::List);
+        assert_eq!(contract.required_evidence_fields, vec!["candidates"]);
+        assert_eq!(
+            contract.failure_policy,
+            TaskFailurePolicy::RetryWithAlternatives
+        );
+    }
+
+    #[test]
+    fn missing_locator_contract_prefers_clarify_policy() {
+        let mut route = route_with_contract(
+            RoutedMode::AskClarify,
+            IntentOutputContract {
+                locator_kind: OutputLocatorKind::Path,
+                requires_content_evidence: true,
+                ..IntentOutputContract::default()
+            },
+        );
+        route.needs_clarify = true;
+
+        let contract = TaskContract::from_route_result(&route);
+
+        assert_eq!(contract.intent_kind, TaskIntentKind::Clarify);
+        assert_eq!(contract.missing_parameters, vec!["locator"]);
+        assert_eq!(contract.failure_policy, TaskFailurePolicy::Clarify);
+    }
+
+    #[test]
+    fn task_contract_includes_structured_workspace_target() {
+        let route = route_with_contract(
+            RoutedMode::Act,
+            IntentOutputContract {
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+                requires_content_evidence: true,
+                ..IntentOutputContract::default()
+            },
+        );
+
+        let contract = TaskContract::from_route_result(&route);
+
+        assert_eq!(contract.targets.len(), 1);
+        assert_eq!(contract.targets[0].role, TaskTargetRole::Primary);
+        assert_eq!(contract.targets[0].kind, TaskTargetObject::Directory);
+        assert_eq!(contract.targets[0].locator, ".");
+        assert!(contract.compact_prompt_line().contains("\"locator\":\".\""));
+    }
+
+    #[test]
+    fn existence_contract_requires_structural_path_evidence() {
+        let route = route_with_contract(
+            RoutedMode::Act,
+            IntentOutputContract {
+                locator_kind: OutputLocatorKind::Path,
+                locator_hint: "README.md".to_string(),
+                semantic_kind: OutputSemanticKind::ExistenceWithPath,
+                requires_content_evidence: true,
+                ..IntentOutputContract::default()
+            },
+        );
+
+        let contract = TaskContract::from_route_result(&route);
+
+        assert_eq!(contract.targets.len(), 1);
+        assert_eq!(contract.targets[0].kind, TaskTargetObject::Path);
+        assert_eq!(contract.targets[0].locator, "README.md");
+        assert_eq!(
+            contract.required_evidence_fields,
+            vec!["exists", "kind", "path"]
+        );
+    }
+
+    #[test]
+    fn task_contract_splits_structured_multi_target_locator() {
+        let route = route_with_contract(
+            RoutedMode::Act,
+            IntentOutputContract {
+                locator_kind: OutputLocatorKind::Filename,
+                locator_hint: "README.md | AGENTS.md".to_string(),
+                semantic_kind: OutputSemanticKind::QuantityComparison,
+                requires_content_evidence: true,
+                ..IntentOutputContract::default()
+            },
+        );
+
+        let contract = TaskContract::from_route_result(&route);
+
+        assert_eq!(contract.targets.len(), 2);
+        assert_eq!(contract.targets[0].locator, "README.md");
+        assert_eq!(contract.targets[1].locator, "AGENTS.md");
+        assert_eq!(
+            contract.required_evidence_fields,
+            vec!["exists", "field_value", "kind", "size_bytes"]
+        );
+        assert!(contract
+            .compact_prompt_line()
+            .contains("\"locator\":\"AGENTS.md\""));
+    }
+}

@@ -21,6 +21,11 @@
 - `show_file_at_rev` — show file content at revision (target + path)
 - `rev_parse` — rev-parse HEAD
 
+Action selection notes:
+- Use `current_branch` when the requested output is the single current branch name.
+- Use `branch` only when the requested output is the branch list.
+- Do not invent plural or helper actions such as `branches`, `list_branches`, or `get_current_branch`; the runtime may normalize some aliases defensively, but planner output should use the declared action names.
+
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|

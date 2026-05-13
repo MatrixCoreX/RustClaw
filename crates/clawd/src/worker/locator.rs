@@ -58,6 +58,9 @@ pub(crate) fn try_resolve_implicit_locator_path(
         }
         return None;
     }
+    if has_unresolved_explicit_local_locator_tokens(&explicit_tokens) {
+        return None;
+    }
     let keywords = extract_locator_keywords(&query_text);
     let filename_tokens = extract_filename_like_tokens(&query_text);
     if matches!(locator_kind, crate::OutputLocatorKind::CurrentWorkspace) {
@@ -549,6 +552,18 @@ fn is_relative_explicit_locator_token(token: &str) -> bool {
         && !token.starts_with("http://")
         && !token.starts_with("https://")
         && !token.contains(":\\")
+}
+
+fn has_unresolved_explicit_local_locator_tokens(explicit_tokens: &[String]) -> bool {
+    explicit_tokens
+        .iter()
+        .any(|token| is_local_explicit_locator_token(token))
+}
+
+fn is_local_explicit_locator_token(token: &str) -> bool {
+    looks_like_explicit_path_or_url_token(token)
+        && !token.starts_with("http://")
+        && !token.starts_with("https://")
 }
 
 fn context_relative_locator_roots(
@@ -1426,6 +1441,31 @@ mod tests {
         assert!(
             out.is_none(),
             "relative missing file should not resolve to parent directory: {out:?}"
+        );
+    }
+
+    #[test]
+    fn unresolved_absolute_explicit_path_does_not_fallback_to_keyword_match() {
+        let workspace = TempDirGuard::new("absolute_missing_file_workspace");
+        fs::write(workspace.path.join("rustclaw"), "unrelated").expect("write unrelated child");
+        let missing = workspace.path.join("NO_SUCH_RUSTCLAW_TEST_987654.txt");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = workspace.path.clone();
+        state.skill_rt.default_locator_search_dir = workspace.path.clone();
+        state.skill_rt.locator_scan_max_depth = 4;
+        state.skill_rt.locator_scan_max_files = 100;
+
+        let out = super::try_resolve_implicit_locator_path(
+            &state,
+            &format!("读取 {} 的第一行", missing.display()),
+            "",
+            crate::OutputLocatorKind::Path,
+            None,
+        );
+
+        assert!(
+            out.is_none(),
+            "absolute missing file should not resolve by path segment: {out:?}"
         );
     }
 

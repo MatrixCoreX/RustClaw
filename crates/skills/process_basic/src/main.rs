@@ -82,16 +82,15 @@ fn execute(args: Value) -> Result<(String, Value), String> {
             run_ps_snapshot(limit as usize).map(|text| {
                 (
                     text.clone(),
-                    json!({"action":"ps","exit_code":0,"limit":limit,"output":text}),
+                    json!({"action":"ps","exit_code":0,"limit":limit,"platform":std::env::consts::OS,"output":text}),
                 )
             })
         }
-        "port_list" => run_command("ss", &["-ltnp"], None)
-            .or_else(|_| run_port_list_snapshot())
-            .map(|text| {
+        "port_list" => run_port_list_snapshot()
+            .map(|(command_tool, text)| {
                 (
                     text.clone(),
-                    json!({"action":"port_list","exit_code":0,"output":text}),
+                    json!({"action":"port_list","exit_code":0,"platform":std::env::consts::OS,"command_tool":command_tool,"output":text}),
                 )
             }),
         "kill" => {
@@ -103,7 +102,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
             run_command("kill", &["-s", signal, &pid.to_string()], None).map(|text| {
                 (
                     text.clone(),
-                    json!({"action":"kill","exit_code":0,"pid":pid,"signal":signal,"output":text}),
+                    json!({"action":"kill","exit_code":0,"pid":pid,"signal":signal,"platform":std::env::consts::OS,"output":text}),
                 )
             })
         }
@@ -122,7 +121,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
             tail_file(&full, n).map(|text| {
                 (
                     text.clone(),
-                    json!({"action":"tail_log","path":path,"n":n,"output":text}),
+                    json!({"action":"tail_log","path":path,"n":n,"platform":std::env::consts::OS,"output":text}),
                 )
             })
         }
@@ -199,16 +198,25 @@ fn run_ps_snapshot(limit: usize) -> Result<String, String> {
     ))
 }
 
+fn run_port_list_command(
+    command_tool: &'static str,
+    bin: &str,
+    args: &[&str],
+) -> Result<(&'static str, String), String> {
+    run_command(bin, args, None).map(|text| (command_tool, text))
+}
+
 #[cfg(target_os = "macos")]
-fn run_port_list_snapshot() -> Result<String, String> {
-    run_command("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"], None)
-        .or_else(|_| run_command("netstat", &["-anv", "-p", "tcp"], None))
+fn run_port_list_snapshot() -> Result<(&'static str, String), String> {
+    run_port_list_command("lsof", "lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"])
+        .or_else(|_| run_port_list_command("netstat", "netstat", &["-anv", "-p", "tcp"]))
 }
 
 #[cfg(not(target_os = "macos"))]
-fn run_port_list_snapshot() -> Result<String, String> {
-    run_command("lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"], None)
-        .or_else(|_| run_command("netstat", &["-ltnp"], None))
+fn run_port_list_snapshot() -> Result<(&'static str, String), String> {
+    run_port_list_command("ss", "ss", &["-ltnp"])
+        .or_else(|_| run_port_list_command("lsof", "lsof", &["-nP", "-iTCP", "-sTCP:LISTEN"]))
+        .or_else(|_| run_port_list_command("netstat", "netstat", &["-ltnp"]))
 }
 
 #[derive(Debug)]

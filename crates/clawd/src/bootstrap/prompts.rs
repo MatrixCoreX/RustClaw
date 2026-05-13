@@ -30,6 +30,10 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "contract_repair_judge (routing)",
     ),
     (
+        "prompts/direct_answer_gate_prompt.md",
+        "direct_answer_gate (ask_flow)",
+    ),
+    (
         "prompts/clarify_question_prompt.md",
         "clarify_question (routing)",
     ),
@@ -89,6 +93,10 @@ const CORE_PROMPT_REGISTRY: &[(&str, &str)] = &[
         "prompts/user_response_contract_validator_prompt.md",
         "user_response_contract_validator (fallback.response)",
     ),
+    (
+        "prompts/answer_verifier_prompt.md",
+        "answer_verifier (finalize.answer)",
+    ),
 ];
 
 /// §3.5b: 启动期 prompt 校验单条记录。
@@ -104,6 +112,7 @@ pub(crate) struct PromptValidationIssue {
 pub(crate) struct PromptValidationReport {
     pub checked: usize,
     pub missing: Vec<PromptValidationIssue>,
+    pub active_llm_vendor: Option<String>,
     pub vendor: String,
 }
 
@@ -120,6 +129,10 @@ pub(crate) fn validate_core_prompts(
 ) -> PromptValidationReport {
     let vendor = prompt_vendor_name_from_selected_vendor(selected_vendor);
     let mut report = PromptValidationReport {
+        active_llm_vendor: selected_vendor
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
         vendor: vendor.clone(),
         ..Default::default()
     };
@@ -147,25 +160,34 @@ pub(crate) fn validate_core_prompts(
 /// - 全部命中磁盘：单行 INFO 总结。
 /// - 有 fallback 命中：每条 WARN，最后给一条汇总，便于排查打包/部署遗漏。
 pub(crate) fn log_prompt_validation_report(report: &PromptValidationReport) {
+    let active_llm_vendor = report.active_llm_vendor.as_deref().unwrap_or("default");
     if report.missing.is_empty() {
         info!(
-            "prompt_validation: all {} core prompts resolved from disk/manifest (vendor={})",
-            report.checked, report.vendor
+            "prompt_validation: all {} core prompts resolved from disk/manifest \
+            (active_llm_vendor={} prompt_vendor_patch={})",
+            report.checked, active_llm_vendor, report.vendor
         );
         return;
     }
     for issue in &report.missing {
         warn!(
             "prompt_validation: fallback to embedded include_str! template (\
-            disk/manifest empty) logical_path={} label={} resolved_disk_path={} vendor={}",
-            issue.logical_path, issue.label, issue.resolved_disk_path, report.vendor
+            disk/manifest empty) logical_path={} label={} resolved_disk_path={} \
+            active_llm_vendor={} prompt_vendor_patch={}",
+            issue.logical_path,
+            issue.label,
+            issue.resolved_disk_path,
+            active_llm_vendor,
+            report.vendor
         );
     }
     warn!(
-        "prompt_validation: {} of {} core prompts fell back to embedded constants (vendor={}); \
+        "prompt_validation: {} of {} core prompts fell back to embedded constants \
+        (active_llm_vendor={} prompt_vendor_patch={}); \
         production deployments should ship the prompts/ tree alongside the binary",
         report.missing.len(),
         report.checked,
+        active_llm_vendor,
         report.vendor
     );
 }
@@ -189,9 +211,10 @@ pub(crate) fn strict_prompt_validation_error(report: &PromptValidationReport) ->
         .collect::<Vec<_>>()
         .join("; ");
     Some(format!(
-        "prompt_validation strict mode blocked startup: {} of {} core prompts fell back to embedded templates (vendor={}): {}",
+        "prompt_validation strict mode blocked startup: {} of {} core prompts fell back to embedded templates (active_llm_vendor={} prompt_vendor_patch={}): {}",
         report.missing.len(),
         report.checked,
+        report.active_llm_vendor.as_deref().unwrap_or("default"),
         report.vendor,
         details
     ))
@@ -753,6 +776,7 @@ selected_model  = "gpt-4o-mini"
     fn strict_prompt_validation_error_lists_missing_prompts() {
         let report = PromptValidationReport {
             checked: 15,
+            active_llm_vendor: Some("mimo".to_string()),
             vendor: "minimax".to_string(),
             missing: vec![PromptValidationIssue {
                 logical_path: "prompts/intent_normalizer_prompt.md".to_string(),
@@ -764,6 +788,8 @@ selected_model  = "gpt-4o-mini"
         let message = strict_prompt_validation_error(&report)
             .expect("strict mode should return an error message when prompts are missing");
         assert!(message.contains("strict mode blocked startup"));
+        assert!(message.contains("active_llm_vendor=mimo"));
+        assert!(message.contains("prompt_vendor_patch=minimax"));
         assert!(message.contains("intent_normalizer (routing)"));
         assert!(message.contains("prompts/intent_normalizer_prompt.md"));
     }

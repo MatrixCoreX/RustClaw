@@ -36,6 +36,14 @@ fn should_skip_ask_memory_pair(
         .any(|message| crate::fallback::is_known_clarify_fallback_text(state, message))
 }
 
+fn non_failure_final_status(semantic_clarify: bool) -> crate::task_journal::TaskJournalFinalStatus {
+    if semantic_clarify {
+        crate::task_journal::TaskJournalFinalStatus::Clarify
+    } else {
+        crate::task_journal::TaskJournalFinalStatus::Success
+    }
+}
+
 fn assistant_memory_source_text(answer_text: &str, answer_messages: &[String]) -> String {
     let publishable_messages = answer_messages
         .iter()
@@ -650,6 +658,18 @@ pub(crate) async fn try_finalize_schedule_direct_success(
     Ok(false)
 }
 
+fn should_use_answer_route_result(
+    initial: &crate::RouteResult,
+    answer_route: &crate::RouteResult,
+    answer_journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    let answer_has_execution_trace = !answer_journal.rounds.is_empty()
+        || !answer_journal.step_results.is_empty()
+        || answer_journal.plan_result.is_some()
+        || answer_journal.verify_result.is_some();
+    answer_has_execution_trace && answer_route.is_execute_gate() && !initial.is_execute_gate()
+}
+
 pub(crate) async fn finalize_ask_result(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -698,9 +718,21 @@ pub(crate) async fn finalize_ask_result(
                 );
                 return Ok(());
             }
+            let mut effective_route_result = route_result.clone();
             if let Some(answer_journal) = answer.task_journal.as_ref() {
                 journal.merge_from(answer_journal);
+                if let Some(answer_route_result) = answer_journal.route_result.as_ref() {
+                    if should_use_answer_route_result(
+                        route_result,
+                        answer_route_result,
+                        answer_journal,
+                    ) {
+                        effective_route_result = answer_route_result.clone();
+                        journal.record_route_result(&effective_route_result);
+                    }
+                }
             }
+            let route_result = &effective_route_result;
             let semantic_clarify = route_result.ask_mode.is_clarify_only()
                 || answer
                     .task_journal
@@ -762,10 +794,24 @@ pub(crate) async fn finalize_ask_result(
                     }
                     (answer_text, answer_messages)
                 };
+            journal.record_final_answer(&answer_text);
+            if !failure_reply && !semantic_clarify && journal.answer_verifier_summary.is_none() {
+                if let Some(answer_verifier) = crate::answer_verifier::verify_answer_observe_only(
+                    state,
+                    task,
+                    prompt,
+                    route_result,
+                    &journal,
+                    &answer_text,
+                )
+                .await
+                {
+                    journal.record_answer_verifier_summary(answer_verifier);
+                }
+            }
             journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
             journal.record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
             journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
-            journal.record_final_answer(&answer_text);
             crate::finalize::ensure_task_metrics(&mut journal, &answer_text, &answer_messages);
             if failure_reply {
                 let err_text = answer.error_text.unwrap_or_else(|| answer_text.clone());
@@ -800,7 +846,7 @@ pub(crate) async fn finalize_ask_result(
                     insert_unfinished_goal_memory(state, task, prompt, &err_text);
                 }
             } else {
-                journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+                journal.record_final_status(non_failure_final_status(semantic_clarify));
                 finalize_ask_success(
                     state,
                     task,
@@ -1014,11 +1060,47 @@ pub(crate) async fn finalize_ask_result(
 
 #[cfg(test)]
 mod tests {
-    use super::{assistant_memory_source_text, journal_has_missing_file_search_evidence};
+    use super::{
+        assistant_memory_source_text, journal_has_missing_file_search_evidence,
+        non_failure_final_status, should_use_answer_route_result,
+    };
 
     use serde_json::json;
 
+    fn route_result(mode: crate::RoutedMode) -> crate::RouteResult {
+        crate::RouteResult {
+            routed_mode: mode,
+            ask_mode: crate::AskMode::from_routed_mode(mode),
+            resolved_intent: "test".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        }
+    }
+
     // ensure_journal_task_metrics_* tests 已搬移到 finalize/journal.rs（Stage 3.1）。
+
+    #[test]
+    fn non_failure_final_status_preserves_clarify_semantics() {
+        assert_eq!(
+            non_failure_final_status(false),
+            crate::task_journal::TaskJournalFinalStatus::Success
+        );
+        assert_eq!(
+            non_failure_final_status(true),
+            crate::task_journal::TaskJournalFinalStatus::Clarify
+        );
+    }
 
     #[test]
     fn assistant_memory_source_text_filters_execution_summary() {
@@ -1106,6 +1188,42 @@ mod tests {
                 ..Default::default()
             });
         assert!(journal_has_missing_file_search_evidence(Some(&journal)));
+    }
+
+    #[test]
+    fn answer_route_result_overrides_initial_chat_when_execution_trace_exists() {
+        let initial = route_result(crate::RoutedMode::Chat);
+        let answer_route = route_result(crate::RoutedMode::ChatAct);
+        let mut answer_journal =
+            crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+        answer_journal.record_plan_result(&crate::PlanResult {
+            plan_kind: crate::PlanKind::Single,
+            goal: "inspect project".to_string(),
+            planner_notes: String::new(),
+            raw_plan_text: String::new(),
+            missing_slots: Vec::new(),
+            needs_confirmation: false,
+            steps: Vec::new(),
+        });
+
+        assert!(should_use_answer_route_result(
+            &initial,
+            &answer_route,
+            &answer_journal
+        ));
+    }
+
+    #[test]
+    fn answer_route_result_does_not_override_chat_without_execution_trace() {
+        let initial = route_result(crate::RoutedMode::Chat);
+        let answer_route = route_result(crate::RoutedMode::ChatAct);
+        let answer_journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+
+        assert!(!should_use_answer_route_result(
+            &initial,
+            &answer_route,
+            &answer_journal
+        ));
     }
 
     #[test]

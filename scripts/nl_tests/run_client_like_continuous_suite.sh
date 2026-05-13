@@ -421,9 +421,13 @@ if delivery_requested and not needs_clarify and not missing_or_clarify and "file
 
 filesystem_refusal_markers = [
     "chat-only 模式无法直接访问文件系统",
+    "chat-only mode cannot perform filesystem checks",
+    "chat-only mode",
+    "cannot perform filesystem checks",
     "无法直接访问文件系统",
     "没有执行文件系统命令的能力",
     "无法检查当前目录",
+    "suggested_command",
     "cannot directly access the file system",
     "do not have the ability to execute filesystem commands",
 ]
@@ -509,7 +513,7 @@ from pathlib import Path
 obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 tags = sys.argv[2]
 
-def expected_skill_from_tags(raw_tags: str) -> str:
+def normalize_expected_name(raw: str) -> str:
     suffixes = [
         "_local_side_effect_client_like_aggregate",
         "_local_conditional_client_like_aggregate",
@@ -518,23 +522,65 @@ def expected_skill_from_tags(raw_tags: str) -> str:
         "_local_client_like_aggregate",
         "_client_like_aggregate",
     ]
+    raw = (raw or "").strip()
+    for suffix in suffixes:
+        if raw.endswith(suffix):
+            return raw[: -len(suffix)]
+    return raw
+
+def split_tag_tokens(raw_tags: str) -> list[str]:
+    return [token for token in re.split(r"[\s,]+", raw_tags.strip()) if token]
+
+def expected_contract_from_tags(raw_tags: str) -> dict:
+    expected = {
+        "skill": "",
+        "capabilities": [],
+        "any_skills": [],
+        "requires_tool_call": False,
+        "evidence_fields": [],
+    }
     for token in re.split(r"[\s,]+", raw_tags.strip()):
         if token.startswith("builtin_skill:"):
-            raw = token[len("builtin_skill:"):]
+            raw = normalize_expected_name(token[len("builtin_skill:"):])
         elif token.startswith("skill:"):
-            raw = token[len("skill:"):]
+            raw = normalize_expected_name(token[len("skill:"):])
         else:
             continue
-        for suffix in suffixes:
-            if raw.endswith(suffix):
-                raw = raw[: -len(suffix)]
-                break
         if raw and raw != "chat":
-            return raw
-    return ""
+            expected["skill"] = raw
+            break
+    for token in split_tag_tokens(raw_tags):
+        if token == "requires_tool_call=true":
+            expected["requires_tool_call"] = True
+            continue
+        if token.startswith("capability:"):
+            raw = normalize_expected_name(token[len("capability:"):])
+        elif token.startswith("tool:"):
+            raw = normalize_expected_name(token[len("tool:"):])
+        else:
+            continue
+        if raw and raw != "chat":
+            expected["capabilities"].append(raw)
+    for match in re.finditer(r"(?:^|[\s,])any_skill:([^\s]+)", raw_tags):
+        for raw in re.split(r"[,;+]+", match.group(1).strip()):
+            name = normalize_expected_name(raw)
+            if name and name != "chat":
+                expected["any_skills"].append(name)
+    for match in re.finditer(r"(?:^|[\s,])evidence:([^\s]+)", raw_tags):
+        for raw in re.split(r"[,;+]+", match.group(1).strip()):
+            field = raw.strip()
+            if field:
+                expected["evidence_fields"].append(field)
+    return expected
 
-expected = expected_skill_from_tags(tags)
-if not expected:
+expected = expected_contract_from_tags(tags)
+if (
+    not expected["skill"]
+    and not expected["capabilities"]
+    and not expected["any_skills"]
+    and not expected["requires_tool_call"]
+    and not expected["evidence_fields"]
+):
     raise SystemExit(0)
 
 data = obj.get("data") or {}
@@ -542,21 +588,84 @@ result = data.get("result_json") or {}
 journal = result.get("task_journal") or {}
 trace = journal.get("trace") or {}
 executed = []
+requested_capabilities = []
+tool_steps = []
 for item in trace.get("step_results") or []:
-    skill = str((item or {}).get("skill") or "").strip()
+    item = item or {}
+    skill = str(item.get("executed_skill") or item.get("skill") or "").strip()
     if skill:
         executed.append(skill)
+    if skill and skill not in {"think", "respond", "synthesize_answer"}:
+        tool_steps.append(item)
+    requested = str(item.get("requested_capability") or "").strip()
+    if requested:
+        requested_capabilities.append(requested)
 for round_item in trace.get("rounds") or []:
     plan = (round_item or {}).get("plan_result") or {}
     for step in plan.get("steps") or []:
-        skill = str((step or {}).get("skill") or "").strip()
+        step = step or {}
+        skill = str(step.get("skill") or "").strip()
         if skill:
             executed.append(skill)
+        if str(step.get("action_type") or "").strip() == "call_tool" and skill:
+            requested_capabilities.append(skill)
+            tool_steps.append(step)
 
-if expected not in set(executed):
+executed_set = set(executed)
+capability_set = set(requested_capabilities) | executed_set
+
+def capability_family_names(name: str) -> set[str]:
+    """Return runtime-equivalent capability names for legacy test expectations."""
+    families = {
+        # Structured field/range reads and document parsing are now often planned
+        # through system_basic/doc_parse rather than the old read_file wrapper.
+        "read_file": {"read_file", "system_basic", "doc_parse"},
+        # Directory inventory/listing may be served by the structured system tool.
+        "list_dir": {"list_dir", "system_basic"},
+    }
+    return families.get(name, {name})
+
+def expected_name_observed(name: str, observed: set[str]) -> bool:
+    return bool(capability_family_names(name).intersection(observed))
+
+def json_contains_key(value, key: str) -> bool:
+    if isinstance(value, dict):
+        if key in value:
+            return True
+        return any(json_contains_key(child, key) for child in value.values())
+    if isinstance(value, list):
+        return any(json_contains_key(child, key) for child in value)
+    if isinstance(value, str) and key in value:
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return False
+        return json_contains_key(parsed, key)
+    return False
+
+if expected["skill"] and not expected_name_observed(expected["skill"], executed_set):
     actual = ",".join(dict.fromkeys(executed)) or "<none>"
-    print(f"expected_skill_not_executed expected={expected} actual={actual}")
+    print(f"expected_skill_not_executed expected={expected['skill']} actual={actual}")
     raise SystemExit(1)
+for capability in expected["capabilities"]:
+    if not expected_name_observed(capability, capability_set):
+        actual = ",".join(dict.fromkeys(requested_capabilities + executed)) or "<none>"
+        print(f"expected_capability_not_observed expected={capability} actual={actual}")
+        raise SystemExit(1)
+if expected["any_skills"] and not any(
+    expected_name_observed(name, executed_set) for name in expected["any_skills"]
+):
+    actual = ",".join(dict.fromkeys(executed)) or "<none>"
+    allowed = ",".join(dict.fromkeys(expected["any_skills"])) or "<none>"
+    print(f"expected_any_skill_not_executed allowed={allowed} actual={actual}")
+    raise SystemExit(1)
+if expected["requires_tool_call"] and not tool_steps:
+    print("expected_tool_call_not_observed actual=<none>")
+    raise SystemExit(1)
+for field in expected["evidence_fields"]:
+    if not json_contains_key(journal, field):
+        print(f"expected_evidence_field_missing field={field}")
+        raise SystemExit(1)
 raise SystemExit(0)
 PY
 }
@@ -807,6 +916,7 @@ if start < 1:
     raise SystemExit(f"case_start must be >= 1, got {start}")
 seen = 0
 emitted = 0
+row_sep = "\x1f"
 def case_group_for_name(name: str) -> str:
     base = name.strip() or "unnamed_case"
     stripped = re.sub(r"_turn[0-9]+$", "", base)
@@ -835,13 +945,13 @@ for raw in case_file.read_text(encoding="utf-8").splitlines():
     if seen < start:
         continue
     emitted += 1
-    print("\t".join([
+    print(row_sep.join([
         str(seen),
         group_key_for_name(name),
-        name.replace("\t", " "),
-        tags.replace("\t", " "),
-        prompt.replace("\t", " "),
-        expect.replace("\t", " "),
+        name.replace("\t", " ").replace(row_sep, " "),
+        tags.replace("\t", " ").replace(row_sep, " "),
+        prompt.replace("\t", " ").replace(row_sep, " "),
+        expect.replace("\t", " ").replace(row_sep, " "),
     ]))
     if limit and emitted >= limit:
         break
@@ -969,6 +1079,62 @@ print(
 PY
 }
 
+print_prompt_budget_report() {
+  local run_dir="$1"
+  python3 - "$run_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+run_dir = Path(sys.argv[1])
+labels = {}
+files = []
+
+def result_json_from_response(obj):
+    data = obj.get("data") or {}
+    result = data.get("result_json") or {}
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except Exception:
+            result = {}
+    return result if isinstance(result, dict) else {}
+
+for path in sorted(run_dir.glob("turn*.json")):
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    result = result_json_from_response(obj)
+    journal = result.get("task_journal") or {}
+    summary = journal.get("summary") or {}
+    metrics = summary.get("task_metrics") or {}
+    by_prompt = metrics.get("by_prompt") or {}
+    file_count = 0
+    if isinstance(by_prompt, dict):
+        for label, bucket in by_prompt.items():
+            if not isinstance(bucket, dict):
+                continue
+            count = int(bucket.get("prompt_truncation_count") or 0)
+            if count <= 0:
+                continue
+            labels[label] = labels.get(label, 0) + count
+            file_count += count
+    if file_count:
+        files.append(f"{path.name}:{file_count}")
+
+total = sum(labels.values())
+if total:
+    label_text = ",".join(f"{label}:{count}" for label, count in sorted(labels.items()))
+    file_text = ",".join(files[:12])
+    if len(files) > 12:
+        file_text += f",...(+{len(files) - 12})"
+    print(f"PROMPT_BUDGET_RISK prompt_truncations={total} labels={label_text} files={file_text}")
+else:
+    print("PROMPT_BUDGET_OK prompt_truncations=0")
+PY
+}
+
 resolve_admin_key
 
 if [[ -z "${EXTERNAL_USER_ID_VALUE:-}" ]]; then
@@ -1061,7 +1227,7 @@ if [[ "$RUN_BUILTIN_SMOKE" -eq 1 ]]; then
 fi
 
 if [[ -n "${CASE_FILE_VALUE:-}" ]]; then
-  while IFS=$'\t' read -r case_index case_group_key case_name case_tags case_prompt case_expect; do
+  while IFS=$'\x1f' read -r case_index case_group_key case_name case_tags case_prompt case_expect; do
     [[ -n "${case_index:-}" ]] || continue
     turn=$((turn + 1))
     case_external_chat_id="$EXTERNAL_CHAT_ID_VALUE"
@@ -1094,5 +1260,8 @@ if [[ "$RUN_BUILTIN_SMOKE" -eq 1 ]]; then
 else
   verify_db_state 0
 fi
+
+python3 "${ROOT_DIR}/scripts/nl_tests/tag_run_outcomes.py" "$RUN_DIR"
+print_prompt_budget_report "$RUN_DIR"
 
 echo "CLIENT_LIKE_CONTINUOUS_SUITE_OK turns=${turn} log_dir=${RUN_DIR}"

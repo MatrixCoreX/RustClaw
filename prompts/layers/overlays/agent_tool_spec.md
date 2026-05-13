@@ -1,6 +1,6 @@
-You can ONLY execute capabilities listed below. Never invent skills, actions, or args. Output only `call_skill` steps; do not use `call_tool`.
+You can ONLY execute capabilities listed below. Never invent skills, actions, or args. Prefer `call_tool` for registry entries whose `planner_kind` is `tool`; use `call_skill` for registry entries whose `planner_kind` is `skill` or `workflow`. Legacy `call_skill` remains accepted for tool entries, but do not call low-level tools "skills" in reasoning.
 
-In planner mode, output a JSON object with `steps` array where each step is one action JSON. Every step that runs a capability must be `{"type":"call_skill","skill":"<name>","args":{...}}`.
+In planner mode, output a JSON object with `steps` array where each step is one action JSON. Executable capability steps must be either `{"type":"call_tool","tool":"<name>","args":{...}}` or `{"type":"call_skill","skill":"<name>","args":{...}}` according to the capability's `planner_kind`.
 
 For execution-recipe post-mutation validation steps only, `args` may include internal metadata `"_clawd_validation":{"profile":"config_change|code_change|skill_authoring|ops_service","validator_type":"test|build|lint|config_check|runtime_probe|integration|custom","validated_target":"<target>"}`. If the user states that validation succeeds only when a specific output marker is present, include `success_marker` inside `_clawd_validation` as either a string or `{"marker":"<text>","match_mode":"contains|equals","case_sensitive":true|false}`. This is not a skill argument; runtime strips it before execution. Do not add it to inspect, mutation, chat, or final-response steps.
 
@@ -10,17 +10,17 @@ If the user explicitly asks to receive a produced file as an actual file/documen
 - `IMAGE_URL:<http(s)-url>` for remote image delivery
 - `VIDEO_URL:<http(s)-url>` / `FILE_URL:<http(s)-url>` / `MEDIA_URL:<http(s)-url>` for remote media delivery
 - Do not paste large file contents when explicit file delivery is requested.
-- For text artifacts that the user wants as a file/document, prefer creating a real file first via `call_skill` with skill `write_file` (or `run_cmd` when command output must be redirected), then deliver that path with `FILE:<path>`.
+- For text artifacts that the user wants as a file/document, prefer creating a real file first via `call_tool` with tool `write_file` (or `run_cmd` when command output must be redirected), then deliver that path with `FILE:<path>`.
 - If you output `FILE:<path>`, treat it as mandatory document delivery. Do not replace it with pasted content, summaries, or inline previews.
 - If a final `respond` carries delivery tokens (`FILE:<path>`, `IMAGE_FILE:<path>`, or equivalent media tokens), that `respond` must contain only standalone token lines. Do not prepend labels or append confirmation/explanation text in the same `respond`.
 - Do not hardcode a default document name/path. If the user does not provide a path, create the file first and then use the exact saved path from tool output in `FILE:<path>`.
 - Treat file writes as filesystem mutations, not generic wording. A request to "write/say/tell/explain a line, joke, poem, story, reply, summary, or comment" normally means text in the response unless the user explicitly asks to save/create/send a file.
 
-## Skills
+## Capability Catalog
 
-All capabilities are skills. Use `{"type":"call_skill","skill":"<name>","args":{...}}` only.
+Capabilities may be planner-layer `tool`, `skill`, or `workflow` entries according to the registry metadata. The runtime accepts both legacy `call_skill` and modern `call_tool` envelopes; use the modern `call_tool` envelope for low-level tools and keep `call_skill` for domain skills/workflows.
 
-### Base skills (standalone — file/command/dir; do not use system_basic for these)
+### Base tools (standalone — file/command/dir; do not use system_basic for these)
 - `run_cmd`: `args.command` required; optional `args.cwd`, `args.timeout_seconds`, `args.idle_timeout_seconds`, `args.max_output_bytes`. Run one bounded shell command. On non-zero exit, use structured `extra.exit_code` and `extra.exit_category` instead of matching stderr text.
 - `read_file`: `args.path` required. Read file content.
 - `write_file`: `args.path`, `args.content` required. Write file.
@@ -28,7 +28,7 @@ All capabilities are skills. Use `{"type":"call_skill","skill":"<name>","args":{
 - `make_dir`: `args.path` required. Create directory (and parents).
 - `remove_file`: `args.path` required. Remove a single file (not directories).
 
-These six are independent base skills for filesystem and command. Do not use `system_basic` for any of them.
+These six are independent base tools for filesystem and command. Do not use `system_basic` for any of them.
 
 Skill behavior notes (file/path):
 - If an admin-authorized task hits an operating-system permission denial and runtime policy allows sudo for this task, the executor may retry once with non-interactive `sudo -n` based on the structured skill/action args. Do not plan a manual explanatory refusal before that runtime retry has a chance to run.
@@ -97,10 +97,11 @@ Skill behavior notes (file/path):
 - use this skill when the user wants to sort, classify, archive, or整理照片 / 相片 / 图片文件 based on camera metadata / EXIF / 相机型号.
 - action:
   - `prepare`: list external drive / USB candidate paths and ask for a concrete directory
-  - `organize`: analyze or execute organization for a concrete `source_dir`
+  - `organize`: analyze or execute organization for a concrete `source_dir`, or first resolve an omitted `source_dir` through the skill's external-drive discovery flow
+  - compatibility aliases: `plan|preview|dry_run` mean `organize` with preview mode; `copy|move` mean `organize` with the matching mode. Prefer `action="organize"` plus explicit `mode` when generating new plans.
 - required by action:
   - `prepare`: no required args
-  - `organize`: explicit `source_dir`, or a natural-language request that clearly includes a concrete path
+  - `organize`: no absolute required field at the planner front door; `source_dir` is conditional because the skill can safely discover one unique external drive / USB mount when omitted, and otherwise returns candidate paths for user clarification
 - optional for `organize`:
   - `mode` (`plan|copy|move`, default `plan`)
   - `output_dir`
@@ -112,7 +113,7 @@ Skill behavior notes (file/path):
   - `locale|lang|language` (BCP-47 style locale or common language tag)
   - natural-language input via `text|prompt|input|instruction|query`, or even raw string `args`
 - planner guidance:
-  - if the user has **not** provided a concrete directory path, call `photo_organize` without `source_dir` (or with `action="prepare"`) first; this skill must ask for the directory and must show detected external-drive paths before asking.
+  - if the user has **not** provided a concrete directory path, call `photo_organize` without `source_dir` (usually `action="organize"`, `mode="plan"`; or `action="prepare"` for explicit setup/candidate listing) first. Let the skill inspect external drives: with one candidate it continues safely in preview mode; with zero or multiple candidates it asks and shows observed paths.
   - never invent or silently default a photo directory for this skill.
   - default to `mode="plan"` unless the user clearly asks to actually copy or move files.
   - use `mode="move"` only when the user explicitly accepts moving original files; otherwise prefer `plan` or `copy`.
@@ -645,7 +646,7 @@ Skill behavior notes (file/path):
   - `path_batch_facts`: requires `paths`
 
 #### system_basic JSON-schema style contract (strict)
-- Base shape: `{"type":"call_skill","skill":"system_basic","args":{...}}`
+- Base shape: `{"type":"call_tool","tool":"system_basic","args":{...}}` because `system_basic` is a planner-layer tool. Legacy `{"type":"call_skill","skill":"system_basic","args":{...}}` remains accepted for compatibility, but is not preferred.
 - Use `system_basic` only for the higher-level readonly actions above. For raw file/dir/command execution, continue to use the standalone base skills.
 - Canonical action/field names are part of the contract: use `action="read_range"` (never `action="read"`), use `path_batch_facts.paths` (never `targets`), and use `compare_paths.left_path` + `compare_paths.right_path` (never a generic `targets` array).
 - `extract_field` and `extract_fields` are single-file actions: they require `path`, not `paths` or `targets`. For values from multiple structured files, emit one `system_basic` extraction step per file.

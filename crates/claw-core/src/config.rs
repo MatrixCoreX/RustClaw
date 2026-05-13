@@ -582,6 +582,10 @@ pub struct WorkerConfig {
     pub concurrency: usize,
     #[serde(default = "default_worker_task_timeout_seconds")]
     pub task_timeout_seconds: u64,
+    #[serde(default = "default_worker_llm_max_calls_per_task")]
+    pub llm_max_calls_per_task: u64,
+    #[serde(default = "default_worker_llm_total_timeout_seconds")]
+    pub llm_total_timeout_seconds: u64,
     #[serde(default = "default_worker_poll_interval_ms")]
     pub poll_interval_ms: u64,
     #[serde(default = "default_worker_queue_limit")]
@@ -599,6 +603,8 @@ impl Default for WorkerConfig {
         Self {
             concurrency: default_worker_concurrency(),
             task_timeout_seconds: default_worker_task_timeout_seconds(),
+            llm_max_calls_per_task: default_worker_llm_max_calls_per_task(),
+            llm_total_timeout_seconds: default_worker_llm_total_timeout_seconds(),
             poll_interval_ms: default_worker_poll_interval_ms(),
             queue_limit: default_worker_queue_limit(),
             task_heartbeat_seconds: default_worker_task_heartbeat_seconds(),
@@ -1643,6 +1649,16 @@ fn default_worker_task_timeout_seconds() -> u64 {
     // 1 小时单任务硬上限。比 demo 模板里的 86400 (24h) 安全得多。
     // 真的需要长任务（视频处理、大批量同步）就在 toml 中显式覆盖。
     3600
+}
+
+fn default_worker_llm_max_calls_per_task() -> u64 {
+    40
+}
+
+fn default_worker_llm_total_timeout_seconds() -> u64 {
+    // Mimo 等慢模型经常需要 normalizer + planner + synthesis 连续调用；
+    // 900s 仍低于单任务硬超时，但能覆盖长文 synthesis + verifier 的慢调用组合。
+    900
 }
 
 fn default_worker_poll_interval_ms() -> u64 {

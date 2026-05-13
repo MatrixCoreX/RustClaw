@@ -393,9 +393,6 @@ pub(crate) async fn maybe_extract_user_preferences_with_llm(
     if trimmed.chars().count() < cfg.write_min_chars.max(8) {
         return Ok(());
     }
-    if !looks_like_memory_preference_llm_candidate(trimmed, cfg) {
-        return Ok(());
-    }
 
     let prompt_text = utf8_safe_prefix(trimmed, cfg.llm_preference_max_chars.max(128));
     let prompt = build_memory_preference_llm_prompt(prompt_text);
@@ -1780,29 +1777,6 @@ User text:
     )
 }
 
-fn looks_like_memory_preference_llm_candidate(content: &str, cfg: &MemoryConfig) -> bool {
-    let norm = content.to_ascii_lowercase();
-    if contains_any_marker(&norm, &cfg.rules.salience_boost_markers) {
-        return true;
-    }
-    const DURABLE_HINTS: &[&str] = &[
-        "preference",
-        "remember that",
-        "from now on",
-        "going forward",
-        "以后",
-        "下次",
-        "默认",
-        "记住",
-        "偏好",
-        "これから",
-        "今後",
-        "覚えて",
-        "a partir de ahora",
-    ];
-    DURABLE_HINTS.iter().any(|hint| norm.contains(hint))
-}
-
 fn parse_memory_preference_llm_output(
     raw: &str,
     min_confidence: f32,
@@ -2014,9 +1988,9 @@ mod tests {
         build_last_turn_full_context, build_recent_assistant_replies_context,
         clarify_assistant_placeholder, classify_assistant_context_reply_kind,
         extract_result_text_for_recent_turns, insert_memory, legacy_principal_chat_id,
-        looks_like_memory_preference_llm_candidate, ordered_entries_from_assistant_reply,
-        parse_memory_preference_llm_output, provider_unavailable_assistant_placeholder,
-        recall_memories_since_id, recall_user_preferences, retrieval_source_ref_for_kb_chunk,
+        ordered_entries_from_assistant_reply, parse_memory_preference_llm_output,
+        provider_unavailable_assistant_placeholder, recall_memories_since_id,
+        recall_user_preferences, retrieval_source_ref_for_kb_chunk,
         retrieval_source_ref_for_memory, retrieval_source_ref_for_preference,
         upsert_user_preferences_from_route_hint, AssistantContextReplyKind, MemoryWriteKind,
         MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_SYSTEM, MEMORY_ROLE_USER, MEMORY_TYPE_GENERIC,
@@ -2161,23 +2135,6 @@ mod tests {
         }"#;
         let prefs = parse_memory_preference_llm_output(raw, 0.72);
         assert!(prefs.is_empty());
-    }
-
-    #[test]
-    fn memory_preference_llm_candidate_gate_requires_durable_hint() {
-        let cfg = claw_core::config::MemoryConfig::default();
-        assert!(!looks_like_memory_preference_llm_candidate(
-            "tell me a short joke",
-            &cfg
-        ));
-        assert!(looks_like_memory_preference_llm_candidate(
-            "以后默认用日语回复我",
-            &cfg
-        ));
-        assert!(looks_like_memory_preference_llm_candidate(
-            "Going forward, respond in concise English.",
-            &cfg
-        ));
     }
 
     #[test]

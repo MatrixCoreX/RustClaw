@@ -418,11 +418,84 @@ fn current_workspace_locator_resolution(
     workspace_root: &std::path::Path,
     route_result: &crate::RouteResult,
 ) -> Option<crate::post_route_policy::LocatorResolution> {
-    (route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
-        && route_result.output_contract.locator_hint.trim().is_empty())
-    .then(|| {
-        crate::post_route_policy::LocatorResolution::Direct(workspace_root.display().to_string())
-    })
+    if route_result.output_contract.locator_kind != crate::OutputLocatorKind::CurrentWorkspace {
+        return None;
+    }
+    let locator_hint = route_result.output_contract.locator_hint.trim();
+    if !locator_hint.is_empty()
+        && !locator_hint_points_to_workspace_root(workspace_root, locator_hint)
+    {
+        return None;
+    }
+    Some(crate::post_route_policy::LocatorResolution::Direct(
+        workspace_root.display().to_string(),
+    ))
+}
+
+fn locator_hint_names_workspace_root(workspace_root: &std::path::Path, locator_hint: &str) -> bool {
+    let Some(root_name) = workspace_root.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let normalized_root = normalize_locator_identity_token(root_name);
+    let normalized_hint = normalize_locator_identity_token(locator_hint);
+    !normalized_root.is_empty() && normalized_hint == normalized_root
+}
+
+fn locator_hint_points_to_workspace_root(
+    workspace_root: &std::path::Path,
+    locator_hint: &str,
+) -> bool {
+    if locator_hint_names_workspace_root(workspace_root, locator_hint) {
+        return true;
+    }
+    let locator_hint = locator_hint.trim();
+    if locator_hint.is_empty() || locator_hint.contains('\n') {
+        return false;
+    }
+    let candidate = std::path::Path::new(locator_hint);
+    let candidate = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        workspace_root.join(candidate)
+    };
+    normalize_workspace_locator_path(&candidate) == normalize_workspace_locator_path(workspace_root)
+}
+
+fn normalize_workspace_locator_path(path: &std::path::Path) -> std::path::PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn normalize_locator_identity_token(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches(|c: char| {
+            matches!(
+                c,
+                '"' | '\''
+                    | '`'
+                    | ','
+                    | '.'
+                    | '，'
+                    | '。'
+                    | ':'
+                    | '：'
+                    | ';'
+                    | '；'
+                    | ')'
+                    | '('
+                    | ']'
+                    | '['
+                    | '）'
+                    | '（'
+                    | '】'
+                    | '【'
+                    | '>'
+                    | '<'
+                    | '》'
+                    | '《'
+            )
+        })
+        .to_ascii_lowercase()
 }
 
 fn should_attempt_auto_locator(route_result: &crate::RouteResult) -> bool {
@@ -1251,6 +1324,81 @@ mod tests {
                 if path == root.display().to_string()
         ));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn current_workspace_locator_resolution_accepts_absolute_workspace_hint() {
+        let root = make_temp_root("current_workspace_locator_abs_root");
+        std::fs::write(root.join("rustclaw"), "#!/usr/bin/env bash\n").expect("launcher file");
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "Introduce RustClaw as the current project".to_string(),
+            needs_clarify: false,
+            route_reason: "workspace summary".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                locator_hint: root.display().to_string(),
+                requires_content_evidence: true,
+                ..Default::default()
+            },
+        };
+        assert!(matches!(
+            super::current_workspace_locator_resolution(&root, &route),
+            Some(crate::post_route_policy::LocatorResolution::Direct(path))
+                if path == root.display().to_string()
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn current_workspace_locator_hint_naming_root_resolves_to_workspace_root() {
+        let parent = make_temp_root("current_workspace_locator_root_name");
+        let root = parent.join("rustclaw");
+        std::fs::create_dir_all(&root).expect("workspace root");
+        std::fs::write(root.join("rustclaw"), "#!/usr/bin/env bash\n").expect("same-name child");
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "Introduce the current RustClaw project".to_string(),
+            needs_clarify: false,
+            route_reason: "workspace summary".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                locator_hint: "RustClaw".to_string(),
+                requires_content_evidence: true,
+                ..Default::default()
+            },
+        };
+
+        assert!(matches!(
+            super::current_workspace_locator_resolution(&root, &route),
+            Some(crate::post_route_policy::LocatorResolution::Direct(path))
+                if path == root.display().to_string()
+        ));
+        let _ = std::fs::remove_dir_all(parent);
     }
 
     #[test]

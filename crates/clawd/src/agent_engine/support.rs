@@ -25,6 +25,7 @@ pub(super) struct AgentLoopGuardPolicy {
     pub(super) repeat_action_limit: usize,
     pub(super) no_progress_limit: usize,
     pub(super) multi_round_enabled: bool,
+    pub(super) answer_verifier_retry_limit: usize,
     pub(super) ops_closed_loop: LoopRecipeOverrides,
 }
 
@@ -189,6 +190,11 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
             &parsed,
             &["agent", "loop_guard", "multi_round_enabled"],
             true,
+        ),
+        answer_verifier_retry_limit: parse_usize_allow_zero_from_toml(
+            &parsed,
+            &["agent", "loop_guard", "answer_verifier_retry_limit"],
+            2,
         ),
         ops_closed_loop: LoopRecipeOverrides {
             max_steps: parse_optional_usize_from_toml(
@@ -611,6 +617,7 @@ mod tests {
             repeat_action_limit: 4,
             no_progress_limit: 1,
             multi_round_enabled: true,
+            answer_verifier_retry_limit: 2,
             ops_closed_loop: LoopRecipeOverrides {
                 max_steps: Some(48),
                 max_rounds: Some(4),

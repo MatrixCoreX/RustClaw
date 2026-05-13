@@ -22,6 +22,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 mod agent_engine;
+mod answer_verifier;
 mod app_helpers;
 mod ask_flow;
 mod bootstrap;
@@ -60,9 +61,11 @@ mod runtime;
 mod schedule_service;
 mod self_extension;
 mod semantic_judge;
+mod skill_availability;
 mod skills;
 mod system_health;
 mod task_context_builder;
+mod task_contract;
 mod task_journal;
 mod verifier;
 mod visible_text;
@@ -134,6 +137,7 @@ pub(crate) use repo::{
     SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
+pub(crate) use task_contract::TaskContract;
 // Phase 3.2 Stage B：AskMode 已经被 RouteResult/PreparedAskRouting 消费；
 // ChatEntryStrategy/ActFinalizeStyle 在 Stage C 切换 match 时才会被显式 import。
 #[allow(unused_imports)]
@@ -654,6 +658,16 @@ async fn main() -> anyhow::Result<()> {
             started_at: Instant::now(),
             queue_limit: config.worker.queue_limit,
             worker_task_timeout_seconds: config.worker.task_timeout_seconds.max(1),
+            llm_max_calls_per_task: if config.worker.llm_max_calls_per_task == 0 {
+                crate::llm_gateway::DEFAULT_MAX_LLM_CALLS_PER_TASK
+            } else {
+                config.worker.llm_max_calls_per_task
+            },
+            llm_total_timeout_ms: if config.worker.llm_total_timeout_seconds == 0 {
+                crate::llm_gateway::DEFAULT_MAX_LLM_TOTAL_MS_PER_TASK
+            } else {
+                config.worker.llm_total_timeout_seconds.saturating_mul(1000)
+            },
             worker_task_heartbeat_seconds: config.worker.task_heartbeat_seconds.max(5),
             worker_running_no_progress_timeout_seconds: config
                 .worker

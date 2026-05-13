@@ -479,6 +479,7 @@ pub(crate) struct SkillRunOutcome {
     pub(crate) text: String,
     pub(crate) notify: Option<bool>,
     pub(crate) validation: Option<Value>,
+    pub(crate) extra: Option<Value>,
 }
 
 pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
@@ -1075,6 +1076,7 @@ pub(crate) async fn run_skill_with_runner_outcome(
                     text,
                     notify: None,
                     validation: None,
+                    extra: None,
                 });
         }
         SkillKind::External | SkillKind::Runner => {}
@@ -1200,6 +1202,7 @@ pub(crate) async fn run_skill_with_runner_outcome(
             .and_then(|v| v.get("validation"))
             .cloned()
     });
+    let extra = value.get("extra").cloned();
     let text = value
         .get("text")
         .and_then(|v| v.as_str())
@@ -1209,6 +1212,7 @@ pub(crate) async fn run_skill_with_runner_outcome(
         text,
         notify,
         validation,
+        extra,
     })
 }
 
@@ -1232,7 +1236,9 @@ mod tests {
     use serde_json::json;
     use std::collections::{HashMap, HashSet};
 
-    use std::sync::{Arc, RwLock};
+    use std::sync::{Arc, Mutex, RwLock};
+
+    static STRICT_ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn test_state(locale: &str) -> AppState {
         let agents_by_id = HashMap::from([(
@@ -1676,6 +1682,7 @@ mod tests {
 
     #[test]
     fn skill_env_strict_off_when_env_unset_or_empty() {
+        let _guard = STRICT_ENV_TEST_LOCK.lock().expect("strict env test lock");
         // 暂存 + 清掉避免邻测污染
         let prev = std::env::var_os("RUSTCLAW_SKILL_ENV_STRICT");
         std::env::remove_var("RUSTCLAW_SKILL_ENV_STRICT");
@@ -1699,6 +1706,7 @@ mod tests {
 
     #[test]
     fn skill_env_strict_on_for_truthy_values() {
+        let _guard = STRICT_ENV_TEST_LOCK.lock().expect("strict env test lock");
         let prev = std::env::var_os("RUSTCLAW_SKILL_ENV_STRICT");
         for val in ["1", "true", "TRUE", "True", "on", "yes"] {
             std::env::set_var("RUSTCLAW_SKILL_ENV_STRICT", val);

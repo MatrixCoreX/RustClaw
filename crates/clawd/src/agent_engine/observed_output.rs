@@ -103,6 +103,17 @@ fn strip_bare_json_language_prefix(raw: &str) -> &str {
     }
 }
 
+fn extract_answer_from_finalizer_envelope_text(raw: &str) -> Option<String> {
+    let candidate = strip_bare_json_language_prefix(raw);
+    crate::prompt_utils::validate_against_schema::<ObservedAnswerFallbackOut>(
+        candidate,
+        crate::prompt_utils::PromptSchemaId::FinalizerOut,
+    )
+    .ok()
+    .map(|validated| validated.value.answer.trim().to_string())
+    .filter(|answer| !answer.is_empty())
+}
+
 fn non_code_markdown_text(raw: &str) -> Option<String> {
     let mut in_fence = false;
     let mut lines = Vec::new();
@@ -347,14 +358,20 @@ fn route_requests_scalar_count(route: &crate::RouteResult) -> bool {
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
 }
 
+fn route_requests_scalar_existence(route: &crate::RouteResult) -> bool {
+    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+        && !route.output_contract.delivery_required
+}
+
 fn route_requests_hidden_entries_check(route: &crate::RouteResult) -> bool {
     route.output_contract.semantic_kind == crate::OutputSemanticKind::HiddenEntriesCheck
 }
 
 pub(crate) fn route_prefers_direct_observed_answer_for_scalar(route: &crate::RouteResult) -> bool {
-    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-        && (route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
-            || route_requests_hidden_entries_check(route))
+    route_requests_scalar_existence(route)
+        || (route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+            && route_requests_hidden_entries_check(route))
 }
 
 pub(crate) fn scalar_route_prefers_structured_observed_answer(
@@ -574,6 +591,33 @@ fn count_answer_from_latest_listing(
     Some(normalized_listing_entry_count(&listing).to_string())
 }
 
+fn count_answer_from_latest_fs_search(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> Option<String> {
+    if !route_requests_scalar_count(route) {
+        return None;
+    }
+    let observed = extract_latest_generic_successful_output(loop_state)?;
+    if observed.skill != "fs_search" {
+        return None;
+    }
+    let value = serde_json::from_str::<serde_json::Value>(&observed.body).ok()?;
+    match value.get("action").and_then(|v| v.as_str())? {
+        action
+            if action.eq_ignore_ascii_case("find_name")
+                || action.eq_ignore_ascii_case("find_ext") =>
+        {
+            value.get("count").and_then(value_scalar_text)
+        }
+        action if action.eq_ignore_ascii_case("grep_text") => value
+            .get("match_count")
+            .or_else(|| value.get("count"))
+            .and_then(value_scalar_text),
+        _ => None,
+    }
+}
+
 fn trim_for_observed_prompt(text: &str, max_chars: usize) -> String {
     let trimmed = text.trim();
     if trimmed.chars().count() <= max_chars {
@@ -600,6 +644,39 @@ fn normalized_scalar_candidate(body: &str) -> Option<String> {
         .filter(|line| !looks_like_structured_machine_output_line(line))
         .collect::<Vec<_>>();
     (lines.len() == 1).then(|| lines[0].to_string())
+}
+
+fn numeric_scalar_text(text: &str) -> bool {
+    let trimmed = text.trim();
+    !trimmed.is_empty() && trimmed.parse::<f64>().is_ok()
+}
+
+fn scalar_count_diagnostic_line_for_answer(
+    answer: &str,
+    route: Option<&crate::RouteResult>,
+    loop_state: &LoopState,
+) -> Option<String> {
+    let route = route?;
+    if !route_requests_scalar_count(route) || !numeric_scalar_text(answer) {
+        return None;
+    }
+    let observed = extract_latest_generic_successful_output(loop_state)?;
+    let lines = observed
+        .body
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| *line != "exit=0")
+        .filter(|line| !is_ignorable_shell_warning(line))
+        .filter(|line| !looks_like_structured_machine_output_line(line))
+        .collect::<Vec<_>>();
+    if lines.len() <= 1 {
+        return None;
+    }
+    lines
+        .into_iter()
+        .find(|line| !numeric_scalar_text(line))
+        .map(ToString::to_string)
 }
 
 fn value_scalar_text(value: &serde_json::Value) -> Option<String> {
@@ -705,6 +782,17 @@ fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> 
     {
         return "Use the observed output as evidence to produce the requested final wording. Do not answer by copying only the raw observed output; that would be an incomplete passthrough for this contract.".to_string();
     }
+    let response_shape = agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .map(|route| route.output_contract.response_shape);
+    let semantic_kind = agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .map(|route| route.output_contract.semantic_kind);
+    if semantic_kind == Some(crate::OutputSemanticKind::RawCommandOutput)
+        && response_shape == Some(crate::OutputResponseShape::Strict)
+    {
+        return "Use the observed command output as the value for the exact format requested by the user. If the user asked for a prefix, suffix, template, or key=value shape, apply that formatting instead of returning the raw command output unchanged.".to_string();
+    }
     if let Some(count) = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .and_then(|route| route.output_contract.exact_sentence_count)
@@ -714,12 +802,6 @@ fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> 
             "Return exactly {count} {sentence_label}. Do not compress the answer into fewer sentences or expand beyond that count."
         );
     }
-    let response_shape = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.output_contract.response_shape);
-    let semantic_kind = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.output_contract.semantic_kind);
     if semantic_kind == Some(crate::OutputSemanticKind::ExistenceWithPathSummary) {
         return "Return whether the target exists, the resolved path when found, and the requested brief content-grounded purpose or summary. Do not answer from path evidence alone if content evidence is available.".to_string();
     }
@@ -1104,6 +1186,58 @@ fn inventory_dir_direct_answer_candidate(value: &serde_json::Value) -> Option<St
     normalized_listing_text(&names.join("\n"))
 }
 
+fn first_meaningful_excerpt_sentence(text: &str) -> Option<String> {
+    let mut short_fallback = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty()
+            || line.starts_with('#')
+            || line.starts_with('<')
+            || line.starts_with("```")
+            || line.starts_with('|')
+            || line.starts_with('-')
+        {
+            continue;
+        }
+        if short_fallback.is_none() {
+            short_fallback = Some(line.to_string());
+        }
+        if line.chars().count() < 48 {
+            continue;
+        }
+        let sentence = line
+            .split_inclusive(['.', '。', '！', '!', '？', '?'])
+            .next()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(line);
+        return Some(sentence.to_string());
+    }
+    short_fallback
+}
+
+fn content_excerpt_summary_direct_answer_candidate(
+    route: Option<&crate::RouteResult>,
+    body: &str,
+) -> Option<String> {
+    if !route.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::ContentExcerptSummary
+    }) {
+        return None;
+    }
+    let text = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("text")
+                .or_else(|| value.get("excerpt"))
+                .and_then(|value| value.as_str())
+                .map(ToString::to_string)
+        })
+        .unwrap_or_else(|| body.to_string());
+    first_meaningful_excerpt_sentence(&text)
+}
+
 fn inventory_dir_scalar_path_candidate(
     value: &serde_json::Value,
     prefer_full_path: bool,
@@ -1139,6 +1273,43 @@ fn inventory_dir_scalar_path_candidate(
     (!paths.is_empty()).then(|| paths.join("\n"))
 }
 
+fn compact_inventory_dir_kind_lines(entries: &[serde_json::Value]) -> Option<Vec<String>> {
+    let mut dirs = Vec::new();
+    let mut files = Vec::new();
+    let mut others = Vec::new();
+
+    for entry in entries {
+        let entry = entry.as_object()?;
+        let name = entry
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())?;
+        match entry
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .unwrap_or("other")
+        {
+            "dir" => dirs.push(name.to_string()),
+            "file" => files.push(name.to_string()),
+            _ => others.push(name.to_string()),
+        }
+    }
+
+    let mut lines = Vec::new();
+    if !dirs.is_empty() {
+        lines.push(format!("dir_names={}", dirs.join(",")));
+    }
+    if !files.is_empty() {
+        lines.push(format!("file_names={}", files.join(",")));
+    }
+    if !others.is_empty() {
+        lines.push(format!("other_names={}", others.join(",")));
+    }
+    (!lines.is_empty()).then_some(lines)
+}
+
 fn inventory_dir_observed_candidate(value: &serde_json::Value) -> Option<String> {
     let path = value
         .get("resolved_path")
@@ -1163,6 +1334,11 @@ fn inventory_dir_observed_candidate(value: &serde_json::Value) -> Option<String>
         }
     }
     if let Some(entries) = value.get("entries").and_then(|v| v.as_array()) {
+        if entries.len() > 16 {
+            if let Some(lines) = compact_inventory_dir_kind_lines(entries) {
+                return Some(format!("{header}\n{}", lines.join("\n")));
+            }
+        }
         let lines = entries
             .iter()
             .filter_map(|entry| {
@@ -1564,6 +1740,36 @@ fn candidate_exists_with_path_text(
     }
 }
 
+fn candidate_exists_scalar_text(state: Option<&AppState>, prefer_english: bool) -> String {
+    observed_t(state, "clawd.msg.exists_yes", "有", "yes", prefer_english)
+}
+
+fn candidate_exists_with_path_and_size_text(
+    state: Option<&AppState>,
+    path: Option<&str>,
+    size_bytes: u64,
+    prefer_english: bool,
+) -> String {
+    match path.map(str::trim).filter(|path| !path.is_empty()) {
+        Some(path) => observed_t_with_vars(
+            state,
+            "clawd.msg.exists_with_path_and_size",
+            "有，路径：{path}，大小：{size_bytes} 字节",
+            "yes, path: {path}, size: {size_bytes} bytes",
+            prefer_english,
+            &[("path", path), ("size_bytes", &size_bytes.to_string())],
+        ),
+        None => observed_t_with_vars(
+            state,
+            "clawd.msg.exists_with_size",
+            "有，大小：{size_bytes} 字节",
+            "yes, size: {size_bytes} bytes",
+            prefer_english,
+            &[("size_bytes", &size_bytes.to_string())],
+        ),
+    }
+}
+
 fn candidate_not_found_text(state: Option<&AppState>, prefer_english: bool) -> String {
     observed_t(state, "clawd.msg.exists_no", "没有", "no", prefer_english)
 }
@@ -1597,11 +1803,19 @@ fn normalize_system_basic_match_path(
     if candidate.is_absolute() {
         return Some(candidate_path.to_string());
     }
+    if candidate.exists() {
+        return Some(canonical_existing_path(candidate));
+    }
     let root = resolved_root
         .map(str::trim)
         .filter(|root| !root.is_empty())
         .map(Path::new)?;
-    Some(root.join(candidate).to_string_lossy().to_string())
+    let rooted = root.join(candidate);
+    if rooted.exists() {
+        Some(canonical_existing_path(&rooted))
+    } else {
+        Some(rooted.to_string_lossy().to_string())
+    }
 }
 
 fn path_batch_fact_preferred_path<'a>(
@@ -1633,6 +1847,30 @@ fn system_basic_path_batch_scalar_path_candidate(value: &serde_json::Value) -> O
     exists
         .then(|| path_batch_fact_preferred_path(entry).map(ToString::to_string))
         .flatten()
+}
+
+fn path_batch_facts_requests_size(value: &serde_json::Value) -> bool {
+    value
+        .get("fields")
+        .and_then(|fields| fields.as_array())
+        .map(|fields| {
+            fields.iter().any(|field| {
+                field.as_str().is_some_and(|field| {
+                    let field = field.trim().to_ascii_lowercase();
+                    field == "size" || field == "size_bytes" || field == "file_size"
+                })
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn path_batch_fact_size_bytes(entry: &serde_json::Map<String, serde_json::Value>) -> Option<u64> {
+    entry
+        .get("fact")
+        .and_then(|v| v.as_object())
+        .and_then(|fact| fact.get("size_bytes"))
+        .and_then(|v| v.as_u64())
+        .or_else(|| entry.get("size_bytes").and_then(|v| v.as_u64()))
 }
 
 fn system_basic_existence_with_path_candidate(
@@ -1728,7 +1966,44 @@ fn system_basic_existence_with_path_candidate(
                 ));
             }
             let path = path_batch_fact_preferred_path(entry);
+            if path_batch_facts_requests_size(value) {
+                if let Some(size_bytes) = path_batch_fact_size_bytes(entry) {
+                    return Some(candidate_exists_with_path_and_size_text(
+                        state,
+                        path,
+                        size_bytes,
+                        prefer_english,
+                    ));
+                }
+            }
             Some(candidate_exists_with_path_text(state, path, prefer_english))
+        }
+        _ => None,
+    }
+}
+
+fn system_basic_scalar_existence_candidate(
+    state: Option<&AppState>,
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<String> {
+    match value.get("action").and_then(|v| v.as_str())? {
+        "path_batch_facts" => {
+            let facts = value.get("facts").and_then(|v| v.as_array())?;
+            if facts.len() != 1 {
+                return None;
+            }
+            let exists = facts
+                .first()?
+                .as_object()?
+                .get("exists")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            Some(if exists {
+                candidate_exists_scalar_text(state, prefer_english)
+            } else {
+                candidate_not_found_text(state, prefer_english)
+            })
         }
         _ => None,
     }
@@ -1797,6 +2072,89 @@ fn fs_search_find_ext_results(value: &serde_json::Value) -> Option<(Vec<String>,
         .filter(|v| !v.is_empty())?
         .to_string();
     Some((results, count, ext))
+}
+
+fn fs_search_grep_text_results(
+    value: &serde_json::Value,
+) -> Option<(Vec<(String, u64, String)>, usize, String)> {
+    let action = value.get("action").and_then(|v| v.as_str())?;
+    if !action.eq_ignore_ascii_case("grep_text") {
+        return None;
+    }
+    let query = value
+        .get("query")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())?
+        .to_string();
+    let matches = value
+        .get("matches")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let obj = item.as_object()?;
+                    let path = obj
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())?
+                        .to_string();
+                    let line = obj.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let text = obj
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())?
+                        .to_string();
+                    Some((path, line, text))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let match_count = value
+        .get("match_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(matches.len() as u64) as usize;
+    Some((matches, match_count, query))
+}
+
+fn fs_search_grep_text_observed_candidate(value: &serde_json::Value) -> Option<String> {
+    let (matches, match_count, query) = fs_search_grep_text_results(value)?;
+    let file_count = value
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or_default();
+    let patterns = value
+        .get("patterns")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut lines = vec![format!(
+        "grep_text query={query} file_count={file_count} match_count={match_count}"
+    )];
+    if !patterns.is_empty() {
+        lines.push(format!("file_patterns={}", patterns.join(", ")));
+    }
+    if matches.is_empty() {
+        lines.push("matches: none".to_string());
+    } else {
+        lines.extend(
+            matches
+                .into_iter()
+                .take(16)
+                .map(|(path, line, text)| format!("match path={path} line={line} text={text}")),
+        );
+    }
+    Some(lines.join("\n"))
 }
 
 fn path_matches_find_name_pattern(path: &str, pattern: &str) -> bool {
@@ -2070,6 +2428,235 @@ fn fs_search_direct_answer_candidate(
     allow_multi_result_list.then_some(matches)
 }
 
+fn normalized_scope_text(value: &str) -> Option<String> {
+    let normalized = value
+        .trim()
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .trim_matches('/')
+        .to_ascii_lowercase();
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn locator_scope_candidates(locator_hint: &str) -> Vec<String> {
+    let locator_hint = locator_hint.trim();
+    if locator_hint.is_empty() {
+        return Vec::new();
+    }
+    let path = Path::new(locator_hint);
+    let scoped_path = if path.extension().is_some() {
+        path.parent().unwrap_or(path)
+    } else {
+        path
+    };
+    let mut candidates = Vec::new();
+    if let Some(scope) = normalized_scope_text(&scoped_path.to_string_lossy()) {
+        candidates.push(scope);
+    }
+    if let Some(name) = scoped_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .and_then(normalized_scope_text)
+    {
+        candidates.push(name);
+    }
+    candidates.sort();
+    candidates.dedup();
+    candidates
+}
+
+fn path_is_inside_locator_scope(path: &str, locator_hint: &str) -> bool {
+    let Some(path) = normalized_scope_text(path) else {
+        return false;
+    };
+    locator_scope_candidates(locator_hint)
+        .into_iter()
+        .any(|scope| {
+            path == scope
+                || path.starts_with(&format!("{scope}/"))
+                || path.ends_with(&format!("/{scope}"))
+                || path.contains(&format!("/{scope}/"))
+        })
+}
+
+fn pathish_filter_tokens(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let push_token = |raw: &str, tokens: &mut Vec<String>| {
+        let token = raw
+            .trim_matches(|ch: char| ch == '.' || ch == '-' || ch == '_')
+            .to_ascii_lowercase();
+        if token.len() >= 2 && !tokens.iter().any(|seen| seen == &token) {
+            tokens.push(token.clone());
+        }
+        for part in token.split(['.', '-', '_']) {
+            let part = part.trim();
+            if part.len() >= 3 && !tokens.iter().any(|seen| seen == part) {
+                tokens.push(part.to_string());
+            }
+        }
+    };
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+            current.push(ch);
+        } else if !current.is_empty() {
+            push_token(&current, &mut tokens);
+            current.clear();
+        }
+    }
+    if !current.is_empty() {
+        push_token(&current, &mut tokens);
+    }
+    tokens
+}
+
+fn result_extensions(results: &[String]) -> Vec<String> {
+    let mut exts = results
+        .iter()
+        .filter_map(|path| Path::new(path).extension().and_then(|ext| ext.to_str()))
+        .map(|ext| ext.trim_start_matches('.').to_ascii_lowercase())
+        .filter(|ext| !ext.is_empty())
+        .collect::<Vec<_>>();
+    exts.sort();
+    exts.dedup();
+    exts
+}
+
+fn route_intent_extension_hints(route: &crate::RouteResult, results: &[String]) -> Vec<String> {
+    let available_exts = result_extensions(results);
+    if available_exts.is_empty() {
+        return Vec::new();
+    }
+    pathish_filter_tokens(&route.resolved_intent)
+        .into_iter()
+        .filter(|token| available_exts.iter().any(|ext| ext == token))
+        .collect::<Vec<_>>()
+}
+
+fn path_contains_filter_token(path: &str, token: &str) -> bool {
+    let path = path.to_ascii_lowercase();
+    let file_name = Path::new(&path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let stem = Path::new(&path)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    path.contains(token) || file_name.contains(token) || stem.contains(token)
+}
+
+fn semantic_fs_search_score(path: &str, tokens: &[String], ignored_tokens: &[String]) -> usize {
+    tokens
+        .iter()
+        .filter(|token| {
+            token.len() >= 3
+                && !token.chars().all(|ch| ch.is_ascii_digit())
+                && !ignored_tokens.iter().any(|ignored| ignored == *token)
+                && path_contains_filter_token(path, token)
+        })
+        .map(|token| token.len())
+        .sum()
+}
+
+fn fs_search_route_filtered_listing_candidate(
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+    allow_multi_result_list: bool,
+) -> Option<String> {
+    if !matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FilePaths
+            | crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::ScalarPathOnly
+    ) {
+        if route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPath
+            || !route_prefers_plain_fs_search_paths(route)
+        {
+            return None;
+        }
+    }
+    let (mut results, count, pattern) = fs_search_find_name_results(value)?;
+    if count == 0 || results.is_empty() {
+        return None;
+    }
+    if results.len() == 1 {
+        return Some(results[0].clone());
+    }
+
+    let locator_hint = route.output_contract.locator_hint.trim();
+    if !locator_hint.is_empty() {
+        let scoped = results
+            .iter()
+            .filter(|path| path_is_inside_locator_scope(path, locator_hint))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !scoped.is_empty() && scoped.len() < results.len() {
+            results = scoped;
+        }
+    }
+
+    let ext_hints = route_intent_extension_hints(route, &results);
+    if !ext_hints.is_empty() {
+        let ext_filtered = results
+            .iter()
+            .filter(|path| {
+                Path::new(path)
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.trim_start_matches('.').to_ascii_lowercase())
+                    .is_some_and(|ext| ext_hints.iter().any(|hint| hint == &ext))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !ext_filtered.is_empty() {
+            results = ext_filtered;
+        }
+    }
+
+    let mut ignored_tokens = ext_hints;
+    ignored_tokens.extend(pathish_filter_tokens(locator_hint));
+    if let Some(pattern) = normalized_find_name_pattern(pattern.as_deref()) {
+        if locator_hint
+            .is_empty()
+            .then_some(false)
+            .unwrap_or_else(|| path_is_inside_locator_scope(&pattern, locator_hint))
+        {
+            ignored_tokens.extend(pathish_filter_tokens(&pattern));
+        }
+    }
+    ignored_tokens.sort();
+    ignored_tokens.dedup();
+
+    let tokens = pathish_filter_tokens(&route.resolved_intent);
+    let mut scored = results
+        .iter()
+        .cloned()
+        .map(|path| {
+            let score = semantic_fs_search_score(&path, &tokens, &ignored_tokens);
+            (score, path)
+        })
+        .collect::<Vec<_>>();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    let top_score = scored.first().map(|(score, _)| *score).unwrap_or_default();
+    if top_score == 0 {
+        return None;
+    }
+    let mut filtered = scored
+        .into_iter()
+        .filter(|(score, _)| *score == top_score)
+        .map(|(_, path)| path)
+        .collect::<Vec<_>>();
+    filtered.sort();
+    filtered.dedup();
+    if filtered.len() == 1 {
+        return filtered.into_iter().next();
+    }
+    allow_multi_result_list.then(|| filtered.join("\n"))
+}
+
 fn parent_directory_listing_from_paths(paths: &[String]) -> Option<String> {
     let mut dirs = Vec::new();
     for path in paths {
@@ -2241,10 +2828,15 @@ fn structured_scalar_candidate(
                 &[("field_path", field_path)],
             ))
         }
-        "path_batch_facts" => route
-            .is_some_and(route_requests_scalar_path_only)
-            .then(|| system_basic_path_batch_scalar_path_candidate(&value))
-            .flatten(),
+        "path_batch_facts" => {
+            if route.is_some_and(route_requests_scalar_existence) {
+                system_basic_scalar_existence_candidate(state, &value, prefer_english)
+            } else if route.is_some_and(route_requests_scalar_path_only) {
+                system_basic_path_batch_scalar_path_candidate(&value)
+            } else {
+                None
+            }
+        }
         "count_inventory" => count_inventory_direct_answer_candidate(
             state,
             &value,
@@ -2562,6 +3154,27 @@ fn normalize_read_range_excerpt_for_direct_answer(
     Some(lines.join("\n"))
 }
 
+pub(crate) fn tail_read_range_direct_answer_candidate(
+    body: &str,
+    prefer_english: bool,
+) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    if value.get("action").and_then(|v| v.as_str()) != Some("read_range") {
+        return None;
+    }
+    if value.get("mode").and_then(|v| v.as_str()) != Some("tail") {
+        return None;
+    }
+    let requested_n = value.get("requested_n").and_then(|v| v.as_u64())?;
+    if requested_n == 0 || requested_n > 50 {
+        return None;
+    }
+    value
+        .get("excerpt")
+        .and_then(|v| v.as_str())
+        .and_then(|excerpt| normalize_read_range_excerpt_for_direct_answer(excerpt, prefer_english))
+}
+
 fn compare_paths_observed_candidate(body: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     if value.get("action").and_then(|v| v.as_str()) != Some("compare_paths") {
@@ -2810,7 +3423,8 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
         }
         "db_basic" => db_basic_observed_candidate(&value),
         "service_control" => service_control_summary_candidate(&value),
-        "fs_search" => fs_search_direct_answer_candidate(None, &value, None, false, true, false),
+        "fs_search" => fs_search_grep_text_observed_candidate(&value)
+            .or_else(|| fs_search_direct_answer_candidate(None, &value, None, false, true, false)),
         "archive_basic" => archive_basic_observed_candidate(&value),
         "log_analyze" => compact_log_analyze_excerpt(&value),
         "package_manager" => package_manager_summary_candidate(
@@ -2913,6 +3527,9 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
         if let Some(answer) = count_answer_from_latest_listing(route, loop_state) {
             return Some(answer);
         }
+        if let Some(answer) = count_answer_from_latest_fs_search(route, loop_state) {
+            return Some(answer);
+        }
     }
     let locator_hint = route.map(|route| route.output_contract.locator_hint.as_str());
     extract_direct_scalar_from_generic_output_with_locator_hint_impl(
@@ -2969,6 +3586,9 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
             return Some(answer);
         }
         if let Some(answer) = count_answer_from_latest_listing(route, loop_state) {
+            return Some(answer);
+        }
+        if let Some(answer) = count_answer_from_latest_fs_search(route, loop_state) {
             return Some(answer);
         }
     }
@@ -3120,7 +3740,18 @@ fn extract_direct_answer_from_generic_output_impl(
                     .ok()
                     .and_then(|value| {
                         route
-                            .and_then(|route| fs_search_semantic_listing_candidate(route, &value))
+                            .and_then(|route| {
+                                fs_search_route_filtered_listing_candidate(
+                                    route,
+                                    &value,
+                                    allow_raw_listing_direct_answer,
+                                )
+                            })
+                            .or_else(|| {
+                                route.and_then(|route| {
+                                    fs_search_semantic_listing_candidate(route, &value)
+                                })
+                            })
                             .or_else(|| {
                                 fs_search_direct_answer_candidate(
                                     state,
@@ -3133,6 +3764,9 @@ fn extract_direct_answer_from_generic_output_impl(
                             })
                     }),
                 "git_basic" => None,
+                "doc_parse" => {
+                    content_excerpt_summary_direct_answer_candidate(route, &observed_output.body)
+                }
                 "db_basic" => route.and_then(|route| {
                     db_basic_tables_summary_candidate(
                         route,
@@ -3157,7 +3791,11 @@ fn extract_direct_answer_from_generic_output_impl(
                         })?;
                     let action = value.get("action").and_then(|v| v.as_str());
                     if action == Some("read_range")
-                        && route_allows_read_range_direct_passthrough(route, response_shape)
+                        && (route_allows_tail_read_range_direct_passthrough(
+                            route,
+                            response_shape,
+                            &value,
+                        ) || route_allows_read_range_direct_passthrough(route, response_shape))
                     {
                         value
                             .get("excerpt")
@@ -3208,6 +3846,14 @@ fn extract_direct_answer_from_generic_output_impl(
                         })
                     {
                         system_basic_path_batch_scalar_path_candidate(&value)
+                    } else if action == Some("path_batch_facts")
+                        && route.is_some_and(route_requests_scalar_existence)
+                    {
+                        system_basic_scalar_existence_candidate(
+                            state,
+                            &value,
+                            prefers_english_presence_answer,
+                        )
                     } else if !existence_with_path_should_use_llm_synthesis
                         && route.is_some_and(|route| {
                             route.output_contract.semantic_kind
@@ -3255,6 +3901,40 @@ fn extract_direct_answer_from_generic_output_impl(
         return None;
     }
     Some(answer)
+}
+
+fn route_allows_tail_read_range_direct_passthrough(
+    route: Option<&crate::RouteResult>,
+    response_shape: Option<crate::OutputResponseShape>,
+    value: &serde_json::Value,
+) -> bool {
+    if matches!(
+        response_shape,
+        Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar)
+    ) {
+        return false;
+    }
+    let Some(route) = route else {
+        return false;
+    };
+    if route.output_contract.delivery_required {
+        return false;
+    }
+    if value.get("mode").and_then(|v| v.as_str()) != Some("tail") {
+        return false;
+    }
+    let Some(requested_n) = value.get("requested_n").and_then(|v| v.as_u64()) else {
+        return false;
+    };
+    if requested_n == 0 || requested_n > 50 {
+        return false;
+    }
+    route.output_contract.requires_content_evidence
+        && matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ContentExcerptSummary
+                | crate::OutputSemanticKind::RawCommandOutput
+        )
 }
 
 fn route_allows_read_range_direct_passthrough(
@@ -3718,6 +4398,9 @@ pub(crate) async fn synthesize_answer_from_observed_output(
             })
         })?;
     let mut answer = parsed.answer.trim().to_string();
+    if let Some(unwrapped) = extract_answer_from_finalizer_envelope_text(&answer) {
+        answer = unwrapped;
+    }
     if let Some(replacement) = replace_internal_missing_sentinel_with_structured_observation(
         &answer,
         state,
@@ -3730,6 +4413,22 @@ pub(crate) async fn synthesize_answer_from_observed_output(
             crate::truncate_for_log(&replacement)
         );
         answer = replacement;
+    }
+    if let Some(diagnostic) = scalar_count_diagnostic_line_for_answer(
+        &answer,
+        agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
+        loop_state,
+    ) {
+        tracing::info!(
+            "observed_answer_fallback_replace_scalar_count_with_diagnostic task_id={} diagnostic={}",
+            task.task_id,
+            crate::truncate_for_log(&diagnostic)
+        );
+        answer = if request_language_hint.starts_with("en") {
+            format!("Unable to produce a reliable count: {diagnostic}")
+        } else {
+            format!("无法可靠统计：{diagnostic}")
+        };
     }
     let direct_passthrough_disallowed = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
@@ -3794,18 +4493,22 @@ pub(crate) fn normalized_observed_listing(observed: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::super::LoopState;
     use super::{
         answer_is_direct_observation_passthrough, cross_turn_observed_output_entries,
         extract_direct_answer_from_generic_output, extract_direct_scalar_from_generic_output,
         extract_direct_scalar_from_generic_output_i18n,
         extract_direct_scalar_from_generic_output_with_locator_hint,
-        has_observed_answer_candidates, normalized_observed_listing, observed_contract_json,
-        observed_output_entries, observed_request_language_hint, observed_response_style_hint,
+        has_observed_answer_candidates, normalize_system_basic_match_path,
+        normalized_observed_listing, observed_contract_json, observed_output_entries,
+        observed_request_language_hint, observed_response_style_hint,
         recent_generated_output_from_user_request,
         replace_internal_missing_sentinel_with_structured_observation,
         route_observation_facts_entry, route_requires_synthesized_delivery,
-        structured_observed_body, AgentRunContext, OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
+        scalar_count_diagnostic_line_for_answer, structured_observed_body, AgentRunContext,
+        OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
     };
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
@@ -3906,6 +4609,27 @@ mod tests {
                 self_extension: crate::SelfExtensionContract::default(),
             },
         }
+    }
+
+    #[test]
+    fn scalar_count_answer_detects_non_numeric_diagnostic_line() {
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "configs/config_copy".to_string();
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "run_cmd",
+            "0\n\nfind: /workspace/configs/config_copy: No such file or directory\n",
+        ));
+
+        let diagnostic = scalar_count_diagnostic_line_for_answer("0", Some(&route), &loop_state);
+
+        assert_eq!(
+            diagnostic.as_deref(),
+            Some("find: /workspace/configs/config_copy: No such file or directory")
+        );
     }
 
     fn reuse_active_context(user_request: &str) -> AgentRunContext {
@@ -4511,6 +5235,61 @@ version.workspace = true
     }
 
     #[test]
+    fn fs_search_file_paths_contract_filters_broad_pattern_with_route_semantics() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_search",
+            r#"{"action":"find_name","pattern":"plan","count":8,"results":["crates/clawd/src/agent_engine/planning.rs","docs/planning_deterministic_guardrails_audit.md","plan/agent_intelligence_architecture_plan_20260511_已完成.md","plan/builtin_skill_capability_governance_plan_20260510.md","plan/codex_style_agent_architecture_refactor_plan_20260511.md","plan/execution_intent_routing_repair_plan_20260509_已完成.md","plan/llm_first_agent_convergence_plan_20260511.md","prompts/layers/overlays/plan_repair_prompt.md"],"root":""}"#,
+        ));
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route.routed_mode = crate::RoutedMode::Act;
+        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::Act);
+        route.resolved_intent = "Read plan/definitely_missing_20260511.md; if missing, search the plan directory for md files related to execution_intent and return only found paths.".to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/home/guagua/rustclaw/plan".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("plan/execution_intent_routing_repair_plan_20260509_已完成.md")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_count_uses_latest_fs_search_count() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"count_inventory","counts":{"total":107,"files":101,"dirs":6},"path":"scripts/nl_tests/cases"}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step(
+            "step_2",
+            "fs_search",
+            r#"{"action":"find_name","count":10,"patterns":["clarify"],"results":["a.txt","b.txt"],"root":"scripts/nl_tests/cases"}"#,
+        ));
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("10")
+        );
+    }
+
+    #[test]
     fn fs_search_find_ext_direct_answer_returns_paths_list() {
         let value = serde_json::json!({
             "action": "find_ext",
@@ -4523,6 +5302,18 @@ version.workspace = true
                 .as_deref(),
             Some("Cargo.toml\nconfigs/config.toml\nconfigs/git_basic.toml")
         );
+    }
+
+    #[test]
+    fn fs_search_grep_text_observed_body_keeps_line_evidence() {
+        let body = r#"{"action":"grep_text","query":"run_cmd","patterns":["prompt_utils.rs"],"count":1,"match_count":2,"matches":[{"path":"crates/clawd/src/prompt_utils.rs","line":1275,"text":"if step_type == \"run_cmd\" {"},{"path":"crates/clawd/src/prompt_utils.rs","line":1276,"text":"return normalize_run_cmd_call(obj, obj.get(\"args\").and_then(|v| v.as_object()));"}]}"#;
+        let observed = super::structured_observed_body("fs_search", body)
+            .expect("grep_text should compact observed evidence");
+
+        assert!(observed.contains("grep_text query=run_cmd"));
+        assert!(observed.contains("file_patterns=prompt_utils.rs"));
+        assert!(observed.contains("match path=crates/clawd/src/prompt_utils.rs line=1275"));
+        assert!(observed.contains("step_type == \"run_cmd\""));
     }
 
     #[test]
@@ -4782,7 +5573,7 @@ version.workspace = true
     fn observed_request_language_hint_follows_current_user_text() {
         assert_eq!(
             observed_request_language_hint("读一下 README 开头，三句话总结"),
-            "mixed"
+            "zh-CN"
         );
         assert_eq!(
             observed_request_language_hint("Summarize the README in one sentence."),
@@ -4836,6 +5627,14 @@ version.workspace = true
             observed_response_style_hint(Some(&agent_run_context)).contains("exactly 3 sentences")
         );
         route_result.output_contract.exact_sentence_count = None;
+
+        route_result.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+        route_result.output_contract.response_shape = OutputResponseShape::Strict;
+        route_result.output_contract.exact_sentence_count = Some(1);
+        agent_run_context.route_result = Some(route_result.clone());
+        assert!(observed_response_style_hint(Some(&agent_run_context)).contains("key=value"));
+        route_result.output_contract.exact_sentence_count = None;
+        route_result.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
 
         route_result.output_contract.response_shape = OutputResponseShape::Scalar;
         agent_run_context.route_result = Some(route_result.clone());
@@ -5074,6 +5873,55 @@ version.workspace = true
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
             None
+        );
+    }
+
+    #[test]
+    fn direct_answer_summarizes_doc_parse_content_excerpt_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "doc_parse",
+            r##"{"text":"# RustClaw\n\n<img src=\"./RustClaw.png\" width=\"420\" />\n\nRustClaw is a local Rust agent runtime centered on clawd and designed for multi-channel task execution.\n\n## Overview\nMore text."}"##,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::ChatAct,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            resolved_intent: "读取 README.md 并总结一行".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "README.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some(
+                "RustClaw is a local Rust agent runtime centered on clawd and designed for multi-channel task execution."
+            )
         );
     }
 
@@ -6185,6 +7033,79 @@ version.workspace = true
     }
 
     #[test]
+    fn direct_answer_formats_scalar_existence_without_path_from_system_basic_path_batch_facts() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"configs/config.toml","resolved_path":"/tmp/repo/configs/config.toml","size_bytes":1190},"path":"/tmp/repo/configs/config.toml"}],"include_missing":true}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "检查 configs/config.toml 是否存在，只回答有或没有".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ExistenceWithPath,
+                locator_hint: "configs/config.toml".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("有")
+        );
+    }
+
+    #[test]
+    fn direct_answer_formats_path_batch_facts_requested_size() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"path_batch_facts","count":1,"fields":["exists","size"],"facts":[{"exists":true,"fact":{"kind":"file","path":"data/rustclaw.db","resolved_path":"/tmp/repo/data/rustclaw.db","size_bytes":55226368},"path":"/tmp/repo/data/rustclaw.db"}],"include_missing":true}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route_result.routed_mode = crate::RoutedMode::Act;
+        route_result.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::Act);
+        route_result.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint = "data/rustclaw.db".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("yes, path: /tmp/repo/data/rustclaw.db, size: 55226368 bytes")
+        );
+    }
+
+    #[test]
     fn direct_answer_formats_missing_path_batch_facts_with_reason() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -7209,6 +8130,35 @@ version.workspace = true
     }
 
     #[test]
+    fn system_basic_find_path_normalization_prefers_existing_relative_path() {
+        let rel_dir = Path::new("target").join(format!(
+            "clawd-observed-output-find-path-{}-{}",
+            std::process::id(),
+            crate::now_ts_u64()
+        ));
+        std::fs::create_dir_all(&rel_dir).unwrap();
+        let file_path = rel_dir.join("Report.MD");
+        std::fs::write(&file_path, "hello").unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let resolved_root = cwd.join(&rel_dir).to_string_lossy().to_string();
+        let expected = file_path
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        assert_eq!(
+            normalize_system_basic_match_path(
+                Some(&resolved_root),
+                Some(file_path.to_string_lossy().as_ref())
+            )
+            .as_deref(),
+            Some(expected.as_str())
+        );
+        let _ = std::fs::remove_dir_all(rel_dir);
+    }
+
+    #[test]
     fn direct_scalar_path_only_prefers_resolved_path_from_path_batch_facts() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -7776,6 +8726,47 @@ version.workspace = true
                 "inventory_dir path=/tmp/repo/prompts/schemas sort_by=size_desc total=2 files=2 dirs=0 hidden=0\nentry name=intent_normalizer.schema.json kind=file size_bytes=9402 modified_ts=1777513843\nentry name=plan_result.schema.json kind=file size_bytes=4187 modified_ts=1777526917"
             )
         );
+    }
+
+    #[test]
+    fn structured_observed_body_compacts_large_inventory_dir_by_kind() {
+        let entries = (0..9)
+            .map(|idx| {
+                serde_json::json!({
+                    "hidden": false,
+                    "kind": "dir",
+                    "modified_ts": 1777513843,
+                    "name": format!("dir_{idx}"),
+                    "path": format!("dir_{idx}"),
+                    "size_bytes": 0
+                })
+            })
+            .chain((0..9).map(|idx| {
+                serde_json::json!({
+                    "hidden": false,
+                    "kind": "file",
+                    "modified_ts": 1777513843,
+                    "name": format!("file_{idx}.md"),
+                    "path": format!("file_{idx}.md"),
+                    "size_bytes": 42
+                })
+            }))
+            .collect::<Vec<_>>();
+        let body = serde_json::json!({
+            "action": "inventory_dir",
+            "counts": {"dirs": 9, "files": 9, "hidden": 0, "total": 18},
+            "entries": entries,
+            "path": ".",
+            "resolved_path": "/tmp/repo",
+            "sort_by": "name"
+        })
+        .to_string();
+
+        let observed = structured_observed_body("system_basic", &body).expect("observed body");
+        assert!(observed.contains("dir_names=dir_0,dir_1,dir_2"));
+        assert!(observed.contains("file_names=file_0.md,file_1.md,file_2.md"));
+        assert!(!observed.contains("modified_ts=1777513843"));
+        assert!(!observed.contains("size_bytes=42"));
     }
 
     #[test]
@@ -9217,6 +10208,15 @@ version.workspace = true
         assert_eq!(
             super::strip_bare_json_language_prefix("json response follows"),
             "json response follows"
+        );
+    }
+
+    #[test]
+    fn observed_answer_parser_unwraps_nested_finalizer_envelope() {
+        let raw = "json\n{\"answer\":\"# RustClaw\\n正文\",\"qualified\":true,\"needs_clarify\":false,\"is_meta_instruction\":false,\"publishable\":true,\"confidence\":0.85,\"reason\":\"grounded\"}";
+        assert_eq!(
+            super::extract_answer_from_finalizer_envelope_text(raw).as_deref(),
+            Some("# RustClaw\n正文")
         );
     }
 

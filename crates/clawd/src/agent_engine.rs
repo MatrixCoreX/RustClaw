@@ -5,6 +5,7 @@ use std::path::Path;
 use tracing::{debug, info, warn};
 
 mod arg_resolver;
+mod attempt_ledger;
 mod dispatch_support;
 mod execution_loop;
 pub(crate) mod loop_control;
@@ -60,7 +61,7 @@ fn ensure_task_running(state: &AppState, task: &ClaimedTask) -> Result<(), Strin
 /// （execution-enabled）∩（agent allowed_skills）。
 /// 每个可见技能需在 registry 中提供 skill prompt 的逻辑路径配置，才会注入 playbook。
 fn build_skill_playbooks_text(state: &AppState, task: &ClaimedTask) -> String {
-    let enabled = state.planner_visible_skills_for_task(task);
+    let enabled = state.planner_available_skills_for_task(task);
     let enabled_count = enabled.len();
     let agent_id = state.task_agent_id(task);
     info!(
@@ -95,7 +96,24 @@ fn build_skill_playbooks_text(state: &AppState, task: &ClaimedTask) -> String {
         if trimmed.is_empty() {
             continue;
         }
-        sections.push(format!("### {skill}\n{trimmed}"));
+        let metadata = state
+            .skill_manifest(skill)
+            .map(|manifest| {
+                let mut parts = vec![format!(
+                    "planner_kind: {}",
+                    manifest.planner_kind.as_token()
+                )];
+                parts.extend(crate::skill_availability::availability_metadata_parts(
+                    &crate::skill_availability::evaluate_manifest_availability(&manifest),
+                ));
+                format!("Registry metadata: {}", parts.join("; "))
+            })
+            .unwrap_or_default();
+        if metadata.is_empty() {
+            sections.push(format!("### {skill}\n{trimmed}"));
+        } else {
+            sections.push(format!("### {skill}\n{trimmed}\n{metadata}"));
+        }
     }
 
     if !skipped_no_prompt.is_empty() {
@@ -141,7 +159,7 @@ fn first_non_heading_line(text: &str) -> Option<String> {
 
 /// 首轮路由提示：给 LLM 一份“技能速览”，降低误判成纯 chat 的概率。
 fn build_skill_quick_index_text(state: &AppState, task: &ClaimedTask) -> String {
-    let enabled = state.planner_visible_skills_for_task(task);
+    let enabled = state.planner_available_skills_for_task(task);
     if enabled.is_empty() {
         return "- (no enabled skills)".to_string();
     }
@@ -157,7 +175,14 @@ fn build_skill_quick_index_text(state: &AppState, task: &ClaimedTask) -> String 
             } else {
                 "skill enabled but registry prompt_file logical path missing".to_string()
             };
-        lines.push(format!("- {skill}: {summary}"));
+        if let Some(manifest) = state.skill_manifest(skill) {
+            lines.push(format!(
+                "- {skill}: {summary}; planner_kind: {}",
+                manifest.planner_kind.as_token()
+            ));
+        } else {
+            lines.push(format!("- {skill}: {summary}"));
+        }
     }
     lines.join("\n")
 }
@@ -202,28 +227,43 @@ fn build_single_plan_prompt(
 
 fn build_turn_analysis_prompt_block(
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    route_result: Option<&crate::RouteResult>,
 ) -> String {
-    let Some(analysis) = turn_analysis else {
-        return "<none>".to_string();
-    };
-    let turn_type = analysis
-        .turn_type
-        .map(crate::intent_router::TurnType::as_str)
-        .unwrap_or("none");
-    let target_task_policy = analysis
-        .target_task_policy
-        .map(crate::intent_router::TargetTaskPolicy::as_str)
-        .unwrap_or("none");
-    let state_patch = analysis
-        .state_patch
-        .as_ref()
-        .and_then(|value| serde_json::to_string(value).ok())
-        .unwrap_or_else(|| "null".to_string());
-    format!(
-        "- turn_type={turn_type}\n- target_task_policy={target_task_policy}\n- should_interrupt_active_run={}\n- attachment_processing_required={}\n- state_patch={state_patch}",
-        analysis.should_interrupt_active_run,
-        analysis.attachment_processing_required,
-    )
+    let mut lines = Vec::new();
+    if let Some(analysis) = turn_analysis {
+        let turn_type = analysis
+            .turn_type
+            .map(crate::intent_router::TurnType::as_str)
+            .unwrap_or("none");
+        let target_task_policy = analysis
+            .target_task_policy
+            .map(crate::intent_router::TargetTaskPolicy::as_str)
+            .unwrap_or("none");
+        let state_patch = analysis
+            .state_patch
+            .as_ref()
+            .and_then(|value| serde_json::to_string(value).ok())
+            .unwrap_or_else(|| "null".to_string());
+        lines.push(format!("- turn_type={turn_type}"));
+        lines.push(format!("- target_task_policy={target_task_policy}"));
+        lines.push(format!(
+            "- should_interrupt_active_run={}",
+            analysis.should_interrupt_active_run
+        ));
+        lines.push(format!(
+            "- attachment_processing_required={}",
+            analysis.attachment_processing_required
+        ));
+        lines.push(format!("- state_patch={state_patch}"));
+    }
+    if let Some(route) = route_result {
+        lines.push(crate::TaskContract::from_route_result(route).compact_prompt_line());
+    }
+    if lines.is_empty() {
+        "<none>".to_string()
+    } else {
+        lines.join("\n")
+    }
 }
 
 /// Progress: short hints only (e.g. "Step 1/3", "Skill X completed"). For "in progress" UI. Not final content.
@@ -232,7 +272,7 @@ fn build_turn_analysis_prompt_block(
 // Phase 3.3 Stage 2.3：LoopState 字段升 pub(crate)，因 finalize/loop_reply.rs 物理搬到了
 // 不同模块（`crate::finalize`），无法再通过 `pub(super)` 隐式继承；继续保持仅 `pub(crate)`，
 // 不暴露给 crate 外部。改字段时请关注 crate::finalize::* 与 crate::agent_engine::* 内的写入点。
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct LoopState {
     pub(crate) round_no: usize,
     pub(crate) max_rounds: usize,
@@ -244,6 +284,7 @@ pub(crate) struct LoopState {
     pub(crate) delivery_messages: Vec<String>,
     pub(crate) subtask_results: Vec<String>,
     pub(crate) history_compact: Vec<String>,
+    pub(crate) attempt_ledger_entries: Vec<self::attempt_ledger::AttemptLedgerEntry>,
     pub(crate) last_actions_fingerprint: Option<String>,
     pub(crate) repeat_action_counts: HashMap<String, usize>,
     pub(crate) successful_action_fingerprints: HashMap<String, usize>,
@@ -260,6 +301,9 @@ pub(crate) struct LoopState {
     pub(crate) last_user_visible_respond: Option<String>,
     /// Last publishable runtime synthesis output. Prefer this over generic finalization when no explicit respond was emitted.
     pub(crate) last_publishable_synthesis_output: Option<String>,
+    /// A tool/skill returned a structured user-input request. Finalize as clarify and do not
+    /// treat the answer as incomplete execution output.
+    pub(crate) pending_user_input_required: bool,
     pub(crate) executed_step_results: Vec<crate::executor::StepExecutionResult>,
     pub(crate) round_traces: Vec<crate::task_journal::TaskJournalRoundTrace>,
     pub(crate) execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,

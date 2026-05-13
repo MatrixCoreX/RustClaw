@@ -32,6 +32,9 @@ __TOOL_SPEC__
 Skill playbooks:
 __SKILL_PLAYBOOKS__
 
+Attempt ledger:
+__ATTEMPT_LEDGER__
+
 Malformed planner output to repair:
 __RAW_PLAN__
 
@@ -69,6 +72,8 @@ Repair rules:
 - If the execution recipe says `target_scope=greenfield`, the repaired plan must create the minimal new file, directory, or scaffold needed before validation.
 - If the repair trigger is `greenfield_requires_artifact_creation`, a validate-only or readback-only plan is still invalid. Add a concrete creation step first.
 - If the raw planner output is plain prose, malformed JSON, a partial tool sketch, or mixed content, convert it into the smallest valid `steps` array that correctly handles the user request.
+- If `Attempt ledger` is not empty, use it as the list of already attempted methods. A repaired plan after failure must differ materially from a failed prior attempt: change arguments/target, choose a different available tool/skill, add bounded discovery, fix environment/dependency/config state, add validation after repair, or ask one clarification for a missing user-owned parameter. Do not repeat the same tool/skill with the same target/arguments unless the ledger indicates a transient timeout/network/provider failure.
+- Treat registry metadata in the tool spec/playbooks (`retryable`, `requires_confirmation`, `capabilities`, and `validation_actions`) as capability policy. Do not repair a stable non-retryable blocker into another equivalent attempt. Prefer clarification, a grounded failure, or a materially different safe capability only when the user goal still has a valid fallback.
 - Treat the runtime environment block above as authoritative when repairing command or path-related steps. Keep command syntax, path style, env-var syntax, shell builtins, and executable choices compatible with that OS/shell.
 - If an available skill already covers the needed capability safely and directly, repair toward that dedicated skill instead of `run_cmd`. Use `run_cmd` mainly when shell semantics are the task or no existing skill in the contract can perform the capability.
 - If the repair reason is `preferred_skill_required_for_semantic_route`, the route has a structured semantic contract that matches a registry skill marked `preferred_over_run_cmd`. Use the registry skill hints in the tool spec/playbooks to choose that dedicated enabled skill and its documented action instead of repairing back to `run_cmd`.
@@ -83,6 +88,8 @@ Repair rules:
 - When the request semantically asks for exact raw file lines, a bounded line slice, or a preview without document understanding, repair toward `system_basic` with `action=\"read_range\"` instead of `run_cmd head/tail`, unless the shell behavior itself is the task.
 - When the request asks to parse, extract key points, summarize sections, judge excerpt meaning, or otherwise understand a supported local document, repair toward the most specific enabled document/content skill whose interface covers that task instead of generic line-range reading.
 - For path-scoped lookup requests where the searched token is being used like a file or directory name, repair toward `fs_search.find_name`. Repair toward `fs_search.grep_text` only when the user clearly asks to search file contents/text.
+- If the repair trigger is `content_evidence_requires_content_observation`, the malformed plan only proved that a file/path exists, but the route needs evidence from file contents. Repair by adding a bounded content observation such as `fs_search.grep_text`, `system_basic.read_range`, `read_file` for a small known file, or an equivalent safe command, then synthesize/respond from that content evidence.
+- When a known target file needs a content-pattern check, repair away from broad whole-file `read_file` if that would be too large or already produced truncated evidence. Use scoped content search (`fs_search.grep_text` with a bounded root/path when supported), a bounded range read around known lines, or a small command that returns matching lines; then preserve the requested boolean/scalar final shape.
 - For ordinal directory-entry follow-ups that already bind one concrete entry under a known parent directory, repair toward that selected concrete entry path directly. Do not repair into `list_dir` plus `read_range.path={{last_output}}`, and do not use the multiline listing body itself as a file path.
 - If recent assistant context already exposes ordered entries and the current follow-up picks one by ordinal position, repair toward that exact selected entry instead of re-listing the parent directory.
 - For requests to explain what the current repository / project / workspace is for, repair toward grounded project-overview evidence from the root `README`, stable docs, or top-level directory listing plus a final explanation. Do not repair those requests into git branch/status only.
@@ -90,6 +97,7 @@ Repair rules:
 - When the request requires retrieval plus narration, include both parts in `steps`. Do not stop at retrieval alone.
 - When the malformed plan reads whole JSON/TOML/YAML files but the user asked for specific field/key/dot-path values, repair to `system_basic.extract_field` or `extract_fields` observations instead of broad `read_file`. For multiple target files, use one compact field-extraction observation per file, then synthesize/respond with the requested scalar/list/comparison shape. `extract_field(s)` requires one `path`; never repair into `paths`/`targets` arrays for these actions.
 - File metadata is not a structured document field. When repairing size, mtime, path-kind, or content-equality comparisons over explicit files, use `system_basic.compare_paths` for two paths or `system_basic.path_batch_facts` for a path list, then synthesize/respond from that metadata.
+- If a plan already observed `path_batch_facts`/`compare_paths` and the user only asked for metadata such as existence, size, kind, modified time, or comparison, do not repair by adding `read_file`/`read_range`; repair the final answer to use the observed metadata fields.
 - For retrieval-plus-narration repairs, prefer a terminal `respond` with the grounded answer; do not add a trailing rewrite-only skill call.
 - When the repaired plan still needs runtime-owned wording based on observed execution evidence, prefer `... -> {"type":"synthesize_answer","evidence_refs":[...]} -> {"type":"respond","content":"{{last_output}}"}` instead of planner-authored free-form rewrite text.
 - If the request is content-evidence based and the repaired bounded observation steps already provide the grounded evidence needed for the final summary/explanation, an observation-only repaired plan is acceptable when the runtime observed-output finalizer can compose the final user-facing answer. If the repaired plan must control final shape or wording, use `synthesize_answer -> respond` instead. Avoid a trailing rewrite step or templated `respond` that merely echoes the same evidence.

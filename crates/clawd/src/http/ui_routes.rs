@@ -42,7 +42,10 @@ use claw_core::types::{
     StartFeishuBindSessionRequest, TelegramBotRuntimeStatus, UiKeyVerifyRequest,
     UpsertExchangeCredentialRequest,
 };
-use claw_core::{prompt_layers, skill_registry::SkillKind};
+use claw_core::{
+    prompt_layers,
+    skill_registry::{PlannerCapabilityKind, SkillKind},
+};
 
 const TELEGRAM_BOT_HEARTBEAT_STALE_SECONDS: i64 = 45;
 const FEISHU_BIND_SESSION_DEFAULT_TTL_SECONDS: u64 = 600;
@@ -8208,6 +8211,28 @@ fn collect_skill_switches(value: &toml::Value, state: &AppState) -> BTreeMap<Str
     out
 }
 
+fn registry_tool_capability_names(state: &AppState) -> Vec<String> {
+    let mut out = state
+        .get_skills_registry()
+        .as_ref()
+        .map(|registry| {
+            registry
+                .all_names()
+                .into_iter()
+                .filter(|name| {
+                    !hide_skill_in_ui(state, name)
+                        && registry
+                            .planner_kind(name)
+                            .map(|kind| kind == PlannerCapabilityKind::Tool)
+                            .unwrap_or(false)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    out.sort_unstable();
+    out
+}
+
 fn compute_effective_enabled(
     baseline: &[String],
     switches: &BTreeMap<String, bool>,
@@ -8354,6 +8379,17 @@ async fn get_skills_config(
         .filter(|s| !hide_skill_in_ui(&state, s))
         .map(|s| s.to_string())
         .collect();
+    let tool_skill_names = registry_tool_capability_names(&state);
+    let locked_skill_names = {
+        let mut set = BTreeSet::new();
+        for name in &core_skill_names {
+            set.insert(name.clone());
+        }
+        for name in &tool_skill_names {
+            set.insert(name.clone());
+        }
+        set.into_iter().collect::<Vec<_>>()
+    };
     let external_skill_names = state
         .get_skills_registry()
         .as_ref()
@@ -8382,6 +8418,8 @@ async fn get_skills_config(
                 "managed_skills": managed,
                 "base_skill_names": base_skill_names,
                 "core_skill_names": core_skill_names,
+                "tool_skill_names": tool_skill_names,
+                "locked_skill_names": locked_skill_names,
                 "external_skill_names": external_skill_names,
                 "effective_enabled_skills_preview": effective,
                 "runtime_enabled_skills": runtime_visible,
@@ -8793,6 +8831,9 @@ async fn update_skills_config(
     };
     let baseline = collect_skills_baseline(&parsed, &state);
     let core_skills = claw_core::config::core_skills_always_enabled();
+    let tool_skill_names = registry_tool_capability_names(&state)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     let mut switches = BTreeMap::new();
     for (k, v) in req.skill_switches {
         let skill = state.resolve_canonical_skill_name(k.trim());
@@ -8800,7 +8841,8 @@ async fn update_skills_config(
             continue;
         }
         let is_core = core_skills.iter().any(|s| *s == skill);
-        switches.insert(skill, if is_core { true } else { v });
+        let is_tool = tool_skill_names.contains(&skill);
+        switches.insert(skill, if is_core || is_tool { true } else { v });
     }
     let rendered = render_switches_inline_table(&switches);
     let updated = upsert_skill_switches_line(&raw, &rendered);
