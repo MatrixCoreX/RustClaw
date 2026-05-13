@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde_json::{json, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +117,23 @@ pub(crate) struct TaskJournalFinalizerSummary {
     pub(crate) evidence_quotes_count: usize,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TaskJournalAnswerVerifierSummary {
+    pub(crate) pass: bool,
+    pub(crate) missing_evidence_fields: Vec<String>,
+    pub(crate) answer_incomplete_reason: String,
+    pub(crate) should_retry: bool,
+    pub(crate) retry_instruction: String,
+    pub(crate) confidence: f64,
+}
+
+impl TaskJournalAnswerVerifierSummary {
+    pub(crate) fn high_confidence_retry_gap(&self) -> bool {
+        self.confidence >= 0.55 && !self.pass
+    }
+}
+
 fn verify_summary_json(verify: &TaskJournalVerifySummary) -> Value {
     json!({
         "approved": verify.approved,
@@ -157,6 +176,17 @@ fn finalizer_summary_json(summary: &TaskJournalFinalizerSummary) -> Value {
         "confidence": summary.confidence,
         "used_evidence_ids_count": summary.used_evidence_ids_count,
         "evidence_quotes_count": summary.evidence_quotes_count,
+    })
+}
+
+fn answer_verifier_summary_json(summary: &TaskJournalAnswerVerifierSummary) -> Value {
+    json!({
+        "pass": summary.pass,
+        "missing_evidence_fields": summary.missing_evidence_fields,
+        "answer_incomplete_reason": crate::truncate_for_log(&summary.answer_incomplete_reason),
+        "should_retry": summary.should_retry,
+        "retry_instruction": crate::truncate_for_log(&summary.retry_instruction),
+        "confidence": summary.confidence,
     })
 }
 
@@ -217,10 +247,123 @@ fn turn_analysis_json(analysis: &crate::intent_router::TurnAnalysis) -> Value {
     })
 }
 
-fn step_trace_json(step: &TaskJournalStepTrace) -> Value {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RequestedPlanCapability {
+    action_type: String,
+    capability: String,
+}
+
+fn raw_plan_steps(raw_plan_text: &str) -> Vec<Value> {
+    let Some(value) =
+        crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<Value>(raw_plan_text)
+    else {
+        return Vec::new();
+    };
+    if let Some(steps) = value.get("steps").and_then(Value::as_array) {
+        return steps.clone();
+    }
+    value.as_array().cloned().unwrap_or_default()
+}
+
+fn string_field<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn requested_capability_from_raw_step(step: &Value) -> Option<RequestedPlanCapability> {
+    let mut action_type = string_field(step, &["type", "action_type", "action"])?;
+    let capability = match action_type {
+        "call_tool" => string_field(step, &["tool", "skill", "name"]),
+        "call_skill" => string_field(step, &["skill", "tool", "name"]),
+        "respond" | "synthesize_answer" | "think" => Some(action_type),
+        _ => {
+            if let Some(tool) = string_field(step, &["tool"]) {
+                action_type = "call_tool";
+                Some(tool)
+            } else if let Some(skill) = string_field(step, &["skill"]) {
+                action_type = "call_skill";
+                Some(skill)
+            } else {
+                Some(action_type)
+            }
+        }
+    }?;
+    Some(RequestedPlanCapability {
+        action_type: action_type.to_string(),
+        capability: capability.to_string(),
+    })
+}
+
+fn requested_capabilities_for_plan(plan: &crate::PlanResult) -> Vec<RequestedPlanCapability> {
+    let raw_steps = raw_plan_steps(&plan.raw_plan_text);
+    plan.steps
+        .iter()
+        .enumerate()
+        .map(|(idx, normalized_step)| {
+            raw_steps
+                .get(idx)
+                .and_then(requested_capability_from_raw_step)
+                .unwrap_or_else(|| RequestedPlanCapability {
+                    action_type: normalized_step.action_type.clone(),
+                    capability: normalized_step.skill.clone(),
+                })
+        })
+        .collect()
+}
+
+fn requested_capability_queues(
+    journal: &TaskJournal,
+) -> BTreeMap<String, Vec<RequestedPlanCapability>> {
+    let mut requested_by_step_id: BTreeMap<String, Vec<RequestedPlanCapability>> = BTreeMap::new();
+    for round in &journal.rounds {
+        if let Some(plan) = round.plan_result.as_ref() {
+            let requested = requested_capabilities_for_plan(plan);
+            for (step, requested) in plan.steps.iter().zip(requested.into_iter()) {
+                requested_by_step_id
+                    .entry(step.step_id.clone())
+                    .or_default()
+                    .push(requested);
+            }
+        }
+    }
+    if requested_by_step_id.is_empty() {
+        if let Some(plan) = journal.plan_result.as_ref() {
+            let requested = requested_capabilities_for_plan(plan);
+            for (step, requested) in plan.steps.iter().zip(requested.into_iter()) {
+                requested_by_step_id
+                    .entry(step.step_id.clone())
+                    .or_default()
+                    .push(requested);
+            }
+        }
+    }
+    requested_by_step_id
+}
+
+fn next_requested_capability(
+    requested_by_step_id: &mut BTreeMap<String, Vec<RequestedPlanCapability>>,
+    step_id: &str,
+) -> Option<RequestedPlanCapability> {
+    let queue = requested_by_step_id.get_mut(step_id)?;
+    if queue.is_empty() {
+        None
+    } else {
+        Some(queue.remove(0))
+    }
+}
+
+fn step_trace_json(
+    step: &TaskJournalStepTrace,
+    requested: Option<&RequestedPlanCapability>,
+) -> Value {
     json!({
         "step_id": &step.step_id,
         "skill": &step.skill,
+        "requested_action_type": requested.map(|value| value.action_type.as_str()),
+        "requested_capability": requested.map(|value| value.capability.as_str()),
+        "executed_skill": &step.skill,
         "status": step.status.as_str(),
         "output_excerpt": step.output_excerpt.as_deref(),
         "error_excerpt": step.error_excerpt.as_deref(),
@@ -258,6 +401,11 @@ fn task_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
                     json!({
                         "count": bucket.count,
                         "elapsed_ms": bucket.elapsed_ms,
+                        "prompt_truncation_count": bucket.prompt_truncation_count,
+                        "prompt_bytes_before_max": bucket.prompt_bytes_before_max,
+                        "prompt_bytes_budget_min": bucket.prompt_bytes_budget_min,
+                        "prompt_bytes_after_max": bucket.prompt_bytes_after_max,
+                        "prompt_truncated_bytes_total": bucket.prompt_truncated_bytes_total,
                     }),
                 )
             })
@@ -269,6 +417,11 @@ fn task_metrics_json(metrics: &TaskJournalTaskMetrics) -> Value {
         "delivery_consistent": metrics.delivery_consistent,
         "llm_calls_per_task": metrics.llm_calls_per_task,
         "llm_elapsed_ms_per_task": metrics.llm_elapsed_ms_per_task,
+        "prompt_truncation_count": metrics
+            .by_prompt
+            .as_ref()
+            .map(|map| map.values().map(|bucket| bucket.prompt_truncation_count).sum::<u64>())
+            .unwrap_or(0),
         "by_prompt": by_prompt_value,
     })
 }
@@ -303,6 +456,7 @@ pub(crate) struct TaskJournal {
     pub(crate) rounds: Vec<TaskJournalRoundTrace>,
     pub(crate) step_results: Vec<TaskJournalStepTrace>,
     pub(crate) finalizer_summary: Option<TaskJournalFinalizerSummary>,
+    pub(crate) answer_verifier_summary: Option<TaskJournalAnswerVerifierSummary>,
     pub(crate) task_metrics: TaskJournalTaskMetrics,
     pub(crate) final_answer: Option<String>,
     pub(crate) final_status: Option<TaskJournalFinalStatus>,
@@ -423,6 +577,20 @@ impl TaskJournal {
         self.finalizer_summary = Some(finalizer_summary);
     }
 
+    pub(crate) fn record_answer_verifier_summary(
+        &mut self,
+        verifier_out: crate::answer_verifier::AnswerVerifierOut,
+    ) {
+        self.answer_verifier_summary = Some(TaskJournalAnswerVerifierSummary {
+            pass: verifier_out.pass,
+            missing_evidence_fields: verifier_out.missing_evidence_fields,
+            answer_incomplete_reason: verifier_out.answer_incomplete_reason,
+            should_retry: verifier_out.should_retry,
+            retry_instruction: verifier_out.retry_instruction,
+            confidence: verifier_out.confidence,
+        });
+    }
+
     pub(crate) fn record_used_evidence_ids_count(&mut self, used_evidence_ids_count: usize) {
         self.task_metrics.used_evidence_ids_count = Some(used_evidence_ids_count);
     }
@@ -491,6 +659,9 @@ impl TaskJournal {
         if self.finalizer_summary.is_none() {
             self.finalizer_summary = other.finalizer_summary.clone();
         }
+        if self.answer_verifier_summary.is_none() {
+            self.answer_verifier_summary = other.answer_verifier_summary.clone();
+        }
         if self.task_metrics.used_evidence_ids_count.is_none() {
             self.task_metrics.used_evidence_ids_count = other.task_metrics.used_evidence_ids_count;
         }
@@ -554,12 +725,14 @@ impl TaskJournal {
             "plan_result": self.plan_result.as_ref().map(plan_summary_json),
             "verify_result": self.verify_result.as_ref().map(verify_summary_json),
             "finalizer_summary": self.finalizer_summary.as_ref().map(finalizer_summary_json),
+            "answer_verifier_summary": self.answer_verifier_summary.as_ref().map(answer_verifier_summary_json),
             "task_metrics": task_metrics_json(&self.task_metrics),
             "final_answer": self.final_answer.as_deref().map(crate::truncate_for_log),
         })
     }
 
     pub(crate) fn to_trace_json(&self) -> Value {
+        let mut requested_by_step_id = requested_capability_queues(self);
         json!({
             "task_id": self.task_id.as_deref(),
             "kind": self.kind.as_deref(),
@@ -576,8 +749,12 @@ impl TaskJournal {
                     "verify_result": round.verify_result.as_ref().map(verify_trace_json),
                 })
             }).collect::<Vec<_>>(),
-            "step_results": self.step_results.iter().map(step_trace_json).collect::<Vec<_>>(),
+            "step_results": self.step_results.iter().map(|step| {
+                let requested = next_requested_capability(&mut requested_by_step_id, &step.step_id);
+                step_trace_json(step, requested.as_ref())
+            }).collect::<Vec<_>>(),
             "finalizer_summary": self.finalizer_summary.as_ref().map(finalizer_summary_json),
+            "answer_verifier_summary": self.answer_verifier_summary.as_ref().map(answer_verifier_summary_json),
             "task_metrics": task_metrics_json(&self.task_metrics),
             "ask_state_transitions": self.transitions.iter().map(ask_transition_json).collect::<Vec<_>>(),
         })
@@ -599,15 +776,25 @@ pub(crate) fn delivery_payload_consistent(text: &str, messages: &[String]) -> bo
         let trimmed = message.trim();
         (!trimmed.is_empty()).then_some(trimmed)
     });
-    match last_message {
-        Some(message) => message == text,
-        None => messages.is_empty(),
+    if matches!(last_message, Some(message) if message == text) {
+        return true;
     }
+    let publishable_joined = messages
+        .iter()
+        .map(|message| message.trim())
+        .filter(|message| !message.is_empty())
+        .filter(|message| !crate::finalize::is_execution_summary_message(message))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if !publishable_joined.is_empty() {
+        return publishable_joined == text;
+    }
+    messages.is_empty()
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Value;
+    use serde_json::{json, Value};
 
     use super::{
         delivery_payload_consistent, TaskJournal, TaskJournalFinalizerFallback,
@@ -659,6 +846,20 @@ mod tests {
         });
         journal.record_delivery_consistent(true);
         journal.record_llm_calls_per_task(3);
+        let mut by_prompt = std::collections::HashMap::new();
+        by_prompt.insert(
+            "normalizer".to_string(),
+            crate::LlmPromptBucket {
+                count: 1,
+                elapsed_ms: 42,
+                prompt_truncation_count: 1,
+                prompt_bytes_before_max: Some(157_037),
+                prompt_bytes_budget_min: Some(125_200),
+                prompt_bytes_after_max: Some(125_180),
+                prompt_truncated_bytes_total: 31_857,
+            },
+        );
+        journal.record_llm_by_prompt(by_prompt);
         let summary = journal.to_summary_json();
 
         assert_eq!(
@@ -695,6 +896,22 @@ mod tests {
         );
         assert_eq!(
             summary
+                .get("task_metrics")
+                .and_then(|v| v.get("prompt_truncation_count"))
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            summary
+                .get("task_metrics")
+                .and_then(|v| v.get("by_prompt"))
+                .and_then(|v| v.get("normalizer"))
+                .and_then(|v| v.get("prompt_bytes_before_max"))
+                .and_then(Value::as_u64),
+            Some(157_037)
+        );
+        assert_eq!(
+            summary
                 .get("route_result")
                 .and_then(|v| v.get("self_extension"))
                 .and_then(|v| v.get("mode"))
@@ -728,6 +945,14 @@ mod tests {
         assert!(!delivery_payload_consistent(
             "最终结果",
             &["中间消息".to_string(), "别的结果".to_string()]
+        ));
+        assert!(delivery_payload_consistent(
+            "第一段\n\n第二段",
+            &[
+                "**执行过程**\n1. 调用技能 `read_file`".to_string(),
+                "第一段".to_string(),
+                "第二段".to_string()
+            ]
         ));
         assert!(delivery_payload_consistent("任意文本", &[]));
     }
@@ -770,5 +995,66 @@ mod tests {
         let log = journal.to_log_json();
         assert_eq!(log.get("task_id").and_then(Value::as_str), Some("task-2"));
         assert_eq!(log.get("kind").and_then(Value::as_str), Some("ask"));
+    }
+
+    #[test]
+    fn trace_json_distinguishes_requested_tool_from_executed_skill() {
+        let mut journal = TaskJournal::for_task("task-3", "ask", "列出当前目录前三项");
+        let plan = crate::PlanResult {
+            goal: "list workspace".to_string(),
+            missing_slots: Vec::new(),
+            needs_confirmation: false,
+            steps: vec![crate::PlanStep {
+                step_id: "step_1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "system_basic".to_string(),
+                args: json!({"action": "inventory_dir", "path": "."}),
+                depends_on: Vec::new(),
+                why: "list directory".to_string(),
+            }],
+            planner_notes: String::new(),
+            plan_kind: crate::PlanKind::Single,
+            raw_plan_text:
+                r#"{"steps":[{"type":"call_tool","tool":"list_dir","args":{"path":".","limit":3}}]}"#
+                    .to_string(),
+        };
+        journal.rounds.push(super::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: "list workspace".to_string(),
+            plan_result: Some(plan),
+            ..Default::default()
+        });
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some("README.md\nCargo.toml".to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let trace = journal.to_trace_json();
+        let step = trace
+            .get("step_results")
+            .and_then(Value::as_array)
+            .and_then(|steps| steps.first())
+            .expect("step result should be present");
+        assert_eq!(
+            step.get("requested_action_type").and_then(Value::as_str),
+            Some("call_tool")
+        );
+        assert_eq!(
+            step.get("requested_capability").and_then(Value::as_str),
+            Some("list_dir")
+        );
+        assert_eq!(
+            step.get("executed_skill").and_then(Value::as_str),
+            Some("system_basic")
+        );
+        assert_eq!(
+            step.get("skill").and_then(Value::as_str),
+            Some("system_basic")
+        );
     }
 }

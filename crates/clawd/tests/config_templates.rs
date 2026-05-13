@@ -1,5 +1,7 @@
 use claw_core::secrets::{provision_secret_envs, SecretValue, SecretsBroker, SecretsError};
-use claw_core::skill_registry::{Capability, SkillsRegistry, REQUIRED_BUILTIN_SKILLS};
+use claw_core::skill_registry::{
+    Capability, PlannerCapabilityKind, SkillsRegistry, REQUIRED_BUILTIN_SKILLS,
+};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -352,7 +354,18 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
     let main_expected_with_caps: &[(&str, &[&str])] = &[
         // 主配置中 image_edit / image_vision 可复用同厂商全局 key，不声明专用
         // secrets capability；image_generate 仍显式要求专用生成 key。
+        ("browser_web", &["fs.write", "net"]),
+        ("config_guard", &["fs.read"]),
+        ("doc_parse", &["fs.read"]),
+        ("extension_manager", &["llm"]),
+        ("fs_search", &["fs.read"]),
+        ("http_basic", &["net"]),
         ("image_edit", &["fs.write", "llm", "net"]),
+        ("list_dir", &["fs.read"]),
+        ("log_analyze", &["fs.read"]),
+        ("make_dir", &["fs.write"]),
+        ("remove_file", &["fs.write"]),
+        ("read_file", &["fs.read"]),
         // 注意 sort 顺序：`fs.write` < `llm` < `net` < `secrets.*`（按字典序）。
         // 新增 vendor 段时（openai/google/qwen/...），同步加 secrets.<usage>_<vendor>_api_key。
         (
@@ -367,10 +380,18 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("image_vision", &["llm", "net"]),
         ("stock", &["llm"]),
         ("invest_copy", &["llm"]),
-        ("extension_manager", &["llm"]),
+        ("task_control", &["net"]),
+        ("web_search_extract", &["net"]),
+        ("write_file", &["fs.write"]),
     ];
     let docker_expected_with_caps: &[(&str, &[&str])] = &[
         // Docker 模板保持专用 image_edit / image_vision secret 声明。
+        ("browser_web", &["fs.write", "net"]),
+        ("config_guard", &["fs.read"]),
+        ("doc_parse", &["fs.read"]),
+        ("extension_manager", &["llm"]),
+        ("fs_search", &["fs.read"]),
+        ("http_basic", &["net"]),
         (
             "image_edit",
             &[
@@ -393,6 +414,14 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
             "image_vision",
             &["llm", "net", "secrets.image_vision_minimax_api_key"],
         ),
+        ("list_dir", &["fs.read"]),
+        ("log_analyze", &["fs.read"]),
+        ("make_dir", &["fs.write"]),
+        ("read_file", &["fs.read"]),
+        ("remove_file", &["fs.write"]),
+        ("task_control", &["net"]),
+        ("web_search_extract", &["net"]),
+        ("write_file", &["fs.write"]),
     ];
 
     let registry_paths = [
@@ -443,6 +472,56 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
                 caps.iter().map(Capability::as_token).collect::<Vec<_>>(),
             );
         }
+    }
+}
+
+#[test]
+fn registry_entries_have_group_and_tools_have_platform_metadata() {
+    let registry_paths = [
+        workspace_root().join("configs/skills_registry.toml"),
+        workspace_root().join("docker/config/skills_registry.toml"),
+    ];
+
+    for path in registry_paths.iter() {
+        let registry = SkillsRegistry::load_from_path(path).expect("load registry");
+        for name in registry.all_names() {
+            let manifest = registry
+                .manifest(&name)
+                .unwrap_or_else(|| panic!("{}: missing manifest for `{name}`", path.display()));
+            assert!(
+                manifest.group.is_some(),
+                "{}: skill `{name}` must declare registry group metadata",
+                path.display()
+            );
+            if manifest.planner_kind == PlannerCapabilityKind::Tool {
+                assert!(
+                    !manifest.supported_os.is_empty(),
+                    "{}: planner tool `{name}` must declare supported_os",
+                    path.display()
+                );
+            }
+        }
+        let list_dir = registry
+            .manifest("list_dir")
+            .unwrap_or_else(|| panic!("{}: missing list_dir manifest", path.display()));
+        assert_eq!(
+            list_dir.runtime_skill.as_deref(),
+            Some("system_basic"),
+            "{}: list_dir runtime mapping should stay registry-driven",
+            path.display()
+        );
+        assert_eq!(
+            list_dir.runtime_action.as_deref(),
+            Some("inventory_dir"),
+            "{}: list_dir runtime action should stay registry-driven",
+            path.display()
+        );
+        assert!(
+            !list_dir.runtime_rewrite_arg_keys.is_empty()
+                && !list_dir.runtime_rewrite_semantic_kinds.is_empty(),
+            "{}: list_dir runtime mapping must declare structured rewrite triggers",
+            path.display()
+        );
     }
 }
 

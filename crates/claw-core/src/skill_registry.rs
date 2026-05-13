@@ -1,7 +1,7 @@
 //! 技能注册表：从 TOML 驱动技能的发现、启用、别名、超时与 prompt 路径。
 //! Phase 1：仅做“发现/启用/别名/超时”从 registry 读取，执行层与 planner 仍用现有逻辑。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use serde::Deserialize;
@@ -47,6 +47,29 @@ pub enum PrimaryFallbackRole {
     None,
     Primary,
     Fallback,
+}
+
+/// Planner-facing capability layer. This is intentionally separate from
+/// [`SkillKind`]: `kind` describes execution shape (builtin/runner/external),
+/// while `planner_kind` describes how the agent should reason about the
+/// capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PlannerCapabilityKind {
+    Tool,
+    #[default]
+    Skill,
+    Workflow,
+}
+
+impl PlannerCapabilityKind {
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Tool => "tool",
+            Self::Skill => "skill",
+            Self::Workflow => "workflow",
+        }
+    }
 }
 
 /// §P4.1 主体：技能能力声明（closed-set + 命名 secrets.*）。
@@ -181,6 +204,7 @@ impl Capability {
 pub struct SkillManifest {
     pub name: String,
     pub kind: SkillKind,
+    pub planner_kind: PlannerCapabilityKind,
     pub output_kind: OutputKind,
     pub description: Option<String>,
     pub semantic_tags: Vec<String>,
@@ -189,14 +213,24 @@ pub struct SkillManifest {
     pub prompt_file: Option<String>,
     pub input_schema: Option<JsonValue>,
     pub output_schema: Option<JsonValue>,
+    pub runtime_skill: Option<String>,
+    pub runtime_action: Option<String>,
+    pub runtime_default_args: Option<JsonValue>,
+    pub runtime_rewrite_arg_keys: Vec<String>,
+    pub runtime_rewrite_semantic_kinds: Vec<String>,
     pub risk_level: Option<SkillRiskLevel>,
     pub auto_invocable: Option<bool>,
     pub requires_confirmation: Option<bool>,
     pub side_effect: Option<bool>,
+    pub confirmation_exempt_when: Vec<BTreeMap<String, JsonValue>>,
     pub timeout_seconds: Option<u64>,
     pub retryable: Option<bool>,
     pub group: Option<String>,
     pub primary_fallback_role: Option<PrimaryFallbackRole>,
+    pub supported_os: Vec<String>,
+    pub required_bins: Vec<String>,
+    pub optional_bins: Vec<String>,
+    pub platform_notes: Vec<String>,
     /// §P4.1 主体：这条技能对外声明需要使用的能力集（去重、按 [`Capability::as_token`]
     /// 排序）。空表示"纯计算 + 标准库"，不需要任何特权资源。
     pub capabilities: Vec<Capability>,
@@ -210,6 +244,8 @@ pub struct SkillRegistryEntry {
     pub enabled: bool,
     #[serde(default)]
     pub kind: SkillKind,
+    #[serde(default)]
+    pub planner_kind: Option<PlannerCapabilityKind>,
     #[serde(default)]
     pub aliases: Vec<String>,
     /// 该技能专用超时（秒）；未设或 0 表示用全局默认
@@ -238,6 +274,20 @@ pub struct SkillRegistryEntry {
     pub input_schema: Option<TomlValue>,
     #[serde(default)]
     pub output_schema: Option<TomlValue>,
+    /// Optional planner-tool execution mapping. When set, clawd may rewrite a
+    /// planner-facing tool into this runtime skill/action under structured
+    /// schema conditions. This keeps planner names, UI labels, and runtime
+    /// executors configurable instead of embedding tool maps in clawd code.
+    #[serde(default)]
+    pub runtime_skill: Option<String>,
+    #[serde(default)]
+    pub runtime_action: Option<String>,
+    #[serde(default)]
+    pub runtime_default_args: Option<TomlValue>,
+    #[serde(default)]
+    pub runtime_rewrite_arg_keys: Vec<String>,
+    #[serde(default)]
+    pub runtime_rewrite_semantic_kinds: Vec<String>,
     #[serde(default)]
     pub risk_level: Option<SkillRiskLevel>,
     #[serde(default)]
@@ -246,12 +296,38 @@ pub struct SkillRegistryEntry {
     pub requires_confirmation: Option<bool>,
     #[serde(default)]
     pub side_effect: Option<bool>,
+    /// Structured arg matchers that allow a normally-confirmed skill to run
+    /// without front-door confirmation for safe/read-only variants.
+    ///
+    /// Example:
+    /// `confirmation_exempt_when = [{ action = "prepare" }, { action = "organize", mode = "plan" }]`
+    ///
+    /// This is intentionally structured so routing policy stays in config rather
+    /// than language-specific source-code phrase checks.
+    #[serde(default)]
+    pub confirmation_exempt_when: Vec<BTreeMap<String, TomlValue>>,
     #[serde(default)]
     pub retryable: Option<bool>,
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
     pub primary_fallback_role: Option<PrimaryFallbackRole>,
+    /// Host OS families where this skill/tool is expected to work, e.g.
+    /// `linux`, `macos`, or `any`. This is planner/UI metadata, not a runtime
+    /// permission.
+    #[serde(default)]
+    pub supported_os: Vec<String>,
+    /// Commands that must exist for the main happy path. Empty means pure Rust
+    /// or no external command dependency.
+    #[serde(default)]
+    pub required_bins: Vec<String>,
+    /// Commands used for optional probes or fallbacks.
+    #[serde(default)]
+    pub optional_bins: Vec<String>,
+    /// Human-readable platform notes for planner/UI display. Keep stable and
+    /// factual; do not put routing phrase examples here.
+    #[serde(default)]
+    pub platform_notes: Vec<String>,
 
     // ---------- Phase 5: 执行配置 ----------
     /// Runner 技能：在 runner 侧的执行名；未设则用 name。
@@ -332,6 +408,140 @@ fn normalize_metadata_tokens(values: &[String]) -> Vec<String> {
     out
 }
 
+fn normalize_schema_token(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if matches!(ch, '-' | ' ' | '.') {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect()
+}
+
+fn normalize_schema_tokens(values: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for value in values {
+        let token = normalize_schema_token(value);
+        if token.is_empty() || out.iter().any(|existing| existing == &token) {
+            continue;
+        }
+        out.push(token);
+    }
+    out
+}
+
+fn normalize_metadata_lines(values: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for value in values {
+        let line = value.trim();
+        if line.is_empty() || out.iter().any(|existing| existing == line) {
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    out
+}
+
+fn normalize_matcher_value(value: &TomlValue) -> TomlValue {
+    match value {
+        TomlValue::String(s) => TomlValue::String(normalize_schema_token(s)),
+        TomlValue::Array(items) => {
+            TomlValue::Array(items.iter().map(normalize_matcher_value).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+fn normalize_confirmation_exempt_when(
+    matchers: &[BTreeMap<String, TomlValue>],
+) -> Vec<BTreeMap<String, TomlValue>> {
+    let mut out = Vec::new();
+    for matcher in matchers {
+        let mut normalized = BTreeMap::new();
+        for (key, value) in matcher {
+            let key = normalize_schema_token(key);
+            if key.is_empty() {
+                continue;
+            }
+            normalized.insert(key, normalize_matcher_value(value));
+        }
+        if normalized.is_empty() || out.iter().any(|existing| existing == &normalized) {
+            continue;
+        }
+        out.push(normalized);
+    }
+    out
+}
+
+fn confirmation_exempt_when_to_json(
+    matchers: &[BTreeMap<String, TomlValue>],
+) -> Vec<BTreeMap<String, JsonValue>> {
+    matchers
+        .iter()
+        .map(|matcher| {
+            matcher
+                .iter()
+                .filter_map(|(key, value)| {
+                    toml_value_to_json(value).map(|value| (key.clone(), value))
+                })
+                .collect::<BTreeMap<_, _>>()
+        })
+        .filter(|matcher| !matcher.is_empty())
+        .collect()
+}
+
+fn resolved_planner_kind(entry: &SkillRegistryEntry) -> PlannerCapabilityKind {
+    if let Some(kind) = entry.planner_kind {
+        return kind;
+    }
+
+    if let Some(group) = entry
+        .group
+        .as_deref()
+        .map(|value| value.trim().to_ascii_lowercase())
+    {
+        if matches!(group.as_str(), "workflow" | "flows" | "orchestration") {
+            return PlannerCapabilityKind::Workflow;
+        }
+        if matches!(
+            group.as_str(),
+            "filesystem"
+                | "file"
+                | "files"
+                | "fs"
+                | "system"
+                | "developer"
+                | "dev"
+                | "ops"
+                | "status"
+                | "service"
+                | "runtime"
+                | "database"
+                | "db"
+                | "web"
+                | "http"
+                | "shell"
+        ) {
+            return PlannerCapabilityKind::Tool;
+        }
+    }
+
+    if entry.preferred_over_run_cmd {
+        return PlannerCapabilityKind::Tool;
+    }
+
+    if entry.kind == SkillKind::Builtin {
+        return PlannerCapabilityKind::Tool;
+    }
+
+    PlannerCapabilityKind::Skill
+}
+
 fn toml_value_to_json(value: &TomlValue) -> Option<JsonValue> {
     serde_json::to_value(value).ok()
 }
@@ -386,6 +596,20 @@ impl SkillsRegistry {
                 .collect();
             entry.semantic_tags = normalize_metadata_tokens(&entry.semantic_tags);
             entry.validation_actions = normalize_metadata_tokens(&entry.validation_actions);
+            entry.runtime_skill = trim_optional_string(entry.runtime_skill.as_deref())
+                .map(|value| to_canonical_key(&value));
+            entry.runtime_action = trim_optional_string(entry.runtime_action.as_deref())
+                .map(|value| normalize_schema_token(&value));
+            entry.runtime_rewrite_arg_keys =
+                normalize_schema_tokens(&entry.runtime_rewrite_arg_keys);
+            entry.runtime_rewrite_semantic_kinds =
+                normalize_schema_tokens(&entry.runtime_rewrite_semantic_kinds);
+            entry.confirmation_exempt_when =
+                normalize_confirmation_exempt_when(&entry.confirmation_exempt_when);
+            entry.supported_os = normalize_metadata_tokens(&entry.supported_os);
+            entry.required_bins = normalize_metadata_tokens(&entry.required_bins);
+            entry.optional_bins = normalize_metadata_tokens(&entry.optional_bins);
+            entry.platform_notes = normalize_metadata_lines(&entry.platform_notes);
             // §P4.1 主体：把 capabilities_raw 翻译成强类型，未知 token 直接报错。
             // 排序 + dedup 让"声明顺序"不影响等价性，并避免重复声明在策略层
             // 引出二义性。
@@ -584,6 +808,7 @@ impl SkillsRegistry {
         Some(SkillManifest {
             name: entry.name.clone(),
             kind: entry.kind,
+            planner_kind: resolved_planner_kind(entry),
             output_kind: entry.output_kind,
             description: trim_optional_string(entry.description.as_deref()),
             semantic_tags: entry.semantic_tags.clone(),
@@ -592,16 +817,35 @@ impl SkillsRegistry {
             prompt_file: trim_optional_string(Some(entry.prompt_file.as_str())),
             input_schema: entry.input_schema.as_ref().and_then(toml_value_to_json),
             output_schema: entry.output_schema.as_ref().and_then(toml_value_to_json),
+            runtime_skill: entry.runtime_skill.clone(),
+            runtime_action: entry.runtime_action.clone(),
+            runtime_default_args: entry
+                .runtime_default_args
+                .as_ref()
+                .and_then(toml_value_to_json),
+            runtime_rewrite_arg_keys: entry.runtime_rewrite_arg_keys.clone(),
+            runtime_rewrite_semantic_kinds: entry.runtime_rewrite_semantic_kinds.clone(),
             risk_level: entry.risk_level,
             auto_invocable: entry.auto_invocable,
             requires_confirmation: entry.requires_confirmation,
             side_effect: entry.side_effect,
+            confirmation_exempt_when: confirmation_exempt_when_to_json(
+                &entry.confirmation_exempt_when,
+            ),
             timeout_seconds,
             retryable: entry.retryable,
             group: trim_optional_string(entry.group.as_deref()),
             primary_fallback_role: entry.primary_fallback_role,
+            supported_os: entry.supported_os.clone(),
+            required_bins: entry.required_bins.clone(),
+            optional_bins: entry.optional_bins.clone(),
+            platform_notes: entry.platform_notes.clone(),
             capabilities: entry.resolved_capabilities.clone(),
         })
+    }
+
+    pub fn planner_kind(&self, canonical_name: &str) -> Option<PlannerCapabilityKind> {
+        self.get(canonical_name).map(resolved_planner_kind)
     }
 
     /// §P4.1 主体：取该技能的强类型能力声明（已去重 + 排序）。
@@ -1026,15 +1270,24 @@ capabilities = ["llm", "net", "fs.write", "llm", "secrets.image_generation_minim
     #[test]
     fn registry_manifest_exposes_planner_metadata() {
         let toml = r#"
-[[skills]]
-name = "db_basic"
-enabled = true
-kind = "runner"
-description = "Use structured SQLite actions."
-semantic_tags = ["sqlite_query", "SQLite_Query", "sqlite_table_listing", ""]
-preferred_over_run_cmd = true
-validation_actions = ["sqlite_query", "SQLITE_QUERY"]
-"#;
+	[[skills]]
+	name = "db_basic"
+	enabled = true
+	kind = "runner"
+	description = "Use structured SQLite actions."
+	semantic_tags = ["sqlite_query", "SQLite_Query", "sqlite_table_listing", ""]
+	preferred_over_run_cmd = true
+	validation_actions = ["sqlite_query", "SQLITE_QUERY"]
+	runtime_skill = "system_basic"
+	runtime_action = "Inventory-Dir"
+	runtime_default_args = { names_only = true }
+	runtime_rewrite_arg_keys = ["Include_Hidden", "include-hidden", ""]
+	runtime_rewrite_semantic_kinds = ["File_Names", "file-names", ""]
+	supported_os = ["Linux", "macOS", ""]
+	required_bins = ["sqlite3", "SQLite3"]
+	optional_bins = ["file", "FILE"]
+	platform_notes = ["SQLite file access is pure Rust in the runner.", "SQLite file access is pure Rust in the runner.", ""]
+	"#;
         let path = std::env::temp_dir().join("test_registry_planner_metadata.toml");
         std::fs::write(&path, toml).unwrap();
         let reg = SkillsRegistry::load_from_path(&path).unwrap();
@@ -1051,13 +1304,91 @@ validation_actions = ["sqlite_query", "SQLITE_QUERY"]
             ]
         );
         assert!(manifest.preferred_over_run_cmd);
+        assert_eq!(manifest.planner_kind, PlannerCapabilityKind::Tool);
         assert_eq!(
             manifest.validation_actions,
             vec!["sqlite_query".to_string()]
         );
+        assert_eq!(manifest.runtime_skill.as_deref(), Some("system_basic"));
+        assert_eq!(manifest.runtime_action.as_deref(), Some("inventory_dir"));
+        assert_eq!(
+            manifest
+                .runtime_default_args
+                .as_ref()
+                .and_then(|value| value.get("names_only"))
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            manifest.runtime_rewrite_arg_keys,
+            vec!["include_hidden".to_string()]
+        );
+        assert_eq!(
+            manifest.runtime_rewrite_semantic_kinds,
+            vec!["file_names".to_string()]
+        );
+        assert_eq!(
+            manifest.supported_os,
+            vec!["linux".to_string(), "macos".to_string()]
+        );
+        assert_eq!(manifest.required_bins, vec!["sqlite3".to_string()]);
+        assert_eq!(manifest.optional_bins, vec!["file".to_string()]);
+        assert_eq!(
+            manifest.platform_notes,
+            vec!["SQLite file access is pure Rust in the runner.".to_string()]
+        );
         let entry = reg.get("db_basic").unwrap();
         assert_eq!(entry.semantic_tags, manifest.semantic_tags);
         assert_eq!(entry.validation_actions, manifest.validation_actions);
+        assert_eq!(entry.supported_os, manifest.supported_os);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn registry_manifest_infers_and_allows_planner_kind_override() {
+        let toml = r#"
+[[skills]]
+name = "run_cmd"
+enabled = true
+kind = "builtin"
+
+[[skills]]
+name = "image_vision"
+enabled = true
+kind = "runner"
+
+[[skills]]
+name = "extension_manager"
+enabled = true
+kind = "runner"
+planner_kind = "workflow"
+
+[[skills]]
+name = "custom_bundle"
+enabled = true
+kind = "runner"
+planner_kind = "tool"
+"#;
+        let path = std::env::temp_dir().join("test_registry_planner_kind.toml");
+        std::fs::write(&path, toml).unwrap();
+        let reg = SkillsRegistry::load_from_path(&path).unwrap();
+
+        assert_eq!(
+            reg.manifest("run_cmd").unwrap().planner_kind,
+            PlannerCapabilityKind::Tool
+        );
+        assert_eq!(
+            reg.manifest("image_vision").unwrap().planner_kind,
+            PlannerCapabilityKind::Skill
+        );
+        assert_eq!(
+            reg.manifest("extension_manager").unwrap().planner_kind,
+            PlannerCapabilityKind::Workflow
+        );
+        assert_eq!(
+            reg.manifest("custom_bundle").unwrap().planner_kind,
+            PlannerCapabilityKind::Tool
+        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -1218,9 +1549,13 @@ auto_invocable = false
 requires_confirmation = true
 side_effect = true
 retryable = true
-group = "shell"
-primary_fallback_role = "primary"
-input_schema = { type = "object", required = ["command"] }
+	group = "shell"
+	primary_fallback_role = "primary"
+	supported_os = ["linux", "macos"]
+	required_bins = ["bash"]
+	optional_bins = ["sudo"]
+	platform_notes = ["Uses bash for command execution."]
+	input_schema = { type = "object", required = ["command"] }
 output_schema = { type = "object", properties = { text = { type = "string" } } }
 "#;
         let path = std::env::temp_dir().join("test_skills_manifest_registry.toml");
@@ -1228,6 +1563,7 @@ output_schema = { type = "object", properties = { text = { type = "string" } } }
         let reg = SkillsRegistry::load_from_path(&path).unwrap();
         let manifest = reg.manifest("run_cmd").unwrap();
         assert_eq!(manifest.name, "run_cmd");
+        assert_eq!(manifest.planner_kind, PlannerCapabilityKind::Tool);
         assert_eq!(manifest.description.as_deref(), Some("Run a shell command"));
         assert_eq!(
             manifest.prompt_file.as_deref(),
@@ -1242,6 +1578,16 @@ output_schema = { type = "object", properties = { text = { type = "string" } } }
         assert_eq!(
             manifest.primary_fallback_role,
             Some(PrimaryFallbackRole::Primary)
+        );
+        assert_eq!(
+            manifest.supported_os,
+            vec!["linux".to_string(), "macos".to_string()]
+        );
+        assert_eq!(manifest.required_bins, vec!["bash".to_string()]);
+        assert_eq!(manifest.optional_bins, vec!["sudo".to_string()]);
+        assert_eq!(
+            manifest.platform_notes,
+            vec!["Uses bash for command execution.".to_string()]
         );
         assert_eq!(
             manifest

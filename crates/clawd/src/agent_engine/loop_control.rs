@@ -1,8 +1,9 @@
 use tracing::{info, warn};
 
 use super::{
-    ensure_task_running, execute_actions_once, load_agent_loop_guard_policy, prepare_round_actions,
-    push_round_trace, AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome,
+    append_progress_hint, attempt_ledger, encode_progress_i18n, ensure_task_running,
+    execute_actions_once, load_agent_loop_guard_policy, prepare_round_actions, push_round_trace,
+    AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome,
 };
 use crate::{AgentAction, AppState, AskReply, ClaimedTask, RouteResult};
 
@@ -18,6 +19,16 @@ fn has_authoritative_delivery(loop_state: &LoopState) -> bool {
             .as_deref()
             .map(str::trim)
             .is_some_and(|text| !text.is_empty())
+}
+
+fn reply_final_status_is_clarify(reply: &AskReply) -> bool {
+    reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.final_status)
+        .is_some_and(|status| {
+            matches!(status, crate::task_journal::TaskJournalFinalStatus::Clarify)
+        })
 }
 
 fn route_expects_terminal_user_answer(route_result: &RouteResult) -> bool {
@@ -432,35 +443,135 @@ pub(super) async fn run_agent_with_loop(
     loop_state.max_rounds = policy.max_rounds.max(1);
     base_policy.apply_recipe_runtime_overrides(&mut loop_state.execution_recipe);
     let mut round = 1usize;
-    while round <= loop_state.max_rounds {
-        ensure_task_running(state, task)?;
-        loop_state.round_no = round;
-        super::maybe_publish_execution_recipe_phase_hint(state, task, &mut loop_state);
-        let outcome = run_agent_round(
+    let mut answer_verifier_retry_count = 0usize;
+    loop {
+        while round <= loop_state.max_rounds {
+            ensure_task_running(state, task)?;
+            loop_state.round_no = round;
+            super::maybe_publish_execution_recipe_phase_hint(state, task, &mut loop_state);
+            let outcome = run_agent_round(
+                state,
+                task,
+                goal,
+                user_text,
+                &policy,
+                &mut loop_state,
+                agent_run_context,
+            )
+            .await?;
+            loop_state.last_stop_signal = outcome.stop_signal.clone();
+            if evaluate_round_outcome(task, &mut loop_state, &policy, &outcome) {
+                break;
+            }
+            round += 1;
+        }
+        let pre_finalize_loop_state = loop_state.clone();
+        let mut reply = crate::finalize::finalize_loop_reply(
             state,
             task,
-            goal,
             user_text,
-            &policy,
-            &mut loop_state,
+            loop_state,
             agent_run_context,
         )
         .await?;
-        loop_state.last_stop_signal = outcome.stop_signal.clone();
-        if evaluate_round_outcome(task, &mut loop_state, &policy, &outcome) {
-            break;
+        attach_answer_verifier_if_missing(state, task, user_text, agent_run_context, &mut reply)
+            .await;
+        if let Some(verifier) = answer_verifier_retry_summary(&reply) {
+            if answer_verifier_retry_count < policy.answer_verifier_retry_limit
+                && policy.multi_round_enabled
+            {
+                loop_state = pre_finalize_loop_state;
+                answer_verifier_retry_count += 1;
+                loop_state.has_recoverable_failure_context = true;
+                loop_state.delivery_messages.clear();
+                loop_state.last_user_visible_respond = None;
+                loop_state.last_publishable_synthesis_output = None;
+                loop_state.last_stop_signal = Some("answer_verifier_retry".to_string());
+                attempt_ledger::record_attempt_with_retry_instruction(
+                    &mut loop_state,
+                    "answer_verifier",
+                    &format!(
+                        "missing_evidence_fields={}",
+                        verifier.missing_evidence_fields.join(",")
+                    ),
+                    crate::executor::StepExecutionStatus::Error,
+                    &reply.text,
+                    Some("answer_incomplete"),
+                    &verifier.answer_incomplete_reason,
+                    Some(&verifier.retry_instruction),
+                );
+                append_progress_hint(
+                    state,
+                    task,
+                    &mut loop_state.progress_messages,
+                    encode_progress_i18n("telegram.progress.answer_incomplete_retry", &[]),
+                );
+                if loop_state.round_no >= loop_state.max_rounds {
+                    loop_state.max_rounds += 1;
+                }
+                round = loop_state.round_no + 1;
+                info!(
+                    "loop_round_extend task_id={} round={} reason=answer_verifier_retry new_max_rounds={}",
+                    task.task_id, loop_state.round_no, loop_state.max_rounds
+                );
+                continue;
+            }
         }
-        round += 1;
+        return Ok(reply);
     }
-    crate::finalize::finalize_loop_reply(state, task, user_text, loop_state, agent_run_context)
-        .await
+}
+
+async fn attach_answer_verifier_if_missing(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    agent_run_context: Option<&AgentRunContext>,
+    reply: &mut AskReply,
+) {
+    if reply.should_fail_task || reply_final_status_is_clarify(reply) {
+        return;
+    }
+    let Some(route_result) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return;
+    };
+    let Some(journal) = reply.task_journal.as_mut() else {
+        return;
+    };
+    if journal.answer_verifier_summary.is_some() {
+        return;
+    }
+    if let Some(answer_verifier) = crate::answer_verifier::verify_answer_observe_only(
+        state,
+        task,
+        user_text,
+        route_result,
+        journal,
+        &reply.text,
+    )
+    .await
+    {
+        journal.record_answer_verifier_summary(answer_verifier);
+    }
+}
+
+fn answer_verifier_retry_summary(
+    reply: &AskReply,
+) -> Option<&crate::task_journal::TaskJournalAnswerVerifierSummary> {
+    if reply.should_fail_task || reply_final_status_is_clarify(reply) {
+        return None;
+    }
+    let summary = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())?;
+    summary.high_confidence_retry_gap().then_some(summary)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        evaluate_round_outcome, initial_execution_recipe_spec, should_stop_for_observed_finalize,
-        AgentLoopGuardPolicy, RoundOutcome,
+        answer_verifier_retry_summary, evaluate_round_outcome, initial_execution_recipe_spec,
+        should_stop_for_observed_finalize, AgentLoopGuardPolicy, RoundOutcome,
     };
     use crate::{
         agent_engine::{AgentRunContext, LoopState},
@@ -469,9 +580,9 @@ mod tests {
             ExecutionRecipeSpec, ExecutionRecipeTargetScope,
         },
         executor::{StepExecutionResult, StepExecutionStatus},
-        AgentAction, ClaimedTask, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
-        OutputResponseShape, OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult,
-        RoutedMode, ScheduleKind,
+        AgentAction, AskReply, ClaimedTask, IntentOutputContract, OutputDeliveryIntent,
+        OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ResumeBehavior, RiskCeiling,
+        RouteResult, RoutedMode, ScheduleKind,
     };
     use serde_json::json;
 
@@ -532,6 +643,60 @@ mod tests {
         }
     }
 
+    #[test]
+    fn answer_verifier_retry_summary_requires_retryable_high_confidence_gap() {
+        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+        journal.answer_verifier_summary =
+            Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+                pass: false,
+                missing_evidence_fields: vec!["path".to_string()],
+                answer_incomplete_reason: "missing fallback path".to_string(),
+                should_retry: true,
+                retry_instruction: "search fallback path".to_string(),
+                confidence: 0.8,
+            });
+        let reply = AskReply::non_llm("wrong path".to_string()).with_task_journal(journal);
+
+        let summary = answer_verifier_retry_summary(&reply).expect("retry gap");
+        assert_eq!(summary.missing_evidence_fields, vec!["path"]);
+    }
+
+    #[test]
+    fn answer_verifier_retry_summary_uses_high_confidence_gap_even_without_flag() {
+        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+        journal.answer_verifier_summary =
+            Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+                pass: false,
+                missing_evidence_fields: Vec::new(),
+                answer_incomplete_reason: "candidate contradicts observed evidence".to_string(),
+                should_retry: false,
+                retry_instruction: String::new(),
+                confidence: 0.95,
+            });
+        let reply = AskReply::non_llm("wrong answer".to_string()).with_task_journal(journal);
+
+        assert!(answer_verifier_retry_summary(&reply).is_some());
+    }
+
+    #[test]
+    fn answer_verifier_retry_summary_skips_clarify_final_status() {
+        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Clarify);
+        journal.answer_verifier_summary =
+            Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+                pass: false,
+                missing_evidence_fields: vec!["path".to_string()],
+                answer_incomplete_reason: "missing fallback path".to_string(),
+                should_retry: true,
+                retry_instruction: "search fallback path".to_string(),
+                confidence: 0.8,
+            });
+        let reply =
+            AskReply::non_llm("please provide the path".to_string()).with_task_journal(journal);
+
+        assert!(answer_verifier_retry_summary(&reply).is_none());
+    }
+
     fn test_policy() -> AgentLoopGuardPolicy {
         AgentLoopGuardPolicy {
             max_steps: 8,
@@ -540,6 +705,7 @@ mod tests {
             repeat_action_limit: 3,
             no_progress_limit: 1,
             multi_round_enabled: true,
+            answer_verifier_retry_limit: 2,
             ops_closed_loop: Default::default(),
         }
     }

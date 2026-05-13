@@ -217,7 +217,9 @@ models = [
     "mimo-v2.5-pro",
     "mimo-v2.5",
 ]
-timeout_seconds = 60
+# MiMo 在 planner / synthesis 长上下文下响应可能超过 60s；
+# 单次请求超时调高，整体任务仍由 [worker].llm_total_timeout_seconds 兜底。
+timeout_seconds = 180
 
 # 用途/Purpose: 自定义 OpenAI-compatible 提供商.
 # 建议修改/Recommended change: 可改，适合接入私有网关.
@@ -507,3 +509,9 @@ running_recovery_check_interval_seconds = 60
 # 多轮 agent 任务一般 5–15 min；超过 1h 通常是循环卡死，应当被 hard timeout 切断。
 # 真有"长跑批处理"需求请按 task 级别在创建时单独提 timeout，不要把全局调回大值。
 task_timeout_seconds = 3600
+# 单任务 LLM 逻辑调用次数预算 / Per-task logical LLM call budget.
+# 用来阻断异常循环，不限制单个 provider 内部重试次数。
+llm_max_calls_per_task = 40
+# 单任务 LLM 累计耗时预算（秒）/ Per-task cumulative LLM wall-clock budget in seconds.
+# Mimo 等慢模型 normalizer + planner + synthesis + verifier 可能接近 8-10 分钟，默认给 15 分钟。
+llm_total_timeout_seconds = 900

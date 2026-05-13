@@ -751,6 +751,9 @@ pub(crate) fn action_satisfies_greenfield_creation(
     skill_name: &str,
     args: &Value,
 ) -> bool {
+    if matches!(skill_name.trim(), "write_file" | "make_dir") {
+        return true;
+    }
     match state.resolve_canonical_skill_name(skill_name).as_str() {
         "write_file" | "make_dir" => true,
         "run_cmd" => args

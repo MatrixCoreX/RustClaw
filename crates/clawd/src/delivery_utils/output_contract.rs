@@ -248,6 +248,32 @@ fn canonical_output_text(text: &str, messages: &[String]) -> String {
         .unwrap_or_default()
 }
 
+fn strip_spurious_leading_delivery_label_for_non_file_contract(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let mut lines = trimmed.lines();
+    let Some(first) = lines.next() else {
+        return String::new();
+    };
+    let Some((_kind, payload)) = crate::finalize::parse_delivery_file_token(first.trim()) else {
+        return trimmed.to_string();
+    };
+    let rest = lines.collect::<Vec<_>>().join("\n").trim().to_string();
+    if rest.is_empty() {
+        return trimmed.to_string();
+    }
+
+    let payload = trim_path_token(payload);
+    if !payload.is_empty() && Path::new(&payload).is_file() {
+        return trimmed.to_string();
+    }
+
+    rest
+}
+
 fn should_collapse_to_single_output(
     output_contract: &IntentOutputContract,
     text: &str,
@@ -272,13 +298,21 @@ pub(crate) fn sync_output_payload(
     normalized_text: &mut String,
     normalized_messages: &mut Vec<String>,
 ) {
-    let mut canonical = canonical_output_text(normalized_text, normalized_messages);
-    canonical = strip_preamble_before_markdown_table(&canonical);
     let file_contract = output_contract.delivery_required
         || matches!(
             output_contract.response_shape,
             OutputResponseShape::FileToken
         );
+    if !file_contract {
+        *normalized_text =
+            strip_spurious_leading_delivery_label_for_non_file_contract(normalized_text);
+        for message in normalized_messages.iter_mut() {
+            *message = strip_spurious_leading_delivery_label_for_non_file_contract(message);
+        }
+    }
+
+    let mut canonical = canonical_output_text(normalized_text, normalized_messages);
+    canonical = strip_preamble_before_markdown_table(&canonical);
     if file_contract {
         if let Some(path) = existing_file_path_literal(&canonical) {
             canonical = format!("FILE:{}", path.display());
@@ -540,6 +574,33 @@ mod tests {
     }
 
     #[test]
+    fn non_file_contract_strips_spurious_leading_file_label_from_prose() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            delivery_required: false,
+            semantic_kind: OutputSemanticKind::None,
+            ..Default::default()
+        };
+        let mut text =
+            "FILE: RustClaw-介绍.md\n# RustClaw\nRustClaw 是一个本地智能体运行时。".to_string();
+        let mut messages = vec![text.clone()];
+
+        enforce_output_contract(
+            &state,
+            "帮我写一篇关于 RustClaw 的长文",
+            &contract,
+            &mut text,
+            &mut messages,
+        );
+
+        assert!(!text.starts_with("FILE:"));
+        assert!(text.starts_with("# RustClaw"));
+        assert_eq!(messages, vec![text]);
+    }
+
+    #[test]
     fn exact_sentence_count_overrides_mislabelled_one_sentence_contract() {
         let state = crate::AppState::test_default_with_fixture_provider();
         let contract = IntentOutputContract {
@@ -578,6 +639,31 @@ mod tests {
         enforce_output_contract(&state, "只回答编号", &contract, &mut text, &mut messages);
 
         assert_eq!(text, "minimax-small-20260429_201348");
+    }
+
+    #[test]
+    fn scalar_contract_does_not_extract_delimited_path_from_context_sentence() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Scalar,
+            locator_hint: "./NO_SUCH_RUSTCLAW_TEST_987654.txt".to_string(),
+            ..Default::default()
+        };
+        let expected = "未找到 `./NO_SUCH_RUSTCLAW_TEST_987654.txt`，请确认路径后再继续。";
+        let mut text = expected.to_string();
+        let mut messages = Vec::new();
+
+        enforce_output_contract(
+            &state,
+            "读取 ./NO_SUCH_RUSTCLAW_TEST_987654.txt 的第一行",
+            &contract,
+            &mut text,
+            &mut messages,
+        );
+
+        assert_eq!(text, expected);
+        assert_eq!(messages, vec![expected.to_string()]);
     }
 
     #[test]
@@ -624,6 +710,44 @@ mod tests {
     }
 
     #[test]
+    fn scalar_count_contract_does_not_extract_path_from_missing_result() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Scalar,
+            semantic_kind: OutputSemanticKind::ScalarCount,
+            ..Default::default()
+        };
+        let expected = "`configs/config_copy` 不存在，无法统计匹配项数量。";
+        let mut text = expected.to_string();
+        let mut messages = Vec::new();
+
+        enforce_output_contract(&state, "只回答数量", &contract, &mut text, &mut messages);
+
+        assert_eq!(text, expected);
+        assert_eq!(messages, vec![expected.to_string()]);
+    }
+
+    #[test]
+    fn scalar_count_contract_ignores_digits_embedded_in_path_tokens() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Scalar,
+            semantic_kind: OutputSemanticKind::ScalarCount,
+            ..Default::default()
+        };
+        let expected = "`configs/config_copy_2026` 不存在，无法统计匹配项数量。";
+        let mut text = expected.to_string();
+        let mut messages = Vec::new();
+
+        enforce_output_contract(&state, "只回答数量", &contract, &mut text, &mut messages);
+
+        assert_eq!(text, expected);
+        assert_eq!(messages, vec![expected.to_string()]);
+    }
+
+    #[test]
     fn scalar_contract_preserves_missing_sentinel() {
         let state = crate::AppState::test_default_with_fixture_provider();
         let contract = IntentOutputContract {
@@ -660,10 +784,12 @@ fn extract_scalar_literal_for_contract(
     text: &str,
     output_contract: &IntentOutputContract,
 ) -> Option<String> {
-    if allows_loose_scalar_token_extraction(output_contract.semantic_kind) {
+    if output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount {
+        extract_scalar_count_literal(text)
+    } else if allows_loose_scalar_token_extraction(output_contract.semantic_kind) {
         extract_scalar_literal_loose(text)
     } else {
-        extract_scalar_literal_explicit(text)
+        extract_scalar_literal_explicit_for_contract(text, output_contract)
     }
 }
 
@@ -675,6 +801,52 @@ fn allows_loose_scalar_token_extraction(kind: crate::OutputSemanticKind) -> bool
             | crate::OutputSemanticKind::SqliteTableNamesOnly
             | crate::OutputSemanticKind::SqliteDatabaseKindJudgment
     )
+}
+
+fn extract_scalar_count_literal(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if contains_missing_scalar_sentinel(trimmed) {
+        return Some(trimmed.to_string());
+    }
+    if trimmed.chars().all(|c| c.is_ascii_digit()) {
+        return Some(trimmed.to_string());
+    }
+
+    let integers = scalar_count_integer_candidates(trimmed);
+    if integers.len() == 1 {
+        integers.into_iter().next()
+    } else {
+        None
+    }
+}
+
+fn scalar_count_integer_candidates(text: &str) -> Vec<String> {
+    let chars = text.chars().collect::<Vec<_>>();
+    let mut candidates = Vec::new();
+    let mut idx = 0;
+    while idx < chars.len() {
+        if !chars[idx].is_ascii_digit() {
+            idx += 1;
+            continue;
+        }
+        let start = idx;
+        while idx < chars.len() && chars[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        let end = idx;
+        let prev = start.checked_sub(1).and_then(|i| chars.get(i)).copied();
+        let next = chars.get(end).copied();
+        if prev.is_some_and(is_scalar_identifier_char)
+            || next.is_some_and(is_scalar_identifier_char)
+        {
+            continue;
+        }
+        let candidate = chars[start..end].iter().collect::<String>();
+        if !candidates.iter().any(|existing| existing == &candidate) {
+            candidates.push(candidate);
+        }
+    }
+    candidates
 }
 
 fn extract_scalar_literal_explicit(text: &str) -> Option<String> {
@@ -691,6 +863,29 @@ fn extract_scalar_literal_explicit(text: &str) -> Option<String> {
     }
     if let Some(scalar) = extract_single_delimited_scalar(trimmed, "**") {
         return Some(scalar);
+    }
+    None
+}
+
+fn extract_scalar_literal_explicit_for_contract(
+    text: &str,
+    output_contract: &IntentOutputContract,
+) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed == "<missing>" {
+        return Some(trimmed.to_string());
+    }
+    if is_scalar_literal(trimmed) {
+        return Some(trimmed.to_string());
+    }
+
+    for delimiter in ["`", "**"] {
+        if let Some(scalar) = extract_single_delimited_scalar(trimmed, delimiter) {
+            if scalar_candidate_is_path_or_locator_for_non_path_contract(&scalar, output_contract) {
+                return None;
+            }
+            return Some(scalar);
+        }
     }
     None
 }
@@ -741,6 +936,30 @@ fn extract_single_delimited_scalar(text: &str, delimiter: &str) -> Option<String
     } else {
         None
     }
+}
+
+fn scalar_candidate_is_path_or_locator_for_non_path_contract(
+    candidate: &str,
+    output_contract: &IntentOutputContract,
+) -> bool {
+    if output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly {
+        return false;
+    }
+    let candidate = trim_scalar_token_punctuation(candidate);
+    if candidate.contains('/') || candidate.contains('\\') {
+        return true;
+    }
+    let hint = trim_scalar_token_punctuation(output_contract.locator_hint.trim());
+    if hint.is_empty() {
+        return false;
+    }
+    if candidate == hint {
+        return true;
+    }
+    Path::new(&hint)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| candidate == name)
 }
 
 fn trim_scalar_token_punctuation(token: &str) -> String {
@@ -801,6 +1020,14 @@ fn is_scalar_literal(s: &str) -> bool {
                     '-' | '_' | '.' | ':' | '/' | '\\' | '@' | '=' | '+' | '#'
                 )
         })
+}
+
+fn is_scalar_identifier_char(c: char) -> bool {
+    c.is_ascii_alphanumeric()
+        || matches!(
+            c,
+            '-' | '_' | '.' | ':' | '/' | '\\' | '@' | '=' | '+' | '#'
+        )
 }
 
 pub(crate) fn response_has_same_file_token(

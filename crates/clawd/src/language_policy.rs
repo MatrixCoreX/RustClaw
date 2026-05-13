@@ -118,6 +118,73 @@ fn text_language_counts(text: &str) -> TextLanguageCounts {
     counts
 }
 
+fn trim_language_neutral_token_edges(token: &str) -> &str {
+    token.trim_matches(|ch: char| {
+        ch.is_ascii_punctuation() && !matches!(ch, '/' | '\\' | '.' | '_' | '-' | '~' | ':' | '@')
+    })
+}
+
+fn looks_like_language_neutral_artifact_token(token: &str) -> bool {
+    let token = trim_language_neutral_token_edges(token);
+    if token.is_empty() {
+        return false;
+    }
+    let counts = text_language_counts(token);
+    if counts.cjk > 0 || counts.kana > 0 || counts.hangul > 0 || counts.ascii_alpha == 0 {
+        return false;
+    }
+    if token.contains("://")
+        || token.starts_with("./")
+        || token.starts_with("../")
+        || token.starts_with('/')
+        || token.starts_with("~/")
+        || token.contains('/')
+        || token.contains('\\')
+    {
+        return true;
+    }
+    let bytes = token.as_bytes();
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\')
+    {
+        return true;
+    }
+    if token.contains('_') || token.contains('-') {
+        return true;
+    }
+    if let Some((head, ext)) = token.rsplit_once('.') {
+        let ext = ext.trim();
+        if !head.is_empty()
+            && !ext.is_empty()
+            && ext.len() <= 12
+            && ext.chars().all(|ch| ch.is_ascii_alphanumeric())
+        {
+            return true;
+        }
+    }
+    let alpha_count = token.chars().filter(|ch| ch.is_ascii_alphabetic()).count();
+    alpha_count >= 2
+        && token
+            .chars()
+            .filter(|ch| ch.is_ascii_alphabetic())
+            .all(|ch| ch.is_ascii_uppercase())
+}
+
+fn text_language_counts_without_neutral_artifacts(text: &str) -> TextLanguageCounts {
+    let mut language_text = String::with_capacity(text.len());
+    for token in text.split_whitespace() {
+        if looks_like_language_neutral_artifact_token(token) {
+            language_text.push(' ');
+        } else {
+            language_text.push_str(token);
+            language_text.push(' ');
+        }
+    }
+    text_language_counts(&language_text)
+}
+
 pub(crate) fn text_language_conflicts_with_hint(text: &str, language_hint: &str) -> bool {
     let counts = text_language_counts(text);
     let hint = language_hint.trim().to_ascii_lowercase();
@@ -143,7 +210,8 @@ pub(crate) fn request_language_hint(user_text: &str) -> &'static str {
         return "ko";
     }
     if counts.cjk > 0 {
-        return if counts.non_cjk_alpha() == 0 {
+        let semantic_counts = text_language_counts_without_neutral_artifacts(trimmed);
+        return if semantic_counts.cjk > 0 && semantic_counts.non_cjk_alpha() == 0 {
             "zh-CN"
         } else {
             "mixed"
@@ -336,6 +404,15 @@ mod tests {
             "en"
         );
         assert_eq!(request_language_hint("用 English 解释 README"), "mixed");
+        assert_eq!(
+            request_language_hint("读取 ./NO_SUCH_RUSTCLAW_TEST_987654.txt 的第一行"),
+            "zh-CN"
+        );
+        assert_eq!(
+            request_language_hint("读取 /home/guagua/rustclaw/configs/config.toml 的第一行"),
+            "zh-CN"
+        );
+        assert_eq!(request_language_hint("读取 AGENTS.md 的第一行"), "zh-CN");
         assert_eq!(
             request_language_hint("logs ディレクトリのファイル名を一覧して"),
             "ja"

@@ -6,60 +6,98 @@
 name = "run_cmd"
 enabled = true
 kind = "builtin"
+planner_kind = "tool"
+group = "system"
 aliases = ["shell", "exec"]
 timeout_seconds = 60
 prompt_file = "prompts/skills/run_cmd.md"
 output_kind = "text"
+supported_os = ["linux", "macos"]
+required_bins = ["bash"]
+optional_bins = ["sudo"]
+platform_notes = ["Executes through bash on Linux/macOS; sudo use is gated by task policy."]
 
 [[skills]]
 name = "read_file"
 enabled = true
 kind = "builtin"
+planner_kind = "tool"
+group = "filesystem"
 aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/read_file.md"
 output_kind = "text"
+capabilities = ["fs.read"]
+supported_os = ["linux", "macos"]
+runtime_skill = "system_basic"
+runtime_action = "inventory_dir"
+runtime_default_args = { names_only = true }
+runtime_rewrite_arg_keys = ["dirs_only", "directories_only", "directory_only", "folders_only", "files_only", "file_only", "kind_filter", "kind", "entry_type", "include_hidden", "sort_by", "ext_filter", "extension", "extensions"]
+runtime_rewrite_semantic_kinds = ["file_names", "directory_names"]
 
 [[skills]]
 name = "write_file"
 enabled = true
 kind = "builtin"
+planner_kind = "tool"
+group = "filesystem"
 aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/write_file.md"
 output_kind = "text"
+capabilities = ["fs.write"]
+supported_os = ["linux", "macos"]
 
 [[skills]]
 name = "list_dir"
 enabled = true
 kind = "builtin"
+planner_kind = "tool"
+group = "filesystem"
 aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/list_dir.md"
 output_kind = "text"
+capabilities = ["fs.read"]
+supported_os = ["linux", "macos"]
+runtime_skill = "system_basic"
+runtime_action = "inventory_dir"
+runtime_default_args = { names_only = true }
+runtime_rewrite_arg_keys = ["dirs_only", "directories_only", "directory_only", "folders_only", "files_only", "file_only", "kind_filter", "kind", "entry_type", "include_hidden", "sort_by", "ext_filter", "extension", "extensions"]
+runtime_rewrite_semantic_kinds = ["file_names", "directory_names"]
 
 [[skills]]
 name = "make_dir"
 enabled = true
 kind = "builtin"
+planner_kind = "tool"
+group = "filesystem"
 aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/make_dir.md"
 output_kind = "text"
+capabilities = ["fs.write"]
+supported_os = ["linux", "macos"]
 
 [[skills]]
 name = "remove_file"
 enabled = true
 kind = "builtin"
+planner_kind = "tool"
+group = "filesystem"
 aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/remove_file.md"
 output_kind = "text"
+capabilities = ["fs.write"]
+supported_os = ["linux", "macos"]
 
 [[skills]]
 name = "schedule"
 enabled = true
 kind = "builtin"
+planner_kind = "workflow"
+group = "workflow"
 aliases = ["schedule_compile", "timer_compile"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/schedule.md"
@@ -69,6 +107,8 @@ output_kind = "text"
 name = "x"
 enabled = true
 kind = "runner"
+planner_kind = "skill"
+group = "publishing"
 aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/x.md"
@@ -78,111 +118,160 @@ output_kind = "text"
 name = "system_basic"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "system"
 aliases = ["system"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/system_basic.md"
 output_kind = "text"
+supported_os = ["linux", "macos"]
+optional_bins = ["hostname", "sysctl"]
+platform_notes = ["Linux uses /proc for detailed runtime probes; macOS uses sysctl where available."]
 
 [[skills]]
 name = "http_basic"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "system"
 aliases = ["http"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/http_basic.md"
 output_kind = "text"
+capabilities = ["net"]
+supported_os = ["linux", "macos"]
+platform_notes = ["Uses Rust HTTP client; no external command dependency."]
 
 [[skills]]
 name = "git_basic"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "system"
 aliases = ["git"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/git_basic.md"
 output_kind = "text"
+supported_os = ["linux", "macos"]
+required_bins = ["git"]
 
 [[skills]]
 name = "install_module"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "system"
 aliases = ["module_install", "install_modules"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/install_module.md"
 output_kind = "text"
+supported_os = ["linux", "macos"]
+optional_bins = ["python3", "npm", "cargo", "go"]
+platform_notes = ["Language ecosystem installers are action-dependent; use package_manager for OS packages."]
 
 [[skills]]
 name = "process_basic"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "ops"
 aliases = ["process", "process_manager"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/process_basic.md"
 output_kind = "text"
+supported_os = ["linux", "macos"]
+required_bins = ["ps", "kill"]
+optional_bins = ["ss", "lsof", "netstat"]
+platform_notes = ["port_list chooses Linux ss before lsof/netstat; macOS uses lsof before netstat."]
 
 [[skills]]
 name = "package_manager"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "system"
 aliases = ["package_install", "pkg_manager", "packages"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/package_manager.md"
 output_kind = "text"
+supported_os = ["linux", "macos"]
+required_bins = ["sh", "id"]
+optional_bins = ["apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew", "sudo"]
+platform_notes = ["macOS prefers Homebrew; Linux prefers native distro package managers before Homebrew fallback."]
 
 [[skills]]
 name = "archive_basic"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "system"
 aliases = ["archive", "archive_tool"]
 description = "List, pack, and unpack zip/tar archives with structured archive actions instead of ad-hoc shell commands."
-group = "system"
 semantic_tags = ["archive_list", "archive_pack", "archive_unpack"]
 preferred_over_run_cmd = true
 validation_actions = ["list"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/archive_basic.md"
 output_kind = "text"
+supported_os = ["linux", "macos"]
+optional_bins = ["tar", "zip", "unzip"]
+platform_notes = ["Archive command dependency is action/format dependent."]
 
 [[skills]]
 name = "db_basic"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "system"
 aliases = ["database", "sqlite_tool"]
 description = "Run read-only SQLite queries and confirmed SQLite mutations through structured database actions."
-group = "system"
 semantic_tags = ["sqlite_query", "sqlite_table_listing", "sqlite_table_names_only", "sqlite_database_kind_judgment", "sqlite_schema_version"]
 preferred_over_run_cmd = true
 validation_actions = ["sqlite_query", "schema_version", "list_tables"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/db_basic.md"
 output_kind = "text"
+supported_os = ["linux", "macos"]
+platform_notes = ["SQLite access is implemented in-process; no sqlite3 CLI dependency."]
 
 [[skills]]
 name = "docker_basic"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "ops"
 aliases = ["docker", "docker_ops"]
 description = "Inspect Docker containers/images and perform targeted container lifecycle actions through structured Docker actions."
-group = "ops"
 semantic_tags = ["docker_ps", "docker_images", "docker_logs", "docker_container_lifecycle"]
 preferred_over_run_cmd = true
 validation_actions = ["ps", "images", "inspect"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/docker_basic.md"
 output_kind = "text"
+supported_os = ["linux", "macos"]
+optional_bins = ["docker"]
+platform_notes = ["Read-only Docker inspection returns available=false when Docker CLI or daemon is unavailable."]
 
 [[skills]]
 name = "fs_search"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "filesystem"
 aliases = ["fs-search", "filesystem_search", "file_search", "search_files", "fs_rearch"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/fs_search.md"
 output_kind = "text"
+capabilities = ["fs.read"]
+supported_os = ["linux", "macos"]
+platform_notes = ["Implemented with Rust filesystem traversal; no external find/grep dependency."]
 
 [[skills]]
 name = "rss_fetch"
 enabled = true
 kind = "runner"
+planner_kind = "skill"
+group = "news/web"
 aliases = ["rss", "rss_reader", "rss_fetcher", "news", "news_fetcher"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/rss_fetch.md"
@@ -192,6 +281,8 @@ output_kind = "text"
 name = "image_vision"
 enabled = true
 kind = "runner"
+planner_kind = "skill"
+group = "image"
 aliases = ["vision", "image_vision_skill", "vision_image", "image-analyze"]
 timeout_seconds = 90
 prompt_file = "prompts/skills/image_vision.md"
@@ -211,6 +302,8 @@ capabilities = [
 name = "image_generate"
 enabled = true
 kind = "runner"
+planner_kind = "skill"
+group = "image"
 aliases = ["image_generation", "generate_image", "draw_image", "text_to_image"]
 timeout_seconds = 180
 prompt_file = "prompts/skills/image_generate.md"
@@ -241,6 +334,8 @@ side_effect = true
 name = "image_edit"
 enabled = true
 kind = "runner"
+planner_kind = "skill"
+group = "image"
 aliases = ["image_modify", "image_editor", "edit_image", "image_outpaint"]
 timeout_seconds = 180
 prompt_file = "prompts/skills/image_edit.md"
@@ -262,6 +357,8 @@ side_effect = true
 name = "audio_transcribe"
 enabled = true
 kind = "runner"
+planner_kind = "skill"
+group = "audio"
 aliases = []
 timeout_seconds = 120
 prompt_file = "prompts/skills/audio_transcribe.md"
@@ -271,6 +368,8 @@ output_kind = "text"
 name = "audio_synthesize"
 enabled = true
 kind = "runner"
+planner_kind = "skill"
+group = "audio"
 aliases = []
 timeout_seconds = 90
 prompt_file = "prompts/skills/audio_synthesize.md"
@@ -280,56 +379,80 @@ output_kind = "text"
 name = "health_check"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "ops"
 aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/health_check.md"
 output_kind = "text"
+supported_os = ["linux", "macos"]
+optional_bins = ["pgrep", "ps", "uname", "df", "brew", "sysctl", "vm_stat"]
+platform_notes = ["Linux reads /proc for uptime/load/memory; macOS uses sysctl/vm_stat where available."]
 
 [[skills]]
 name = "log_analyze"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "ops"
 aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/log_analyze.md"
 output_kind = "text"
+capabilities = ["fs.read"]
+supported_os = ["linux", "macos"]
 
 [[skills]]
 name = "service_control"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "ops"
 aliases = []
 description = "Check, verify, diagnose, and control RustClaw, systemd/service, Homebrew services, and launchd services with structured status evidence."
-group = "ops"
 semantic_tags = ["service_status", "service_logs", "service_start_stop", "runtime_health"]
 preferred_over_run_cmd = true
 validation_actions = ["status", "verify", "logs"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/service_control.md"
 output_kind = "text"
+supported_os = ["linux", "macos"]
+optional_bins = ["systemctl", "service", "journalctl", "brew", "launchctl", "log", "sudo", "ps"]
+platform_notes = ["Linux supports systemd/service managers; macOS prefers Homebrew services and limited launchd inspection/lifecycle guidance."]
 
 [[skills]]
 name = "task_control"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "ops"
 aliases = ["task_manager", "task_status", "task_cancel"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/task_control.md"
 output_kind = "text"
+capabilities = ["net"]
+supported_os = ["linux", "macos"]
+platform_notes = ["Uses authenticated local clawd HTTP APIs; no external command dependency."]
 
 [[skills]]
 name = "config_guard"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "ops"
 aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/config_guard.md"
 output_kind = "text"
+capabilities = ["fs.read"]
+supported_os = ["linux", "macos"]
 
 [[skills]]
 name = "crypto"
 enabled = true
 kind = "runner"
+planner_kind = "skill"
+group = "market/data"
 aliases = ["coin", "coins", "crypto_trade", "market_data", "crypto_market"]
 timeout_seconds = 60
 prompt_file = "prompts/skills/crypto.md"
@@ -339,6 +462,8 @@ output_kind = "text"
 name = "stock"
 enabled = true
 kind = "runner"
+planner_kind = "skill"
+group = "market/data"
 aliases = ["a_stock", "stock_quote", "股票"]
 timeout_seconds = 15
 prompt_file = "prompts/skills/stock.md"
@@ -348,6 +473,8 @@ output_kind = "text"
 name = "weather"
 enabled = true
 kind = "runner"
+planner_kind = "skill"
+group = "news/web"
 aliases = ["天气", "weather_query", "查天气"]
 timeout_seconds = 15
 prompt_file = "prompts/skills/weather.md"
@@ -357,6 +484,8 @@ output_kind = "text"
 name = "map_merchant"
 enabled = true
 kind = "runner"
+planner_kind = "skill"
+group = "news/web"
 aliases = ["地图商户", "商户推荐", "附近商户", "高德地图", "高德商户", "高德商户推荐", "高德附近商户", "谷歌地图商户", "google地图商户"]
 timeout_seconds = 20
 prompt_file = "prompts/skills/map_merchant.md"
@@ -379,24 +508,36 @@ output_kind = "text"
 name = "doc_parse"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "filesystem"
 aliases = ["parse_doc", "document_parse", "doc_reader"]
 timeout_seconds = 20
 prompt_file = "prompts/skills/doc_parse.md"
 output_kind = "text"
+capabilities = ["fs.read"]
+supported_os = ["linux", "macos"]
+optional_bins = ["pdftotext", "pdfinfo"]
+platform_notes = ["Markdown/text/html/docx parse in-process; PDF extraction uses poppler tools when available."]
 
 [[skills]]
 name = "transform"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "system"
 aliases = ["transform_data", "data_transform", "table_transform"]
 timeout_seconds = 20
 prompt_file = "prompts/skills/transform.md"
 output_kind = "text"
+supported_os = ["linux", "macos"]
+platform_notes = ["Pure structured-data transform; no filesystem or command dependency."]
 
 [[skills]]
 name = "invest_copy"
 enabled = true
 kind = "runner"
+planner_kind = "skill"
+group = "publishing"
 aliases = ["investment_copy", "invest_style", "copy_invest"]
 timeout_seconds = 90
 prompt_file = "prompts/skills/invest_copy.md"
@@ -409,15 +550,22 @@ retryable = true
 name = "web_search_extract"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "news/web"
 aliases = ["search_extract", "web_search", "web_extract"]
 timeout_seconds = 25
 prompt_file = "prompts/skills/web_search_extract.md"
 output_kind = "text"
+capabilities = ["net"]
+supported_os = ["linux", "macos"]
+platform_notes = ["Search backend requires network and backend/API configuration."]
 
 [[skills]]
 name = "kb"
 enabled = true
 kind = "runner"
+planner_kind = "skill"
+group = "news/web"
 aliases = ["knowledge_base", "kb_ingest", "kb_search"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/kb.md"
@@ -427,7 +575,57 @@ output_kind = "text"
 name = "browser_web"
 enabled = true
 kind = "runner"
+planner_kind = "tool"
+group = "news/web"
 aliases = ["browser_fetch", "page_extract", "browser_search"]
 timeout_seconds = 45
 prompt_file = "prompts/skills/browser_web.md"
 output_kind = "text"
+capabilities = ["net", "fs.write"]
+side_effect = true
+supported_os = ["linux", "macos"]
+required_bins = ["node"]
+optional_bins = ["chromium", "google-chrome", "playwright"]
+platform_notes = ["Uses Node.js helper and headless Chromium; Linux sandbox probing is skipped on macOS."]
+
+[[skills]]
+name = "photo_organize"
+enabled = true
+kind = "runner"
+planner_kind = "skill"
+group = "image"
+aliases = ["photo_sort", "photo_classifier", "image_organize"]
+timeout_seconds = 180
+prompt_file = "prompts/skills/photo_organize.md"
+output_kind = "text"
+description = "Front-door routing contract: photo organization without source_dir is executable, not a clarification. Call photo_organize with action=organize and mode=plan so the skill can discover external drive / USB candidates and preview a unique candidate or return observed candidates."
+semantic_tags = ["photo_organization", "exif_classification", "external_drive_discovery", "source_dir_optional_discovery"]
+risk_level = "high"
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+retryable = false
+confirmation_exempt_when = [
+  { action = "prepare" },
+  { action = "organize", mode = "plan" },
+  { action = "organize", organize_mode = "plan" },
+]
+
+[[skills]]
+name = "extension_manager"
+enabled = true
+kind = "runner"
+planner_kind = "workflow"
+group = "workflow"
+aliases = ["extension_scaffold", "capability_extension"]
+timeout_seconds = 30
+prompt_file = "prompts/skills/extension_manager.md"
+output_kind = "text"
+risk_level = "high"
+capabilities = ["llm"]
+auto_invocable = false
+requires_confirmation = true
+side_effect = true
+retryable = false
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["assess_gap", "enable_external_skill", "implement_external_skill", "register_external_skill", "validate_external_skill", "permanent_extension_plan", "temporary_fix_plan", "temporary_fix_execute", "scaffold_external_skill"] }, request = { type = "string" }, mode_hint = { type = "string", enum = ["auto", "temporary_fix", "permanent_extension", "manual_review"] }, confirm = { type = "boolean" }, allow_package_install = { type = "boolean" }, plan = { type = "object" }, skill_name = { type = "string" }, capability_summary = { type = "string" }, actions = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }

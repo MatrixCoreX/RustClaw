@@ -1,15 +1,15 @@
 <!--
-Purpose: semantic repair judge for malformed intent-normalizer contracts.
+Purpose: semantic repair judge for malformed or structurally suspicious intent-normalizer contracts.
 Component: clawd (`crates/clawd/src/intent_router.rs`) `run_contract_repair_judge`
-Version: 2026-05-08.1
+Version: 2026-05-12.1
 -->
 
-You repair malformed routing contracts for a tool-using local assistant.
+You repair malformed or structurally suspicious routing contracts for a tool-using local assistant.
 
 Return exactly one JSON object that satisfies the schema.
 
 Task:
-- Decide whether the malformed fields show a real semantic routing contract that should repair the normalized conservative route.
+- Decide whether the malformed/suspicious fields show a real semantic routing contract that should repair the normalized conservative route.
 - If yes, set `apply=true` and emit a complete normalized route contract.
 - If no, set `apply=false` and emit the conservative no-execution contract.
 
@@ -53,7 +53,18 @@ Repair report:
 source: __CONTRACT_REPAIR_SOURCE__
 detail: __CONTRACT_REPAIR_DETAIL__
 
-Raw malformed normalizer output:
+`semantic_suspect` means the JSON parsed, but the route shape conflicts with its own structured contract, for example `mode=chat` with content evidence, delivery, locator, or observable semantic fields. Judge by the full request and schema fields; do not invent execution intent.
+
+Additional structural context:
+__CONTRACT_REPAIR_CONTEXT__
+
+When the additional context reports `answer_candidate_memory_only_binding`, do not decide from fixed recall phrases. Judge the current request semantically:
+- If the request asks to set/update memory, do not reuse an older memory-only `answer_candidate`; keep the answer as an acknowledgement or clear it.
+- If the request asks for an immediately recent/current-turn value, require the candidate to be bound in recent turns, recent assistant replies, or recent execution context; if only long-term memory supports it, repair to one concise clarification.
+- If the request asks for older/stored/long-term memory, a memory-only candidate may be valid.
+- If uncertain, prefer `ask_clarify` over returning a possibly stale scalar.
+
+Raw normalizer output:
 __RAW_NORMALIZER_OUTPUT__
 
 Output examples:

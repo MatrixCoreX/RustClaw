@@ -21,6 +21,8 @@ pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
     // 顺序很重要：更具体的匹配放前面，避免被宽泛规则吃掉。
     if s.contains("intent_normalizer") {
         "normalizer"
+    } else if s.contains("direct_answer_gate") {
+        "direct_answer_gate"
     } else if s.contains("intent_router") {
         "router_legacy"
     } else if s.contains("plan_repair") {
@@ -78,15 +80,16 @@ pub(crate) fn classify_prompt_source(prompt_source: &str) -> &'static str {
 ///
 /// 如需更细的 HTTP 维度限流，参见 P1 优化项：把计数下沉到
 /// [`call_provider_with_retry`]，但要同时调整重试上限以避免误熔断。
-pub(crate) const MAX_LLM_CALLS_PER_TASK: u64 = 40;
+pub(crate) const DEFAULT_MAX_LLM_CALLS_PER_TASK: u64 = 40;
 
 /// Phase 1.3: 单任务 LLM 总耗时（ms）上限。主要挡住某一个 provider
-/// 长时间挂住、不停重试的场景。180s 是目前 worker_task_timeout 的量级。
+/// 长时间挂住、不停重试的场景。默认 420s，实际运行值来自
+/// `worker.llm_total_timeout_seconds`。
 ///
 /// **预算的"耗时"语义**：累加的是每次 `run_with_fallback_*` 入口的
 /// **wall-clock 耗时**（包括所有失败 provider 的尝试时间），而不是
 /// "成功 provider 的纯耗时"。这样能更准确反映任务对 LLM 链路施加的真实压力。
-pub(crate) const MAX_LLM_TOTAL_MS_PER_TASK: u64 = 180_000;
+pub(crate) const DEFAULT_MAX_LLM_TOTAL_MS_PER_TASK: u64 = 420_000;
 
 fn matches_provider_override(name: &str, provider_type: &str, override_name: &str) -> bool {
     let wanted = override_name.trim().to_ascii_lowercase();
@@ -909,6 +912,10 @@ mod tests {
         assert_eq!(
             classify_prompt_source("inline:direct_classifier"),
             "direct_classifier"
+        );
+        assert_eq!(
+            classify_prompt_source("layered:prompts/direct_answer_gate_prompt.md#vendor=mimo"),
+            "direct_answer_gate"
         );
         assert_eq!(
             classify_prompt_source(

@@ -6,6 +6,8 @@
 ## Capability Summary
 - `process_basic` provides process inspection and targeted process control operations.
 - It supports listing processes/ports, killing a PID, and tailing logs.
+- Use `port_list` for local listening-port checks, including requests that ask whether a runtime such as `clawd` is listening on a specific port.
+- `port_list` chooses OS-native probes first: Linux uses `ss` with `lsof`/`netstat` fallback; macOS uses `lsof` with `netstat` fallback. The successful response includes `extra.platform` and `extra.command_tool`.
 
 ## Actions
 - `ps`
@@ -29,7 +31,7 @@
 - Invalid PID/signal/path values.
 - OS command failures are returned with readable error text.
 - Non-zero subprocess exit codes are returned as `status=error` with `error_text=process command failed: exit=<code>\n<stdout/stderr>`.
-- Successful responses also mirror structured metadata into `extra`, including fields like `action`, `exit_code`, and `output`.
+- Successful responses also mirror structured metadata into `extra`, including fields like `action`, `exit_code`, `platform`, `command_tool` for `port_list`, and `output`.
 
 ## Request/Response Examples
 ### Example 1
@@ -39,5 +41,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"exit=0\nPID ...","extra":{"action":"ps","exit_code":0,"limit":20,"output":"exit=0\nPID ..."},"error_text":null}
+{"request_id":"demo-1","status":"ok","text":"exit=0\nPID ...","extra":{"action":"ps","exit_code":0,"limit":20,"platform":"linux","output":"exit=0\nPID ..."},"error_text":null}
 ```

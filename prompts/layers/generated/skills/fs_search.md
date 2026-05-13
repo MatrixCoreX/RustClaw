@@ -37,11 +37,13 @@
 | `find_name` | `target_kind` | no | string | `any` | `any|file|dir`; narrow name search to files or directories. `files_only=true` and `dirs_only=true` are accepted aliases. |
 | `find_ext` | `ext` (or `extension`) | yes | string | - | Extension selector (e.g. `rs`). |
 | `find_ext` | `pattern` / `patterns` (or `name`/`keyword`/`query`) | no | string or string[] | none | Optional basename fragment filter; simple wildcard and alternation patterns are accepted. |
-| `grep_text` | `query` | yes | string | - | Text/regex query for content search. |
-| optional | `root` | no | string(path) | workspace | Search root path. |
+| `grep_text` | `query` | yes | string | - | Text query for content search. |
+| `grep_text` | `pattern` / `patterns` (or `name`/`filename`/`file_pattern`) | no | string or string[] | none | Optional filename/basename filter for content search; does not replace `query`. |
+| optional | `root` (or `path`/`dir`) | no | string(path) | workspace | Search root path. |
 | optional | `max_results` | no | number | impl default | Cap result volume. |
 | optional | `max_depth` | no | number | env/default | Traversal depth cap. |
 | optional | `max_files` | no | number | env/default | Scanned-file cap. |
+| `grep_text` | `max_line_chars` | no | number | 240 | Cap each matched line snippet length. |
 
 ## Error Contract (from interface)
 - Missing required query key for selected action.
@@ -50,6 +52,7 @@
 - Search runtime errors return readable filesystem/tool errors.
 - `find_name` may return both files and directories unless `target_kind` is provided.
 - Successful responses are returned as JSON text with stable top-level fields like `action`, `root`, `count`, and `results`.
+- `grep_text` also returns `patterns`, `match_count`, and `matches` items with `path`, `line`, and `text` so callers can answer content-check questions without reading whole files.
 - Successful responses also mirror that parsed JSON into the optional `extra` field for machine-readable consumers.
 
 ## Request/Response Examples (from interface)

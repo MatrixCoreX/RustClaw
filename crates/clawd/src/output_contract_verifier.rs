@@ -111,12 +111,15 @@ fn verify_scalar_path_only(contract: &IntentOutputContract, text: &str) -> Outpu
 
 /// scalar_count：回答里至少要有一个整数字面（或纯数字 candidate）。
 /// 多行文本且只有一个整数 → Reshape 取该整数；完全无整数 → Reject。
-fn verify_scalar_count(text: &str) -> OutputContractVerdict {
+fn verify_scalar_count(contract: &IntentOutputContract, text: &str) -> OutputContractVerdict {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return OutputContractVerdict::Reject {
             reason: "scalar_count: empty candidate".to_string(),
         };
+    }
+    if scalar_count_candidate_is_structural_unavailable_result(trimmed, &contract.locator_hint) {
+        return OutputContractVerdict::Pass;
     }
     let integers = trimmed
         .split(|c: char| !c.is_ascii_digit())
@@ -137,6 +140,19 @@ fn verify_scalar_count(text: &str) -> OutputContractVerdict {
         };
     }
     OutputContractVerdict::Pass
+}
+
+fn scalar_count_candidate_is_structural_unavailable_result(text: &str, locator_hint: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed == "<missing>" || trimmed.ends_with(": <missing>") {
+        return true;
+    }
+    let hint = locator_hint.trim();
+    if hint.is_empty() || !trimmed.contains(hint) {
+        return false;
+    }
+    let outside_hint = trimmed.replace(hint, "");
+    !outside_hint.chars().any(|ch| ch.is_ascii_digit())
 }
 
 fn verify_hidden_entries_check(
@@ -180,7 +196,7 @@ pub(crate) fn verify_output_contract(
         OutputSemanticKind::HiddenEntriesCheck => {
             verify_hidden_entries_check(contract, trimmed_candidate)
         }
-        OutputSemanticKind::ScalarCount => verify_scalar_count(trimmed_candidate),
+        OutputSemanticKind::ScalarCount => verify_scalar_count(contract, trimmed_candidate),
         OutputSemanticKind::RecentScalarEqualityCheck => OutputContractVerdict::Pass,
         _ => OutputContractVerdict::Pass,
     }
@@ -318,6 +334,40 @@ mod tests {
             OutputContractVerdict::Reshape { reshaped, .. } => assert_eq!(reshaped, "5"),
             other => panic!("expected Reshape extracting int, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn pass_scalar_count_missing_target_failure_without_integer() {
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Scalar,
+            semantic_kind: OutputSemanticKind::ScalarCount,
+            locator_hint: "configs/config_copy".to_string(),
+            ..IntentOutputContract::default()
+        };
+        let v = verify_output_contract(
+            &contract,
+            "`configs/config_copy` 不存在，无法统计匹配项数量。",
+            "?",
+        );
+        assert_eq!(v, OutputContractVerdict::Pass);
+    }
+
+    #[test]
+    fn pass_scalar_count_missing_target_failure_with_digits_in_path() {
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Scalar,
+            semantic_kind: OutputSemanticKind::ScalarCount,
+            locator_hint: "configs/config_copy_2026".to_string(),
+            ..IntentOutputContract::default()
+        };
+        let v = verify_output_contract(
+            &contract,
+            "`configs/config_copy_2026` does not exist, so the matching item count cannot be computed.",
+            "?",
+        );
+        assert_eq!(v, OutputContractVerdict::Pass);
     }
 
     #[test]

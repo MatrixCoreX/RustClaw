@@ -13,6 +13,7 @@ Shared routing contract:
 - Ordinal reply references (previous reply / two-turns-back reply) must bind by assistant-turn index first.
 - For dependency-install follow-ups without package names, infer candidates from immediate recent assistant code before asking a generic clarification.
 - Use `ask_clarify` only when the request is otherwise executable but one key target, scope, or parameter is still missing.
+- If the relevant tool/skill contract owns safe discovery, defaulting, bounded lookup, or candidate-returning prepare behavior for a missing parameter, keep the request executable and let that capability resolve or ask with observed candidates. Do not ask a front-door clarification merely because that parameter is omitted.
 
 ## Multilingual Reinforcement
 <!-- Reserved for language-specific reinforcement.

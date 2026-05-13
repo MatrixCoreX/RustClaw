@@ -182,10 +182,11 @@ fn execute(args: Value) -> Result<(String, Value), String> {
     let obj = args
         .as_object()
         .ok_or_else(|| tr("git_basic.err.args_object"))?;
-    let action = obj
+    let raw_action = obj
         .get("action")
         .and_then(|v| v.as_str())
         .unwrap_or("status");
+    let action = normalize_action(raw_action);
     let root = std::env::var("WORKSPACE_ROOT")
         .ok()
         .map(PathBuf::from)
@@ -202,7 +203,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         .unwrap_or(20)
         .min(100);
 
-    let (subcmd, mut extra): (&str, Vec<String>) = match action {
+    let (subcmd, mut extra): (&str, Vec<String>) = match action.as_str() {
         "status" => (
             "status",
             vec!["--short".to_string(), "--branch".to_string()],
@@ -283,6 +284,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
             output.clone(),
             json!({
                 "action": action,
+                "raw_action": raw_action,
                 "subcommand": subcmd,
                 "exit_code": exit_code,
                 "output": output,
@@ -291,6 +293,19 @@ fn execute(args: Value) -> Result<(String, Value), String> {
     } else {
         Err(format!("git command failed: exit={exit_code}\n{text}"))
     }
+}
+
+fn normalize_action(raw: &str) -> String {
+    let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
+    match normalized.as_str() {
+        "branches" | "list_branches" | "all_branches" => "branch",
+        "current_branch_name" | "branch_current" | "get_current_branch" => "current_branch",
+        "cached_diff" | "staged_diff" => "diff_cached",
+        "changed_file" | "changed_file_names" => "changed_files",
+        "revparse" | "head" => "rev_parse",
+        _ => normalized.as_str(),
+    }
+    .to_string()
 }
 
 /// 使用 `git rev-parse --is-inside-work-tree` 可靠识别仓库根、子目录与 worktree。
@@ -308,4 +323,19 @@ fn is_git_repo(root: &PathBuf) -> bool {
     };
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
     out.status.success() && s == "true"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_action;
+
+    #[test]
+    fn normalizes_git_basic_action_aliases() {
+        assert_eq!(normalize_action("branches"), "branch");
+        assert_eq!(normalize_action("list-branches"), "branch");
+        assert_eq!(normalize_action("get_current_branch"), "current_branch");
+        assert_eq!(normalize_action("current-branch-name"), "current_branch");
+        assert_eq!(normalize_action("cached_diff"), "diff_cached");
+        assert_eq!(normalize_action("changed-file-names"), "changed_files");
+    }
 }

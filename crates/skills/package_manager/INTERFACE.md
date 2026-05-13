@@ -6,6 +6,7 @@
 ## Capability Summary
 - `package_manager` detects available package managers and installs packages with optional dry-run/sudo controls.
 - It supports direct manager-specific install and smart auto-detection install.
+- Detection is platform-aware: macOS prefers Homebrew first, while Linux prefers the native distro managers before Homebrew fallback. Successful responses include `extra.platform`; `detect` also includes `extra.candidate_order`.
 
 ## Actions
 - `detect`
@@ -27,7 +28,7 @@
 - Unsupported manager/action values.
 - Install command failures return readable stderr/system errors.
 - Non-zero install command exit codes are returned as `status=error` with `error_text=package install failed: exit=<code>\n<stdout/stderr>`.
-- Successful responses also mirror structured metadata into `extra`, including `action`, `manager`, `packages`, and `output`.
+- Successful responses also mirror structured metadata into `extra`, including `action`, `manager`, `platform`, `packages`, and `output`.
 
 ## Request/Response Examples
 ### Example 1
@@ -37,5 +38,5 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"dry_run=1 command: apt-get install -y jq","extra":{"action":"smart_install","manager":"apt-get","packages":["jq"],"dry_run":true,"command":"apt-get install -y jq","output":"dry_run=1 command: apt-get install -y jq"},"error_text":null}
+{"request_id":"demo-1","status":"ok","text":"dry_run=1 command: apt-get install -y jq","extra":{"action":"smart_install","manager":"apt-get","platform":"linux","packages":["jq"],"dry_run":true,"command":"apt-get install -y jq","output":"dry_run=1 command: apt-get install -y jq"},"error_text":null}
 ```

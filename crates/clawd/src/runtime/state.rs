@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
@@ -35,6 +35,11 @@ pub(crate) struct SkillViews {
 pub(crate) struct LlmPromptBucket {
     pub(crate) count: u64,
     pub(crate) elapsed_ms: u64,
+    pub(crate) prompt_truncation_count: u64,
+    pub(crate) prompt_bytes_before_max: Option<usize>,
+    pub(crate) prompt_bytes_budget_min: Option<usize>,
+    pub(crate) prompt_bytes_after_max: Option<usize>,
+    pub(crate) prompt_truncated_bytes_total: u64,
 }
 
 pub(crate) struct SkillViewsSnapshot {
@@ -268,6 +273,8 @@ pub(crate) struct WorkerConfig {
     pub(crate) started_at: Instant,
     pub(crate) queue_limit: usize,
     pub(crate) worker_task_timeout_seconds: u64,
+    pub(crate) llm_max_calls_per_task: u64,
+    pub(crate) llm_total_timeout_ms: u64,
     pub(crate) worker_task_heartbeat_seconds: u64,
     pub(crate) worker_running_no_progress_timeout_seconds: u64,
     pub(crate) worker_running_recovery_check_interval_seconds: u64,
@@ -283,6 +290,8 @@ impl WorkerConfig {
             started_at: Instant::now(),
             queue_limit: 1,
             worker_task_timeout_seconds: 300,
+            llm_max_calls_per_task: crate::llm_gateway::DEFAULT_MAX_LLM_CALLS_PER_TASK,
+            llm_total_timeout_ms: crate::llm_gateway::DEFAULT_MAX_LLM_TOTAL_MS_PER_TASK,
             worker_task_heartbeat_seconds: 10,
             worker_running_no_progress_timeout_seconds: 300,
             worker_running_recovery_check_interval_seconds: 30,
@@ -305,8 +314,8 @@ pub(crate) struct TaskMetricsRegistry {
     pub(crate) llm_calls_per_task: Arc<Mutex<HashMap<String, u64>>>,
     /// Phase 1.3: 单任务 LLM 累计耗时（ms），与 `llm_calls_per_task` 一起构成
     /// "单任务 LLM 预算"。在 `llm_gateway::run_with_fallback_with_prompt_source`
-    /// 入口处做一次预算检查，超过 `MAX_LLM_CALLS_PER_TASK` 或
-    /// `MAX_LLM_TOTAL_MS_PER_TASK` 就直接短路返回错误，防止单个任务
+    /// 入口处做一次预算检查，超过 `worker.llm_max_calls_per_task` 或
+    /// `worker.llm_total_timeout_ms` 就直接短路返回错误，防止单个任务
     /// 无限扩张 LLM 预算（例如 plan_repair 抖动、fallback 雪崩）。
     pub(crate) llm_elapsed_per_task: Arc<Mutex<HashMap<String, u64>>>,
     /// Phase 1.5: per-task 的 LLM 调用按 prompt label 分桶累计（次数 + 耗时）。
@@ -510,6 +519,52 @@ impl AskStateRegistry {
     pub(crate) fn get(&self, task_id: &str) -> Option<crate::AskState> {
         self.inner.lock().unwrap().get(task_id).copied()
     }
+}
+
+fn confirmation_exempt_matcher_matches(
+    args: &serde_json::Value,
+    matcher: &BTreeMap<String, serde_json::Value>,
+) -> bool {
+    let Some(args) = args.as_object() else {
+        return false;
+    };
+    matcher.iter().all(|(key, expected)| {
+        args.get(key)
+            .is_some_and(|actual| json_value_matches(actual, expected))
+    })
+}
+
+fn json_value_matches(actual: &serde_json::Value, expected: &serde_json::Value) -> bool {
+    if let Some(options) = expected.as_array() {
+        return options
+            .iter()
+            .any(|candidate| json_value_matches(actual, candidate));
+    }
+    match (actual, expected) {
+        (serde_json::Value::String(actual), serde_json::Value::String(expected)) => {
+            normalize_arg_token(actual) == normalize_arg_token(expected)
+        }
+        (serde_json::Value::Bool(actual), serde_json::Value::Bool(expected)) => actual == expected,
+        (serde_json::Value::Number(actual), serde_json::Value::Number(expected)) => {
+            actual == expected
+        }
+        _ => actual == expected,
+    }
+}
+
+fn normalize_arg_token(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if matches!(ch, '-' | ' ' | '.') {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect()
 }
 
 impl AppState {
@@ -911,6 +966,42 @@ impl AppState {
         bucket.elapsed_ms = bucket.elapsed_ms.saturating_add(elapsed_ms);
     }
 
+    pub(crate) fn note_task_prompt_truncation_with_label(
+        &self,
+        task_id: &str,
+        label: &str,
+        bytes_before: usize,
+        bytes_budget: usize,
+        bytes_after: usize,
+    ) {
+        let mut guard = self.metrics.llm_by_prompt_per_task.lock().unwrap();
+        let bucket = guard
+            .entry(task_id.to_string())
+            .or_default()
+            .entry(label.to_string())
+            .or_default();
+        bucket.prompt_truncation_count = bucket.prompt_truncation_count.saturating_add(1);
+        bucket.prompt_bytes_before_max = Some(
+            bucket
+                .prompt_bytes_before_max
+                .map_or(bytes_before, |current| current.max(bytes_before)),
+        );
+        bucket.prompt_bytes_budget_min = Some(
+            bucket
+                .prompt_bytes_budget_min
+                .map_or(bytes_budget, |current| current.min(bytes_budget)),
+        );
+        bucket.prompt_bytes_after_max = Some(
+            bucket
+                .prompt_bytes_after_max
+                .map_or(bytes_after, |current| current.max(bytes_after)),
+        );
+        let truncated_bytes = bytes_before.saturating_sub(bytes_after) as u64;
+        bucket.prompt_truncated_bytes_total = bucket
+            .prompt_truncated_bytes_total
+            .saturating_add(truncated_bytes);
+    }
+
     pub(crate) fn task_llm_elapsed_ms(&self, task_id: &str) -> u64 {
         self.metrics
             .llm_elapsed_per_task
@@ -938,17 +1029,19 @@ impl AppState {
     /// 阈值刻意给得宽松（40 次 / 180 秒），只用于兜底异常放大场景。
     pub(crate) fn task_llm_budget_exceeded(&self, task_id: &str) -> Option<String> {
         let calls = self.task_llm_call_count(task_id);
-        if calls >= crate::llm_gateway::MAX_LLM_CALLS_PER_TASK {
+        let max_calls = self.worker.llm_max_calls_per_task.max(1);
+        if calls >= max_calls {
             return Some(format!(
                 "llm budget exceeded: calls={calls} limit={}",
-                crate::llm_gateway::MAX_LLM_CALLS_PER_TASK
+                max_calls
             ));
         }
         let elapsed = self.task_llm_elapsed_ms(task_id);
-        if elapsed >= crate::llm_gateway::MAX_LLM_TOTAL_MS_PER_TASK {
+        let max_elapsed = self.worker.llm_total_timeout_ms.max(1_000);
+        if elapsed >= max_elapsed {
             return Some(format!(
                 "llm budget exceeded: elapsed_ms={elapsed} limit={}",
-                crate::llm_gateway::MAX_LLM_TOTAL_MS_PER_TASK
+                max_elapsed
             ));
         }
         None
@@ -1037,6 +1130,20 @@ impl AppState {
             .collect();
         visible.sort_unstable();
         visible
+    }
+
+    pub(crate) fn planner_available_skills_for_task(&self, task: &ClaimedTask) -> Vec<String> {
+        self.planner_visible_skills_for_task(task)
+            .into_iter()
+            .filter(|skill| {
+                self.skill_manifest(skill)
+                    .map(|manifest| {
+                        crate::skill_availability::evaluate_manifest_availability(&manifest)
+                            .is_available()
+                    })
+                    .unwrap_or(true)
+            })
+            .collect()
     }
 
     pub(crate) fn normalize_known_agent_id(&self, agent_id: Option<&str>) -> Option<String> {
@@ -1166,13 +1273,30 @@ impl AppState {
             .and_then(|r| r.manifest(canonical_name))
     }
 
-    pub(crate) fn skill_requires_confirmation_policy(&self, canonical_name: &str) -> bool {
+    pub(crate) fn skill_invocation_requires_confirmation_policy(
+        &self,
+        canonical_name: &str,
+        args: Option<&serde_json::Value>,
+    ) -> bool {
         let Some(manifest) = self.skill_manifest(canonical_name) else {
             return false;
         };
-        manifest.requires_confirmation == Some(true)
+        let requires_confirmation = manifest.requires_confirmation == Some(true)
             || matches!(manifest.risk_level, Some(SkillRiskLevel::High))
-            || (manifest.side_effect == Some(true) && manifest.auto_invocable == Some(false))
+            || (manifest.side_effect == Some(true) && manifest.auto_invocable == Some(false));
+        if !requires_confirmation {
+            return false;
+        }
+        if let Some(args) = args {
+            if manifest
+                .confirmation_exempt_when
+                .iter()
+                .any(|matcher| confirmation_exempt_matcher_matches(args, matcher))
+            {
+                return false;
+            }
+        }
+        true
     }
 
     pub(crate) fn skill_is_retryable(&self, canonical_name: &str) -> bool {

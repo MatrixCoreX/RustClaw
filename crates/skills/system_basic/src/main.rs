@@ -699,8 +699,8 @@ fn extract_field(
     let (format, root_value) =
         parse_structured_root(&real, obj.get("format").and_then(Value::as_str))?;
 
-    let found = lookup_field_value(&root_value, field_path);
-    let (exists, value, value_type, value_text) = match found {
+    let found = lookup_field_value_with_resolution(&root_value, field_path);
+    let (exists, value, value_type, value_text) = match found.value {
         Some(v) => (
             true,
             v.clone(),
@@ -716,6 +716,9 @@ fn extract_field(
         "resolved_path": real.display().to_string(),
         "format": format,
         "field_path": field_path,
+        "resolved_field_path": found.resolved_field_path.unwrap_or_default(),
+        "match_strategy": found.match_strategy,
+        "match_count": found.match_count,
         "exists": exists,
         "value_type": value_type,
         "value_text": value_text,
@@ -740,8 +743,8 @@ fn extract_fields(
 
     let mut results = Vec::new();
     for field_path in field_paths {
-        let found = lookup_field_value(&root_value, &field_path);
-        let (exists, value, value_type, value_text) = match found {
+        let found = lookup_field_value_with_resolution(&root_value, &field_path);
+        let (exists, value, value_type, value_text) = match found.value {
             Some(v) => (
                 true,
                 v.clone(),
@@ -752,6 +755,9 @@ fn extract_fields(
         };
         results.push(json!({
             "field_path": field_path,
+            "resolved_field_path": found.resolved_field_path.unwrap_or_default(),
+            "match_strategy": found.match_strategy,
+            "match_count": found.match_count,
             "exists": exists,
             "value_type": value_type,
             "value_text": value_text,
@@ -917,9 +923,11 @@ fn find_path(
             _ => name_norm.contains(&needle_norm),
         };
         if hit {
+            let resolved_path = p.display().to_string();
             matches.push(json!({
                 "name": name,
                 "path": to_rel(workspace_root, p),
+                "resolved_path": resolved_path,
                 "kind": kind,
             }));
         }
@@ -1074,6 +1082,7 @@ fn path_batch_facts(
     if paths.is_empty() {
         return Err(SkillError::invalid_input("paths is required"));
     }
+    let fields = string_list_arg(obj, "fields");
     let include_missing = bool_arg(obj, "include_missing", true);
     let mut facts = Vec::new();
 
@@ -1110,13 +1119,16 @@ fn path_batch_facts(
         }
     }
 
-    Ok(json!({
+    let mut response = json!({
         "action": "path_batch_facts",
         "count": facts.len(),
         "include_missing": include_missing,
         "facts": facts,
-    })
-    .to_string())
+    });
+    if !fields.is_empty() {
+        response["fields"] = json!(fields);
+    }
+    Ok(response.to_string())
 }
 
 fn resolve_case_insensitive_leaf(path: &Path) -> Option<PathBuf> {
@@ -1644,17 +1656,232 @@ fn collect_dir_signatures(
 
 fn lookup_field_value<'a>(value: &'a Value, field_path: &str) -> Option<&'a Value> {
     let mut current = value;
-    for seg in field_path.split('.') {
+    for seg in split_field_path(field_path)? {
         if seg.is_empty() {
             return None;
         }
-        if let Ok(idx) = seg.parse::<usize>() {
-            current = current.as_array()?.get(idx)?;
-        } else {
-            current = current.get(seg)?;
-        }
+        current = lookup_field_segment(current, seg)?;
     }
     Some(current)
+}
+
+struct FieldLookup<'a> {
+    value: Option<&'a Value>,
+    resolved_field_path: Option<String>,
+    match_strategy: &'static str,
+    match_count: usize,
+}
+
+fn lookup_field_value_with_resolution<'a>(value: &'a Value, field_path: &str) -> FieldLookup<'a> {
+    if let Some(found) = lookup_field_value(value, field_path) {
+        return FieldLookup {
+            value: Some(found),
+            resolved_field_path: Some(field_path.to_string()),
+            match_strategy: "exact_path",
+            match_count: 1,
+        };
+    }
+
+    let Some(key) = bare_field_key_selector(field_path) else {
+        return FieldLookup {
+            value: None,
+            resolved_field_path: None,
+            match_strategy: "exact_path",
+            match_count: 0,
+        };
+    };
+
+    let mut matches = Vec::new();
+    collect_bare_key_matches(value, key, "", &mut matches);
+    if matches.len() == 1 {
+        let (resolved_field_path, found) = matches.remove(0);
+        return FieldLookup {
+            value: Some(found),
+            resolved_field_path: Some(resolved_field_path),
+            match_strategy: "unique_bare_key",
+            match_count: 1,
+        };
+    }
+
+    FieldLookup {
+        value: None,
+        resolved_field_path: None,
+        match_strategy: "unique_bare_key",
+        match_count: matches.len(),
+    }
+}
+
+fn bare_field_key_selector(field_path: &str) -> Option<&str> {
+    let key = field_path.trim();
+    if key.is_empty()
+        || key
+            .chars()
+            .any(|ch| ch == '.' || ch == '[' || ch == ']' || ch.is_whitespace())
+    {
+        return None;
+    }
+    Some(key)
+}
+
+fn collect_bare_key_matches<'a>(
+    value: &'a Value,
+    target_key: &str,
+    current_path: &str,
+    out: &mut Vec<(String, &'a Value)>,
+) {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                let child_path = if current_path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{current_path}.{key}")
+                };
+                if key == target_key {
+                    out.push((child_path.clone(), child));
+                }
+                collect_bare_key_matches(child, target_key, &child_path, out);
+            }
+        }
+        Value::Array(items) => {
+            for (idx, child) in items.iter().enumerate() {
+                let child_path = if current_path.is_empty() {
+                    format!("[{idx}]")
+                } else {
+                    format!("{current_path}[{idx}]")
+                };
+                collect_bare_key_matches(child, target_key, &child_path, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn split_field_path(field_path: &str) -> Option<Vec<&str>> {
+    let mut out = Vec::new();
+    let mut start = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut quote: Option<char> = None;
+    for (idx, ch) in field_path.char_indices() {
+        if let Some(active_quote) = quote {
+            if ch == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.checked_sub(1)?,
+            '.' if bracket_depth == 0 => {
+                out.push(&field_path[start..idx]);
+                start = idx + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    if quote.is_some() || bracket_depth != 0 {
+        return None;
+    }
+    out.push(&field_path[start..]);
+    Some(out)
+}
+
+fn lookup_field_segment<'a>(mut current: &'a Value, segment: &str) -> Option<&'a Value> {
+    if let Ok(idx) = segment.parse::<usize>() {
+        return current.as_array()?.get(idx);
+    }
+
+    let Some(first_bracket) = segment.find('[') else {
+        return current.get(segment);
+    };
+    let key = &segment[..first_bracket];
+    if !key.is_empty() {
+        current = current.get(key)?;
+    }
+
+    let mut rest = &segment[first_bracket..];
+    while !rest.is_empty() {
+        let inner_start = rest.strip_prefix('[')?;
+        let end = find_selector_end(inner_start)?;
+        let selector = &inner_start[..end];
+        current = lookup_field_selector(current, selector)?;
+        rest = &inner_start[end + 1..];
+    }
+    Some(current)
+}
+
+fn find_selector_end(selector_and_tail: &str) -> Option<usize> {
+    let mut quote: Option<char> = None;
+    for (idx, ch) in selector_and_tail.char_indices() {
+        if let Some(active_quote) = quote {
+            if ch == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            ']' => return Some(idx),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn lookup_field_selector<'a>(value: &'a Value, selector: &str) -> Option<&'a Value> {
+    let selector = selector.trim();
+    if let Ok(idx) = selector.parse::<usize>() {
+        return value.as_array()?.get(idx);
+    }
+    let condition = selector
+        .strip_prefix("?(")
+        .and_then(|value| value.strip_suffix(')'))
+        .unwrap_or(selector);
+    let (field_path, expected) = parse_field_filter_condition(condition)?;
+    value.as_array()?.iter().find(|item| {
+        lookup_field_value(item, field_path)
+            .is_some_and(|found| json_value_matches_text(found, expected))
+    })
+}
+
+fn parse_field_filter_condition(condition: &str) -> Option<(&str, &str)> {
+    let (left, right) = condition
+        .split_once("==")
+        .or_else(|| condition.split_once('='))?;
+    let left = left.trim();
+    let field_path = left
+        .strip_prefix("@.")
+        .or_else(|| left.strip_prefix('@'))
+        .unwrap_or(left)
+        .trim();
+    if field_path.is_empty() {
+        return None;
+    }
+    let expected = strip_matching_quotes(right.trim())?;
+    Some((field_path, expected))
+}
+
+fn strip_matching_quotes(value: &str) -> Option<&str> {
+    if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        let first = bytes[0];
+        let last = bytes[value.len() - 1];
+        if (first == b'\'' && last == b'\'') || (first == b'"' && last == b'"') {
+            return Some(&value[1..value.len() - 1]);
+        }
+    }
+    Some(value)
+}
+
+fn json_value_matches_text(value: &Value, expected: &str) -> bool {
+    match value {
+        Value::String(text) => text == expected,
+        Value::Bool(flag) => flag.to_string() == expected,
+        Value::Number(number) => number.to_string() == expected,
+        Value::Null => expected.eq_ignore_ascii_case("null"),
+        Value::Array(_) | Value::Object(_) => json_value_to_text(value) == expected,
+    }
 }
 
 fn json_value_type(v: &Value) -> &'static str {
@@ -1931,9 +2158,14 @@ mod tests {
             "paths".to_string(),
             json!([root.join("reports/report.md").display().to_string()]),
         );
+        obj.insert("fields".to_string(), json!(["exists", "size"]));
 
         let out = path_batch_facts(&root, &obj, true).expect("path facts");
         let value: Value = serde_json::from_str(&out).expect("json");
+        assert_eq!(
+            value.get("fields").and_then(Value::as_array).map(Vec::len),
+            Some(2)
+        );
         let fact = value
             .get("facts")
             .and_then(Value::as_array)
@@ -2010,6 +2242,147 @@ mod tests {
     }
 
     #[test]
+    fn extract_field_supports_array_filter_segments_for_toml() {
+        let root = temp_root("extract_field_toml_filter");
+        let target = root.join("skills_registry.toml");
+        std::fs::write(
+            &target,
+            r#"
+[[skills]]
+name = "read_file"
+planner_kind = "tool"
+
+[[skills]]
+name = "stock"
+planner_kind = "skill"
+
+[[skills]]
+name = "run_cmd"
+planner_kind = "tool"
+"#,
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("format".to_string(), json!("toml"));
+        obj.insert(
+            "field_path".to_string(),
+            json!("skills[?(@.name=='run_cmd')].planner_kind"),
+        );
+
+        let out = extract_field(&root, &obj, true).expect("extract field");
+        let value: Value = serde_json::from_str(&out).expect("json");
+
+        assert_eq!(value.get("exists").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            value.get("value_text").and_then(Value::as_str),
+            Some("tool")
+        );
+        assert_eq!(
+            value.get("value_type").and_then(Value::as_str),
+            Some("string")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extract_field_resolves_unique_bare_key_in_nested_toml() {
+        let root = temp_root("extract_field_unique_bare_key");
+        let target = root.join("config.toml");
+        std::fs::write(
+            &target,
+            r#"
+[llm]
+selected_vendor = "mimo"
+selected_model = "mimo-v2.5-pro"
+"#,
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("format".to_string(), json!("toml"));
+        obj.insert("field_path".to_string(), json!("selected_vendor"));
+
+        let out = extract_field(&root, &obj, true).expect("extract field");
+        let value: Value = serde_json::from_str(&out).expect("json");
+
+        assert_eq!(value.get("exists").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            value.get("value_text").and_then(Value::as_str),
+            Some("mimo")
+        );
+        assert_eq!(
+            value.get("resolved_field_path").and_then(Value::as_str),
+            Some("llm.selected_vendor")
+        );
+        assert_eq!(
+            value.get("match_strategy").and_then(Value::as_str),
+            Some("unique_bare_key")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extract_field_keeps_ambiguous_bare_key_missing() {
+        let root = temp_root("extract_field_ambiguous_bare_key");
+        let target = root.join("config.toml");
+        std::fs::write(
+            &target,
+            r#"
+[primary]
+name = "alpha"
+
+[secondary]
+name = "beta"
+"#,
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("format".to_string(), json!("toml"));
+        obj.insert("field_path".to_string(), json!("name"));
+
+        let out = extract_field(&root, &obj, true).expect("extract field");
+        let value: Value = serde_json::from_str(&out).expect("json");
+
+        assert_eq!(value.get("exists").and_then(Value::as_bool), Some(false));
+        assert_eq!(value.get("match_count").and_then(Value::as_u64), Some(2));
+        assert_eq!(
+            value.get("match_strategy").and_then(Value::as_str),
+            Some("unique_bare_key")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn lookup_field_value_supports_bracket_index_and_filter() {
+        let value = json!({
+            "items": [
+                {"name": "alpha", "versions": [{"kind": "old", "value": 1}]},
+                {"name": "beta", "versions": [{"kind": "new", "value": 2}]}
+            ]
+        });
+
+        assert_eq!(
+            lookup_field_value(&value, "items[1].versions[0].value").and_then(Value::as_i64),
+            Some(2)
+        );
+        assert_eq!(
+            lookup_field_value(
+                &value,
+                "items[?(@.name==\"beta\")].versions[?(@.kind=='new')].value"
+            )
+            .and_then(Value::as_i64),
+            Some(2)
+        );
+        assert_eq!(
+            lookup_field_value(&value, "items.[name=beta].versions.[kind=new].value")
+                .and_then(Value::as_i64),
+            Some(2)
+        );
+    }
+
+    #[test]
     fn read_range_uses_range_mode_when_line_bounds_are_present() {
         let root = temp_root("read_range_bounds");
         let target = root.join("README.md");
@@ -2030,6 +2403,38 @@ mod tests {
             .get("excerpt")
             .and_then(Value::as_str)
             .is_some_and(|excerpt| excerpt.contains("8|8") && !excerpt.contains("9|9")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn find_path_match_includes_resolved_path() {
+        let root = temp_root("find_path_resolved_path");
+        let dir = root.join("case_only");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let target = dir.join("Report.MD");
+        std::fs::write(&target, "hello").expect("write target");
+        let mut obj = Map::new();
+        obj.insert("root".to_string(), json!("case_only"));
+        obj.insert("name".to_string(), json!("report.md"));
+        obj.insert("match_mode".to_string(), json!("exact"));
+        obj.insert("target_kind".to_string(), json!("file"));
+
+        let out = find_path(&root, &obj, false).expect("find path");
+        let value: Value = serde_json::from_str(&out).expect("json");
+        let first = value
+            .get("matches")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .expect("first match");
+
+        assert_eq!(
+            first.get("path").and_then(Value::as_str),
+            Some("case_only/Report.MD")
+        );
+        assert_eq!(
+            first.get("resolved_path").and_then(Value::as_str),
+            Some(target.to_string_lossy().as_ref())
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

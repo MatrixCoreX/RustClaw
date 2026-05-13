@@ -119,6 +119,16 @@ fn remember_skill_metadata(loop_state: &mut LoopState, normalized_skill: &str) {
         .insert("last_skill_name".to_string(), normalized_skill.to_string());
 }
 
+fn skill_extra_requests_user_input(extra: Option<&Value>) -> bool {
+    let Some(obj) = extra.and_then(Value::as_object) else {
+        return false;
+    };
+    obj.get("requires_user_input")
+        .or_else(|| obj.get("needs_user_input"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
 fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
@@ -454,6 +464,7 @@ async fn try_auto_sudo_retry_after_permission_denied(
                 crate::execution_recipe::ValidationObservation::Passed,
                 None,
                 None,
+                None,
             )
             .await?;
             Ok(Some(outcome.stop_signal))
@@ -537,6 +548,7 @@ async fn handle_skill_step_success(
     out: &str,
     action_effect: crate::execution_recipe::ActionEffect,
     validation_observation: crate::execution_recipe::ValidationObservation,
+    structured_extra: Option<&Value>,
     write_file_effective_path: Option<&WriteFileEffectivePath>,
     read_file_requested_path: Option<&str>,
 ) -> Result<SkillActionOutcome, String> {
@@ -672,6 +684,39 @@ async fn handle_skill_step_success(
             }
         }
     }
+    let (ledger_status, ledger_error_kind, ledger_reason) = match &validation_observation {
+        crate::execution_recipe::ValidationObservation::Passed => (
+            crate::executor::StepExecutionStatus::Ok,
+            None,
+            "completed_with_observation",
+        ),
+        crate::execution_recipe::ValidationObservation::Failed(detail) => (
+            crate::executor::StepExecutionStatus::Error,
+            Some("validation_failed"),
+            detail.as_str(),
+        ),
+        crate::execution_recipe::ValidationObservation::Inconclusive if action_effect.validates => {
+            (
+                crate::executor::StepExecutionStatus::Error,
+                Some("validation_inconclusive"),
+                "validation result was inconclusive",
+            )
+        }
+        crate::execution_recipe::ValidationObservation::Inconclusive => (
+            crate::executor::StepExecutionStatus::Ok,
+            None,
+            "completed_with_inconclusive_non_validation_observation",
+        ),
+    };
+    super::attempt_ledger::record_attempt(
+        loop_state,
+        normalized_skill,
+        args_summary,
+        ledger_status,
+        out,
+        ledger_error_kind,
+        ledger_reason,
+    );
     let had_observed_output = !out.trim().is_empty();
     if had_observed_output {
         loop_state.has_tool_or_skill_output = true;
@@ -700,6 +745,23 @@ async fn handle_skill_step_success(
             .successful_action_fingerprints
             .entry(fingerprint.to_string())
             .or_insert(0) += 1;
+    }
+    if matches!(ledger_status, crate::executor::StepExecutionStatus::Ok)
+        && had_observed_output
+        && skill_extra_requests_user_input(structured_extra)
+    {
+        loop_state.pending_user_input_required = true;
+        loop_state.last_user_visible_respond = Some(out.to_string());
+        super::append_delivery_message(
+            &task.task_id,
+            &mut loop_state.delivery_messages,
+            out.to_string(),
+        );
+        loop_state.history_compact.push(format!(
+            "round={} step={} skill={} requires_user_input",
+            loop_state.round_no, step_in_round, normalized_skill
+        ));
+        stop_signal = Some("skill_requires_user_input".to_string());
     }
     info!(
         "executor_result_ok task_id={} round={} step={} type={} output={} trace_only=raw_not_delivery",
@@ -736,9 +798,11 @@ async fn handle_skill_step_success(
             .as_deref(),
         step_execution,
     );
-    // Raw skill output is trace/evidence, not final user-visible delivery.
+    // Raw skill output stays trace/evidence unless the skill explicitly marks it as a user-input prompt.
+    let ended_with_user_visible_output =
+        stop_signal.as_deref() == Some("skill_requires_user_input");
     Ok(SkillActionOutcome {
-        ended_with_user_visible_output: false,
+        ended_with_user_visible_output,
         stop_signal,
         continue_in_round: false,
     })
@@ -763,6 +827,20 @@ async fn handle_skill_step_failure(
     action_trace_kind: &str,
 ) -> Result<Option<String>, String> {
     let user_visible_err = crate::skills::normalize_skill_error_for_user(normalized_skill, err);
+    let ledger_args_summary = recovery_args
+        .map(|args| {
+            super::build_safe_skill_args_summary(args, super::PROGRESS_ARGS_SUMMARY_MAX_LEN)
+        })
+        .unwrap_or_default();
+    super::attempt_ledger::record_attempt(
+        loop_state,
+        normalized_skill,
+        &ledger_args_summary,
+        crate::executor::StepExecutionStatus::Error,
+        "",
+        None,
+        &user_visible_err,
+    );
     let effect = recovery_args
         .map(|args| {
             crate::execution_recipe::apply_target_scope_progress(
@@ -959,11 +1037,14 @@ pub(super) async fn execute_prepared_skill_action(
         crate::truncate_for_log(&exec_args.to_string())
     );
     let structured_validation = Arc::new(Mutex::new(None::<Value>));
+    let structured_extra = Arc::new(Mutex::new(None::<Value>));
     let structured_validation_slot = Arc::clone(&structured_validation);
+    let structured_extra_slot = Arc::clone(&structured_extra);
     let exec_args_for_run = exec_args.clone();
     let step_execution =
         crate::executor::execute_step(&format!("step_{global_step}"), action, || {
             let structured_validation_slot = Arc::clone(&structured_validation_slot);
+            let structured_extra_slot = Arc::clone(&structured_extra_slot);
             let exec_args_for_run = exec_args_for_run.clone();
             async move {
                 let outcome =
@@ -971,6 +1052,9 @@ pub(super) async fn execute_prepared_skill_action(
                         .await?;
                 if let Ok(mut slot) = structured_validation_slot.lock() {
                     *slot = outcome.validation.clone();
+                }
+                if let Ok(mut slot) = structured_extra_slot.lock() {
+                    *slot = outcome.extra.clone();
                 }
                 Ok(outcome.text)
             }
@@ -980,6 +1064,7 @@ pub(super) async fn execute_prepared_skill_action(
         .lock()
         .ok()
         .and_then(|slot| slot.clone());
+    let structured_extra = structured_extra.lock().ok().and_then(|slot| slot.clone());
     let raw_action_effect = crate::execution_recipe::classify_skill_action_effect(
         state,
         normalized_skill,
@@ -1017,6 +1102,7 @@ pub(super) async fn execute_prepared_skill_action(
                 out,
                 action_effect,
                 validation_observation,
+                structured_extra.as_ref(),
                 write_file_effective_path.as_ref(),
                 read_file_requested_path.as_deref(),
             )
@@ -1077,7 +1163,7 @@ mod tests {
 
     use super::{
         build_auto_sudo_retry_args, handle_skill_step_failure, handle_skill_step_success,
-        AgentLoopGuardPolicy, LoopState,
+        skill_extra_requests_user_input, AgentLoopGuardPolicy, LoopState,
     };
     use crate::{
         AgentRuntimeConfig, AppState, ClaimedTask, SkillViewsSnapshot, ToolsPolicy,
@@ -1190,6 +1276,7 @@ mod tests {
             repeat_action_limit: 4,
             no_progress_limit: 1,
             multi_round_enabled: true,
+            answer_verifier_retry_limit: 2,
             ops_closed_loop: Default::default(),
         }
     }
@@ -1317,6 +1404,20 @@ mod tests {
             started_at: 0,
             finished_at: 0,
         }
+    }
+
+    #[test]
+    fn skill_extra_user_input_signal_uses_generic_protocol_fields() {
+        assert!(skill_extra_requests_user_input(Some(
+            &serde_json::json!({"requires_user_input": true})
+        )));
+        assert!(skill_extra_requests_user_input(Some(
+            &serde_json::json!({"needs_user_input": true})
+        )));
+        assert!(!skill_extra_requests_user_input(Some(
+            &serde_json::json!({"needs_directory": true})
+        )));
+        assert!(!skill_extra_requests_user_input(None));
     }
 
     fn failed_step(
@@ -1585,6 +1686,7 @@ mod tests {
             crate::execution_recipe::ValidationObservation::Failed(detail.to_string()),
             None,
             None,
+            None,
         )
         .await
         .expect("skill step outcome");
@@ -1640,6 +1742,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn successful_skill_user_input_signal_finalizes_as_clarify_delivery() {
+        let state = test_state();
+        let task = test_task();
+        let mut loop_state = LoopState::new(4);
+        loop_state.round_no = 1;
+
+        let output = "Please provide the directory path.";
+        let outcome = handle_skill_step_success(
+            &state,
+            &task,
+            &mut loop_state,
+            "skill:photo_organize:{\"action\":\"prepare\"}",
+            &ok_step("step_1", "photo_organize", output),
+            1,
+            1,
+            "photo_organize",
+            "skill",
+            "",
+            &serde_json::json!({ "action": "prepare" }),
+            output,
+            crate::execution_recipe::ActionEffect::observe(),
+            crate::execution_recipe::ValidationObservation::Passed,
+            Some(&serde_json::json!({
+                "requires_user_input": true,
+                "missing_argument": "source_dir"
+            })),
+            None,
+            None,
+        )
+        .await
+        .expect("skill step outcome");
+
+        assert_eq!(
+            outcome.stop_signal.as_deref(),
+            Some("skill_requires_user_input")
+        );
+        assert!(outcome.ended_with_user_visible_output);
+        assert!(loop_state.pending_user_input_required);
+        assert_eq!(loop_state.delivery_messages, vec![output.to_string()]);
+    }
+
+    #[tokio::test]
     async fn run_cmd_validation_failed_marker_advances_recipe_repair_without_success_fingerprint() {
         let state = test_state();
         let task = test_task();
@@ -1674,6 +1818,7 @@ mod tests {
             output,
             crate::execution_recipe::ActionEffect::validate(),
             crate::execution_recipe::ValidationObservation::Failed("VALIDATION_FAILED".to_string()),
+            None,
             None,
             None,
         )
@@ -1741,6 +1886,7 @@ mod tests {
             crate::execution_recipe::ActionEffect::observe(),
             crate::execution_recipe::ValidationObservation::Passed,
             None,
+            None,
             Some("/opt/other-project/main.rs"),
         )
         .await
@@ -1781,6 +1927,7 @@ mod tests {
             "ok",
             crate::execution_recipe::ActionEffect::mutate(),
             crate::execution_recipe::ValidationObservation::Passed,
+            None,
             None,
             None,
         )

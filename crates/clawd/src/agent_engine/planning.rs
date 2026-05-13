@@ -6,11 +6,12 @@ use std::sync::OnceLock;
 use tracing::{info, warn};
 
 use super::{
-    build_loop_history_compact, build_single_plan_prompt, build_skill_playbooks_text,
-    build_skill_quick_index_text, build_turn_analysis_prompt_block, plan_step_label,
-    AgentLoopGuardPolicy, LoopState, SinglePlanEnvelope, AGENT_TOOL_SPEC_PATH,
-    LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH, LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH,
-    PLAN_REPAIR_PROMPT_LOGICAL_PATH, SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH,
+    attempt_ledger::build_attempt_ledger_compact, build_loop_history_compact,
+    build_single_plan_prompt, build_skill_playbooks_text, build_skill_quick_index_text,
+    build_turn_analysis_prompt_block, plan_step_label, AgentLoopGuardPolicy, LoopState,
+    SinglePlanEnvelope, AGENT_TOOL_SPEC_PATH, LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH,
+    LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH, PLAN_REPAIR_PROMPT_LOGICAL_PATH,
+    SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH,
 };
 use crate::{
     llm_gateway, plan_step_from_agent_action, AgentAction, AppState, ClaimedTask, PlanKind,
@@ -29,6 +30,7 @@ fn build_incremental_plan_prompt(
     config_response_language: &str,
     round: usize,
     history_compact: &str,
+    attempt_ledger: &str,
     last_round_output: &str,
     runtime_os: &str,
     runtime_shell: &str,
@@ -47,6 +49,7 @@ fn build_incremental_plan_prompt(
             ("__CONFIG_RESPONSE_LANGUAGE__", config_response_language),
             ("__ROUND__", &round.to_string()),
             ("__HISTORY_COMPACT__", history_compact),
+            ("__ATTEMPT_LEDGER__", attempt_ledger),
             ("__LAST_ROUND_OUTPUT__", last_round_output),
             ("__RUNTIME_OS__", runtime_os),
             ("__RUNTIME_SHELL__", runtime_shell),
@@ -120,6 +123,7 @@ fn build_lightweight_tool_spec(
         "- Prefer the most specific enabled skill whose interface covers the request; use generic filesystem/system skills only when no dedicated skill fits.".to_string(),
     ];
     if let Some(route) = route_result {
+        lines.push(crate::TaskContract::from_route_result(route).compact_prompt_line());
         lines.push(format!(
             "- routed_mode={} response_shape={} semantic_kind={} locator_kind={}",
             route.routed_mode.as_str(),
@@ -250,6 +254,10 @@ fn compact_skill_playbook_from_prompt(skill: &str, prompt_body: &str) -> String 
 fn registry_planner_metadata_hint(state: &AppState, skill: &str) -> Option<String> {
     let manifest = state.skill_manifest(skill)?;
     let mut parts = Vec::new();
+    parts.push(format!(
+        "planner_kind: {}",
+        manifest.planner_kind.as_token()
+    ));
     if !manifest.semantic_tags.is_empty() {
         parts.push(format!(
             "semantic_tags: {}",
@@ -265,15 +273,65 @@ fn registry_planner_metadata_hint(state: &AppState, skill: &str) -> Option<Strin
             manifest.validation_actions.join(", ")
         ));
     }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(format!("Registry metadata: {}", parts.join("; ")))
+    if let Some(retryable) = manifest.retryable {
+        parts.push(format!("retryable: {retryable}"));
+    }
+    if let Some(requires_confirmation) = manifest.requires_confirmation {
+        parts.push(format!("requires_confirmation: {requires_confirmation}"));
+    }
+    if !manifest.confirmation_exempt_when.is_empty() {
+        parts.push(format!(
+            "confirmation_exempt_when: {}",
+            format_confirmation_exempt_when(&manifest.confirmation_exempt_when)
+        ));
+    }
+    parts.extend(crate::skill_availability::availability_metadata_parts(
+        &crate::skill_availability::evaluate_manifest_availability(&manifest),
+    ));
+    if !manifest.capabilities.is_empty() {
+        let capabilities = manifest
+            .capabilities
+            .iter()
+            .map(|capability| capability.as_token())
+            .collect::<Vec<_>>();
+        parts.push(format!("capabilities: {}", capabilities.join(", ")));
+    }
+    Some(format!("Registry metadata: {}", parts.join("; ")))
+}
+
+fn format_confirmation_exempt_when(
+    matchers: &[std::collections::BTreeMap<String, serde_json::Value>],
+) -> String {
+    matchers
+        .iter()
+        .take(4)
+        .map(|matcher| {
+            matcher
+                .iter()
+                .map(|(key, value)| format!("{key}={}", compact_json_value_token(value)))
+                .collect::<Vec<_>>()
+                .join("+")
+        })
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+fn compact_json_value_token(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Bool(v) => v.to_string(),
+        serde_json::Value::Number(v) => v.to_string(),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .map(compact_json_value_token)
+            .collect::<Vec<_>>()
+            .join("|"),
+        _ => value.to_string(),
     }
 }
 
 fn build_lightweight_skill_playbooks_text(state: &AppState, task: &ClaimedTask) -> String {
-    let visible = state.planner_visible_skills_for_task(task);
+    let visible = state.planner_available_skills_for_task(task);
     if visible.is_empty() {
         return "No skill playbooks configured.".to_string();
     }
@@ -298,7 +356,7 @@ fn build_lightweight_skill_playbooks_text(state: &AppState, task: &ClaimedTask) 
 }
 
 fn build_lightweight_skill_quick_index_text(state: &AppState, task: &ClaimedTask) -> String {
-    let visible = state.planner_visible_skills_for_task(task);
+    let visible = state.planner_available_skills_for_task(task);
     if visible.is_empty() {
         return "- (no enabled skills)".to_string();
     }
@@ -753,6 +811,55 @@ fn is_delivery_failure_terminal_reply(actions: &[AgentAction]) -> bool {
     !trimmed.is_empty() && crate::finalize::parse_delivery_token(trimmed).is_none()
 }
 
+fn missing_target_path_from_step_error(
+    step: &crate::executor::StepExecutionResult,
+) -> Option<String> {
+    let err = step.error.as_deref()?.trim();
+    if !crate::skills::is_missing_target_skill_error(&step.skill, err) {
+        return None;
+    }
+    if let Some(path) = err.strip_prefix("__RC_READ_FILE_NOT_FOUND__:") {
+        let path = path.trim();
+        if !path.is_empty() {
+            return Some(path.to_string());
+        }
+    }
+    if let Some(structured) = crate::skills::parse_structured_skill_error(err) {
+        if let Some(extra) = structured.extra.as_ref() {
+            for key in ["path", "target_path", "resolved_path"] {
+                if let Some(path) = extra.get(key).and_then(Value::as_str).map(str::trim) {
+                    if !path.is_empty() {
+                        return Some(path.to_string());
+                    }
+                }
+            }
+        }
+        let text = structured.error_text.trim();
+        if !text.is_empty() {
+            return Some(text.to_string());
+        }
+    }
+    None
+}
+
+fn terminal_reply_mentions_observed_missing_target(
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> bool {
+    let Some(content) = is_plain_respond_only_plan(actions) else {
+        return false;
+    };
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    loop_state
+        .executed_step_results
+        .iter()
+        .filter_map(missing_target_path_from_step_error)
+        .any(|path| trimmed.contains(path.trim()))
+}
+
 fn route_expects_terminal_user_answer(route_result: &RouteResult) -> bool {
     if route_result.output_contract.delivery_required {
         return false;
@@ -783,6 +890,11 @@ fn action_supports_direct_observed_finalize(
     route_result: Option<&RouteResult>,
     action: &AgentAction,
 ) -> bool {
+    if route_result.is_some_and(|route| {
+        route.output_contract.requires_content_evidence && route_expects_terminal_user_answer(route)
+    }) {
+        return false;
+    }
     match action {
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
             let canonical = state.resolve_canonical_skill_name(skill);
@@ -908,6 +1020,18 @@ fn append_synthesize_for_observation_only_terminal_answer(
         content: "{{last_output}}".to_string(),
     });
     info!("plan_append_synthesize_for_observation_only_terminal_answer refs={refs_log}");
+    rewritten
+}
+
+fn append_respond_for_terminal_synthesize_answer(actions: Vec<AgentAction>) -> Vec<AgentAction> {
+    if !matches!(actions.last(), Some(AgentAction::SynthesizeAnswer { .. })) {
+        return actions;
+    }
+    let mut rewritten = actions;
+    rewritten.push(AgentAction::Respond {
+        content: "{{last_output}}".to_string(),
+    });
+    info!("plan_append_respond_for_terminal_synthesize_answer");
     rewritten
 }
 
@@ -1444,10 +1568,22 @@ fn should_force_actionable_plan_repair(
     if contains_unavailable_skill_action(state, actions) {
         return true;
     }
-    if structured_scalar_compare_missing_required_extracts(route_result, actions) {
+    if !loop_state.execution_recipe.is_active()
+        && terminal_reply_mentions_observed_missing_target(loop_state, actions)
+    {
+        return false;
+    }
+    if structured_scalar_compare_missing_required_extracts_for_round(
+        route_result,
+        loop_state,
+        actions,
+    ) {
         return true;
     }
     if actions_use_ad_hoc_command_without_route_preferred_skill(state, route_result, actions) {
+        return true;
+    }
+    if content_evidence_plan_only_has_locator_observation(route_result, loop_state, actions) {
         return true;
     }
     let lightweight_route_has_executable_plan =
@@ -1491,6 +1627,7 @@ async fn repair_plan_actions(
     repair_reason: &str,
     tool_spec: &str,
     skill_playbooks: &str,
+    attempt_ledger: &str,
     raw_plan: &str,
     round_no: usize,
 ) -> Result<String, String> {
@@ -1518,6 +1655,7 @@ async fn repair_plan_actions(
             ("__REPAIR_REASON__", repair_reason),
             ("__TOOL_SPEC__", tool_spec),
             ("__SKILL_PLAYBOOKS__", skill_playbooks),
+            ("__ATTEMPT_LEDGER__", attempt_ledger),
             ("__REQUEST_LANGUAGE_HINT__", &request_language_hint),
             (
                 "__CONFIG_RESPONSE_LANGUAGE__",
@@ -1604,11 +1742,18 @@ fn plan_repair_reason(
     let Some(route_result) = route_result else {
         return "non_actionable_plan_for_current_route";
     };
-    if structured_scalar_compare_missing_required_extracts(route_result, actions) {
+    if structured_scalar_compare_missing_required_extracts_for_round(
+        route_result,
+        loop_state,
+        actions,
+    ) {
         return "structured_scalar_compare_requires_extract_fields";
     }
     if actions_use_ad_hoc_command_without_route_preferred_skill(state, route_result, actions) {
         return "preferred_skill_required_for_semantic_route";
+    }
+    if content_evidence_plan_only_has_locator_observation(route_result, loop_state, actions) {
+        return "content_evidence_requires_content_observation";
     }
     if observation_only_plan_missing_user_answer(state, route_result, loop_state, actions) {
         return "plan_missing_terminal_user_answer";
@@ -1625,13 +1770,28 @@ fn can_fallback_to_initial_plan_after_repair_failure(
     let Some(route_result) = route_result else {
         return false;
     };
+    let has_terminal_answer = has_discussion_followup_action(actions);
+    let fallback_shape_is_safe = if has_terminal_answer {
+        !observation_only_plan_missing_user_answer(state, route_result, loop_state, actions)
+            && !content_evidence_plan_only_has_locator_observation(
+                route_result,
+                loop_state,
+                actions,
+            )
+    } else {
+        true
+    };
     !route_result.needs_clarify
         && !loop_state.has_tool_or_skill_output
         && !contains_unavailable_skill_action(state, actions)
-        && !structured_scalar_compare_missing_required_extracts(route_result, actions)
+        && !structured_scalar_compare_missing_required_extracts_for_round(
+            route_result,
+            loop_state,
+            actions,
+        )
         && !actions_use_ad_hoc_command_without_route_preferred_skill(state, route_result, actions)
         && has_executable_observation_or_action(actions)
-        && !has_discussion_followup_action(actions)
+        && fallback_shape_is_safe
 }
 
 fn scalar_path_auto_locator_observation_plan(
@@ -1678,6 +1838,253 @@ fn scalar_path_auto_locator_fast_plan_result(
         return None;
     }
     let actions = scalar_path_auto_locator_observation_plan(route_result, auto_locator_path)?;
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn existence_with_path_locator_observation_plan(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<Vec<AgentAction>> {
+    let route = route_result?;
+    if route.needs_clarify
+        || route.output_contract.delivery_required
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPath
+    {
+        return None;
+    }
+
+    let hint = route.output_contract.locator_hint.trim();
+    let explicit_targets = explicit_document_file_targets(&route.resolved_intent)
+        .into_iter()
+        .take(8)
+        .collect::<Vec<_>>();
+    if explicit_targets.len() >= 2 {
+        return Some(vec![path_batch_facts_action_for_explicit_targets(
+            &explicit_targets,
+        )]);
+    }
+
+    match route.output_contract.locator_kind {
+        crate::OutputLocatorKind::Filename | crate::OutputLocatorKind::CurrentWorkspace
+            if !hint.is_empty() =>
+        {
+            Some(vec![AgentAction::CallSkill {
+                skill: "fs_search".to_string(),
+                args: serde_json::json!({
+                    "action": "find_name",
+                    "root": ".",
+                    "pattern": hint,
+                    "target_kind": "any",
+                    "max_results": 50,
+                }),
+            }])
+        }
+        crate::OutputLocatorKind::Path => {
+            let path = auto_locator_path
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .or_else(|| (!hint.is_empty()).then_some(hint))?;
+            if Path::new(path).is_dir() {
+                if let Some(file_name) = single_filename_target_for_directory_locator(route) {
+                    return Some(vec![AgentAction::CallSkill {
+                        skill: "system_basic".to_string(),
+                        args: serde_json::json!({
+                            "action": "find_path",
+                            "root": path,
+                            "name": file_name,
+                            "match_mode": "exact",
+                            "target_kind": "file",
+                            "max_results": 50,
+                        }),
+                    }]);
+                }
+            }
+            Some(vec![AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "path_batch_facts",
+                    "paths": [path],
+                    "include_missing": true,
+                }),
+            }])
+        }
+        _ => None,
+    }
+}
+
+fn single_filename_target_for_directory_locator(route: &RouteResult) -> Option<String> {
+    let filenames = crate::delivery_utils::extract_filename_candidates(&route.resolved_intent);
+    (filenames.len() == 1).then(|| filenames[0].clone())
+}
+
+fn existence_with_path_locator_fast_plan_result(
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
+        return None;
+    }
+    let actions = existence_with_path_locator_observation_plan(route_result, auto_locator_path)?;
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn file_paths_locator_observation_plan(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<Vec<AgentAction>> {
+    let route = route_result?;
+    if route.needs_clarify
+        || route.output_contract.delivery_required
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths
+    {
+        return None;
+    }
+
+    let hint = route.output_contract.locator_hint.trim();
+    if !hint.is_empty() {
+        return Some(vec![AgentAction::CallSkill {
+            skill: "fs_search".to_string(),
+            args: serde_json::json!({
+                "action": "find_name",
+                "root": ".",
+                "pattern": hint,
+                "target_kind": "file",
+                "max_results": 50,
+            }),
+        }]);
+    }
+
+    let path = auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .filter(|path| Path::new(path).is_file())?;
+    let name = Path::new(path).file_name()?.to_string_lossy().to_string();
+    let root = Path::new(path)
+        .parent()
+        .and_then(|parent| parent.to_str())
+        .filter(|parent| !parent.is_empty())
+        .unwrap_or(".");
+    Some(vec![AgentAction::CallSkill {
+        skill: "fs_search".to_string(),
+        args: serde_json::json!({
+            "action": "find_name",
+            "root": root,
+            "pattern": name,
+            "target_kind": "file",
+            "max_results": 50,
+        }),
+    }])
+}
+
+fn file_paths_locator_fast_plan_result(
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
+        return None;
+    }
+    let actions = file_paths_locator_observation_plan(route_result, auto_locator_path)?;
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn doc_parse_supported_path(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            matches!(
+                extension.trim().to_ascii_lowercase().as_str(),
+                "md" | "txt" | "html" | "htm" | "pdf" | "docx"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn route_allows_single_file_content_understanding(route: &RouteResult) -> bool {
+    route.output_contract.semantic_kind == crate::OutputSemanticKind::ContentExcerptSummary
+        && !route.output_contract.delivery_required
+        && matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+}
+
+fn single_file_content_understanding_target_path(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<String> {
+    let route = route_result?;
+    if route.needs_clarify || !route_allows_single_file_content_understanding(route) {
+        return None;
+    }
+    auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (!hint.is_empty() && Path::new(hint).is_file()).then_some(hint)
+        })
+        .filter(|path| Path::new(path).is_file())
+        .map(ToString::to_string)
+}
+
+fn content_excerpt_summary_auto_locator_observation_plan(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<Vec<AgentAction>> {
+    let path = single_file_content_understanding_target_path(route_result, auto_locator_path)?;
+    if !doc_parse_supported_path(&path) {
+        return None;
+    }
+    Some(vec![AgentAction::CallSkill {
+        skill: "doc_parse".to_string(),
+        args: serde_json::json!({
+            "action": "parse_doc",
+            "path": path,
+            "max_chars": 12000,
+            "include_metadata": true
+        }),
+    }])
+}
+
+fn content_excerpt_summary_auto_locator_fast_plan_result(
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
+        return None;
+    }
+    let actions =
+        content_excerpt_summary_auto_locator_observation_plan(route_result, auto_locator_path)?;
     let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
     Some(build_plan_result(
@@ -1796,6 +2203,7 @@ fn replace_scalar_count_plan_with_count_inventory(
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
     auto_locator_path: Option<&str>,
+    user_text: &str,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
     if loop_state.has_tool_or_skill_output {
@@ -1813,6 +2221,28 @@ fn replace_scalar_count_plan_with_count_inventory(
     let Some(path) = scalar_count_locator_path(route_result, auto_locator_path) else {
         return actions;
     };
+    if !Path::new(&path).is_dir() {
+        info!("plan_replace_scalar_count_missing_locator_with_path_facts path={path}");
+        let answer = if crate::language_policy::request_language_hint(user_text)
+            .to_ascii_lowercase()
+            .starts_with("en")
+        {
+            format!("{path} does not exist, so the matching item count cannot be computed.")
+        } else {
+            format!("{path} 不存在，无法统计匹配项数量。")
+        };
+        return vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "path_batch_facts",
+                    "paths": [path],
+                    "include_missing": true,
+                }),
+            },
+            AgentAction::Respond { content: answer },
+        ];
+    }
     info!("plan_replace_scalar_count_plan_with_count_inventory");
     vec![AgentAction::CallSkill {
         skill: "system_basic".to_string(),
@@ -1846,17 +2276,40 @@ fn route_directory_locator_path(
     let hint = route.output_contract.locator_hint.trim();
     let current_workspace_fallback =
         route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace;
-    [
-        auto_locator_path
-            .map(str::trim)
-            .filter(|path| !path.is_empty()),
-        (!hint.is_empty()).then_some(hint),
-        (current_workspace_fallback || hint.is_empty()).then_some("."),
-    ]
-    .into_iter()
-    .flatten()
-    .find(|path| Path::new(path).is_dir())
-    .map(ToString::to_string)
+    let hint_looks_like_path = hint.contains(['/', '\\']) || hint.starts_with('.');
+    let auto_dir = auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .filter(|path| Path::new(path).is_dir());
+    if !hint.is_empty() {
+        if let Some(path) = auto_dir.filter(|path| locator_path_matches_hint(path, hint)) {
+            return Some(path.to_string());
+        }
+        if Path::new(hint).is_dir()
+            || matches!(
+                route.output_contract.locator_kind,
+                crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
+            )
+            || hint_looks_like_path
+        {
+            return Some(hint.to_string());
+        }
+    }
+    auto_dir
+        .or_else(|| (current_workspace_fallback || hint.is_empty()).then_some("."))
+        .map(ToString::to_string)
+}
+
+fn locator_path_matches_hint(path: &str, hint: &str) -> bool {
+    let path = path.trim().trim_end_matches(['/', '\\']);
+    let hint = hint.trim().trim_end_matches(['/', '\\']);
+    if path.is_empty() || hint.is_empty() {
+        return false;
+    }
+    if path.eq_ignore_ascii_case(hint) {
+        return true;
+    }
+    path.ends_with(&format!("/{hint}")) || path.ends_with(&format!("\\{hint}"))
 }
 
 fn route_requests_hidden_entries_count(route: &RouteResult) -> bool {
@@ -2267,7 +2720,9 @@ fn ensure_existence_path_summary_has_bounded_content(
         return actions;
     };
     let mut rewritten = actions;
-    if !rewritten.iter().any(action_observes_bounded_file_content) {
+    if !rewritten.iter().any(action_observes_bounded_file_content)
+        && !path_batch_facts_metadata_response_is_sufficient(&rewritten)
+    {
         let insert_at = rewritten
             .iter()
             .position(|action| {
@@ -2322,6 +2777,72 @@ fn ensure_existence_path_summary_has_bounded_content(
         }
     }
     rewritten
+}
+
+fn is_system_basic_path_batch_facts_action(action: &AgentAction) -> bool {
+    matches!(
+        action,
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("system_basic")
+                && args
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .is_some_and(|action| action.eq_ignore_ascii_case("path_batch_facts"))
+    )
+}
+
+fn path_batch_facts_action_requests_metadata_fields(action: &AgentAction) -> bool {
+    let (AgentAction::CallSkill { args, .. } | AgentAction::CallTool { args, .. }) = action else {
+        return false;
+    };
+    let Some(fields) = args.get("fields").and_then(Value::as_array) else {
+        return false;
+    };
+    fields.iter().any(|field| {
+        field.as_str().map(str::trim).is_some_and(|field| {
+            matches!(
+                field.to_ascii_lowercase().as_str(),
+                "size" | "size_bytes" | "exists" | "kind" | "modified" | "modified_ts"
+            )
+        })
+    })
+}
+
+fn path_batch_facts_metadata_response_is_sufficient(actions: &[AgentAction]) -> bool {
+    if !actions.iter().any(is_system_basic_path_batch_facts_action) {
+        return false;
+    }
+    let Some(AgentAction::Respond { content }) = actions.last() else {
+        return false;
+    };
+    if !content.contains("{{") {
+        return false;
+    }
+    let metadata_fields = [
+        "size",
+        "size_bytes",
+        "exists",
+        "kind",
+        "modified",
+        "modified_ts",
+    ];
+    let content_lower = content.to_ascii_lowercase();
+    let placeholder_refs = extract_output_placeholder_evidence_refs(content);
+    let response_mentions_metadata = metadata_fields
+        .iter()
+        .any(|field| content_lower.contains(field));
+    let placeholder_mentions_metadata = placeholder_refs.iter().any(|reference| {
+        let reference = reference.trim().to_ascii_lowercase();
+        metadata_fields
+            .iter()
+            .any(|field| reference == *field || reference.ends_with(&format!(".{field}")))
+    });
+    placeholder_mentions_metadata
+        || response_mentions_metadata
+        || actions
+            .iter()
+            .filter(|action| is_system_basic_path_batch_facts_action(action))
+            .any(path_batch_facts_action_requests_metadata_fields)
 }
 
 fn strip_configured_command_prefix<'a>(request: &'a str, prefix: &str) -> Option<&'a str> {
@@ -2652,6 +3173,7 @@ fn normalize_planned_actions_with_original(
     auto_locator_path: Option<&str>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
+    let terminal_mixed_last_output_content = terminal_mixed_last_output_respond_content(&actions);
     let actions = replace_scalar_path_respond_only_with_auto_locator_observation(
         route_result,
         loop_state,
@@ -2683,6 +3205,45 @@ fn normalize_planned_actions_with_original(
         info!("plan_defer_legacy_semantic_rewrite_to_registry_repair");
     }
     let skip_legacy_semantic_rewrites = explicit_command_request || defer_legacy_semantic_rewrites;
+    let actions = normalize_legacy_compatibility_actions(
+        state,
+        route_result,
+        loop_state,
+        user_text,
+        original_user_text,
+        auto_locator_path,
+        actions,
+        skip_legacy_semantic_rewrites,
+    );
+    let actions = normalize_evidence_contract_actions(
+        state,
+        route_result,
+        loop_state,
+        user_text,
+        auto_locator_path,
+        actions,
+    );
+    let actions = normalize_terminal_delivery_actions(
+        state,
+        route_result,
+        loop_state,
+        user_text,
+        terminal_mixed_last_output_content,
+        actions,
+    );
+    mark_non_mutating_run_cmd_sequences_continue_on_error(state, actions)
+}
+
+fn normalize_legacy_compatibility_actions(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+    skip_legacy_semantic_rewrites: bool,
+) -> Vec<AgentAction> {
     let actions = rewrite_service_status_plan_to_service_control(
         route_result,
         skip_legacy_semantic_rewrites,
@@ -2699,11 +3260,18 @@ fn normalize_planned_actions_with_original(
         route_result,
         loop_state,
         auto_locator_path,
+        user_text,
         actions,
     );
     let actions =
         replace_structured_keys_read_plan(route_result, loop_state, auto_locator_path, actions);
     let actions = ensure_existence_path_summary_has_bounded_content(
+        route_result,
+        loop_state,
+        auto_locator_path,
+        actions,
+    );
+    let actions = ensure_content_excerpt_summary_has_bounded_content(
         route_result,
         loop_state,
         auto_locator_path,
@@ -2715,14 +3283,7 @@ fn normalize_planned_actions_with_original(
         strip_terminal_discussion_for_scalar_path_observation(route_result, loop_state, actions);
     let actions =
         strip_terminal_discussion_for_direct_skill_passthrough(state, route_result, actions);
-    let actions = normalize_doc_parse_schema_aliases(actions);
-    let actions = normalize_system_basic_schema_aliases(actions);
-    let actions = fill_missing_read_range_path_from_route_locator(route_result, actions);
-    let actions = rewrite_filtered_list_dir_to_inventory_dir(route_result, actions);
-    let actions = normalize_archive_basic_schema_aliases(route_result, actions);
-    let actions = strip_file_lines_count_before_tail_read_range(actions);
-    let actions = strip_directory_read_range_after_inventory_dir(actions);
-    let actions = enforce_output_contract_tool_args(route_result, actions);
+    let actions = normalize_action_schema_aliases(state, route_result, actions);
     let actions = rewrite_sqlite_table_listing_plan_to_db_basic(
         route_result,
         auto_locator_path,
@@ -2752,6 +3313,33 @@ fn normalize_planned_actions_with_original(
     );
     let actions =
         rewrite_single_target_file_read_to_auto_locator(route_result, auto_locator_path, actions);
+    actions
+}
+
+fn normalize_action_schema_aliases(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let actions = normalize_doc_parse_schema_aliases(actions);
+    let actions = normalize_system_basic_schema_aliases(actions);
+    let actions = normalize_git_basic_schema_aliases(route_result, actions);
+    let actions = fill_missing_read_range_path_from_route_locator(route_result, actions);
+    let actions = rewrite_filtered_list_dir_to_inventory_dir(state, route_result, actions);
+    let actions = normalize_archive_basic_schema_aliases(route_result, actions);
+    let actions = strip_file_lines_count_before_tail_read_range(actions);
+    let actions = strip_directory_read_range_after_inventory_dir(actions);
+    enforce_output_contract_tool_args(route_result, actions)
+}
+
+fn normalize_evidence_contract_actions(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
     let actions = replace_workspace_synthesis_respond_only_plan(route_result, loop_state, actions);
     let actions = rewrite_extract_field_alias_args(actions);
     let actions = rewrite_extract_field_paths_to_structured_candidates(
@@ -2760,26 +3348,47 @@ fn normalize_planned_actions_with_original(
         auto_locator_path,
         actions,
     );
-    let actions = prune_unscoped_workspace_summary_evidence_for_scope(route_result, actions);
+    let actions = prune_unscoped_workspace_summary_evidence_for_scope(state, route_result, actions);
     let actions =
         strip_unrequested_workspace_artifact_mutations(state, route_result, loop_state, actions);
     let actions =
         ensure_workspace_synthesis_has_default_text_evidence(route_result, loop_state, actions);
     let actions =
         append_synthesize_for_unscoped_workspace_text_evidence(route_result, loop_state, actions);
+    let actions = ensure_explicit_multi_file_targets_have_path_facts(
+        route_result,
+        loop_state,
+        user_text,
+        actions,
+    );
     let actions = append_synthesize_answer_for_structured_scalar_compare(route_result, actions);
     let actions =
         rewrite_unresolved_template_arg_multi_file_read_plan(route_result, user_text, actions);
     let actions = strip_unresolved_template_reads_after_inventory_dir(actions);
     let actions =
         strip_workspace_synthesis_without_text_evidence(route_result, loop_state, actions);
+    actions
+}
+
+fn normalize_terminal_delivery_actions(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    terminal_mixed_last_output_content: Option<String>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
     let actions = strip_pre_observation_synthesize_before_concrete_respond(loop_state, actions);
     let actions =
         rewrite_pre_observation_concrete_respond_to_placeholder(route_result, loop_state, actions);
     let actions =
         rewrite_mixed_placeholder_observed_synthesis_respond(route_result, loop_state, actions);
     let actions = rewrite_terminal_synthesis_placeholder_respond(actions);
+    let actions = strip_intermediate_synthesize_before_later_execution(actions);
+    let actions = append_respond_for_terminal_synthesize_answer(actions);
     let actions = rewrite_terminal_placeholder_respond_to_synthesize_answer(loop_state, actions);
+    let actions =
+        strip_terminal_placeholder_respond_for_exact_listing_contract(route_result, actions);
     let actions = inject_synthesize_answer_for_bare_placeholder_respond(actions, user_text);
     let actions = append_synthesize_for_observation_only_terminal_answer(
         state,
@@ -2787,9 +3396,13 @@ fn normalize_planned_actions_with_original(
         loop_state,
         actions,
     );
+    let actions = restore_terminal_mixed_last_output_respond(
+        route_result,
+        terminal_mixed_last_output_content,
+        actions,
+    );
     let actions = strip_service_status_discussion_actions(route_result, actions);
-    let actions = mark_missing_target_repairable_actions(state, route_result, actions);
-    mark_non_mutating_run_cmd_sequences_continue_on_error(state, actions)
+    mark_missing_target_repairable_actions(state, route_result, actions)
 }
 
 fn string_list_from_value(value: Option<&Value>) -> Vec<String> {
@@ -3207,6 +3820,63 @@ fn normalize_system_basic_schema_aliases(actions: Vec<AgentAction>) -> Vec<Agent
         .collect()
 }
 
+fn normalize_git_basic_args(mut args: Value, route_result: Option<&RouteResult>) -> Value {
+    let Some(obj) = args.as_object_mut() else {
+        return args;
+    };
+    let action_name = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .replace('-', "_");
+
+    let normalized = match action_name.as_str() {
+        "branches" | "list_branches" | "all_branches" => {
+            if route_result.is_some_and(|route| {
+                matches!(
+                    route.output_contract.response_shape,
+                    crate::OutputResponseShape::Scalar
+                )
+            }) {
+                "current_branch"
+            } else {
+                "branch"
+            }
+        }
+        "current_branch_name" | "branch_current" | "get_current_branch" => "current_branch",
+        "cached_diff" | "staged_diff" => "diff_cached",
+        "changed_file" | "changed_file_names" => "changed_files",
+        "revparse" | "head" => "rev_parse",
+        _ => return args,
+    };
+    obj.insert("action".to_string(), Value::String(normalized.to_string()));
+    info!(
+        "plan_normalize_git_basic_action_alias action={} normalized={}",
+        action_name, normalized
+    );
+    args
+}
+
+fn normalize_git_basic_schema_aliases(
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallSkill { skill, args } if skill.eq_ignore_ascii_case("git_basic") => {
+                AgentAction::CallSkill {
+                    skill,
+                    args: normalize_git_basic_args(args, route_result),
+                }
+            }
+            other => other,
+        })
+        .collect()
+}
+
 fn route_locator_hint_for_read_range_fill(route_result: Option<&RouteResult>) -> Option<String> {
     let route = route_result?;
     if route.needs_clarify
@@ -3304,46 +3974,117 @@ fn string_arg_any_matches(
     })
 }
 
+fn normalize_schema_token(raw: &str) -> String {
+    raw.trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if matches!(ch, '-' | ' ' | '.') {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect()
+}
+
 fn list_dir_args_need_inventory_dir(
+    state: &AppState,
     route_result: Option<&RouteResult>,
     obj: &serde_json::Map<String, Value>,
 ) -> bool {
-    route_result.is_some_and(|route| {
-        matches!(
-            route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::DirectoryNames | crate::OutputSemanticKind::FileNames
-        )
-    }) || obj.contains_key("dirs_only")
-        || obj.contains_key("directories_only")
-        || obj.contains_key("directory_only")
-        || obj.contains_key("folders_only")
-        || obj.contains_key("files_only")
-        || obj.contains_key("kind_filter")
-        || obj.contains_key("kind")
-        || obj.contains_key("entry_type")
-        || obj.contains_key("include_hidden")
-        || obj.contains_key("sort_by")
-        || obj.contains_key("ext_filter")
-        || obj.contains_key("extension")
-        || obj.contains_key("extensions")
+    let Some(manifest) = state.skill_manifest("list_dir") else {
+        return route_result.is_some_and(|route| {
+            matches!(
+                route.output_contract.semantic_kind,
+                crate::OutputSemanticKind::DirectoryNames | crate::OutputSemanticKind::FileNames
+            )
+        }) || obj.contains_key("dirs_only")
+            || obj.contains_key("directories_only")
+            || obj.contains_key("directory_only")
+            || obj.contains_key("folders_only")
+            || obj.contains_key("files_only")
+            || obj.contains_key("kind_filter")
+            || obj.contains_key("kind")
+            || obj.contains_key("entry_type")
+            || obj.contains_key("include_hidden")
+            || obj.contains_key("sort_by")
+            || obj.contains_key("ext_filter")
+            || obj.contains_key("extension")
+            || obj.contains_key("extensions");
+    };
+    let route_semantic = route_result
+        .map(|route| route.output_contract.semantic_kind.as_str())
+        .unwrap_or("none");
+    if manifest
+        .runtime_rewrite_semantic_kinds
+        .iter()
+        .any(|kind| kind == route_semantic)
+    {
+        return true;
+    }
+    obj.keys().any(|key| {
+        let normalized = normalize_schema_token(key);
+        manifest
+            .runtime_rewrite_arg_keys
+            .iter()
+            .any(|candidate| candidate == &normalized)
+    })
+}
+
+fn list_dir_runtime_mapping_from_registry(
+    state: &AppState,
+) -> (String, String, Option<serde_json::Value>) {
+    let Some(manifest) = state.skill_manifest("list_dir") else {
+        return (
+            "system_basic".to_string(),
+            "inventory_dir".to_string(),
+            Some(serde_json::json!({"names_only": true})),
+        );
+    };
+    let runtime_skill = manifest
+        .runtime_skill
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("system_basic")
+        .to_string();
+    let runtime_action = manifest
+        .runtime_action
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("inventory_dir")
+        .to_string();
+    (runtime_skill, runtime_action, manifest.runtime_default_args)
+}
+
+fn merge_default_args(obj: &mut serde_json::Map<String, Value>, defaults: Option<Value>) {
+    let Some(defaults) = defaults.and_then(|value| value.as_object().cloned()) else {
+        return;
+    };
+    for (key, value) in defaults {
+        obj.entry(key).or_insert(value);
+    }
 }
 
 fn inventory_dir_args_from_list_dir_args(
+    state: &AppState,
     route_result: Option<&RouteResult>,
     args: Value,
-) -> Option<Value> {
+) -> Option<(String, Value)> {
     let mut obj = args.as_object()?.clone();
-    if !list_dir_args_need_inventory_dir(route_result, &obj) {
+    if !list_dir_args_need_inventory_dir(state, route_result, &obj) {
         return None;
     }
+    let (runtime_skill, runtime_action, default_args) =
+        list_dir_runtime_mapping_from_registry(state);
+    merge_default_args(&mut obj, default_args);
     normalize_path_alias_to_path(
         &mut obj,
         &["dir_path", "directory_path", "directory", "dir"],
     );
-    obj.insert(
-        "action".to_string(),
-        Value::String("inventory_dir".to_string()),
-    );
+    obj.insert("action".to_string(), Value::String(runtime_action));
     let route_semantic = route_result.map(|route| route.output_contract.semantic_kind);
     let mut dirs_only = route_semantic == Some(crate::OutputSemanticKind::DirectoryNames)
         || bool_arg_any(
@@ -3414,10 +4155,11 @@ fn inventory_dir_args_from_list_dir_args(
         }
         obj.remove(key);
     }
-    Some(Value::Object(obj))
+    Some((runtime_skill, Value::Object(obj)))
 }
 
 fn rewrite_filtered_list_dir_to_inventory_dir(
+    state: &AppState,
     route_result: Option<&RouteResult>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
@@ -3425,12 +4167,15 @@ fn rewrite_filtered_list_dir_to_inventory_dir(
         .into_iter()
         .map(|action| match action {
             AgentAction::CallSkill { skill, args } if skill.eq_ignore_ascii_case("list_dir") => {
-                if let Some(args) =
-                    inventory_dir_args_from_list_dir_args(route_result, args.clone())
+                if let Some((runtime_skill, args)) =
+                    inventory_dir_args_from_list_dir_args(state, route_result, args.clone())
                 {
-                    info!("plan_rewrite_list_dir_to_inventory_dir");
+                    info!(
+                        "plan_rewrite_list_dir_to_inventory_dir runtime_skill={}",
+                        runtime_skill
+                    );
                     AgentAction::CallSkill {
-                        skill: "system_basic".to_string(),
+                        skill: runtime_skill,
                         args,
                     }
                 } else {
@@ -3438,12 +4183,15 @@ fn rewrite_filtered_list_dir_to_inventory_dir(
                 }
             }
             AgentAction::CallTool { tool, args } if tool.eq_ignore_ascii_case("list_dir") => {
-                if let Some(args) =
-                    inventory_dir_args_from_list_dir_args(route_result, args.clone())
+                if let Some((runtime_skill, args)) =
+                    inventory_dir_args_from_list_dir_args(state, route_result, args.clone())
                 {
-                    info!("plan_rewrite_list_dir_to_inventory_dir");
+                    info!(
+                        "plan_rewrite_list_dir_to_inventory_dir runtime_skill={}",
+                        runtime_skill
+                    );
                     AgentAction::CallTool {
-                        tool: "system_basic".to_string(),
+                        tool: runtime_skill,
                         args,
                     }
                 } else {
@@ -4243,6 +4991,13 @@ fn action_reads_workspace_text_content(action: &AgentAction) -> bool {
             true
         }
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("fs_search") =>
+        {
+            args.get("action")
+                .and_then(|value| value.as_str())
+                .is_some_and(|action| action.trim().eq_ignore_ascii_case("grep_text"))
+        }
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
             if skill.eq_ignore_ascii_case("system_basic") =>
         {
             args.get("action")
@@ -4270,7 +5025,20 @@ fn executed_step_reads_workspace_text_content(step: &crate::executor::StepExecut
             .is_some_and(|output| !output.is_empty());
     }
     if !step.skill.eq_ignore_ascii_case("system_basic") {
-        return false;
+        if !step.skill.eq_ignore_ascii_case("fs_search") {
+            return false;
+        }
+        return step
+            .output
+            .as_deref()
+            .and_then(|output| serde_json::from_str::<Value>(output).ok())
+            .and_then(|value| {
+                value
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .map(|action| action.trim().eq_ignore_ascii_case("grep_text"))
+            })
+            .unwrap_or(false);
     }
     step.output
         .as_deref()
@@ -4282,6 +5050,80 @@ fn executed_step_reads_workspace_text_content(step: &crate::executor::StepExecut
                 .map(|action| action.trim().eq_ignore_ascii_case("read_range"))
         })
         .unwrap_or(false)
+}
+
+fn action_observes_locator_only(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("fs_search") =>
+        {
+            args.get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|action| {
+                    matches!(
+                        action.to_ascii_lowercase().as_str(),
+                        "find_name" | "find_ext"
+                    )
+                })
+        }
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("system_basic") =>
+        {
+            args.get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|action| {
+                    matches!(
+                        action.to_ascii_lowercase().as_str(),
+                        "find_path" | "path_batch_facts"
+                    )
+                })
+        }
+        _ => false,
+    }
+}
+
+fn content_evidence_plan_only_has_locator_observation(
+    route_result: &RouteResult,
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> bool {
+    if path_batch_facts_metadata_plan_satisfies_route(route_result, actions) {
+        return false;
+    }
+    if loop_state.has_tool_or_skill_output
+        || route_result.needs_clarify
+        || !route_result.output_contract.requires_content_evidence
+        || !route_expects_terminal_user_answer(route_result)
+        || has_workspace_text_content_evidence(loop_state, actions)
+    {
+        return false;
+    }
+    let executable_actions = actions
+        .iter()
+        .filter(|action| {
+            matches!(
+                action,
+                AgentAction::CallSkill { .. } | AgentAction::CallTool { .. }
+            )
+        })
+        .collect::<Vec<_>>();
+    !executable_actions.is_empty()
+        && executable_actions
+            .iter()
+            .all(|action| action_observes_locator_only(action))
+}
+
+fn path_batch_facts_metadata_plan_satisfies_route(
+    route_result: &RouteResult,
+    actions: &[AgentAction],
+) -> bool {
+    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath {
+        return path_batch_facts_metadata_response_is_sufficient(actions);
+    }
+    route_requests_path_metadata_compare(route_result)
+        && structured_scalar_observation_units(actions) >= 2
 }
 
 fn has_workspace_text_content_evidence(loop_state: &LoopState, actions: &[AgentAction]) -> bool {
@@ -4557,6 +5399,7 @@ fn path_matches_workspace_scope_hint(path: &str, scope_hint: &str) -> bool {
 }
 
 fn route_requests_structured_scalar_compare(route: &RouteResult) -> bool {
+    let contract = crate::TaskContract::from_route_result(route);
     !route.needs_clarify
         && !route.output_contract.delivery_required
         && matches!(
@@ -4564,12 +5407,15 @@ fn route_requests_structured_scalar_compare(route: &RouteResult) -> bool {
             crate::OutputSemanticKind::QuantityComparison
                 | crate::OutputSemanticKind::RecentScalarEqualityCheck
         )
-        && matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::Scalar
-                | crate::OutputResponseShape::OneSentence
-                | crate::OutputResponseShape::Strict
-        )
+        && contract
+            .required_evidence_fields
+            .iter()
+            .any(|field| matches!(field.as_str(), "field_value" | "size_bytes"))
+}
+
+fn route_requests_path_metadata_compare(route: &RouteResult) -> bool {
+    route_requests_structured_scalar_compare(route)
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
 }
 
 fn action_scalar_compare_observation_units(action: &AgentAction) -> usize {
@@ -4632,13 +5478,82 @@ fn structured_scalar_observation_units(actions: &[AgentAction]) -> usize {
         .sum()
 }
 
-fn structured_scalar_compare_missing_required_extracts(
+fn executed_step_scalar_compare_observation_units(
+    step: &crate::executor::StepExecutionResult,
+) -> usize {
+    if !step.is_ok() || !step.skill.eq_ignore_ascii_case("system_basic") {
+        return 0;
+    }
+    let Some(value) = step
+        .output
+        .as_deref()
+        .and_then(|output| serde_json::from_str::<Value>(output).ok())
+    else {
+        return 0;
+    };
+    match value
+        .get("action")
+        .and_then(Value::as_str)
+        .map(|action| action.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("extract_field") => 1,
+        Some("extract_fields") => value
+            .get("field_paths")
+            .and_then(Value::as_array)
+            .map(|field_paths| field_paths.len())
+            .or_else(|| value.get("fields").and_then(Value::as_array).map(Vec::len))
+            .unwrap_or(1),
+        Some("count_inventory") | Some("inventory_dir") => value
+            .get("path")
+            .or_else(|| value.get("resolved_path"))
+            .and_then(Value::as_str)
+            .is_some_and(|path| !path.trim().is_empty())
+            as usize,
+        Some("compare_paths") => value
+            .get("paths")
+            .and_then(Value::as_array)
+            .map(|paths| paths.len().min(2))
+            .unwrap_or(2),
+        Some("path_batch_facts") => value
+            .get("facts")
+            .and_then(Value::as_array)
+            .map(|facts| facts.len().min(2))
+            .unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn executed_structured_scalar_observation_units(loop_state: &LoopState) -> usize {
+    loop_state
+        .executed_step_results
+        .iter()
+        .map(executed_step_scalar_compare_observation_units)
+        .sum()
+}
+
+fn structured_scalar_plus_text_evidence(actions: &[AgentAction]) -> bool {
+    structured_scalar_observation_units(actions) >= 1
+        && actions.iter().any(action_reads_workspace_text_content)
+}
+
+fn structured_scalar_compare_missing_required_extracts_for_round(
     route: &RouteResult,
+    loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
-    route_requests_structured_scalar_compare(route)
-        && has_executable_observation_or_action(actions)
-        && structured_scalar_observation_units(actions) < 2
+    if !route_requests_structured_scalar_compare(route)
+        || !has_executable_observation_or_action(actions)
+    {
+        return false;
+    }
+    let scalar_units = structured_scalar_observation_units(actions)
+        + executed_structured_scalar_observation_units(loop_state);
+    let has_text_evidence = has_workspace_text_content_evidence(loop_state, actions);
+    if scalar_units >= 1 && has_text_evidence {
+        return false;
+    }
+    scalar_units < 2
 }
 
 fn append_synthesize_answer_for_structured_scalar_compare(
@@ -4658,17 +5573,20 @@ fn append_synthesize_answer_for_structured_scalar_compare(
     {
         return actions;
     }
+    let scalar_units = structured_scalar_observation_units(&actions);
+    let has_scalar_text_evidence = structured_scalar_plus_text_evidence(&actions);
+    if scalar_units < 2 && !has_scalar_text_evidence {
+        return actions;
+    }
     let evidence_refs = actions
         .iter()
         .enumerate()
         .filter_map(|(idx, action)| {
-            (action_scalar_compare_observation_units(action) > 0)
-                .then(|| format!("step_{}", idx + 1))
+            (action_scalar_compare_observation_units(action) > 0
+                || (has_scalar_text_evidence && action_reads_workspace_text_content(action)))
+            .then(|| format!("step_{}", idx + 1))
         })
         .collect::<Vec<_>>();
-    if structured_scalar_observation_units(&actions) < 2 {
-        return actions;
-    }
     let mut rewritten = actions;
     rewritten.push(AgentAction::SynthesizeAnswer {
         evidence_refs: evidence_refs.clone(),
@@ -4678,6 +5596,178 @@ fn append_synthesize_answer_for_structured_scalar_compare(
         evidence_refs.join(",")
     );
     rewritten
+}
+
+fn path_batch_facts_action_for_explicit_targets(targets: &[String]) -> AgentAction {
+    AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: serde_json::json!({
+            "action": "path_batch_facts",
+            "paths": targets,
+            "include_missing": true,
+            "fields": ["exists", "kind", "size", "modified"],
+        }),
+    }
+}
+
+fn plan_path_matches_explicit_file_target(path: &str, target: &str) -> bool {
+    let Some(path) = normalize_plan_path(path) else {
+        return false;
+    };
+    let Some(target) = normalize_plan_path(target) else {
+        return false;
+    };
+    let path = path.replace('\\', "/");
+    let target = target.replace('\\', "/");
+    if path.eq_ignore_ascii_case(&target) {
+        return true;
+    }
+    let path_lower = path.to_ascii_lowercase();
+    let target_lower = target.to_ascii_lowercase();
+    path_lower.ends_with(&format!("/{target_lower}"))
+        || Path::new(&path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.eq_ignore_ascii_case(&target))
+}
+
+fn action_observed_paths_for_explicit_file_targets(action: &AgentAction) -> Vec<String> {
+    let Some(skill) = planned_action_skill_name(action).map(str::trim) else {
+        return Vec::new();
+    };
+    let Some(args) = action_args(action).and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let mut paths = Vec::new();
+    if skill.eq_ignore_ascii_case("read_file") || skill.eq_ignore_ascii_case("doc_parse") {
+        if let Some(path) = args.get("path").and_then(Value::as_str) {
+            paths.push(path.to_string());
+        }
+        return paths;
+    }
+    if !skill.eq_ignore_ascii_case("system_basic") {
+        return paths;
+    }
+
+    match args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "path_batch_facts" => {
+            paths.extend(string_list_from_value(args.get("paths")));
+            paths.extend(string_list_from_value(args.get("targets")));
+            paths.extend(string_list_from_value(args.get("path")));
+        }
+        "compare_paths" => {
+            paths.extend(string_list_from_value(args.get("paths")));
+            paths.extend(string_list_from_value(args.get("targets")));
+            if let Some(path) = args.get("left_path").and_then(Value::as_str) {
+                paths.push(path.to_string());
+            }
+            if let Some(path) = args.get("right_path").and_then(Value::as_str) {
+                paths.push(path.to_string());
+            }
+        }
+        "read_range" | "extract_field" | "extract_fields" => {
+            if let Some(path) = args.get("path").and_then(Value::as_str) {
+                paths.push(path.to_string());
+            }
+        }
+        _ => {}
+    }
+    paths
+}
+
+fn explicit_file_targets_covered_by_plan(actions: &[AgentAction], targets: &[String]) -> Vec<bool> {
+    let mut covered = vec![false; targets.len()];
+    for action in actions {
+        for path in action_observed_paths_for_explicit_file_targets(action) {
+            for (idx, target) in targets.iter().enumerate() {
+                if !covered[idx] && plan_path_matches_explicit_file_target(&path, target) {
+                    covered[idx] = true;
+                }
+            }
+        }
+    }
+    covered
+}
+
+fn explicit_multi_file_metadata_plan_covers_targets(
+    actions: &[AgentAction],
+    targets: &[String],
+) -> bool {
+    actions.iter().any(|action| {
+        let Some(skill) = planned_action_skill_name(action).map(str::trim) else {
+            return false;
+        };
+        if !skill.eq_ignore_ascii_case("system_basic") {
+            return false;
+        }
+        let Some(args) = action_args(action).and_then(Value::as_object) else {
+            return false;
+        };
+        let action_name = args
+            .get("action")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        if !matches!(
+            action_name.to_ascii_lowercase().as_str(),
+            "path_batch_facts" | "compare_paths"
+        ) {
+            return false;
+        }
+        explicit_file_targets_covered_by_plan(std::slice::from_ref(action), targets)
+            .into_iter()
+            .all(|covered| covered)
+    })
+}
+
+fn ensure_explicit_multi_file_targets_have_path_facts(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.needs_clarify
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || loop_state.has_tool_or_skill_output
+    {
+        return actions;
+    }
+    let targets = structured_or_text_multi_file_targets(route, user_text)
+        .into_iter()
+        .take(4)
+        .collect::<Vec<_>>();
+    if targets.len() < 2 || explicit_multi_file_metadata_plan_covers_targets(&actions, &targets) {
+        return actions;
+    }
+
+    if !route_requests_path_metadata_compare(route) {
+        return actions;
+    }
+
+    if structured_scalar_plus_text_evidence(&actions) {
+        return actions;
+    }
+
+    if structured_scalar_observation_units(&actions) >= 2 {
+        return actions;
+    }
+
+    info!(
+        "plan_replace_scalar_multi_file_read_with_path_batch_facts targets={}",
+        targets.join(",")
+    );
+    vec![path_batch_facts_action_for_explicit_targets(&targets)]
 }
 
 fn rewrite_unresolved_template_arg_multi_file_read_plan(
@@ -4694,7 +5784,10 @@ fn rewrite_unresolved_template_arg_multi_file_read_plan(
     {
         return actions;
     }
-    let file_targets = explicit_document_file_targets(user_text);
+    let file_targets = structured_or_text_multi_file_targets(route, user_text)
+        .into_iter()
+        .filter(|target| filename_candidate_has_document_extension(target))
+        .collect::<Vec<_>>();
     if file_targets.len() < 2 {
         return actions;
     }
@@ -4879,6 +5972,17 @@ fn explicit_document_file_targets(user_text: &str) -> Vec<String> {
     targets
 }
 
+fn structured_or_text_multi_file_targets(route: &RouteResult, user_text: &str) -> Vec<String> {
+    let structured_targets = crate::task_contract::target_locators_for_route(route)
+        .into_iter()
+        .filter(|target| target.trim() != ".")
+        .collect::<Vec<_>>();
+    if structured_targets.len() >= 2 {
+        return structured_targets;
+    }
+    explicit_document_file_targets(user_text)
+}
+
 fn filename_candidate_has_document_extension(candidate: &str) -> bool {
     let Some((_, ext)) = candidate.rsplit_once('.') else {
         return false;
@@ -4889,7 +5993,46 @@ fn filename_candidate_has_document_extension(candidate: &str) -> bool {
     )
 }
 
+fn locator_identity_token(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches(|c: char| {
+            matches!(
+                c,
+                '"' | '\''
+                    | '`'
+                    | ','
+                    | '.'
+                    | '，'
+                    | '。'
+                    | ':'
+                    | '：'
+                    | ';'
+                    | '；'
+                    | '('
+                    | ')'
+                    | '（'
+                    | '）'
+                    | '['
+                    | ']'
+                    | '【'
+                    | '】'
+            )
+        })
+        .to_ascii_lowercase()
+}
+
+fn locator_hint_names_workspace_root(workspace_root: &Path, locator_hint: &str) -> bool {
+    let Some(root_name) = workspace_root.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let normalized_root = locator_identity_token(root_name);
+    let normalized_hint = locator_identity_token(locator_hint);
+    !normalized_root.is_empty() && normalized_hint == normalized_root
+}
+
 fn prune_unscoped_workspace_summary_evidence_for_scope(
+    state: &AppState,
     route_result: Option<&RouteResult>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
@@ -4902,6 +6045,9 @@ fn prune_unscoped_workspace_summary_evidence_for_scope(
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::WorkspaceProjectSummary
         || scope_hint.is_empty()
     {
+        return actions;
+    }
+    if locator_hint_names_workspace_root(&state.skill_rt.workspace_root, scope_hint) {
         return actions;
     }
     let has_scoped_evidence = actions.iter().any(|action| {
@@ -5147,6 +6293,9 @@ fn rewrite_extract_field_paths_to_structured_candidates(
             continue;
         };
         let current = resolve_workspace_path(&state.skill_rt.workspace_root, &request.path);
+        if rewrite_cargo_workspace_package_fields_to_workspace_package(args, &current, &request) {
+            continue;
+        }
         if structured_file_has_all_fields(&current, &request.fields) {
             continue;
         }
@@ -5179,6 +6328,73 @@ fn rewrite_extract_field_paths_to_structured_candidates(
         );
     }
     rewritten
+}
+
+fn rewrite_cargo_workspace_package_fields_to_workspace_package(
+    args: &mut Value,
+    current: &Path,
+    request: &StructuredExtractRequest,
+) -> bool {
+    if current.file_name().and_then(|name| name.to_str()) != Some("Cargo.toml") {
+        return false;
+    }
+    let Some(root_value) = parse_structured_file_value(current) else {
+        return false;
+    };
+    if lookup_structured_field_value(&root_value, "workspace").is_none()
+        || lookup_structured_field_value(&root_value, "package").is_some()
+    {
+        return false;
+    }
+    let mut rewritten_fields = Vec::with_capacity(request.fields.len());
+    let mut changed = false;
+    for field in &request.fields {
+        let Some(suffix) = field.strip_prefix("package.") else {
+            return false;
+        };
+        let workspace_field = format!("workspace.package.{suffix}");
+        if lookup_structured_field_value(&root_value, &workspace_field).is_none() {
+            return false;
+        }
+        rewritten_fields.push(workspace_field);
+        changed = true;
+    }
+    if !changed {
+        return false;
+    }
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    let action_name = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if action_name.eq_ignore_ascii_case("extract_field") && rewritten_fields.len() == 1 {
+        obj.insert(
+            "field_path".to_string(),
+            Value::String(rewritten_fields[0].clone()),
+        );
+    } else if action_name.eq_ignore_ascii_case("extract_fields") {
+        obj.insert(
+            "field_paths".to_string(),
+            Value::Array(
+                rewritten_fields
+                    .iter()
+                    .cloned()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+    } else {
+        return false;
+    }
+    info!(
+        "plan_rewrite_cargo_workspace_package_fields path={} fields={:?}",
+        current.display(),
+        rewritten_fields
+    );
+    true
 }
 
 fn structured_extract_request(args: &Value) -> Option<StructuredExtractRequest> {
@@ -6403,6 +7619,9 @@ fn normalize_output_placeholder_reference(raw: &str) -> String {
     static STEP_BARE_RE: OnceLock<Regex> = OnceLock::new();
     static S_UNDERSCORE_OUTPUT_RE: OnceLock<Regex> = OnceLock::new();
     let lower = raw.trim().to_ascii_lowercase();
+    if lower.starts_with("last_output.") || lower.starts_with("last_output[") {
+        return "last_output".to_string();
+    }
     let step_underscore_output_re = STEP_UNDERSCORE_OUTPUT_RE.get_or_init(|| {
         Regex::new(r"^step_?(\d+)_output$").expect("step output placeholder regex")
     });
@@ -6521,6 +7740,12 @@ fn rewrite_pre_observation_concrete_respond_to_placeholder(
     loop_state: &LoopState,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
+    if route_result.is_some_and(|route| {
+        route.output_contract.delivery_required
+            || route.output_contract.response_shape == crate::OutputResponseShape::FileToken
+    }) {
+        return actions;
+    }
     if actions.len() < 2 {
         return actions;
     }
@@ -6540,6 +7765,9 @@ fn rewrite_pre_observation_concrete_respond_to_placeholder(
         AgentAction::Respond { content } => content.clone(),
         _ => return actions,
     };
+    if crate::finalize::parse_delivery_file_token(respond_content.trim()).is_some() {
+        return actions;
+    }
     let prior_is_observation = matches!(
         &actions[last_idx - 1],
         AgentAction::CallSkill { .. } | AgentAction::CallTool { .. }
@@ -6635,6 +7863,98 @@ fn rewrite_terminal_placeholder_respond_to_synthesize_answer(
         "plan_rewrite_terminal_placeholder_respond_to_synthesize_answer refs={}",
         evidence_refs.join(",")
     );
+    rewritten
+}
+
+fn content_excerpt_summary_target_path(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<String> {
+    let route = route_result?;
+    if route.needs_clarify
+        || route.output_contract.delivery_required
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ContentExcerptSummary
+    {
+        return None;
+    }
+    auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (!hint.is_empty() && Path::new(hint).is_file()).then_some(hint)
+        })
+        .filter(|path| Path::new(path).is_file())
+        .map(ToString::to_string)
+}
+
+fn ensure_content_excerpt_summary_has_bounded_content(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if loop_state.has_tool_or_skill_output {
+        return actions;
+    }
+    let Some(path) = content_excerpt_summary_target_path(route_result, auto_locator_path) else {
+        return actions;
+    };
+    let mut rewritten = actions;
+    if !rewritten.iter().any(action_observes_bounded_file_content) {
+        let insert_at = rewritten
+            .iter()
+            .position(|action| {
+                matches!(
+                    action,
+                    AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. }
+                )
+            })
+            .unwrap_or(rewritten.len());
+        rewritten.insert(
+            insert_at,
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "read_range",
+                    "path": path,
+                    "mode": "head",
+                    "n": 40
+                }),
+            },
+        );
+        info!("plan_insert_content_excerpt_summary_read_range");
+    }
+    if !rewritten
+        .iter()
+        .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. }))
+    {
+        let evidence_refs = observation_action_evidence_refs(&rewritten);
+        if !evidence_refs.is_empty() {
+            let insert_at = rewritten
+                .iter()
+                .rposition(|action| matches!(action, AgentAction::Respond { .. }))
+                .unwrap_or(rewritten.len());
+            rewritten.insert(
+                insert_at,
+                AgentAction::SynthesizeAnswer {
+                    evidence_refs: evidence_refs.clone(),
+                },
+            );
+            match rewritten.get_mut(insert_at + 1) {
+                Some(AgentAction::Respond { content }) => {
+                    *content = "{{last_output}}".to_string();
+                }
+                _ => rewritten.push(AgentAction::Respond {
+                    content: "{{last_output}}".to_string(),
+                }),
+            }
+            info!(
+                "plan_insert_content_excerpt_summary_synthesis refs={}",
+                evidence_refs.join(",")
+            );
+        }
+    }
     rewritten
 }
 
@@ -6762,6 +8082,58 @@ fn has_mixed_last_output_terminal_respond(actions: &[AgentAction]) -> bool {
     mixed_last_output_respond_has_concrete_text(content, &evidence_refs)
 }
 
+fn terminal_mixed_last_output_respond_content(actions: &[AgentAction]) -> Option<String> {
+    let Some(AgentAction::Respond { content }) = actions.last() else {
+        return None;
+    };
+    let evidence_refs = extract_output_placeholder_evidence_refs(content);
+    mixed_last_output_respond_has_concrete_text(content, &evidence_refs).then(|| content.clone())
+}
+
+fn restore_terminal_mixed_last_output_respond(
+    route_result: Option<&RouteResult>,
+    planned_content: Option<String>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if !route_result.is_some_and(|route| {
+        route.output_contract.response_shape == crate::OutputResponseShape::Strict
+            && route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+    }) {
+        return actions;
+    }
+    let Some(planned_content) = planned_content else {
+        return actions;
+    };
+    if actions.len() < 3 {
+        return actions;
+    }
+    let last_idx = actions.len() - 1;
+    let synth_idx = last_idx - 1;
+    let terminal_is_bare_last_output = matches!(
+        &actions[last_idx],
+        AgentAction::Respond { content } if is_bare_last_output_placeholder(content)
+    );
+    let synth_uses_last_output_only = matches!(
+        &actions[synth_idx],
+        AgentAction::SynthesizeAnswer { evidence_refs }
+            if !evidence_refs.is_empty()
+                && evidence_refs
+                    .iter()
+                    .all(|reference| reference.trim().eq_ignore_ascii_case("last_output"))
+    );
+    if !terminal_is_bare_last_output || !synth_uses_last_output_only {
+        return actions;
+    }
+
+    let mut rewritten = Vec::with_capacity(actions.len() - 1);
+    rewritten.extend(actions[..synth_idx].iter().cloned());
+    rewritten.push(AgentAction::Respond {
+        content: planned_content,
+    });
+    info!("plan_restore_terminal_mixed_last_output_respond");
+    rewritten
+}
+
 /// §F1 结构 guard：判断 Respond.content 是否像「未观测就编造」的工具输出形态。
 ///
 /// 这个 guard 只看输出形态，不判断用户意图：
@@ -6869,6 +8241,69 @@ fn inject_synthesize_answer_for_bare_placeholder_respond(
     rewritten
 }
 
+fn strip_intermediate_synthesize_before_later_execution(
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if actions.len() < 2 {
+        return actions;
+    }
+    let mut stripped = Vec::with_capacity(actions.len());
+    let mut changed = false;
+    for (idx, action) in actions.iter().enumerate() {
+        if matches!(action, AgentAction::SynthesizeAnswer { .. })
+            && actions[idx + 1..].iter().any(|later| {
+                matches!(
+                    later,
+                    AgentAction::CallSkill { .. } | AgentAction::CallTool { .. }
+                )
+            })
+        {
+            changed = true;
+            continue;
+        }
+        stripped.push(action.clone());
+    }
+    if changed {
+        info!("plan_strip_intermediate_synthesize_before_later_execution");
+    }
+    stripped
+}
+
+fn strip_terminal_placeholder_respond_for_exact_listing_contract(
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if !matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::FilePaths
+    ) {
+        return actions;
+    }
+    if !actions.iter().any(|action| {
+        matches!(
+            action,
+            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. }
+        )
+    }) {
+        return actions;
+    }
+    let Some(AgentAction::Respond { content }) = actions.last() else {
+        return actions;
+    };
+    if !is_bare_last_output_placeholder(content) {
+        return actions;
+    }
+    let mut stripped = actions;
+    stripped.pop();
+    info!("plan_strip_terminal_placeholder_respond_for_exact_listing_contract");
+    stripped
+}
+
 pub(super) async fn plan_round_actions(
     state: &AppState,
     task: &ClaimedTask,
@@ -6904,6 +8339,39 @@ pub(super) async fn plan_round_actions(
             );
             return Ok(plan_result);
         }
+        if let Some(plan_result) = existence_with_path_locator_fast_plan_result(
+            goal,
+            route_result,
+            loop_state,
+            auto_locator_path,
+        ) {
+            info!(
+                "plan_fast_path_existence_with_path_locator task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
+        if let Some(plan_result) =
+            file_paths_locator_fast_plan_result(goal, route_result, loop_state, auto_locator_path)
+        {
+            info!(
+                "plan_fast_path_file_paths_locator task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
+        if let Some(plan_result) = content_excerpt_summary_auto_locator_fast_plan_result(
+            goal,
+            route_result,
+            loop_state,
+            auto_locator_path,
+        ) {
+            info!(
+                "plan_fast_path_content_excerpt_summary_auto_locator task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
     }
     let recent_assistant_replies = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
         crate::memory::build_recent_assistant_replies_context(
@@ -6934,11 +8402,12 @@ pub(super) async fn plan_round_actions(
     } else {
         build_lightweight_tool_spec(route_result, auto_locator_path)
     };
-    let turn_analysis = build_turn_analysis_prompt_block(turn_analysis_for_prompt);
+    let turn_analysis = build_turn_analysis_prompt_block(turn_analysis_for_prompt, route_result);
     let request_language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_text);
     let user_request_for_prompt =
         crate::language_policy::task_user_request_for_prompt(task, user_text);
+    let attempt_ledger = build_attempt_ledger_compact(loop_state);
     let (prompt_name, prompt_source, prompt_version, prompt_text) = if loop_state.round_no <= 1 {
         let (prompt_name, prompt_logical_path) = round1_prompt_spec_for_class(planning_class);
         let resolved = crate::bootstrap::load_required_prompt_template_for_state_with_meta(
@@ -7010,6 +8479,7 @@ pub(super) async fn plan_round_actions(
                 &state.policy.command_intent.default_locale,
                 loop_state.round_no,
                 &history_compact,
+                &attempt_ledger,
                 &last_output,
                 &runtime_os,
                 &runtime_shell,
@@ -7107,6 +8577,7 @@ pub(super) async fn plan_round_actions(
             repair_reason,
             &tool_spec_template,
             &skill_playbooks,
+            &attempt_ledger,
             &plan_raw,
             loop_state.round_no,
         )
@@ -7154,6 +8625,7 @@ pub(super) async fn plan_round_actions(
                             second_repair_reason,
                             &tool_spec_template,
                             &skill_playbooks,
+                            &attempt_ledger,
                             &repaired,
                             loop_state.round_no,
                         )
@@ -7184,14 +8656,64 @@ pub(super) async fn plan_round_actions(
                                 (second_actions, PlanKind::Repair, second_repaired)
                             }
                             Some(_) => {
-                                return Err("repair plan still non-actionable after second repair"
-                                    .to_string());
+                                let fallback_actions = initial_actions.as_ref().filter(|actions| {
+                                    can_fallback_to_initial_plan_after_repair_failure(
+                                        state,
+                                        route_result,
+                                        loop_state,
+                                        actions,
+                                    )
+                                });
+                                if let Some(actions) = fallback_actions {
+                                    warn!(
+                                        "plan_second_repair_invalid_fallback_to_initial task_id={} round={}",
+                                        task.task_id, loop_state.round_no
+                                    );
+                                    (
+                                        actions.clone(),
+                                        if loop_state.round_no <= 1 {
+                                            PlanKind::Single
+                                        } else {
+                                            PlanKind::Incremental
+                                        },
+                                        plan_raw.clone(),
+                                    )
+                                } else {
+                                    return Err(
+                                        "repair plan still non-actionable after second repair"
+                                            .to_string(),
+                                    );
+                                }
                             }
                             None => {
-                                return Err(
-                                    "second repair plan parser failed: no executable steps"
-                                        .to_string(),
-                                );
+                                let fallback_actions = initial_actions.as_ref().filter(|actions| {
+                                    can_fallback_to_initial_plan_after_repair_failure(
+                                        state,
+                                        route_result,
+                                        loop_state,
+                                        actions,
+                                    )
+                                });
+                                if let Some(actions) = fallback_actions {
+                                    warn!(
+                                        "plan_second_repair_parse_failed_fallback_to_initial task_id={} round={}",
+                                        task.task_id, loop_state.round_no
+                                    );
+                                    (
+                                        actions.clone(),
+                                        if loop_state.round_no <= 1 {
+                                            PlanKind::Single
+                                        } else {
+                                            PlanKind::Incremental
+                                        },
+                                        plan_raw.clone(),
+                                    )
+                                } else {
+                                    return Err(
+                                        "second repair plan parser failed: no executable steps"
+                                            .to_string(),
+                                    );
+                                }
                             }
                         }
                     }
@@ -7292,13 +8814,16 @@ mod tests {
     use super::{
         build_lightweight_skill_playbooks_text, build_lightweight_skill_quick_index_text,
         build_lightweight_tool_spec, can_fallback_to_initial_plan_after_repair_failure,
-        classify_planning_prompt_class, enforce_output_contract_tool_args,
+        classify_planning_prompt_class, content_excerpt_summary_auto_locator_fast_plan_result,
+        enforce_output_contract_tool_args, ensure_content_excerpt_summary_has_bounded_content,
+        existence_with_path_locator_fast_plan_result, file_paths_locator_fast_plan_result,
         fill_missing_read_range_path_from_route_locator,
         has_pre_observation_structured_output_shape,
         inject_synthesize_answer_for_bare_placeholder_respond, is_bare_last_output_placeholder,
-        normalize_archive_basic_schema_aliases, normalize_planned_actions,
-        normalize_planned_actions_with_original, normalize_system_basic_schema_aliases,
-        plan_repair_reason, replace_file_delivery_respond_only_with_path_observation,
+        normalize_archive_basic_schema_aliases, normalize_git_basic_schema_aliases,
+        normalize_planned_actions, normalize_planned_actions_with_original,
+        normalize_system_basic_schema_aliases, plan_repair_reason,
+        replace_file_delivery_respond_only_with_path_observation,
         replace_scalar_count_plan_with_count_inventory,
         replace_scalar_path_respond_only_with_auto_locator_observation,
         rewrite_archive_pack_plan_to_archive_basic,
@@ -7314,9 +8839,11 @@ mod tests {
         scalar_path_auto_locator_fast_plan_result, scalar_path_auto_locator_observation_plan,
         should_force_actionable_plan_repair, strip_directory_read_range_after_inventory_dir,
         strip_file_lines_count_before_tail_read_range,
+        strip_intermediate_synthesize_before_later_execution,
         strip_terminal_discussion_for_direct_skill_passthrough,
         strip_terminal_discussion_for_observed_finalize,
         strip_terminal_discussion_for_scalar_path_observation,
+        strip_terminal_placeholder_respond_for_exact_listing_contract,
         strip_unresolved_template_reads_after_inventory_dir, LoopState, PlanningPromptClass,
     };
     use crate::{
@@ -7552,6 +9079,103 @@ mod tests {
         assert!(matches!(
             normalized.last(),
             Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+        ));
+    }
+
+    #[test]
+    fn existence_path_summary_metadata_placeholder_does_not_force_file_read() {
+        let state = test_state();
+        let loop_state = LoopState::new(1);
+        let mut route = base_route_result();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPathSummary;
+        route.output_contract.locator_hint = "data/rustclaw.db".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: json!({
+                    "action": "path_batch_facts",
+                    "paths": ["/tmp/rustclaw.db"],
+                    "include_missing": true
+                }),
+            },
+            AgentAction::Respond {
+                content: "文件存在，大小为 {{size}} 字节。".to_string(),
+            },
+        ];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &loop_state,
+            "check whether the file exists and report its size",
+            Some("/tmp/rustclaw.db"),
+            actions,
+        );
+
+        assert!(!normalized.iter().any(|action| {
+            matches!(
+                action,
+                AgentAction::CallSkill { skill, args }
+                    if skill == "system_basic"
+                        && args.get("action").and_then(Value::as_str) == Some("read_range")
+            )
+        }));
+        assert!(normalized.iter().any(|action| {
+            matches!(
+                action,
+                AgentAction::SynthesizeAnswer { evidence_refs }
+                    if evidence_refs == &vec!["step_1".to_string()]
+                        || evidence_refs == &vec!["last_output".to_string()]
+            )
+        }));
+        assert!(matches!(
+            normalized.last(),
+            Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+        ));
+    }
+
+    #[test]
+    fn existence_with_path_metadata_batch_answer_does_not_force_content_repair() {
+        let state = test_state();
+        let loop_state = LoopState::new(1);
+        let mut route = base_route_result();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Filename;
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_hint = "README.md".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: json!({
+                    "action": "path_batch_facts",
+                    "paths": ["/home/guagua/rustclaw/README.md"],
+                    "include_missing": true,
+                    "fields": ["exists", "size"]
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        assert!(!should_force_actionable_plan_repair(
+            &state,
+            Some(&route),
+            &loop_state,
+            &actions
+        ));
+        assert!(can_fallback_to_initial_plan_after_repair_failure(
+            &state,
+            Some(&route),
+            &loop_state,
+            &actions
         ));
     }
 
@@ -7840,6 +9464,71 @@ mod tests {
             other => panic!("expected path observation, got {other:?}"),
         }
         assert!(matches!(rewritten[1], AgentAction::Respond { .. }));
+    }
+
+    #[test]
+    fn file_delivery_terminal_token_is_not_rewritten_to_content_synthesis() {
+        let mut route = base_route_result();
+        route.wants_file_delivery = true;
+        route.output_contract.response_shape = OutputResponseShape::FileToken;
+        route.output_contract.delivery_required = true;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/LICENSE.zh-CN.md".to_string();
+        route.output_contract.requires_content_evidence = true;
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: json!({"path":"/tmp/LICENSE.zh-CN.md"}),
+            },
+            AgentAction::Respond {
+                content: "FILE:/tmp/LICENSE.zh-CN.md".to_string(),
+            },
+        ];
+
+        let rewritten = rewrite_pre_observation_concrete_respond_to_placeholder(
+            Some(&route),
+            &LoopState::default(),
+            actions,
+        );
+
+        assert_eq!(rewritten.len(), 2);
+        assert!(matches!(rewritten[0], AgentAction::CallSkill { .. }));
+        assert!(matches!(
+            &rewritten[1],
+            AgentAction::Respond { content } if content == "FILE:/tmp/LICENSE.zh-CN.md"
+        ));
+    }
+
+    #[test]
+    fn file_token_respond_survives_even_when_delivery_contract_is_missing() {
+        let mut route = base_route_result();
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.delivery_required = false;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/LICENSE.zh-CN.md".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: json!({"path":"/tmp/LICENSE.zh-CN.md"}),
+            },
+            AgentAction::Respond {
+                content: "FILE:/tmp/LICENSE.zh-CN.md".to_string(),
+            },
+        ];
+
+        let rewritten = rewrite_pre_observation_concrete_respond_to_placeholder(
+            Some(&route),
+            &LoopState::default(),
+            actions,
+        );
+
+        assert_eq!(rewritten.len(), 2);
+        assert!(matches!(
+            &rewritten[1],
+            AgentAction::Respond { content } if content == "FILE:/tmp/LICENSE.zh-CN.md"
+        ));
     }
 
     #[test]
@@ -8196,15 +9885,35 @@ mod tests {
         let quick_index = build_lightweight_skill_quick_index_text(&state, &task);
         let playbooks = build_lightweight_skill_playbooks_text(&state, &task);
         assert!(quick_index.contains("archive_basic"));
+        assert!(quick_index.contains("planner_kind: tool"));
         assert!(quick_index.contains("semantic_tags: archive_list"));
         assert!(quick_index.contains("preferred_over_run_cmd: true"));
         assert!(quick_index.contains("validation_actions: list"));
         assert!(playbooks.contains("### archive_basic"));
-        assert!(playbooks.contains("Registry metadata: semantic_tags: archive_list"));
+        assert!(playbooks.contains("Registry metadata: planner_kind: tool"));
+        assert!(playbooks.contains("semantic_tags: archive_list"));
         assert!(playbooks.contains("preferred_over_run_cmd: true"));
         assert!(playbooks.contains("validation_actions: list"));
         assert!(playbooks.contains("### service_control"));
         assert!(playbooks.contains("semantic_tags: service_status"));
+    }
+
+    #[test]
+    fn lightweight_tool_spec_includes_route_task_contract() {
+        let mut route = base_route_result();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+
+        let spec = build_lightweight_tool_spec(Some(&route), None);
+
+        assert!(spec.contains("task_contract"));
+        assert!(spec.contains("intent_kind=planner_execute"));
+        assert!(spec.contains("target_object=directory"));
+        assert!(spec.contains("operation=list"));
+        assert!(spec.contains("required_evidence_fields=candidates"));
+        assert!(spec.contains("failure_policy=retry_with_alternatives"));
     }
 
     #[test]
@@ -8587,6 +10296,56 @@ name = "clawd"
         );
     }
 
+    #[test]
+    fn extract_field_rewrites_workspace_cargo_package_version_to_workspace_package_version() {
+        let root = TempDirGuard::new("workspace_cargo_version");
+        fs::write(
+            root.path.join("Cargo.toml"),
+            r#"[workspace]
+members = ["crates/clawd"]
+
+[workspace.package]
+version = "0.1.7"
+"#,
+        )
+        .expect("write workspace cargo");
+
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+        route.output_contract.locator_kind = OutputLocatorKind::Filename;
+        let root_cargo = root.path.join("Cargo.toml");
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "extract_field",
+                "path": root_cargo.display().to_string(),
+                "field_path": "package.version"
+            }),
+        }];
+
+        let normalized = super::normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "Read workspace package version from Cargo.toml",
+            Some(root_cargo.to_string_lossy().as_ref()),
+            actions,
+        );
+        let AgentAction::CallSkill { args, .. } = &normalized[0] else {
+            panic!("expected call skill");
+        };
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some(root_cargo.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            args.get("field_path").and_then(Value::as_str),
+            Some("workspace.package.version")
+        );
+    }
+
     fn should_force_plan_repair(
         route_result: Option<&RouteResult>,
         loop_state: &LoopState,
@@ -8673,6 +10432,49 @@ name = "clawd"
                 true,
                 OutputResponseShape::Free,
             )),
+            &loop_state,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn content_evidence_route_repairs_locator_only_observation_plan() {
+        let loop_state = LoopState::new(2);
+        let actions = vec![AgentAction::CallSkill {
+            skill: "fs_search".to_string(),
+            args: json!({
+                "action": "find_name",
+                "pattern": "crates/clawd/src/prompt_utils.rs",
+            }),
+        }];
+        let route = route_result(RoutedMode::Act, true, OutputResponseShape::Free);
+
+        assert!(should_force_plan_repair(
+            Some(&route),
+            &loop_state,
+            &actions,
+        ));
+        assert_eq!(
+            repair_reason(Some(&route), &loop_state, Some(&actions)),
+            "content_evidence_requires_content_observation"
+        );
+    }
+
+    #[test]
+    fn content_evidence_route_accepts_scoped_grep_observation_plan() {
+        let loop_state = LoopState::new(2);
+        let actions = vec![AgentAction::CallSkill {
+            skill: "fs_search".to_string(),
+            args: json!({
+                "action": "grep_text",
+                "path": "crates/clawd/src/prompt_utils.rs",
+                "query": "run_cmd",
+            }),
+        }];
+        let route = route_result(RoutedMode::Act, true, OutputResponseShape::Free);
+
+        assert!(!should_force_plan_repair(
+            Some(&route),
             &loop_state,
             &actions,
         ));
@@ -8842,10 +10644,14 @@ name = "clawd"
             actions,
         );
 
-        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized.len(), 3);
         assert!(matches!(
             &normalized[1],
             AgentAction::SynthesizeAnswer { evidence_refs } if evidence_refs == &vec!["step_1".to_string()]
+        ));
+        assert!(matches!(
+            &normalized[2],
+            AgentAction::Respond { content } if content == "{{last_output}}"
         ));
     }
 
@@ -8875,7 +10681,7 @@ name = "clawd"
             actions,
         );
 
-        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized.len(), 3);
         assert!(normalized.iter().all(|action| {
             !matches!(
                 action,
@@ -8883,6 +10689,16 @@ name = "clawd"
                     if skill == "git_basic" || skill == "system_basic"
             )
         }));
+        assert!(matches!(
+            &normalized[1],
+            AgentAction::SynthesizeAnswer { evidence_refs }
+                if evidence_refs == &vec!["step_1".to_string()]
+                    || evidence_refs == &vec!["last_output".to_string()]
+        ));
+        assert!(matches!(
+            &normalized[2],
+            AgentAction::Respond { content } if content == "{{last_output}}"
+        ));
     }
 
     #[test]
@@ -8970,7 +10786,7 @@ name = "clawd"
         assert!(matches!(
             &normalized[2],
             AgentAction::SynthesizeAnswer { evidence_refs }
-                if evidence_refs == &vec!["s1.output".to_string(), "s2.output".to_string()]
+                if evidence_refs == &vec!["step_1".to_string(), "step_2".to_string()]
         ));
     }
 
@@ -10202,6 +12018,206 @@ name = "clawd"
     }
 
     #[test]
+    fn existence_with_path_filename_fast_plan_uses_name_search() {
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::Filename;
+        route.output_contract.locator_hint = "start-all-bin.sh".to_string();
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let plan = existence_with_path_locator_fast_plan_result(
+            "find the file in the current repository",
+            Some(&route),
+            &loop_state,
+            None,
+        )
+        .expect("existence-with-path filename route should use a bounded search");
+
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        assert_eq!(plan.steps.len(), 1);
+        match &plan.steps[0].to_agent_action() {
+            Some(AgentAction::CallSkill { skill, args }) => {
+                assert_eq!(skill, "fs_search");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("find_name")
+                );
+                assert_eq!(
+                    args.get("pattern").and_then(Value::as_str),
+                    Some("start-all-bin.sh")
+                );
+            }
+            other => panic!("expected fs_search find_name action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn existence_with_path_multi_file_targets_fast_plan_uses_path_batch_facts() {
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.resolved_intent =
+            "检查 README.md、AGENTS.md、Cargo.toml 是否都存在，只用一行回答每个文件的存在状态"
+                .to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint = "/home/guagua/rustclaw".to_string();
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let plan = existence_with_path_locator_fast_plan_result(
+            "check several explicit files",
+            Some(&route),
+            &loop_state,
+            Some("/home/guagua/rustclaw"),
+        )
+        .expect("multi-file existence route should use path facts");
+
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        assert_eq!(plan.steps.len(), 1);
+        match &plan.steps[0].to_agent_action() {
+            Some(AgentAction::CallSkill { skill, args }) => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("path_batch_facts")
+                );
+                assert_eq!(
+                    args.get("paths"),
+                    Some(&json!(["README.md", "AGENTS.md", "Cargo.toml"]))
+                );
+            }
+            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn existence_with_path_path_fast_plan_uses_path_facts() {
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "Cargo.lock".to_string();
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let plan = existence_with_path_locator_fast_plan_result(
+            "check exact path existence",
+            Some(&route),
+            &loop_state,
+            Some("/tmp/Cargo.lock"),
+        )
+        .expect("existence-with-path path route should use path facts");
+
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        assert_eq!(plan.steps.len(), 1);
+        match &plan.steps[0].to_agent_action() {
+            Some(AgentAction::CallSkill { skill, args }) => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("path_batch_facts")
+                );
+                assert_eq!(args.get("paths"), Some(&json!(["/tmp/Cargo.lock"])));
+            }
+            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn existence_with_path_directory_locator_with_file_target_uses_find_path() {
+        let root = TempDirGuard::new("existence_dir_locator_file_target");
+        fs::create_dir_all(root.path.join("case_only")).expect("mkdir");
+        let directory = root.path.join("case_only");
+        let directory_path = directory.display().to_string();
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.resolved_intent =
+            "Locate report.md within the specified directory and output only its full path."
+                .to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = directory_path.clone();
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let plan = existence_with_path_locator_fast_plan_result(
+            "find a file inside a resolved directory",
+            Some(&route),
+            &loop_state,
+            Some(&directory_path),
+        )
+        .expect("directory locator with file target should use find_path");
+
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        assert_eq!(plan.steps.len(), 1);
+        match &plan.steps[0].to_agent_action() {
+            Some(AgentAction::CallSkill { skill, args }) => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("find_path")
+                );
+                assert_eq!(
+                    args.get("root").and_then(Value::as_str),
+                    Some(directory_path.as_str())
+                );
+                assert_eq!(args.get("name").and_then(Value::as_str), Some("report.md"));
+                assert_eq!(
+                    args.get("target_kind").and_then(Value::as_str),
+                    Some("file")
+                );
+            }
+            other => panic!("expected system_basic find_path action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn file_paths_current_workspace_fast_plan_uses_name_search() {
+        let root = TempDirGuard::new("file_paths_fast_plan");
+        let script = root.path.join("start-all-bin.sh");
+        fs::write(&script, "#!/usr/bin/env bash\n").expect("write script");
+        let script_path = script.display().to_string();
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint = "start-all-bin.sh".to_string();
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let plan = file_paths_locator_fast_plan_result(
+            "find a matching file and return its relative path",
+            Some(&route),
+            &loop_state,
+            Some(&script_path),
+        )
+        .expect("file-path route should use a bounded name search");
+
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        assert_eq!(plan.steps.len(), 1);
+        match &plan.steps[0].to_agent_action() {
+            Some(AgentAction::CallSkill { skill, args }) => {
+                assert_eq!(skill, "fs_search");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("find_name")
+                );
+                assert_eq!(
+                    args.get("pattern").and_then(Value::as_str),
+                    Some("start-all-bin.sh")
+                );
+                assert_eq!(
+                    args.get("target_kind").and_then(Value::as_str),
+                    Some("file")
+                );
+            }
+            other => panic!("expected fs_search find_name action, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn scalar_path_auto_locator_does_not_fast_path_directory_search_scope() {
         let root = TempDirGuard::new("scalar_auto_locator_search_scope");
         fs::write(root.path.join("ABCD.txt"), "hello").expect("write report");
@@ -10283,6 +12299,142 @@ name = "clawd"
     }
 
     #[test]
+    fn content_excerpt_summary_inserts_auto_locator_read_before_synthesis() {
+        let root = TempDirGuard::new("content_excerpt_auto_locator");
+        let readme = root.path.join("README.md");
+        fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
+        let readme_path = readme.display().to_string();
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: json!({
+                    "action": "path_batch_facts",
+                    "paths": ["definitely_missing_rustclaw_20260510.md"],
+                    "include_missing": true
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let normalized = ensure_content_excerpt_summary_has_bounded_content(
+            Some(&route),
+            &loop_state,
+            Some(&readme_path),
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 4);
+        assert!(matches!(
+            &normalized[1],
+            AgentAction::CallSkill { skill, args }
+                if skill == "system_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("read_range")
+                    && args.get("path").and_then(Value::as_str) == Some(readme_path.as_str())
+        ));
+        assert!(matches!(
+            &normalized[2],
+            AgentAction::SynthesizeAnswer { evidence_refs } if evidence_refs == &vec!["last_output".to_string()]
+        ));
+    }
+
+    #[test]
+    fn content_excerpt_summary_auto_locator_fast_plan_uses_doc_parse() {
+        let root = TempDirGuard::new("content_excerpt_fast_plan");
+        let readme = root.path.join("README.md");
+        fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
+        let readme_path = readme.display().to_string();
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let plan = content_excerpt_summary_auto_locator_fast_plan_result(
+            "summarize a resolved fallback document",
+            Some(&route),
+            &loop_state,
+            Some(&readme_path),
+        )
+        .expect("content excerpt summary should parse the resolved document directly");
+
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        assert_eq!(plan.steps.len(), 1);
+        match &plan.steps[0].to_agent_action() {
+            Some(AgentAction::CallSkill { skill, args }) => {
+                assert_eq!(skill, "doc_parse");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("parse_doc")
+                );
+                assert_eq!(
+                    args.get("path").and_then(Value::as_str),
+                    Some(readme_path.as_str())
+                );
+            }
+            other => panic!("expected doc_parse parse_doc action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn generic_content_evidence_does_not_use_single_file_fast_plan() {
+        let root = TempDirGuard::new("generic_content_evidence_no_fast_plan");
+        let readme = root.path.join("README.md");
+        fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
+        let readme_path = readme.display().to_string();
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Free);
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.delivery_required = false;
+        route.output_contract.requires_content_evidence = true;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        assert!(content_excerpt_summary_auto_locator_fast_plan_result(
+            "summarize a resolved local document",
+            Some(&route),
+            &loop_state,
+            Some(&readme_path),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn structured_scalar_compare_does_not_use_single_file_content_fast_plan() {
+        let root = TempDirGuard::new("structured_scalar_no_single_content_fast_plan");
+        let readme = root.path.join("README.md");
+        fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
+        let readme_path = readme.display().to_string();
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
+        route.output_contract.locator_kind = OutputLocatorKind::Filename;
+        route.output_contract.locator_hint = "README.md | AGENTS.md".to_string();
+        route.output_contract.delivery_required = false;
+        route.output_contract.requires_content_evidence = true;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        assert!(content_excerpt_summary_auto_locator_fast_plan_result(
+            "compare files",
+            Some(&route),
+            &loop_state,
+            Some(&readme_path),
+        )
+        .is_none());
+    }
+
+    #[test]
     fn scalar_path_respond_only_uses_loop_state_auto_locator_observation() {
         let root = TempDirGuard::new("scalar_auto_locator_loop_state");
         let report = root.path.join("Report.MD");
@@ -10344,6 +12496,7 @@ name = "clawd"
             Some(&route),
             &LoopState::new(1),
             Some(&root_path),
+            "count entries",
             actions,
         );
 
@@ -10393,6 +12546,7 @@ name = "clawd"
             Some(&route),
             &LoopState::new(1),
             Some(&root_path),
+            "count entries",
             actions,
         );
 
@@ -10410,6 +12564,140 @@ name = "clawd"
                 );
             }
             other => panic!("expected system_basic count_inventory action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scalar_count_missing_explicit_path_checks_that_path_not_auto_parent() {
+        let root = TempDirGuard::new("scalar_count_missing_explicit_path");
+        let parent = root.path.join("configs");
+        fs::create_dir_all(&parent).expect("create parent");
+        let parent_path = parent.display().to_string();
+        let missing = root.path.join("configs/config_copy");
+        let missing_path = missing.display().to_string();
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Scalar);
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = missing_path.clone();
+        route.output_contract.delivery_required = false;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "inventory_dir",
+                "path": missing_path.clone(),
+                "ext_filter": "toml"
+            }),
+        }];
+
+        let normalized = replace_scalar_count_plan_with_count_inventory(
+            Some(&route),
+            &LoopState::new(1),
+            Some(&parent_path),
+            "查一下目录下有几个 toml 文件",
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 2);
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("path_batch_facts")
+                );
+                assert_eq!(args.get("paths"), Some(&json!([missing_path])));
+            }
+            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+        }
+        match &normalized[1] {
+            AgentAction::Respond { content } => {
+                assert!(content.contains("不存在"));
+                assert!(content.contains("无法统计"));
+            }
+            other => panic!("expected missing-path Respond action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn observed_missing_read_file_reply_does_not_force_plan_repair() {
+        use crate::executor::{StepExecutionResult, StepExecutionStatus};
+
+        let missing_path =
+            "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/missing.md";
+        let mut loop_state = LoopState::new(2);
+        loop_state.round_no = 2;
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "read_file".to_string(),
+            status: StepExecutionStatus::Error,
+            output: None,
+            error: Some(format!("__RC_READ_FILE_NOT_FOUND__:{missing_path}")),
+            started_at: 1,
+            finished_at: 2,
+        });
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.resolved_intent =
+            format!("读取 {missing_path}；如果不存在，只回答“不存在”和这个路径");
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = missing_path.to_string();
+        let actions = vec![AgentAction::Respond {
+            content: format!("不存在\n{missing_path}"),
+        }];
+
+        assert!(!should_force_actionable_plan_repair(
+            &test_state(),
+            Some(&route),
+            &loop_state,
+            &actions
+        ));
+    }
+
+    #[test]
+    fn scalar_count_pathlike_hint_in_current_workspace_does_not_use_parent_auto_locator() {
+        let root = TempDirGuard::new("scalar_count_pathlike_current_workspace");
+        let parent = root.path.join("configs");
+        fs::create_dir_all(&parent).expect("create parent");
+        let parent_path = parent.display().to_string();
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Scalar);
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint = "configs/config_copy".to_string();
+        route.output_contract.delivery_required = false;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "inventory_dir",
+                "path": "configs/config_copy",
+                "ext_filter": "toml"
+            }),
+        }];
+
+        let normalized = replace_scalar_count_plan_with_count_inventory(
+            Some(&route),
+            &LoopState::new(1),
+            Some(&parent_path),
+            "查一下目录下有几个 toml 文件",
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 2);
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("path_batch_facts")
+                );
+                assert_eq!(args.get("paths"), Some(&json!(["configs/config_copy"])));
+            }
+            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+        }
+        match &normalized[1] {
+            AgentAction::Respond { content } => {
+                assert!(content.contains("不存在"));
+                assert!(content.contains("无法统计"));
+            }
+            other => panic!("expected missing-path Respond action, got {other:?}"),
         }
     }
 
@@ -11565,12 +13853,14 @@ name = "clawd"
             None,
             actions,
         );
-        assert_eq!(normalized.len(), 3);
         assert!(matches!(
-            &normalized[2],
-            AgentAction::SynthesizeAnswer { evidence_refs }
-                if evidence_refs
-                    == &vec!["step_1".to_string(), "step_2".to_string()]
+            normalized.iter().find(|action| matches!(action, AgentAction::SynthesizeAnswer { .. })),
+            Some(AgentAction::SynthesizeAnswer { evidence_refs })
+                if evidence_refs == &vec!["step_1".to_string(), "step_2".to_string()]
+        ));
+        assert!(matches!(
+            normalized.last(),
+            Some(AgentAction::Respond { content }) if content == "{{last_output}}"
         ));
     }
 
@@ -11615,6 +13905,55 @@ name = "clawd"
     }
 
     #[test]
+    fn structured_scalar_compare_repair_can_add_text_after_prior_scalar_extract() {
+        use crate::executor::{StepExecutionResult, StepExecutionStatus};
+
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        let mut loop_state = LoopState::new(2);
+        loop_state.round_no = 2;
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                serde_json::json!({
+                    "action": "extract_field",
+                    "path": "Cargo.toml",
+                    "field_path": "workspace.package.version",
+                    "value": "0.1.7",
+                    "value_text": "0.1.7"
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let actions = vec![AgentAction::CallSkill {
+            skill: "fs_search".to_string(),
+            args: serde_json::json!({
+                "action": "grep_text",
+                "root": "README.md",
+                "query": "0.1.7",
+                "max_results": 5
+            }),
+        }];
+
+        assert!(
+            !should_force_actionable_plan_repair(
+                &test_state(),
+                Some(&route),
+                &loop_state,
+                &actions
+            ),
+            "unexpected repair reason: {}",
+            plan_repair_reason(&test_state(), Some(&route), &loop_state, Some(&actions))
+        );
+    }
+
+    #[test]
     fn structured_scalar_compare_keeps_two_structured_extracts_for_strict_shape() {
         let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
         route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
@@ -11645,11 +13984,15 @@ name = "clawd"
             actions,
         );
 
-        assert_eq!(normalized.len(), 3);
+        assert!(matches!(
+            normalized.iter().find(|action| matches!(action, AgentAction::SynthesizeAnswer { .. })),
+            Some(AgentAction::SynthesizeAnswer { evidence_refs })
+                if evidence_refs
+                    == &vec!["step_1".to_string(), "step_2".to_string()]
+        ));
         assert!(matches!(
             normalized.last(),
-            Some(AgentAction::SynthesizeAnswer { evidence_refs })
-                if evidence_refs == &vec!["step_1".to_string(), "step_2".to_string()]
+            Some(AgentAction::Respond { content }) if content == "{{last_output}}"
         ));
         assert!(!should_force_actionable_plan_repair(
             &test_state(),
@@ -11735,14 +14078,449 @@ name = "clawd"
             actions,
         );
 
-        assert_eq!(normalized.len(), 2);
         assert!(matches!(
-            normalized.last(),
+            normalized.iter().find(|action| matches!(action, AgentAction::SynthesizeAnswer { .. })),
             Some(AgentAction::SynthesizeAnswer { evidence_refs })
                 if evidence_refs == &vec!["step_1".to_string()]
         ));
+        assert!(matches!(
+            normalized.last(),
+            Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+        ));
         assert!(!should_force_actionable_plan_repair(
             &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            &normalized
+        ));
+    }
+
+    #[test]
+    fn structured_scalar_compare_one_sentence_accepts_path_batch_facts_metadata_evidence() {
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "path_batch_facts",
+                    "paths": ["README.md", "AGENTS.md"],
+                    "fields": ["size_bytes"]
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        assert!(!should_force_actionable_plan_repair(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            &actions
+        ));
+        assert_ne!(
+            plan_repair_reason(
+                &test_state(),
+                Some(&route),
+                &LoopState::new(2),
+                Some(&actions)
+            ),
+            "content_evidence_requires_content_observation"
+        );
+    }
+
+    #[test]
+    fn structured_scalar_compare_free_shape_accepts_path_batch_facts_metadata_evidence() {
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "Cargo.toml | Cargo.lock".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "path_batch_facts",
+                    "paths": ["Cargo.toml", "Cargo.lock"],
+                    "fields": ["size_bytes"]
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        assert!(!should_force_actionable_plan_repair(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(1),
+            &actions
+        ));
+        assert_ne!(
+            plan_repair_reason(
+                &test_state(),
+                Some(&route),
+                &LoopState::new(1),
+                Some(&actions)
+            ),
+            "content_evidence_requires_content_observation"
+        );
+    }
+
+    #[test]
+    fn structured_scalar_compare_replaces_single_file_read_with_explicit_multi_file_path_facts() {
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "doc_parse".to_string(),
+            args: serde_json::json!({
+                "action": "parse_doc",
+                "path": "/home/guagua/rustclaw/README.md",
+                "include_metadata": true
+            }),
+        }];
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            "compare README.md and AGENTS.md by size, then answer in one sentence",
+            None,
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 3);
+        assert!(!normalized.iter().any(|action| matches!(
+            action,
+            AgentAction::CallSkill { skill, .. } if skill == "doc_parse"
+        )));
+        assert!(matches!(
+            &normalized[0],
+            AgentAction::CallSkill { skill, args }
+                if skill == "system_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("path_batch_facts")
+                    && args.get("paths").and_then(Value::as_array).is_some_and(|paths| {
+                        paths.iter().any(|value| value.as_str() == Some("README.md"))
+                            && paths.iter().any(|value| value.as_str() == Some("AGENTS.md"))
+                    })
+        ));
+        assert!(matches!(
+            normalized.get(1),
+            Some(AgentAction::SynthesizeAnswer { evidence_refs })
+                if evidence_refs == &vec!["step_1".to_string()]
+        ));
+    }
+
+    #[test]
+    fn structured_task_contract_targets_drive_multi_file_metadata_plan() {
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
+        route.output_contract.locator_hint = "README.md | AGENTS.md".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "doc_parse".to_string(),
+            args: serde_json::json!({
+                "action": "parse_doc",
+                "path": "README.md",
+                "include_metadata": true
+            }),
+        }];
+
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            "compare these two targets by file metadata",
+            None,
+            actions,
+        );
+
+        assert!(matches!(
+            &normalized[0],
+            AgentAction::CallSkill { skill, args }
+                if skill == "system_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("path_batch_facts")
+                    && args.get("paths").and_then(Value::as_array).is_some_and(|paths| {
+                        paths.iter().any(|value| value.as_str() == Some("README.md"))
+                            && paths.iter().any(|value| value.as_str() == Some("AGENTS.md"))
+                    })
+        ));
+        assert!(matches!(
+            normalized.get(1),
+            Some(AgentAction::SynthesizeAnswer { evidence_refs })
+                if evidence_refs == &vec!["step_1".to_string()]
+        ));
+    }
+
+    #[test]
+    fn explicit_multi_file_metadata_plan_is_not_duplicated_when_targets_are_covered() {
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: serde_json::json!({
+                "action": "path_batch_facts",
+                "paths": ["README.md", "AGENTS.md"]
+            }),
+        }];
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            "比较 README.md 和 AGENTS.md 的大小，并用一句话解释",
+            None,
+            actions,
+        );
+
+        assert_eq!(
+            normalized
+                .iter()
+                .filter(|action| matches!(
+                    action,
+                    AgentAction::CallSkill { skill, args }
+                        if skill == "system_basic"
+                            && args.get("action").and_then(Value::as_str)
+                                == Some("path_batch_facts")
+                ))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn normalization_order_schema_aliases_before_multi_target_coverage() {
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
+        route.output_contract.locator_hint = "README.md | AGENTS.md".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: serde_json::json!({
+                "action": "path_batch_facts",
+                "path_list": ["README.md", "AGENTS.md"]
+            }),
+        }];
+
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            "compare the two task-contract targets by file metadata",
+            None,
+            actions,
+        );
+
+        let path_fact_actions = normalized
+            .iter()
+            .filter_map(|action| match action {
+                AgentAction::CallSkill { skill, args } if skill == "system_basic" => Some(args),
+                _ => None,
+            })
+            .filter(|args| args.get("action").and_then(Value::as_str) == Some("path_batch_facts"))
+            .collect::<Vec<_>>();
+        assert_eq!(path_fact_actions.len(), 1);
+        let args = path_fact_actions[0];
+        assert!(args.get("path_list").is_none());
+        assert!(args
+            .get("paths")
+            .and_then(Value::as_array)
+            .is_some_and(|paths| {
+                paths
+                    .iter()
+                    .any(|value| value.as_str() == Some("README.md"))
+                    && paths
+                        .iter()
+                        .any(|value| value.as_str() == Some("AGENTS.md"))
+            }));
+    }
+
+    #[test]
+    fn multi_file_modified_time_compare_uses_metadata_not_whole_file_reads() {
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
+        route.output_contract.locator_hint = "README.md | AGENTS.md".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: serde_json::json!({"path": "README.md"}),
+            },
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: serde_json::json!({"path": "AGENTS.md"}),
+            },
+        ];
+
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            "比较这两个文件哪个修改时间更新",
+            None,
+            actions,
+        );
+
+        assert!(!normalized.iter().any(|action| matches!(
+            action,
+            AgentAction::CallSkill { skill, .. } if skill == "read_file"
+        )));
+        assert!(matches!(
+            &normalized[0],
+            AgentAction::CallSkill { skill, args }
+                if skill == "system_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("path_batch_facts")
+                    && args.get("fields").and_then(Value::as_array).is_some_and(|fields| {
+                        fields.iter().any(|value| value.as_str() == Some("modified"))
+                    })
+        ));
+    }
+
+    #[test]
+    fn recent_scalar_equality_preserves_content_extract_plan_for_explicit_files() {
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "extract_field",
+                    "path": "Cargo.toml",
+                    "field_path": "package.version"
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "fs_search".to_string(),
+                args: serde_json::json!({
+                    "action": "grep_text",
+                    "root": "README.md",
+                    "query": "version",
+                    "max_matches": 5
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["s0".to_string(), "s1".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            "Read workspace package version from Cargo.toml and compare it with the version mentioned in README.md",
+            None,
+            actions,
+        );
+
+        assert!(!normalized.iter().any(|action| matches!(
+            action,
+            AgentAction::CallSkill { skill, args }
+                if skill == "system_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("path_batch_facts")
+        )));
+        assert!(matches!(
+            normalized.first(),
+            Some(AgentAction::CallSkill { skill, args })
+                if skill == "system_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("extract_field")
+                    && args.get("field_path").and_then(Value::as_str) == Some("package.version")
+        ));
+        assert!(matches!(
+            normalized.get(1),
+            Some(AgentAction::CallSkill { skill, args })
+                if skill == "fs_search"
+                    && args.get("action").and_then(Value::as_str) == Some("grep_text")
+        ));
+        assert!(!should_force_actionable_plan_repair(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            &normalized
+        ));
+    }
+
+    #[test]
+    fn quantity_compare_preserves_scalar_plus_text_evidence_for_explicit_files() {
+        let root = TempDirGuard::new("quantity_scalar_plus_text");
+        fs::write(
+            root.path.join("Cargo.toml"),
+            r#"[workspace]
+members = []
+
+[workspace.package]
+version = "0.1.7"
+"#,
+        )
+        .expect("write workspace cargo");
+        fs::write(root.path.join("README.md"), "RustClaw v0.1.7\n").expect("write readme");
+
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        let cargo_path = root.path.join("Cargo.toml");
+        let readme_path = root.path.join("README.md");
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "extract_field",
+                    "path": cargo_path.display().to_string(),
+                    "field_path": "package.version"
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: serde_json::json!({
+                    "path": readme_path.display().to_string()
+                }),
+            },
+        ];
+        let normalized = super::normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(2),
+            "Read workspace package version from Cargo.toml and compare it with the version mentioned in README.md",
+            Some(cargo_path.to_string_lossy().as_ref()),
+            actions,
+        );
+
+        assert!(!normalized.iter().any(|action| matches!(
+            action,
+            AgentAction::CallSkill { skill, args }
+                if skill == "system_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("path_batch_facts")
+        )));
+        assert!(matches!(
+            normalized.first(),
+            Some(AgentAction::CallSkill { skill, args })
+                if skill == "system_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("extract_field")
+                    && args.get("path").and_then(Value::as_str)
+                        == Some(cargo_path.to_string_lossy().as_ref())
+                    && args.get("field_path").and_then(Value::as_str)
+                        == Some("workspace.package.version")
+        ));
+        assert!(matches!(
+            normalized.get(1),
+            Some(AgentAction::CallSkill { skill, args })
+                if skill == "read_file"
+                    && args.get("path").and_then(Value::as_str)
+                        == Some(readme_path.to_string_lossy().as_ref())
+        ));
+        assert!(matches!(
+            normalized.iter().find(|action| matches!(action, AgentAction::SynthesizeAnswer { .. })),
+            Some(AgentAction::SynthesizeAnswer { evidence_refs })
+                if evidence_refs == &vec!["step_1".to_string(), "step_2".to_string()]
+        ));
+        assert!(!should_force_actionable_plan_repair(
+            &state,
             Some(&route),
             &LoopState::new(2),
             &normalized
@@ -11770,7 +14548,15 @@ name = "clawd"
             actions,
         );
 
-        assert_eq!(normalized.len(), 2);
+        assert!(matches!(
+            normalized.iter().find(|action| matches!(action, AgentAction::SynthesizeAnswer { .. })),
+            Some(AgentAction::SynthesizeAnswer { evidence_refs })
+                if evidence_refs == &vec!["step_1".to_string()]
+        ));
+        assert!(matches!(
+            normalized.last(),
+            Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+        ));
         assert!(!should_force_actionable_plan_repair(
             &test_state(),
             Some(&route),
@@ -11818,6 +14604,74 @@ name = "clawd"
         assert!(matches!(
             &normalized[2],
             AgentAction::Respond { content } if content == "{{last_output}}"
+        ));
+    }
+
+    #[test]
+    fn content_evidence_doc_parse_observation_appends_synthesis() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "doc_parse".to_string(),
+            args: serde_json::json!({
+                "action": "parse_doc",
+                "path": "release_checklist.md",
+                "max_chars": 12000
+            }),
+        }];
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "release_checklist.md".to_string();
+
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            "读一下 release_checklist.md，然后一句话告诉我最先该做什么",
+            None,
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 3);
+        assert!(matches!(
+            &normalized[1],
+            AgentAction::SynthesizeAnswer { evidence_refs }
+                if evidence_refs == &vec!["last_output".to_string()]
+        ));
+        assert!(matches!(
+            &normalized[2],
+            AgentAction::Respond { content } if content == "{{last_output}}"
+        ));
+    }
+
+    #[test]
+    fn terminal_synthesize_answer_appends_delivery_respond() {
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "path_batch_facts",
+                    "paths": ["missing.md"],
+                    "include_missing": true
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "doc_parse".to_string(),
+                args: serde_json::json!({
+                    "action": "extract_key_points",
+                    "path": "README.md"
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+        ];
+
+        let normalized = super::append_respond_for_terminal_synthesize_answer(actions);
+
+        assert_eq!(normalized.len(), 4);
+        assert!(matches!(
+            normalized.last(),
+            Some(AgentAction::Respond { content }) if content == "{{last_output}}"
         ));
     }
 
@@ -12131,7 +14985,7 @@ name = "clawd"
             actions,
         );
 
-        assert_eq!(normalized.len(), 3);
+        assert_eq!(normalized.len(), 2);
         assert!(matches!(
             &normalized[0],
             AgentAction::CallSkill { skill, .. } if skill == "fs_search"
@@ -12139,10 +14993,6 @@ name = "clawd"
         assert!(matches!(
             &normalized[1],
             AgentAction::SynthesizeAnswer { evidence_refs } if evidence_refs == &vec!["last_output".to_string()]
-        ));
-        assert!(matches!(
-            &normalized[2],
-            AgentAction::Respond { content } if content == "{{last_output}}"
         ));
     }
 
@@ -12283,8 +15133,11 @@ name = "clawd"
         route.output_contract.locator_hint = "UI".to_string();
         route.resolved_intent = "Summarize only the UI part of this repository".to_string();
 
-        let pruned =
-            super::prune_unscoped_workspace_summary_evidence_for_scope(Some(&route), actions);
+        let pruned = super::prune_unscoped_workspace_summary_evidence_for_scope(
+            &test_state(),
+            Some(&route),
+            actions,
+        );
         assert_eq!(pruned.len(), 1);
         match &pruned[0] {
             AgentAction::CallSkill { skill, args } => {
@@ -12296,6 +15149,48 @@ name = "clawd"
             }
             other => panic!("expected scoped UI list_dir action, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn workspace_root_identity_scope_keeps_relative_workspace_evidence() {
+        let root = TempDirGuard::new("rustclaw");
+        fs::write(root.path.join("README.md"), "# RustClaw").expect("write README");
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint = root
+            .path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap()
+            .to_string();
+
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: json!({"action": "tree_summary", "path": root.path.display().to_string()}),
+            },
+            AgentAction::CallSkill {
+                skill: "read_file".to_string(),
+                args: json!({"path": "README.md"}),
+            },
+        ];
+
+        let pruned = super::prune_unscoped_workspace_summary_evidence_for_scope(
+            &state,
+            Some(&route),
+            actions,
+        );
+
+        assert_eq!(pruned.len(), 2);
+        assert!(matches!(
+            &pruned[1],
+            AgentAction::CallSkill { skill, args }
+                if skill == "read_file"
+                    && args.get("path").and_then(|value| value.as_str()) == Some("README.md")
+        ));
     }
 
     #[test]
@@ -12321,7 +15216,7 @@ name = "clawd"
             None,
             actions,
         );
-        assert_eq!(normalized.len(), 2);
+        assert_eq!(normalized.len(), 3);
         assert!(matches!(
             &normalized[0],
             AgentAction::CallSkill { skill, .. } if skill == "read_file"
@@ -12330,6 +15225,10 @@ name = "clawd"
             &normalized[1],
             AgentAction::SynthesizeAnswer { evidence_refs }
                 if evidence_refs == &vec!["step_1".to_string()]
+        ));
+        assert!(matches!(
+            &normalized[2],
+            AgentAction::Respond { content } if content == "{{last_output}}"
         ));
     }
 
@@ -12381,18 +15280,27 @@ name = "clawd"
                 AgentAction::CallSkill { skill, .. } if skill == "write_file"
             )
         }));
-        assert!(normalized
-            .iter()
-            .all(|action| !matches!(action, AgentAction::Respond { .. })));
+        assert!(normalized.iter().all(|action| {
+            !matches!(
+                action,
+                AgentAction::Respond { content } if content.trim().starts_with("FILE:")
+            )
+        }));
         assert!(!normalized.iter().any(|action| {
             matches!(action, AgentAction::CallSkill { skill, args }
                 if skill == "system_basic"
                     && args.get("action").and_then(|value| value.as_str()) == Some("read_range"))
         }));
+        assert!(normalized.iter().any(|action| {
+            matches!(
+                action,
+                AgentAction::SynthesizeAnswer { evidence_refs }
+                    if evidence_refs == &vec!["step_1".to_string()]
+            )
+        }));
         assert!(matches!(
             normalized.last(),
-            Some(AgentAction::SynthesizeAnswer { evidence_refs })
-                if evidence_refs == &vec!["step_1".to_string()]
+            Some(AgentAction::Respond { content }) if content == "{{last_output}}"
         ));
     }
 
@@ -12586,6 +15494,49 @@ name = "clawd"
     }
 
     #[test]
+    fn strict_run_cmd_template_preserves_mixed_last_output_respond() {
+        let state = test_state_with_enabled_skills(&["run_cmd"]);
+        let loop_state = LoopState::new(2);
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: json!({ "command": "pwd" }),
+            },
+            AgentAction::Respond {
+                content: "cwd={{last_output}}".to_string(),
+            },
+        ];
+
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "运行 pwd 命令，并按 key=value 模板返回当前目录。",
+            None,
+            Some("/home/guagua/rustclaw"),
+            actions,
+        );
+
+        assert_eq!(
+            actions_as_json(&normalized),
+            json!([
+                {
+                    "type": "call_skill",
+                    "skill": "run_cmd",
+                    "args": { "command": "pwd" }
+                },
+                {
+                    "type": "respond",
+                    "content": "cwd={{last_output}}"
+                }
+            ])
+        );
+    }
+
+    #[test]
     fn runner_skill_only_plan_does_not_require_terminal_respond() {
         let loop_state = LoopState::new(2);
         let actions = vec![AgentAction::CallSkill {
@@ -12715,14 +15666,47 @@ name = "clawd"
             skill: "git_basic".to_string(),
             args: serde_json::json!({ "action": "current_branch" }),
         }];
-        assert!(!should_force_plan_repair(
-            Some(&route_result(
-                RoutedMode::Act,
-                false,
-                OutputResponseShape::Scalar,
-            )),
-            &loop_state,
-            &actions,
+        let route = route_result(RoutedMode::Act, false, OutputResponseShape::Scalar);
+        assert!(
+            !should_force_plan_repair(Some(&route), &loop_state, &actions),
+            "unexpected repair reason: {}",
+            repair_reason(Some(&route), &loop_state, Some(&actions))
+        );
+    }
+
+    #[test]
+    fn git_basic_branch_alias_scalar_route_normalizes_to_current_branch() {
+        let route = route_result(RoutedMode::Act, true, OutputResponseShape::Scalar);
+        let actions = vec![AgentAction::CallSkill {
+            skill: "git_basic".to_string(),
+            args: serde_json::json!({ "action": "branches" }),
+        }];
+
+        let normalized = normalize_git_basic_schema_aliases(Some(&route), actions);
+
+        assert!(matches!(
+            &normalized[0],
+            AgentAction::CallSkill { skill, args }
+                if skill == "git_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("current_branch")
+        ));
+    }
+
+    #[test]
+    fn git_basic_branch_alias_non_scalar_route_normalizes_to_branch() {
+        let route = route_result(RoutedMode::Act, true, OutputResponseShape::Free);
+        let actions = vec![AgentAction::CallSkill {
+            skill: "git_basic".to_string(),
+            args: serde_json::json!({ "action": "branches" }),
+        }];
+
+        let normalized = normalize_git_basic_schema_aliases(Some(&route), actions);
+
+        assert!(matches!(
+            &normalized[0],
+            AgentAction::CallSkill { skill, args }
+                if skill == "git_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("branch")
         ));
     }
 
@@ -13143,7 +16127,14 @@ name = "clawd"
             },
             AgentAction::CallSkill {
                 skill: "run_cmd".to_string(),
-                args: serde_json::json!({ "command": "cargo check -p clawd" }),
+                args: serde_json::json!({
+                    "command": "cargo check -p clawd",
+                    "_clawd_validation": {
+                        "profile": "code_change",
+                        "validator_type": "build",
+                        "validated_target": "tools/demo"
+                    }
+                }),
             },
         ];
         assert!(should_force_plan_repair(
@@ -13233,18 +16224,22 @@ name = "clawd"
             },
             AgentAction::CallSkill {
                 skill: "run_cmd".to_string(),
-                args: serde_json::json!({ "command": "cargo check -p clawd" }),
+                args: serde_json::json!({
+                    "command": "cargo check -p clawd",
+                    "_clawd_validation": {
+                        "profile": "code_change",
+                        "validator_type": "build",
+                        "validated_target": "tools/demo"
+                    }
+                }),
             },
         ];
-        assert!(!should_force_plan_repair(
-            Some(&route_result(
-                RoutedMode::Act,
-                false,
-                OutputResponseShape::Scalar,
-            )),
-            &loop_state,
-            &actions,
-        ));
+        let route = route_result(RoutedMode::Act, false, OutputResponseShape::Scalar);
+        assert!(
+            !should_force_plan_repair(Some(&route), &loop_state, &actions),
+            "unexpected repair reason: {}",
+            repair_reason(Some(&route), &loop_state, Some(&actions))
+        );
     }
 
     #[test]
@@ -13377,6 +16372,66 @@ name = "clawd"
     // ---------- inject_synthesize_answer_for_bare_placeholder_respond ----------
     // 见函数 doc：runtime 兜底，把 minimax 偶发吐出的裸 placeholder respond 注入
     // 一个 synthesize_answer 节点，关掉裸 placeholder 导致的死循环。
+
+    #[test]
+    fn strips_intermediate_synthesize_before_later_execution() {
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: json!({"action": "path_batch_facts", "paths": ["missing.txt"]}),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: json!({"action": "inventory_dir", "path": "scripts"}),
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let stripped = strip_intermediate_synthesize_before_later_execution(actions);
+
+        assert_eq!(stripped.len(), 3);
+        assert!(matches!(
+            &stripped[0],
+            AgentAction::CallSkill { skill, .. } if skill == "system_basic"
+        ));
+        assert!(matches!(
+            &stripped[1],
+            AgentAction::CallSkill { skill, .. } if skill == "system_basic"
+        ));
+        assert!(matches!(
+            &stripped[2],
+            AgentAction::Respond { content } if content == "{{last_output}}"
+        ));
+    }
+
+    #[test]
+    fn strips_terminal_placeholder_respond_for_exact_listing_contract() {
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args: json!({"action": "inventory_dir", "path": "scripts"}),
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let stripped =
+            strip_terminal_placeholder_respond_for_exact_listing_contract(Some(&route), actions);
+
+        assert_eq!(stripped.len(), 1);
+        assert!(matches!(
+            &stripped[0],
+            AgentAction::CallSkill { skill, .. } if skill == "system_basic"
+        ));
+    }
 
     #[test]
     fn detects_bare_last_output_placeholder_variants() {
@@ -13822,7 +16877,7 @@ name = "clawd"
                 },
                 {
                     "type": "synthesize_answer",
-                    "evidence_refs": ["s1.output", "s2.output"]
+                    "evidence_refs": ["step_1", "step_2"]
                 },
                 {
                     "type": "respond",
@@ -13860,7 +16915,7 @@ name = "clawd"
             &normalized[2],
             AgentAction::SynthesizeAnswer { evidence_refs }
                 if evidence_refs.as_slice()
-                    == ["s1.output".to_string(), "s2.output".to_string()].as_slice()
+                    == ["step_1".to_string(), "step_2".to_string()].as_slice()
         ));
         assert!(matches!(
             &normalized[3],

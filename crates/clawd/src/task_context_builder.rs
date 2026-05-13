@@ -511,7 +511,7 @@ pub(crate) fn build_route_task_context_bundle(
     schedule_rules: &str,
 ) -> TaskContextBundle {
     let planner_view = PlannerContextView {
-        visible_skills: state.planner_visible_skills_for_task(task),
+        visible_skills: state.planner_available_skills_for_task(task),
     };
     let capability_map = crate::capability_map::build_capability_map_for_task(state, task);
     let owned_session_snapshot;
@@ -656,7 +656,7 @@ pub(crate) fn build_execution_task_context_bundle(
     chat_memory_budget_chars: usize,
 ) -> TaskContextBundle {
     let planner_view = PlannerContextView {
-        visible_skills: state.planner_visible_skills_for_task(task),
+        visible_skills: state.planner_available_skills_for_task(task),
     };
     let session_snapshot = crate::conversation_state::load_active_session_snapshot(state, task);
     let budget_tier = if uses_light_execution_context_budget(route_result, resolved_prompt) {

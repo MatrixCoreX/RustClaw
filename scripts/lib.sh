@@ -270,11 +270,15 @@ query_task_to_file() {
 }
 
 extract_task_triplet() {
-  python3 - "${1:-}" <<'PY'
+  local raw_file
+  raw_file="$(mktemp /tmp/rustclaw-task-triplet.XXXXXX)"
+  cat > "$raw_file"
+  python3 - "$raw_file" <<'PY'
 import json
 import sys
+from pathlib import Path
 
-raw = (sys.argv[1] if len(sys.argv) > 1 else "").strip()
+raw = Path(sys.argv[1]).read_text().strip()
 obj = json.loads(raw)
 if not obj.get("ok"):
     print(f"query failed\t\t{obj.get('error')}")
@@ -288,6 +292,9 @@ text = text.replace("\r", " ").replace("\n", "\\n").replace("\t", " ")
 error = error.replace("\r", " ").replace("\n", "\\n").replace("\t", " ")
 print(f"{status}\t{text}\t{error}")
 PY
+  local status=$?
+  rm -f "$raw_file"
+  return "$status"
 }
 
 wait_task_until_terminal_with_limit() {
@@ -298,7 +305,7 @@ wait_task_until_terminal_with_limit() {
   while (( waited <= wait_limit_seconds )); do
     local raw triplet status
     raw="$(query_task "$task_id")"
-    triplet="$(extract_task_triplet "$raw")"
+    triplet="$(printf '%s' "$raw" | extract_task_triplet)"
     status="$(printf '%s\n' "$triplet" | awk -F'\t' '{print $1}')"
     case "$status" in
       succeeded|failed|canceled|timeout)

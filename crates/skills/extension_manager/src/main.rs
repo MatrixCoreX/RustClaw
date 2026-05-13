@@ -1697,6 +1697,7 @@ fn conservative_registry_entry_text(skill_name: &str) -> String {
 name = "{skill_name}"
 enabled = false
 kind = "runner"
+planner_kind = "skill"
 aliases = []
 description = "External skill {skill_name}; see its INTERFACE.md for the capability contract."
 semantic_tags = []
@@ -2852,6 +2853,7 @@ mod tests {
         let (updated, changed) = add_registry_entry_text(raw, "demo_skill");
         assert!(changed);
         assert!(updated.contains("name = \"demo_skill\""));
+        assert!(updated.contains("planner_kind = \"skill\""));
         assert!(updated.contains("description = \"External skill demo_skill"));
         assert!(updated.contains("semantic_tags = []"));
         assert!(updated.contains("requires_confirmation = true"));
@@ -2901,6 +2903,7 @@ mod tests {
         let registry = fs::read_to_string(root.join("configs/skills_registry.toml"))
             .expect("read skills_registry.toml");
         assert!(registry.contains("name = \"demo_skill\""));
+        assert!(registry.contains("planner_kind = \"skill\""));
         assert!(registry.contains("requires_confirmation = true"));
 
         let config = fs::read_to_string(root.join("configs/config.toml")).expect("read config");

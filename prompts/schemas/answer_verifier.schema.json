@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/prompts/schemas/answer_verifier.schema.json",
+  "title": "AnswerVerifierOut",
+  "description": "Schema for the JSON object returned by prompts/answer_verifier_prompt.md. Mirrors AnswerVerifierOut in crates/clawd/src/answer_verifier.rs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "pass",
+    "missing_evidence_fields",
+    "answer_incomplete_reason",
+    "should_retry",
+    "retry_instruction",
+    "confidence"
+  ],
+  "properties": {
+    "pass": {
+      "type": "boolean",
+      "description": "True when the final answer satisfies the task contract and observed evidence."
+    },
+    "missing_evidence_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Semantic evidence fields still missing from the answer."
+    },
+    "answer_incomplete_reason": {
+      "type": "string",
+      "description": "Short stable reason when pass=false; empty when pass=true."
+    },
+    "should_retry": {
+      "type": "boolean",
+      "description": "True when another attempt can likely collect the missing evidence or correct the failure."
+    },
+    "retry_instruction": {
+      "type": "string",
+      "description": "Concise instruction for the next planner attempt; empty when no retry is needed."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    }
+  }
+}

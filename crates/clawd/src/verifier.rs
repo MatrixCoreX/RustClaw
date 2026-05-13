@@ -682,7 +682,7 @@ pub(crate) fn verify_plan(
             .iter()
             .any(|step| matches!(step.action_type.as_str(), "call_skill" | "call_tool"));
     let visible_skills: HashSet<String> = state
-        .planner_visible_skills_for_task(task)
+        .planner_available_skills_for_task(task)
         .into_iter()
         .collect();
     let all_step_ids: HashSet<String> = input
@@ -718,8 +718,10 @@ pub(crate) fn verify_plan(
             }
             verify_step_args(state, step, &normalized_skill, &template_scope, &mut issues);
             if !confirmation_already_granted
-                && (state.skill_requires_confirmation_policy(&normalized_skill)
-                    || is_confirmation_like_skill(&normalized_skill))
+                && (state.skill_invocation_requires_confirmation_policy(
+                    &normalized_skill,
+                    Some(&step.args),
+                ) || is_confirmation_like_skill(&normalized_skill))
             {
                 needs_confirmation = true;
                 issues.push(VerifyIssue {
@@ -850,14 +852,28 @@ output_kind = "text"
 group = "reader"
 primary_fallback_role = "primary"
 
-[[skills]]
-name = "fallback_reader"
-enabled = true
-kind = "runner"
-output_kind = "text"
-group = "reader"
-primary_fallback_role = "fallback"
-"#;
+	[[skills]]
+	name = "fallback_reader"
+	enabled = true
+	kind = "runner"
+	output_kind = "text"
+	group = "reader"
+	primary_fallback_role = "fallback"
+
+	[[skills]]
+	name = "photo_organize"
+	enabled = true
+	kind = "runner"
+	output_kind = "text"
+	risk_level = "high"
+	auto_invocable = false
+	requires_confirmation = true
+	side_effect = true
+	confirmation_exempt_when = [
+	  { action = "prepare" },
+	  { action = "organize", mode = "plan" },
+	]
+	"#;
         let path = std::env::temp_dir().join(format!(
             "verifier_registry_{}_{}_{}.toml",
             std::process::id(),
@@ -880,6 +896,7 @@ primary_fallback_role = "fallback"
                 "write_file",
                 "primary_reader",
                 "fallback_reader",
+                "photo_organize",
             ]
             .into_iter()
             .map(str::to_string)
@@ -1217,6 +1234,68 @@ primary_fallback_role = "fallback"
         assert!(result.approved);
         assert!(!result.needs_confirmation);
         assert!(!result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+    }
+
+    #[test]
+    fn confirmation_exempt_invocation_skips_confirmation_requirement() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(false)),
+                request_text: None,
+                context_bundle_summary: Some("photo preview"),
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "photo_organize".to_string(),
+                    args: json!({ "action": "organize", "mode": "plan" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+        assert!(result.approved);
+        assert!(!result.needs_confirmation);
+        assert!(!result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+    }
+
+    #[test]
+    fn non_exempt_invocation_still_requires_confirmation() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(false)),
+                request_text: None,
+                context_bundle_summary: Some("photo move"),
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "photo_organize".to_string(),
+                    args: json!({ "action": "organize", "mode": "move" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+        assert!(result.approved);
+        assert!(result.needs_confirmation);
+        assert!(result
             .issues
             .iter()
             .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));

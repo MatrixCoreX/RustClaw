@@ -17,6 +17,7 @@
 - When the user asks to list files and then briefly explain their purpose, first collect the file names with `inventory_dir`; the final explanation should be synthesized from the names and known project conventions, not from missing structured fields.
 - For recent/latest/last-modified directory inventory, use `inventory_dir` with `sort_by="mtime_desc"` exactly. If the request asks for files, set `files_only=true`; use `max_entries` for the requested count. Do not emit unsupported values such as `mtime`.
 - `extract_field` and `extract_fields` operate on exactly one structured file per call: use `path` plus `field_path`/`field_paths`. Do not pass `paths`, `targets`, or other multi-file arrays to these actions; for multiple files, call the action once per file.
+- `extract_field` / `extract_fields` first resolve exact dot/bracket paths. If a caller supplies one bare field key and exact root-level lookup misses, the skill may resolve it to a unique nested key in that structured document and report `resolved_field_path`, `match_strategy`, and `match_count`; ambiguous bare keys remain missing instead of guessing.
 - For file metadata checks or comparisons, use `compare_paths` for two paths or `path_batch_facts` for multiple explicit paths. Do not model filesystem metadata such as size, modified time, path type, or content equality as `extract_field` / `extract_fields` document fields.
 
 ## Config Entry Points (from interface)
@@ -71,10 +72,10 @@
 | `dir_compare` | `include_hidden` | no | bool | `false` | Include dot-prefixed entries. |
 | `dir_compare` | `max_diffs` | no | integer | `100` | Preview cap for reported left-only/right-only diffs, clamped to `1..500`. |
 | `extract_field` | `path` | yes | string(path) | - | Local JSON/TOML/YAML file path. |
-| `extract_field` | `field_path` | yes | string | - | Dot path like `package.name` or `dependencies.0.name`. |
+| `extract_field` | `field_path` | yes | string | - | Dot/bracket path like `package.name`, `dependencies.0.name`, `items[0].name`, or `skills[?(@.name=='run_cmd')].planner_kind` for array item lookup by field value. The shorter LLM-friendly selector form `skills.[name=run_cmd].planner_kind` is also accepted. |
 | `extract_field` | `format` | no | string | auto | `json|toml|yaml`, auto-detected from extension when omitted. |
 | `extract_fields` | `path` | yes | string(path) | - | Local JSON/TOML/YAML file path. |
-| `extract_fields` | `field_paths` | yes | string[]/string | - | Multiple dot paths to extract in one pass. |
+| `extract_fields` | `field_paths` | yes | string[]/string | - | Multiple dot/bracket paths to extract in one pass; supports the same array index/filter syntax as `field_path`. |
 | `extract_fields` | `format` | no | string | auto | `json|toml|yaml`, auto-detected from extension when omitted. |
 | `structured_keys` | `path` | yes | string(path) | - | Local JSON/TOML/YAML file path. |
 | `structured_keys` | `field_path` | no | string | root | Optional dot path to an object/array inside the parsed document. |
@@ -94,6 +95,7 @@
 | `compare_paths` | `right_path` | yes | string(path) | - | Second path to compare. |
 | `path_batch_facts` | `paths` | yes | string[]/string | - | Explicit paths to inspect in batch. |
 | `path_batch_facts` | `include_missing` | no | bool | `true` | Keep missing-path records instead of failing on not found. |
+| `path_batch_facts` | `fields` | no | string[]/string | none | Optional requested metadata field names (for example `exists`, `size`, `kind`, `modified`); echoed back so callers can preserve requested metadata in the final answer. |
 | `diagnose_runtime` | `include_process` | no | bool | `false` | Include top process snapshot. |
 | `diagnose_runtime` | `include_ports` | no | bool | `false` | Include listening ports snapshot when available. |
 | `diagnose_runtime` | `include_env_summary` | no | bool | `false` | Include selected environment summary. |
@@ -141,6 +143,16 @@ Request:
 Response:
 ```json
 {"request_id":"demo-3","status":"ok","text":"{\"action\":\"extract_field\",\"exists\":true,\"value_type\":\"string\",\"value_text\":\"0.1.3\"}","extra":{"action":"extract_field","exists":true,"value_type":"string","value_text":"0.1.3"},"error_text":null}
+```
+
+Array table lookup example:
+
+```json
+{"request_id":"demo-3b","args":{"action":"extract_field","path":"configs/skills_registry.toml","format":"toml","field_path":"skills[?(@.name=='run_cmd')].planner_kind"}}
+```
+
+```json
+{"request_id":"demo-3b","status":"ok","text":"{\"action\":\"extract_field\",\"exists\":true,\"value_type\":\"string\",\"value_text\":\"tool\"}","extra":{"action":"extract_field","exists":true,"value_type":"string","value_text":"tool"},"error_text":null}
 ```
 
 ### Example 4

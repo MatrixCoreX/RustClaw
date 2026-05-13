@@ -155,6 +155,10 @@ interface SkillsConfigResponse {
   base_skill_names?: string[];
   /** UI 保存时强制保持开启的技能；用于把开关按钮显示为不可关闭 */
   core_skill_names?: string[];
+  /** planner_kind=tool 的底层工具能力；UI 归到工具分组并固定开启 */
+  tool_skill_names?: string[];
+  /** 后端判定的 UI 锁定名单，保存时也会被强制保持开启 */
+  locked_skill_names?: string[];
   external_skill_names?: string[];
   effective_enabled_skills_preview: string[];
   runtime_enabled_skills: string[];
@@ -1851,7 +1855,7 @@ export default function App() {
       }
       setSkillsConfigData(body.data);
       const nextSwitchDraft = { ...(body.data.skill_switches || {}) };
-      (body.data.core_skill_names || []).forEach((name) => {
+      (body.data.locked_skill_names || body.data.core_skill_names || []).forEach((name) => {
         if (nextSwitchDraft[name] === false) nextSwitchDraft[name] = true;
       });
       setSkillSwitchDraft(nextSwitchDraft);
@@ -3286,11 +3290,14 @@ export default function App() {
     const useList = list && list.length > 0 ? list : FALLBACK_BASE_SKILL_NAMES;
     return new Set<string>(useList);
   }, [skillsConfigData?.base_skill_names]);
+  const toolSkillNamesSet = useMemo(() => {
+    return new Set<string>((skillsConfigData?.tool_skill_names ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)));
+  }, [skillsConfigData?.tool_skill_names]);
   const lockedSkillNamesSet = useMemo(() => {
-    const list = skillsConfigData?.core_skill_names;
-    const useList = list && list.length > 0 ? list : Array.from(baseSkillNamesSet);
+    const list = skillsConfigData?.locked_skill_names;
+    const useList = list && list.length > 0 ? list : [...Array.from(baseSkillNamesSet), ...Array.from(toolSkillNamesSet)];
     return new Set<string>(useList);
-  }, [baseSkillNamesSet, skillsConfigData?.core_skill_names]);
+  }, [baseSkillNamesSet, skillsConfigData?.locked_skill_names, toolSkillNamesSet]);
   const externalSkillNamesSet = useMemo(() => {
     return new Set<string>((skillsConfigData?.external_skill_names ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)));
   }, [skillsConfigData?.external_skill_names]);
@@ -3543,28 +3550,33 @@ export default function App() {
     [managedSkills, normalizedSkillsSearchQuery],
   );
 
-  /** 技能分组：图片 / 语音 / 基础（不建议关闭）/ 其他 */
+  /** 能力分组：工具 / 图片 / 语音 / 基础 / 其他 */
+  const skillsTool = useMemo(
+    () => managedSkills.filter((n) => toolSkillNamesSet.has(n)).sort((a, b) => a.localeCompare(b)),
+    [managedSkills, toolSkillNamesSet],
+  );
   const skillsImage = useMemo(
-    () => managedSkills.filter((n) => n.startsWith("image_")).sort((a, b) => a.localeCompare(b)),
-    [managedSkills],
+    () => managedSkills.filter((n) => n.startsWith("image_") && !toolSkillNamesSet.has(n)).sort((a, b) => a.localeCompare(b)),
+    [managedSkills, toolSkillNamesSet],
   );
   const skillsAudio = useMemo(
-    () => managedSkills.filter((n) => n.startsWith("audio_")).sort((a, b) => a.localeCompare(b)),
-    [managedSkills],
+    () => managedSkills.filter((n) => n.startsWith("audio_") && !toolSkillNamesSet.has(n)).sort((a, b) => a.localeCompare(b)),
+    [managedSkills, toolSkillNamesSet],
   );
   const skillsBase = useMemo(
-    () => managedSkills.filter((n) => baseSkillNamesSet.has(n)).sort((a, b) => a.localeCompare(b)),
-    [managedSkills, baseSkillNamesSet],
+    () => managedSkills.filter((n) => baseSkillNamesSet.has(n) && !toolSkillNamesSet.has(n)).sort((a, b) => a.localeCompare(b)),
+    [managedSkills, baseSkillNamesSet, toolSkillNamesSet],
   );
   const skillsOther = useMemo(
     () =>
       managedSkills
-        .filter((n) => !n.startsWith("image_") && !n.startsWith("audio_") && !baseSkillNamesSet.has(n))
+        .filter((n) => !n.startsWith("image_") && !n.startsWith("audio_") && !baseSkillNamesSet.has(n) && !toolSkillNamesSet.has(n))
         .sort((a, b) => a.localeCompare(b)),
-    [managedSkills, baseSkillNamesSet],
+    [managedSkills, baseSkillNamesSet, toolSkillNamesSet],
   );
   const filterBySearch = (list: string[]) =>
     list.filter((name) => !normalizedSkillsSearchQuery || name.toLowerCase().includes(normalizedSkillsSearchQuery));
+  const filteredSkillsTool = useMemo(() => filterBySearch(skillsTool), [skillsTool, normalizedSkillsSearchQuery]);
   const filteredSkillsImage = useMemo(() => filterBySearch(skillsImage), [skillsImage, normalizedSkillsSearchQuery]);
   const filteredSkillsAudio = useMemo(() => filterBySearch(skillsAudio), [skillsAudio, normalizedSkillsSearchQuery]);
   const filteredSkillsBase = useMemo(() => filterBySearch(skillsBase), [skillsBase, normalizedSkillsSearchQuery]);
@@ -3639,8 +3651,8 @@ export default function App() {
         desc: t("这是第一步。先把主模型配好，RustClaw 才能正常理解消息和执行大多数任务。", "This is step one. Configure the main LLM first so RustClaw can understand messages and run most tasks."),
       },
       skills: {
-        title: t("技能设置", "Skill Settings"),
-        desc: t("这里单独管理技能开关和运行中的技能列表。", "Manage skill switches and the current runtime skill list here."),
+        title: t("工具与技能设置", "Tool and Skill Settings"),
+        desc: t("这里管理固定开启的工具能力，以及可按需开启的技能。", "Manage always-on tool capabilities and skills that can be enabled as needed."),
       },
       logs: {
         title: t("查看日志", "Logs"),
@@ -3687,8 +3699,8 @@ export default function App() {
       },
       {
         id: "skills" as const,
-        label: t("技能设置", "Skills"),
-        hint: t("开关技能", "skill toggles"),
+        label: t("工具与技能", "Tools & Skills"),
+        hint: t("管理能力", "manage capabilities"),
         icon: <Wrench className="h-4 w-4" />,
       },
       {
@@ -5690,7 +5702,7 @@ export default function App() {
 
               <div className="rounded-xl border border-white/10 bg-black/20 p-4">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <h4 className="text-sm font-semibold">{t("技能开关", "Skill Switches")}</h4>
+                  <h4 className="text-sm font-semibold">{t("工具与技能开关", "Tool and Skill Switches")}</h4>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => void fetchSkillsConfig()}
@@ -5727,8 +5739,8 @@ export default function App() {
                 ) : null}
                 <p className="mt-3 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/65">
                   {t(
-                    "技能按图片、语音、基础能力与其它分组展示。按钮只是先选择；点击“保存开关”后会提示重启，确认后系统会自动帮你重启并生效。",
-                    "Skills are grouped by image, audio, core capabilities, and others. Buttons only stage your choice; after Save Switches you will be prompted to restart.",
+                    "工具能力固定开启；技能按图片、语音、基础能力与其它分组展示。按钮只是先选择；点击“保存开关”后会提示重启，确认后系统会自动帮你重启并生效。",
+                    "Tool capabilities stay always on. Skills are grouped by image, audio, core capabilities, and others. Buttons only stage your choice; after Save Switches you will be prompted to restart.",
                   )}
                 </p>
 
@@ -5750,9 +5762,11 @@ export default function App() {
                     const isRecentImport = recentImportedSkillName === name;
                     const isExternalSkill = externalSkillNamesSet.has(name);
                     const isLockedSkill = lockedSkillNamesSet.has(name);
+                    const isToolSkill = toolSkillNamesSet.has(name);
                     const isUninstalling = skillUninstallingName === name;
                     const statusMeta = [
-                      baseSkillNamesSet.has(name) ? t("系统基础能力", "Core capability") : null,
+                      isToolSkill ? t("系统工具", "Tool") : null,
+                      baseSkillNamesSet.has(name) && !isToolSkill ? t("系统基础能力", "Core capability") : null,
                       isLockedSkill ? t("固定开启", "Always on") : null,
                       isExternalSkill ? t("外部导入", "Imported") : null,
                     ].filter(Boolean) as string[];
@@ -5804,7 +5818,9 @@ export default function App() {
                             }
                             title={
                               isLockedSkill
-                                ? t("这是系统基础能力，UI 中不能关闭。", "This is a core system capability and cannot be disabled in the UI.")
+                                ? isToolSkill
+                                  ? t("这是底层工具能力，UI 中不能关闭。", "This is a low-level tool capability and cannot be disabled in the UI.")
+                                  : t("这是系统基础能力，UI 中不能关闭。", "This is a core system capability and cannot be disabled in the UI.")
                                 : configuredEnabled
                                   ? t("先设为关闭，保存后才会真正关闭", "Choose Disable first. It only turns off after you save.")
                                   : t("先设为开启，保存后才会真正开启", "Choose Enable first. It only turns on after you save.")
@@ -5833,15 +5849,15 @@ export default function App() {
                     <div className="mt-4 space-y-4">
                       <div className="rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
                         <div className="flex items-center justify-between gap-3">
-                          <h5 className="text-sm font-semibold text-white">{t("技能分组", "Skills by group")}</h5>
+                          <h5 className="text-sm font-semibold text-white">{t("工具与技能分组", "Tools and skills by group")}</h5>
                           <span className="theme-meta-pill !rounded-xl !px-2.5 !py-1 text-[11px]">
                             {filteredManagedSkills.length}/{managedSkills.length}
                           </span>
                         </div>
                         <p className="mt-1 text-xs leading-5 text-white/50">
                           {t(
-                            "图片、语音、基础能力与其它。新导入的技能会出现在对应分组。",
-                            "Image, audio, core capabilities, and others. Newly imported skills appear in the matching group.",
+                            "工具固定开启；图片、语音、基础能力与其它技能可以按需管理。新导入的技能会出现在对应分组。",
+                            "Tools stay always on; image, audio, core capabilities, and other skills can be managed as needed. Newly imported skills appear in the matching group.",
                           )}
                         </p>
                         <label className="mt-3 block space-y-2">
@@ -5857,12 +5873,14 @@ export default function App() {
                         </label>
                       </div>
                       <div className="space-y-4">
+                        {renderSkillGroup(t("固定开启的工具", "Always-on tools"), filteredSkillsTool)}
                         {renderSkillGroup(t("固定开启的基础技能", "Always-on core skills"), filteredSkillsBase)}
                         {renderSkillGroup(t("图片技能", "Image skills"), filteredSkillsImage)}
                         {renderSkillGroup(t("语音技能", "Voice / Audio skills"), filteredSkillsAudio)}
                         {renderSkillGroup(t("其他", "Others"), filteredSkillsOther)}
                       </div>
                       {normalizedSkillsSearchQuery &&
+                        filteredSkillsTool.length === 0 &&
                         filteredSkillsImage.length === 0 &&
                         filteredSkillsAudio.length === 0 &&
                         filteredSkillsBase.length === 0 &&

@@ -3,7 +3,6 @@ use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
-use chrono::{Datelike, Local};
 use exif::{In, Reader, Tag};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -181,16 +180,8 @@ struct PhotoPlan {
 
 #[derive(Debug, Default)]
 struct InferredIntent {
-    action: Option<String>,
     source_dir: Option<String>,
     output_dir: Option<String>,
-    mode: Option<OrganizeMode>,
-    group_by: Option<Vec<GroupField>>,
-    capture_month: Option<String>,
-    selected_brands: Option<Vec<String>>,
-    include_subdirs: Option<bool>,
-    preview_limit: Option<usize>,
-    raw_text: Option<String>,
     notes: Vec<String>,
 }
 
@@ -373,7 +364,8 @@ fn default_i18n_dict() -> HashMap<String, String> {
     );
     m.insert(
         "photo_organize.err.unsupported_action".to_string(),
-        "Unsupported action `{action}`; allowed: prepare|organize".to_string(),
+        "Unsupported action `{action}`; allowed: prepare|organize|plan|preview|dry_run|copy|move"
+            .to_string(),
     );
     m.insert(
         "photo_organize.err.unsupported_mode".to_string(),
@@ -672,6 +664,9 @@ fn execute(args: &Value, cat: &TextCatalog) -> Result<SkillOutput, String> {
         .unwrap_or("organize")
         .trim()
         .to_ascii_lowercase();
+    if let Some(default_mode) = default_mode_for_action_alias(&action) {
+        return handle_organize_with_default_mode(obj, cat, default_mode);
+    }
     match action.as_str() {
         "prepare" | "select_source" => Ok(build_directory_prompt(cat)),
         "organize" | "run" => handle_organize(obj, cat),
@@ -681,6 +676,39 @@ fn execute(args: &Value, cat: &TextCatalog) -> Result<SkillOutput, String> {
             &[("action", other.to_string())],
         )),
     }
+}
+
+fn default_mode_for_action_alias(action: &str) -> Option<OrganizeMode> {
+    match action {
+        "plan" | "preview" | "dry_run" => Some(OrganizeMode::Plan),
+        "copy" => Some(OrganizeMode::Copy),
+        "move" => Some(OrganizeMode::Move),
+        _ => None,
+    }
+}
+
+fn has_mode_arg(obj: &Map<String, Value>) -> bool {
+    obj.get("mode")
+        .or_else(|| obj.get("organize_mode"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+}
+
+fn handle_organize_with_default_mode(
+    obj: &Map<String, Value>,
+    cat: &TextCatalog,
+    default_mode: OrganizeMode,
+) -> Result<SkillOutput, String> {
+    if has_mode_arg(obj) {
+        return handle_organize(obj, cat);
+    }
+    let mut normalized = obj.clone();
+    normalized.insert(
+        "mode".to_string(),
+        Value::String(default_mode.as_str().to_string()),
+    );
+    handle_organize(&normalized, cat)
 }
 
 fn handle_organize(obj: &Map<String, Value>, cat: &TextCatalog) -> Result<SkillOutput, String> {
@@ -882,6 +910,8 @@ fn build_directory_prompt(cat: &TextCatalog) -> SkillOutput {
         buttons,
         extra: Some(json!({
             "action": "prepare",
+            "requires_user_input": true,
+            "missing_argument": "source_dir",
             "needs_directory": true,
             "external_candidates": candidates,
             "recommended_mode": "plan",
@@ -1676,11 +1706,6 @@ fn normalize_args(args: &Value, cat: &TextCatalog) -> Result<Value, String> {
 
     let mut inferred = infer_from_natural_language(&obj);
 
-    if !obj.contains_key("action") {
-        if let Some(action) = inferred.action.take() {
-            obj.insert("action".to_string(), Value::String(action));
-        }
-    }
     if !obj.contains_key("source_dir") {
         if let Some(source_dir) = inferred.source_dir.take() {
             obj.insert("source_dir".to_string(), Value::String(source_dir));
@@ -1689,50 +1714,6 @@ fn normalize_args(args: &Value, cat: &TextCatalog) -> Result<Value, String> {
     if !obj.contains_key("output_dir") {
         if let Some(output_dir) = inferred.output_dir.take() {
             obj.insert("output_dir".to_string(), Value::String(output_dir));
-        }
-    }
-    if !obj.contains_key("mode") {
-        if let Some(mode) = inferred.mode.take() {
-            obj.insert("mode".to_string(), Value::String(mode.as_str().to_string()));
-        }
-    }
-    if !obj.contains_key("group_by") {
-        if let Some(group_by) = inferred.group_by.take() {
-            obj.insert(
-                "group_by".to_string(),
-                Value::Array(
-                    group_by
-                        .into_iter()
-                        .map(|field| Value::String(field.as_arg_str().to_string()))
-                        .collect(),
-                ),
-            );
-        }
-    }
-    if !obj.contains_key("capture_month") {
-        if let Some(capture_month) = inferred.capture_month.take() {
-            obj.insert("capture_month".to_string(), Value::String(capture_month));
-        }
-    }
-    if !obj.contains_key("selected_brands") && !obj.contains_key("brands") {
-        if let Some(selected_brands) = inferred.selected_brands.take() {
-            obj.insert(
-                "selected_brands".to_string(),
-                Value::Array(selected_brands.into_iter().map(Value::String).collect()),
-            );
-        }
-    }
-    if !obj.contains_key("include_subdirs") {
-        if let Some(include_subdirs) = inferred.include_subdirs.take() {
-            obj.insert("include_subdirs".to_string(), Value::Bool(include_subdirs));
-        }
-    }
-    if !obj.contains_key("preview_limit") {
-        if let Some(preview_limit) = inferred.preview_limit.take() {
-            obj.insert(
-                "preview_limit".to_string(),
-                Value::from(preview_limit as u64),
-            );
         }
     }
     if !obj.contains_key("action") {
@@ -1756,18 +1737,10 @@ fn infer_from_natural_language(obj: &Map<String, Value>) -> InferredIntent {
     if trimmed.is_empty() {
         return inferred;
     }
-    inferred.raw_text = Some(trimmed.to_string());
-    let text_lower = trimmed.to_lowercase();
 
-    if text_lower.contains("外接硬盘")
-        || text_lower.contains("u盘")
-        || text_lower.contains("usb")
-        || text_lower.contains("候选路径")
-        || text_lower.contains("先问")
-    {
-        inferred.action = Some("prepare".to_string());
-    }
-
+    // Keep skill-local fallback parsing limited to concrete path binding. Semantic
+    // choices such as mode/grouping/date/brand filters belong in LLM-produced
+    // structured args, not hard-coded natural-language keyword tables.
     let explicit_paths = extract_path_like_tokens(trimmed);
     if let Some(first_path) = explicit_paths.first() {
         inferred.source_dir = Some(first_path.clone());
@@ -1788,241 +1761,7 @@ fn infer_from_natural_language(obj: &Map<String, Value>) -> InferredIntent {
             .push(format!("from_candidate_source_dir={candidate}"));
     }
 
-    if text_lower.contains("不递归")
-        || text_lower.contains("不要子目录")
-        || text_lower.contains("不要子文件夹")
-        || text_lower.contains("只看当前目录")
-        || text_lower.contains("只整理当前目录")
-    {
-        inferred.include_subdirs = Some(false);
-    } else if text_lower.contains("递归")
-        || text_lower.contains("子目录")
-        || text_lower.contains("子文件夹")
-        || text_lower.contains("所有子目录")
-    {
-        inferred.include_subdirs = Some(true);
-    }
-
-    if text_lower.contains("移动")
-        || text_lower.contains("挪到")
-        || text_lower.contains("搬到")
-        || text_lower.contains("move ")
-        || text_lower.ends_with("move")
-    {
-        inferred.mode = Some(OrganizeMode::Move);
-    }
-    if text_lower.contains("复制")
-        || text_lower.contains("拷贝")
-        || text_lower.contains("备份")
-        || text_lower.contains("copy ")
-        || text_lower.ends_with("copy")
-    {
-        inferred.mode = Some(OrganizeMode::Copy);
-    }
-    if text_lower.contains("预览")
-        || text_lower.contains("先看")
-        || text_lower.contains("先预览")
-        || text_lower.contains("先不要动")
-        || text_lower.contains("不要移动")
-        || text_lower.contains("仅预览")
-        || text_lower.contains("dry run")
-        || text_lower.contains("dry-run")
-        || text_lower.contains("preview")
-    {
-        inferred.mode = Some(OrganizeMode::Plan);
-    }
-
-    if inferred.preview_limit.is_none() {
-        inferred.preview_limit = extract_preview_limit(trimmed);
-        if let Some(limit) = inferred.preview_limit {
-            inferred
-                .notes
-                .push(format!("from_text_preview_limit={limit}"));
-        }
-    }
-
-    if inferred.group_by.is_none() {
-        inferred.group_by = infer_group_by_from_text(trimmed, &text_lower);
-        if let Some(group_by) = &inferred.group_by {
-            inferred.notes.push(format!(
-                "from_text_group_by={}",
-                group_by
-                    .iter()
-                    .map(|field| field.as_arg_str())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ));
-        }
-    }
-
-    if inferred.capture_month.is_none() {
-        inferred.capture_month = infer_capture_month_from_text(trimmed, &text_lower);
-        if let Some(capture_month) = &inferred.capture_month {
-            inferred
-                .notes
-                .push(format!("from_text_capture_month={capture_month}"));
-        }
-    }
-
-    if inferred.selected_brands.is_none() {
-        inferred.selected_brands = infer_selected_brands_from_text(trimmed, &text_lower);
-        if let Some(selected_brands) = &inferred.selected_brands {
-            inferred.notes.push(format!(
-                "from_text_selected_brands={}",
-                selected_brands.join(",")
-            ));
-        }
-    }
-
     inferred
-}
-
-fn infer_group_by_from_text(text: &str, text_lower: &str) -> Option<Vec<GroupField>> {
-    let mut ordered = Vec::new();
-    let keywords: &[(GroupField, &[&str])] = &[
-        (GroupField::Brand, &["品牌", "牌子", "brand", "make"]),
-        (GroupField::Model, &["机型", "型号", "model"]),
-        (GroupField::Lens, &["镜头", "lens"]),
-        (GroupField::FocalLength, &["焦段", "焦距", "focal"]),
-        (GroupField::YearMonth, &["年月", "月份", "month", "date"]),
-    ];
-
-    let mut positions = Vec::new();
-    for (field, field_keywords) in keywords {
-        let mut best: Option<usize> = None;
-        for keyword in *field_keywords {
-            let pos = if keyword.is_ascii() {
-                text_lower.find(keyword)
-            } else {
-                text.find(keyword)
-            };
-            if let Some(idx) = pos {
-                best = Some(best.map(|current| current.min(idx)).unwrap_or(idx));
-            }
-        }
-        if let Some(pos) = best {
-            positions.push((pos, *field));
-        }
-    }
-    positions.sort_by_key(|(pos, _)| *pos);
-    for (_, field) in positions {
-        push_unique_group_field(&mut ordered, field);
-    }
-
-    if ordered.is_empty() {
-        let brands = [
-            "佳能", "索尼", "尼康", "富士", "松下", "徕卡", "canon", "sony", "nikon", "fujifilm",
-        ];
-        let matched_brands = brands
-            .iter()
-            .filter(|name| text_lower.contains(&name.to_lowercase()))
-            .count();
-        if matched_brands >= 2
-            && (text.contains("分开")
-                || text_lower.contains("separate")
-                || text_lower.contains("split"))
-        {
-            ordered.push(GroupField::Brand);
-        }
-    }
-
-    if ordered.is_empty() {
-        None
-    } else {
-        Some(ordered)
-    }
-}
-
-fn infer_capture_month_from_text(text: &str, text_lower: &str) -> Option<String> {
-    if text.contains("这个月") || text.contains("本月") || text_lower.contains("this month") {
-        let now = Local::now();
-        return Some(format!("{:04}-{:02}", now.year(), now.month()));
-    }
-
-    let chars = text.chars().collect::<Vec<_>>();
-    for idx in 0..chars.len() {
-        if idx + 7 <= chars.len() {
-            let candidate = chars[idx..idx + 7].iter().collect::<String>();
-            if is_year_month_candidate(&candidate) {
-                return Some(candidate.replace('/', "-").replace('.', "-"));
-            }
-        }
-    }
-    None
-}
-
-fn infer_selected_brands_from_text(text: &str, text_lower: &str) -> Option<Vec<String>> {
-    let wants_filter = text.contains("只整理")
-        || text.contains("仅整理")
-        || text.contains("其他品牌不动")
-        || text.contains("其他不要动")
-        || text_lower.contains("only organize")
-        || text_lower.contains("only sort")
-        || text_lower.contains("leave other brands");
-    if !wants_filter {
-        return None;
-    }
-
-    let candidates = [
-        ("Canon", &["佳能", "canon"][..]),
-        ("Sony", &["索尼", "sony"][..]),
-        ("Nikon", &["尼康", "nikon"][..]),
-        ("Fujifilm", &["富士", "fujifilm", "fuji"][..]),
-        ("Panasonic", &["松下", "panasonic", "lumix"][..]),
-        ("Leica", &["徕卡", "leica"][..]),
-    ];
-    let mut matched = Vec::new();
-    for (canonical, aliases) in candidates {
-        if aliases.iter().any(|alias| {
-            if alias.is_ascii() {
-                text_lower.contains(alias)
-            } else {
-                text.contains(alias)
-            }
-        }) {
-            matched.push(canonical.to_string());
-        }
-    }
-    if matched.is_empty() {
-        None
-    } else {
-        Some(matched)
-    }
-}
-
-fn is_year_month_candidate(raw: &str) -> bool {
-    let normalized = raw.replace('/', "-").replace('.', "-");
-    let mut parts = normalized.split('-');
-    let Some(year) = parts.next() else {
-        return false;
-    };
-    let Some(month) = parts.next() else {
-        return false;
-    };
-    parts.next().is_none()
-        && year.len() == 4
-        && month.len() == 2
-        && year.chars().all(|ch| ch.is_ascii_digit())
-        && month.chars().all(|ch| ch.is_ascii_digit())
-}
-
-fn extract_preview_limit(text: &str) -> Option<usize> {
-    for marker in ["前", "预览", "显示"] {
-        if let Some(idx) = text.find(marker) {
-            let tail = &text[idx + marker.len()..];
-            let digits = tail
-                .chars()
-                .skip_while(|ch| !ch.is_ascii_digit())
-                .take_while(|ch| ch.is_ascii_digit())
-                .collect::<String>();
-            if let Ok(value) = digits.parse::<usize>() {
-                if (1..=50).contains(&value) {
-                    return Some(value);
-                }
-            }
-        }
-    }
-    None
 }
 
 fn extract_path_like_tokens(text: &str) -> Vec<String> {
@@ -2366,5 +2105,26 @@ mod tests {
             None
         );
         assert_eq!(preferred_auto_source_root(Vec::new()), None);
+    }
+
+    #[test]
+    fn structured_action_aliases_map_to_default_modes() {
+        assert_eq!(
+            default_mode_for_action_alias("plan"),
+            Some(OrganizeMode::Plan)
+        );
+        assert_eq!(
+            default_mode_for_action_alias("preview"),
+            Some(OrganizeMode::Plan)
+        );
+        assert_eq!(
+            default_mode_for_action_alias("copy"),
+            Some(OrganizeMode::Copy)
+        );
+        assert_eq!(
+            default_mode_for_action_alias("move"),
+            Some(OrganizeMode::Move)
+        );
+        assert_eq!(default_mode_for_action_alias("organize"), None);
     }
 }

@@ -75,21 +75,19 @@ fn execute(args: Value) -> Result<(String, Value), String> {
             let output = format!("package_manager={mgr}");
             Ok((
                 output.clone(),
-                json!({"action":"detect","manager":mgr,"output":output}),
+                json!({
+                    "action":"detect",
+                    "manager":mgr,
+                    "platform":std::env::consts::OS,
+                    "candidate_order":package_manager_candidates(),
+                    "output":output
+                }),
             ))
         }
         "smart_install" => {
             let manager = detect_manager()
                 .ok_or_else(|| "cannot detect package manager; install manually or set args.manager and use action=install".to_string())?;
-            let packages = extract_packages(obj)?;
-            if packages.is_empty() {
-                return Err("no packages provided".to_string());
-            }
-            for p in &packages {
-                if !is_safe_token(p) {
-                    return Err(format!("invalid package name: {p}"));
-                }
-            }
+            let packages = extract_safe_packages(obj)?;
             let dry_run = obj
                 .get("dry_run")
                 .and_then(|v| v.as_bool())
@@ -108,15 +106,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 .or_else(detect_manager)
                 .ok_or_else(|| "cannot detect package manager; set args.manager".to_string())?;
 
-            let packages = extract_packages(obj)?;
-            if packages.is_empty() {
-                return Err("no packages provided".to_string());
-            }
-            for p in &packages {
-                if !is_safe_token(p) {
-                    return Err(format!("invalid package name: {p}"));
-                }
-            }
+            let packages = extract_safe_packages(obj)?;
 
             let dry_run = obj.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(true);
             let use_sudo = obj
@@ -129,16 +119,19 @@ fn execute(args: Value) -> Result<(String, Value), String> {
     }
 }
 
-fn detect_manager() -> Option<String> {
-    let candidates: &[&str] = match std::env::consts::OS {
+fn package_manager_candidates() -> &'static [&'static str] {
+    match std::env::consts::OS {
         "macos" => &[
             "brew", "apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper",
         ],
         _ => &[
             "apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew",
         ],
-    };
-    for m in candidates {
+    }
+}
+
+fn detect_manager() -> Option<String> {
+    for m in package_manager_candidates() {
         let ok = Command::new("sh")
             .arg("-lc")
             .arg(format!("command -v {m} >/dev/null 2>&1"))
@@ -232,6 +225,7 @@ fn install_packages(
                 "packages": packages,
                 "dry_run": true,
                 "use_sudo": use_sudo,
+                "platform": std::env::consts::OS,
                 "command": full_cmd.join(" "),
                 "output": output,
             }),
@@ -276,6 +270,7 @@ fn install_packages(
                 "packages": packages,
                 "dry_run": false,
                 "use_sudo": use_sudo,
+                "platform": std::env::consts::OS,
                 "exit_code": exit_code,
                 "command": full_cmd.join(" "),
                 "output": output,
@@ -318,6 +313,19 @@ fn extract_packages(obj: &serde_json::Map<String, Value>) -> Result<Vec<String>,
         }
     }
     Err("args.package or args.packages is required".to_string())
+}
+
+fn extract_safe_packages(obj: &serde_json::Map<String, Value>) -> Result<Vec<String>, String> {
+    let packages = extract_packages(obj)?;
+    if packages.is_empty() {
+        return Err("no packages provided".to_string());
+    }
+    for package in &packages {
+        if !is_safe_token(package) {
+            return Err(format!("invalid package name: {package}"));
+        }
+    }
+    Ok(packages)
 }
 
 fn is_root() -> bool {

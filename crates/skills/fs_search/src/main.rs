@@ -65,6 +65,16 @@ fn scan_limits_from_args(obj: &serde_json::Map<String, Value>) -> ScanLimits {
     }
 }
 
+fn skip_default_scan_dir(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    matches!(
+        name,
+        ".git" | "target" | "node_modules" | ".venv" | "venv" | "__pycache__"
+    )
+}
+
 fn normalize_locator_text(text: &str) -> String {
     text.trim()
         .chars()
@@ -235,8 +245,66 @@ fn optional_name_patterns_from_args(obj: &serde_json::Map<String, Value>) -> Vec
     .collect::<Vec<_>>()
 }
 
+fn optional_file_patterns_from_args(obj: &serde_json::Map<String, Value>) -> Vec<String> {
+    string_values_from_args(
+        obj,
+        &[
+            "pattern",
+            "patterns",
+            "name",
+            "names",
+            "filename",
+            "filenames",
+            "file_pattern",
+            "file_patterns",
+        ],
+    )
+    .iter()
+    .flat_map(|raw| expand_name_pattern(raw))
+    .filter(|pattern| !pattern.is_empty())
+    .collect::<Vec<_>>()
+}
+
 fn bool_arg(obj: &serde_json::Map<String, Value>, key: &str) -> bool {
     obj.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn line_matches_query(line: &str, query: &str) -> bool {
+    line.contains(query) || ordered_wildcard_query_matches(line, query)
+}
+
+fn ordered_wildcard_query_matches(line: &str, query: &str) -> bool {
+    if !query.contains(".*") {
+        return false;
+    }
+    let parts = query
+        .split(".*")
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() < 2 {
+        return false;
+    }
+    let mut rest = line;
+    for part in parts {
+        let Some(idx) = rest.find(part) else {
+            return false;
+        };
+        rest = &rest[idx + part.len()..];
+    }
+    true
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    for (idx, ch) in text.chars().enumerate() {
+        if idx >= max_chars {
+            out.push_str("...");
+            return out;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 fn main() -> anyhow::Result<()> {
@@ -305,7 +373,11 @@ fn execute(args: Value) -> Result<Value, String> {
     let root = workspace_root();
     let search_root = resolve_path(
         &root,
-        obj.get("root").and_then(|v| v.as_str()).unwrap_or("."),
+        obj.get("root")
+            .or_else(|| obj.get("path"))
+            .or_else(|| obj.get("dir"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("."),
     )?;
     let scan_limits = scan_limits_from_args(obj);
 
@@ -400,20 +472,57 @@ fn execute(args: Value) -> Result<Value, String> {
                 .get("query")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "query is required".to_string())?;
+            let pattern_norms = optional_file_patterns_from_args(obj);
+            let max_line_chars = obj
+                .get("max_line_chars")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(240)
+                .clamp(40, 2000) as usize;
+            let mut matches = Vec::new();
             walk_collect(&search_root, scan_limits, &mut |p| {
-                if let Ok(text) = std::fs::read_to_string(p) {
-                    if text.contains(query) {
-                        results.push(to_rel(&root, p));
+                if !pattern_norms.is_empty() {
+                    let name = p
+                        .file_name()
+                        .map(|s| normalize_locator_text(&s.to_string_lossy()))
+                        .unwrap_or_default();
+                    if !pattern_norms
+                        .iter()
+                        .any(|pattern_norm| path_name_matches_pattern(p, &name, pattern_norm))
+                    {
+                        return false;
                     }
                 }
-                results.len() >= max_results
+                if let Ok(text) = std::fs::read_to_string(p) {
+                    let rel = to_rel(&root, p);
+                    let mut file_matched = false;
+                    for (idx, line) in text.lines().enumerate() {
+                        if line_matches_query(line, query) {
+                            if !file_matched {
+                                results.push(rel.clone());
+                                file_matched = true;
+                            }
+                            matches.push(json!({
+                                "path": rel.clone(),
+                                "line": idx + 1,
+                                "text": truncate_chars(line.trim(), max_line_chars),
+                            }));
+                            if matches.len() >= max_results {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                matches.len() >= max_results
             })?;
             Ok(json!({
                 "action": "grep_text",
                 "root": to_rel(&root, &search_root),
                 "query": query,
+                "patterns": pattern_norms,
                 "count": results.len(),
+                "match_count": matches.len(),
                 "results": results,
+                "matches": matches,
             }))
         }
         "find_images" | "images" | "image_search" => {
@@ -520,21 +629,34 @@ fn walk_collect_inner(
         return Ok(());
     }
     let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
+    let mut files = Vec::new();
+    let mut dirs = Vec::new();
     for entry in iter {
         let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
         let p = entry.path();
         if p.is_dir() {
-            if depth < limits.max_depth {
-                walk_collect_inner(&p, depth + 1, limits, scanned_files, f)?;
+            if skip_default_scan_dir(&p) {
+                continue;
             }
+            dirs.push(p);
         } else {
-            if *scanned_files >= limits.max_files {
-                return Ok(());
-            }
-            *scanned_files += 1;
-            if f(&p) {
-                return Ok(());
-            }
+            files.push(p);
+        }
+    }
+    files.sort();
+    dirs.sort();
+    for p in files {
+        if *scanned_files >= limits.max_files {
+            return Ok(());
+        }
+        *scanned_files += 1;
+        if f(&p) {
+            return Ok(());
+        }
+    }
+    for p in dirs {
+        if depth < limits.max_depth {
+            walk_collect_inner(&p, depth + 1, limits, scanned_files, f)?;
         }
     }
     Ok(())
@@ -571,21 +693,34 @@ fn walk_collect_nodes_inner(
         return Ok(());
     }
     let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
+    let mut files = Vec::new();
+    let mut dirs = Vec::new();
     for entry in iter {
         let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
         let p = entry.path();
         if p.is_dir() {
-            if depth < limits.max_depth {
-                walk_collect_nodes_inner(&p, depth + 1, limits, scanned_files, f)?;
+            if skip_default_scan_dir(&p) {
+                continue;
             }
+            dirs.push(p);
         } else {
-            if *scanned_files >= limits.max_files {
-                return Ok(());
-            }
-            *scanned_files += 1;
-            if f(&p) {
-                return Ok(());
-            }
+            files.push(p);
+        }
+    }
+    files.sort();
+    dirs.sort();
+    for p in files {
+        if *scanned_files >= limits.max_files {
+            return Ok(());
+        }
+        *scanned_files += 1;
+        if f(&p) {
+            return Ok(());
+        }
+    }
+    for p in dirs {
+        if depth < limits.max_depth {
+            walk_collect_nodes_inner(&p, depth + 1, limits, scanned_files, f)?;
         }
     }
     Ok(())
@@ -697,6 +832,39 @@ mod tests {
     }
 
     #[test]
+    fn find_name_checks_shallow_files_before_deep_scan_budget() {
+        let root = unique_temp_dir("shallow-before-deep");
+        let deep = root.join("aaa_deep");
+        std::fs::create_dir_all(&deep).expect("create deep dir");
+        for idx in 0..8 {
+            std::fs::write(deep.join(format!("noise-{idx}.txt")), "").expect("write noise");
+        }
+        std::fs::write(root.join("start-all-bin.sh"), "#!/usr/bin/env bash\n")
+            .expect("write shallow script");
+
+        let out = execute(json!({
+            "action": "find_name",
+            "pattern": "start-all-bin.sh",
+            "root": root.to_string_lossy().to_string(),
+            "max_depth": 8,
+            "max_files": 1,
+            "max_results": 10
+        }))
+        .expect("find_name succeeds");
+
+        assert_eq!(out.get("count").and_then(Value::as_u64), Some(1));
+        let results = out
+            .get("results")
+            .and_then(Value::as_array)
+            .expect("results array");
+        assert!(results
+            .iter()
+            .any(|v| v.as_str().is_some_and(|s| s.ends_with("start-all-bin.sh"))));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn find_name_expands_simple_alternation_pattern() {
         let root = unique_temp_dir("alternation-pattern");
         std::fs::create_dir_all(&root).expect("create root");
@@ -759,6 +927,135 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(results.len(), 1);
         assert!(results[0].ends_with("execution_intent_routing_repair_plan_20260509.md"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn grep_text_returns_matching_lines_for_known_file_root() {
+        let root = unique_temp_dir("grep-text-lines");
+        std::fs::create_dir_all(&root).expect("create root");
+        let file = root.join("sample.rs");
+        std::fs::write(
+            &file,
+            "fn unrelated() {}\nif step_type == \"run_cmd\" {\n    normalize_run_cmd_call();\n}\n",
+        )
+        .expect("write sample file");
+
+        let out = execute(json!({
+            "action": "grep_text",
+            "query": "run_cmd",
+            "root": file.to_string_lossy().to_string(),
+            "max_results": 10
+        }))
+        .expect("grep_text succeeds");
+
+        assert_eq!(out.get("count").and_then(Value::as_u64), Some(1));
+        assert_eq!(out.get("match_count").and_then(Value::as_u64), Some(2));
+        let matches = out
+            .get("matches")
+            .and_then(Value::as_array)
+            .expect("matches array");
+        assert_eq!(matches[0].get("line").and_then(Value::as_u64), Some(2));
+        assert!(matches[0]
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| text.contains("step_type") && text.contains("run_cmd")));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn grep_text_accepts_ordered_wildcard_query() {
+        let root = unique_temp_dir("grep-text-ordered-wildcard");
+        std::fs::create_dir_all(&root).expect("create root");
+        let file = root.join("sample.rs");
+        std::fs::write(&file, "if step_type == \"run_cmd\" {\n}\n").expect("write sample file");
+
+        let out = execute(json!({
+            "action": "grep_text",
+            "query": "type.*run_cmd",
+            "path": file.to_string_lossy().to_string(),
+            "max_results": 10
+        }))
+        .expect("grep_text succeeds with ordered wildcard query");
+
+        assert_eq!(out.get("count").and_then(Value::as_u64), Some(1));
+        assert_eq!(out.get("match_count").and_then(Value::as_u64), Some(1));
+        let matches = out
+            .get("matches")
+            .and_then(Value::as_array)
+            .expect("matches array");
+        assert!(matches[0]
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| text.contains("step_type") && text.contains("run_cmd")));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn grep_text_accepts_path_alias_for_search_root() {
+        let root = unique_temp_dir("grep-text-path-alias");
+        std::fs::create_dir_all(&root).expect("create root");
+        let file = root.join("sample.rs");
+        std::fs::write(&file, "if step_type == \"run_cmd\" {}\n").expect("write sample file");
+
+        let out = execute(json!({
+            "action": "grep_text",
+            "query": "run_cmd",
+            "path": file.to_string_lossy().to_string(),
+            "max_results": 10
+        }))
+        .expect("grep_text succeeds with path alias");
+
+        assert_eq!(out.get("count").and_then(Value::as_u64), Some(1));
+        let root_value = out.get("root").and_then(Value::as_str).unwrap_or_default();
+        assert!(
+            root_value.ends_with("sample.rs"),
+            "root should reflect the path alias target, got {root_value:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn grep_text_filters_by_file_pattern() {
+        let root = unique_temp_dir("grep-text-file-pattern");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::write(
+            root.join("prompt_utils.rs"),
+            "if step_type == \"run_cmd\" {}\n",
+        )
+        .expect("write target");
+        std::fs::write(root.join("other.rs"), "if step_type == \"run_cmd\" {}\n")
+            .expect("write sibling");
+
+        let out = execute(json!({
+            "action": "grep_text",
+            "query": "run_cmd",
+            "pattern": "prompt_utils.rs",
+            "root": root.to_string_lossy().to_string(),
+            "max_results": 10
+        }))
+        .expect("grep_text succeeds with file pattern");
+
+        assert_eq!(out.get("count").and_then(Value::as_u64), Some(1));
+        let results = out
+            .get("results")
+            .and_then(Value::as_array)
+            .expect("results array")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ends_with("prompt_utils.rs"));
+        assert!(out
+            .get("patterns")
+            .and_then(Value::as_array)
+            .is_some_and(|patterns| patterns
+                .iter()
+                .any(|item| item.as_str() == Some("prompt_utils.rs"))));
 
         let _ = std::fs::remove_dir_all(root);
     }

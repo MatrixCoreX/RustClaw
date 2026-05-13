@@ -924,6 +924,60 @@ fn preserve_active_clarify_output_contract_for_locator_reply(
         .push_str("; preserve_active_clarify_output_contract");
 }
 
+fn structural_locator_kind_from_reply(locator: &str) -> crate::OutputLocatorKind {
+    let trimmed = locator.trim();
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return crate::OutputLocatorKind::Url;
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return crate::OutputLocatorKind::Path;
+    }
+    crate::OutputLocatorKind::Filename
+}
+
+fn promote_active_clarify_locator_reply_to_execute(
+    route_result: &mut crate::RouteResult,
+    clarify_followup_resolution: &crate::intent::continuation_resolver::ClarifyFollowupResolution,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) {
+    let crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(hit) =
+        clarify_followup_resolution
+    else {
+        return;
+    };
+    let Some(clarify_state) = session_snapshot.active_clarify_state.as_ref() else {
+        return;
+    };
+    if hit.prior_user_text.trim() != clarify_state.source_request.trim() {
+        return;
+    }
+    let locator = hit.current_user_text.trim();
+    if locator.is_empty() {
+        return;
+    }
+    if route_result.ask_mode.is_execute_gate() && !route_result.needs_clarify {
+        return;
+    }
+
+    route_result.set_routed_mode(crate::RoutedMode::Act);
+    route_result.needs_clarify = false;
+    route_result.clarify_question.clear();
+    route_result.resolved_intent = hit.resolved_intent.clone();
+    route_result.output_contract.locator_hint = locator.to_string();
+    if matches!(
+        route_result.output_contract.locator_kind,
+        crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
+    ) {
+        route_result.output_contract.locator_kind = structural_locator_kind_from_reply(locator);
+    }
+    if route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None {
+        route_result.output_contract.requires_content_evidence = true;
+    }
+    route_result
+        .route_reason
+        .push_str("; active_clarify_locator_reply_execute");
+}
+
 pub(super) async fn prepare_ask_routing(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -1032,6 +1086,11 @@ pub(super) async fn prepare_ask_routing(
     let mut route_result =
         crate::intent_router::route_result_from_normalizer(state, task, &normalizer_out);
     preserve_active_clarify_output_contract_for_locator_reply(
+        &mut route_result,
+        &clarify_followup_resolution,
+        &session_snapshot,
+    );
+    promote_active_clarify_locator_reply_to_execute(
         &mut route_result,
         &clarify_followup_resolution,
         &session_snapshot,
@@ -1175,6 +1234,7 @@ mod tests {
         active_clarify_run_control_prompt, bind_ordered_entry_reference_from_active_frame,
         merged_prompt_from_task_turn_analysis,
         preserve_active_clarify_output_contract_for_locator_reply,
+        promote_active_clarify_locator_reply_to_execute,
         repair_structural_file_delivery_resolution, should_apply_task_turn_merge,
         should_probe_transcript_for_clarify_fallback, task_turn_merge_prior_context,
     };
@@ -1426,6 +1486,152 @@ mod tests {
         assert!(route
             .route_reason
             .contains("preserve_active_clarify_output_contract"));
+    }
+
+    #[test]
+    fn clarify_locator_reply_promotes_bare_path_back_to_execution() {
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::AskClarify,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
+            resolved_intent: "scripts/nl_tests/fixtures/device_local/logs/model_io.log".to_string(),
+            needs_clarify: true,
+            route_reason: "bare_path_no_verb".to_string(),
+            route_confidence: Some(0.8),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: "What would you like me to do with the file?".to_string(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::Free,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::None,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let clarify_state = crate::clarify_state::ClarifyState {
+            missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
+            pending_question: "请提供日志路径".to_string(),
+            candidate_targets: Vec::new(),
+            delivery_required: false,
+            output_shape: None,
+            semantic_kind: Some(
+                crate::OutputSemanticKind::ContentExcerptSummary
+                    .as_str()
+                    .to_string(),
+            ),
+            source_request: "看看那个模型日志最后 5 行".to_string(),
+            source_task_id: "task-1".to_string(),
+            updated_at_ts: 1,
+            expires_at_ts: 2,
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: Some(clarify_state),
+            active_observed_facts: None,
+        };
+        let resolution =
+            crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
+                crate::clarify_followup::ClarifyLocatorReplyRewrite {
+                    resolved_intent:
+                        "Continue the previous request that was waiting for clarification: 看看那个模型日志最后 5 行\nUser now provides the missing target/content: scripts/nl_tests/fixtures/device_local/logs/model_io.log"
+                            .to_string(),
+                    prior_user_text: "看看那个模型日志最后 5 行".to_string(),
+                    current_user_text: "scripts/nl_tests/fixtures/device_local/logs/model_io.log"
+                        .to_string(),
+                    reason: crate::clarify_followup::ClarifyRewriteReason::ClarifyLocatorReply,
+                },
+            );
+
+        preserve_active_clarify_output_contract_for_locator_reply(
+            &mut route,
+            &resolution,
+            &snapshot,
+        );
+        promote_active_clarify_locator_reply_to_execute(&mut route, &resolution, &snapshot);
+
+        assert!(route.is_execute_gate());
+        assert!(!route.needs_clarify);
+        assert!(route.clarify_question.is_empty());
+        assert_eq!(
+            route.output_contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/logs/model_io.log"
+        );
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+        );
+        assert_eq!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ContentExcerptSummary
+        );
+        assert!(route.output_contract.requires_content_evidence);
+        assert!(route
+            .route_reason
+            .contains("active_clarify_locator_reply_execute"));
+    }
+
+    #[test]
+    fn clarify_locator_reply_does_not_promote_stale_prior_request() {
+        let mut route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::AskClarify,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
+            resolved_intent: "/tmp/a.log".to_string(),
+            needs_clarify: true,
+            route_reason: "bare_path_no_verb".to_string(),
+            route_confidence: Some(0.8),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: "path?".to_string(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: Some(crate::clarify_state::ClarifyState {
+                missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
+                pending_question: "path?".to_string(),
+                candidate_targets: Vec::new(),
+                delivery_required: false,
+                output_shape: None,
+                semantic_kind: None,
+                source_request: "上一轮请求".to_string(),
+                source_task_id: "task-1".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+            }),
+            active_observed_facts: None,
+        };
+        let resolution =
+            crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
+                crate::clarify_followup::ClarifyLocatorReplyRewrite {
+                    resolved_intent: "Continue...".to_string(),
+                    prior_user_text: "另一轮请求".to_string(),
+                    current_user_text: "/tmp/a.log".to_string(),
+                    reason: crate::clarify_followup::ClarifyRewriteReason::ClarifyLocatorReply,
+                },
+            );
+
+        promote_active_clarify_locator_reply_to_execute(&mut route, &resolution, &snapshot);
+
+        assert_eq!(route.routed_mode, crate::RoutedMode::AskClarify);
+        assert!(route.needs_clarify);
     }
 
     #[test]

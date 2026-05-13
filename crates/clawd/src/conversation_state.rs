@@ -192,6 +192,10 @@ fn next_last_primary_task_prompt(
         return prior_prompt;
     }
     let Some(turn_type) = turn_analysis.and_then(|analysis| analysis.turn_type) else {
+        if unannotated_evidence_backed_deliverable_starts_primary_task(route_result, turn_analysis)
+        {
+            return Some(current_prompt.to_string());
+        }
         if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
             return Some(current_prompt.to_string());
         }
@@ -329,6 +333,29 @@ fn standalone_contextual_chat_result_starts_primary_task(
     )
 }
 
+fn unannotated_evidence_backed_deliverable_starts_primary_task(
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    if turn_analysis.is_some()
+        || route_result.needs_clarify
+        || !matches!(
+            route_result.routed_mode,
+            crate::RoutedMode::Act | crate::RoutedMode::ChatAct
+        )
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+    {
+        return false;
+    }
+
+    true
+}
+
 fn standalone_preference_or_memory_turn_clears_primary_task(
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
@@ -450,6 +477,25 @@ fn next_last_primary_task_output(
         )
         || !should_track_primary_task_output(turn_analysis)
     {
+        if unannotated_evidence_backed_deliverable_starts_primary_task(route_result, turn_analysis)
+        {
+            let latest_output = answer_text
+                .trim()
+                .is_empty()
+                .then(|| {
+                    answer_messages
+                        .iter()
+                        .map(String::as_str)
+                        .find(|text| !text.trim().is_empty())
+                        .map(str::to_string)
+                })
+                .flatten()
+                .or_else(|| {
+                    let trimmed = answer_text.trim();
+                    (!trimmed.is_empty()).then(|| trimmed.to_string())
+                });
+            return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
+        }
         if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
             let latest_output = answer_text
                 .trim()
@@ -1353,6 +1399,65 @@ mod tests {
             Some("Write a short release note for RustClaw.")
         );
         assert_eq!(output.as_deref(), Some("RustClaw 0.1.7 is now available."));
+    }
+
+    #[test]
+    fn unannotated_evidence_backed_deliverable_starts_primary_task() {
+        let mut route_result = route_result_for_test(crate::RoutedMode::ChatAct, false);
+        route_result.output_contract.requires_content_evidence = true;
+        route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+
+        let prompt = next_last_primary_task_prompt(
+            None,
+            &route_result,
+            None,
+            "Write a short release note for RustClaw",
+            "Write a short release note for RustClaw",
+        );
+        let output = next_last_primary_task_output(
+            None,
+            &route_result,
+            None,
+            "Write a short release note for RustClaw",
+            "RustClaw 0.1.7 is easier to update and operate.",
+            &[],
+        );
+
+        assert_eq!(
+            prompt.as_deref(),
+            Some("Write a short release note for RustClaw")
+        );
+        assert_eq!(
+            output.as_deref(),
+            Some("RustClaw 0.1.7 is easier to update and operate.")
+        );
+    }
+
+    #[test]
+    fn unannotated_scalar_evidence_result_does_not_start_primary_task() {
+        let mut route_result = route_result_for_test(crate::RoutedMode::ChatAct, false);
+        route_result.output_contract.requires_content_evidence = true;
+        route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+
+        let prompt = next_last_primary_task_prompt(
+            None,
+            &route_result,
+            None,
+            "Count files under logs",
+            "Count files under logs",
+        );
+        let output = next_last_primary_task_output(
+            None,
+            &route_result,
+            None,
+            "Count files under logs",
+            "2",
+            &[],
+        );
+
+        assert!(prompt.is_none());
+        assert!(output.is_none());
     }
 
     #[test]
