@@ -380,8 +380,33 @@ pub(crate) fn scalar_route_prefers_structured_observed_answer(
 ) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Scalar
         && (route_prefers_direct_observed_answer_for_scalar(route)
-            || extract_latest_generic_successful_output(loop_state)
-                .is_some_and(|observed| observed.skill == "health_check"))
+            || extract_latest_generic_successful_output(loop_state).is_some_and(|observed| {
+                observed.skill == "health_check"
+                    || observed_output_action_is(&observed, "read_range")
+            }))
+}
+
+fn observed_output_action_is(observed: &GenericObservedOutput, expected_action: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(&observed.body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("action")
+                .and_then(|action| action.as_str())
+                .map(|action| action == expected_action)
+        })
+        .unwrap_or(false)
+}
+
+fn route_allows_scalar_read_range_direct_answer(route: &crate::RouteResult) -> bool {
+    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+        && !route.output_contract.delivery_required
+        && matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+                | crate::OutputSemanticKind::ContentExcerptSummary
+                | crate::OutputSemanticKind::RawCommandOutput
+        )
 }
 
 fn route_requests_scalar_path_only(route: &crate::RouteResult) -> bool {
@@ -571,7 +596,7 @@ fn directory_listing_entries_from_step(
         "list_dir" => normalized_observed_listing(body).map(|listing| listing_entries(&listing)),
         "run_cmd" => run_cmd_listing_text_candidate(body, auto_locator_path)
             .map(|listing| listing_entries(&listing)),
-        "system_basic" => {
+        "system_basic" | "fs_basic" => {
             let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
             inventory_dir_names(&value)
         }
@@ -715,7 +740,7 @@ fn structured_scalar_observation_from_extract_item(
 fn structured_scalar_observation_from_step(
     step: &crate::executor::StepExecutionResult,
 ) -> Option<StructuredScalarObservation> {
-    if !step.is_ok() || step.skill != "system_basic" {
+    if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "config_basic") {
         return None;
     }
     let body = step.output.as_deref()?.trim();
@@ -1093,7 +1118,7 @@ fn system_basic_existence_with_path_value(skill: &str, body: &str) -> Option<ser
 }
 
 fn system_basic_structured_doc_value(skill: &str, body: &str) -> Option<serde_json::Value> {
-    if skill != "system_basic" {
+    if !matches!(skill, "system_basic" | "config_basic") {
         return None;
     }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
@@ -2370,6 +2395,14 @@ fn fs_search_direct_answer_candidate(
     allow_multi_result_list: bool,
     prefer_path_only: bool,
 ) -> Option<String> {
+    if let Some(answer) = fs_search_grep_text_direct_answer_candidate(
+        state,
+        value,
+        prefer_english,
+        allow_multi_result_list,
+    ) {
+        return Some(answer);
+    }
     if let Some((results, count, ext)) = fs_search_find_ext_results(value) {
         if count == 0 || results.is_empty() {
             return Some(if prefer_english {
@@ -2426,6 +2459,37 @@ fn fs_search_direct_answer_candidate(
     }
     let matches = results.into_iter().take(3).collect::<Vec<_>>().join("\n");
     allow_multi_result_list.then_some(matches)
+}
+
+fn fs_search_grep_text_direct_answer_candidate(
+    state: Option<&AppState>,
+    value: &serde_json::Value,
+    prefer_english: bool,
+    allow_multi_result_list: bool,
+) -> Option<String> {
+    let (matches, match_count, _query) = fs_search_grep_text_results(value)?;
+    if match_count == 0 || matches.is_empty() {
+        return Some(observed_t(
+            state,
+            "clawd.msg.fs_search_no_match",
+            "没有找到匹配项",
+            "No matches found.",
+            prefer_english,
+        ));
+    }
+    let mut paths = Vec::new();
+    for (path, _, _) in matches {
+        if !paths.iter().any(|seen| seen == &path) {
+            paths.push(path);
+        }
+    }
+    if paths.is_empty() {
+        return None;
+    }
+    if paths.len() == 1 {
+        return paths.into_iter().next();
+    }
+    allow_multi_result_list.then(|| paths.into_iter().take(3).collect::<Vec<_>>().join("\n"))
 }
 
 fn normalized_scope_text(value: &str) -> Option<String> {
@@ -2644,6 +2708,12 @@ fn fs_search_route_filtered_listing_candidate(
     if top_score == 0 {
         return None;
     }
+    let second_score = scored
+        .iter()
+        .find_map(|(score, _)| (*score < top_score).then_some(*score))
+        .unwrap_or_default();
+    let decisive_single_candidate =
+        top_score >= 8 && (second_score == 0 || top_score >= second_score.saturating_mul(2));
     let mut filtered = scored
         .into_iter()
         .filter(|(score, _)| *score == top_score)
@@ -2652,6 +2722,9 @@ fn fs_search_route_filtered_listing_candidate(
     filtered.sort();
     filtered.dedup();
     if filtered.len() == 1 {
+        if allow_multi_result_list && !decisive_single_candidate && results.len() > 1 {
+            return Some(results.into_iter().take(3).collect::<Vec<_>>().join("\n"));
+        }
         return filtered.into_iter().next();
     }
     allow_multi_result_list.then(|| filtered.join("\n"))
@@ -2755,11 +2828,21 @@ fn structured_scalar_candidate(
             prefer_english,
         );
     }
-    if skill != "system_basic" {
+    if !matches!(skill, "system_basic" | "config_basic" | "fs_basic") {
         return None;
     }
     let action = value.get("action").and_then(|v| v.as_str())?;
     match action {
+        "read_range" => route
+            .filter(|route| route_allows_scalar_read_range_direct_answer(route))
+            .and_then(|_| {
+                value
+                    .get("excerpt")
+                    .and_then(|v| v.as_str())
+                    .and_then(|excerpt| {
+                        normalize_read_range_excerpt_for_direct_answer(excerpt, prefer_english)
+                    })
+            }),
         "inventory_dir" => {
             let hidden_count_route = route.is_some_and(|route| {
                 route.output_contract.response_shape == crate::OutputResponseShape::Scalar
@@ -3088,6 +3171,40 @@ fn structured_keys_direct_answer_candidate(
     })
 }
 
+fn validate_structured_direct_answer_candidate(
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<String> {
+    if value.get("action").and_then(|v| v.as_str()) != Some("validate_structured") {
+        return None;
+    }
+    let valid = value.get("valid")?.as_bool()?;
+    let format = value
+        .get("format")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("structured");
+    if valid {
+        return Some(if prefer_english {
+            format!("pass: {format} parsed successfully")
+        } else {
+            format!("通过：{format} 解析成功")
+        });
+    }
+    let reason = value
+        .get("error_text")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("parse failed");
+    Some(if prefer_english {
+        format!("fail: {reason}")
+    } else {
+        format!("失败：{reason}")
+    })
+}
+
 fn normalize_read_range_excerpt(excerpt: &str) -> Option<String> {
     let lines = excerpt
         .lines()
@@ -3407,6 +3524,20 @@ fn count_inventory_observed_candidate(value: &serde_json::Value) -> Option<Strin
     (lines.len() > 1).then(|| lines.join("\n"))
 }
 
+fn validate_structured_observed_candidate(value: &serde_json::Value) -> Option<String> {
+    if value.get("action").and_then(|v| v.as_str()) != Some("validate_structured") {
+        return None;
+    }
+    let valid = value.get("valid")?.as_bool()?;
+    let format = value
+        .get("format")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("structured");
+    Some(format!("validate_structured format={format} valid={valid}"))
+}
+
 fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     match skill {
@@ -3416,15 +3547,27 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
                 "read_range" => read_range_observed_candidate(&value),
                 "inventory_dir" => inventory_dir_observed_candidate(&value),
                 "count_inventory" => count_inventory_observed_candidate(&value),
+                "validate_structured" => validate_structured_observed_candidate(&value),
                 "compare_paths" => compare_paths_observed_candidate(body),
                 "path_batch_facts" => path_batch_facts_observed_candidate(&value),
                 _ => None,
             }
         }
+        "config_basic" => validate_structured_observed_candidate(&value),
         "db_basic" => db_basic_observed_candidate(&value),
         "service_control" => service_control_summary_candidate(&value),
-        "fs_search" => fs_search_grep_text_observed_candidate(&value)
-            .or_else(|| fs_search_direct_answer_candidate(None, &value, None, false, true, false)),
+        "fs_search" | "fs_basic" => {
+            if skill == "fs_basic" {
+                match value.get("action").and_then(|v| v.as_str()) {
+                    Some("inventory_dir") => return inventory_dir_observed_candidate(&value),
+                    Some("read_range") => return read_range_observed_candidate(&value),
+                    _ => {}
+                }
+            }
+            fs_search_grep_text_observed_candidate(&value).or_else(|| {
+                fs_search_direct_answer_candidate(None, &value, None, false, true, false)
+            })
+        }
         "archive_basic" => archive_basic_observed_candidate(&value),
         "log_analyze" => compact_log_analyze_excerpt(&value),
         "package_manager" => package_manager_summary_candidate(
@@ -3739,29 +3882,15 @@ fn extract_direct_answer_from_generic_output_impl(
                 "fs_search" => serde_json::from_str::<serde_json::Value>(&observed_output.body)
                     .ok()
                     .and_then(|value| {
-                        route
-                            .and_then(|route| {
-                                fs_search_route_filtered_listing_candidate(
-                                    route,
-                                    &value,
-                                    allow_raw_listing_direct_answer,
-                                )
-                            })
-                            .or_else(|| {
-                                route.and_then(|route| {
-                                    fs_search_semantic_listing_candidate(route, &value)
-                                })
-                            })
-                            .or_else(|| {
-                                fs_search_direct_answer_candidate(
-                                    state,
-                                    &value,
-                                    locator_hint,
-                                    prefers_english_free_text,
-                                    allow_raw_listing_direct_answer,
-                                    prefer_full_path,
-                                )
-                            })
+                        fs_search_output_direct_answer_candidate(
+                            state,
+                            route,
+                            &value,
+                            locator_hint,
+                            prefers_english_free_text,
+                            allow_raw_listing_direct_answer,
+                            prefer_full_path,
+                        )
                     }),
                 "git_basic" => None,
                 "doc_parse" => {
@@ -3783,13 +3912,26 @@ fn extract_direct_answer_from_generic_output_impl(
                 ),
                 "archive_basic" => None,
                 "log_analyze" => None,
-                "system_basic" => {
+                "system_basic" | "config_basic" | "fs_basic" => {
                     let value = serde_json::from_str::<serde_json::Value>(&observed_output.body)
                         .ok()
                         .or_else(|| {
                             system_basic_info_value("system_basic", &observed_output.body)
                         })?;
                     let action = value.get("action").and_then(|v| v.as_str());
+                    if observed_output.skill == "fs_basic" {
+                        if let Some(answer) = fs_search_output_direct_answer_candidate(
+                            state,
+                            route,
+                            &value,
+                            locator_hint,
+                            prefers_english_free_text,
+                            allow_raw_listing_direct_answer,
+                            prefer_full_path,
+                        ) {
+                            return Some(answer);
+                        }
+                    }
                     if action == Some("read_range")
                         && (route_allows_tail_read_range_direct_passthrough(
                             route,
@@ -3829,6 +3971,11 @@ fn extract_direct_answer_from_generic_output_impl(
                             state,
                             &value,
                             response_shape,
+                            prefers_english_free_text,
+                        )
+                    } else if action == Some("validate_structured") {
+                        validate_structured_direct_answer_candidate(
+                            &value,
                             prefers_english_free_text,
                         )
                     } else if action == Some("info")
@@ -3901,6 +4048,32 @@ fn extract_direct_answer_from_generic_output_impl(
         return None;
     }
     Some(answer)
+}
+
+fn fs_search_output_direct_answer_candidate(
+    state: Option<&AppState>,
+    route: Option<&crate::RouteResult>,
+    value: &serde_json::Value,
+    locator_hint: Option<&str>,
+    prefer_english: bool,
+    allow_multi_result_list: bool,
+    prefer_full_path: bool,
+) -> Option<String> {
+    route
+        .and_then(|route| {
+            fs_search_route_filtered_listing_candidate(route, value, allow_multi_result_list)
+        })
+        .or_else(|| route.and_then(|route| fs_search_semantic_listing_candidate(route, value)))
+        .or_else(|| {
+            fs_search_direct_answer_candidate(
+                state,
+                value,
+                locator_hint,
+                prefer_english,
+                allow_multi_result_list,
+                prefer_full_path,
+            )
+        })
 }
 
 fn route_allows_tail_read_range_direct_passthrough(
@@ -4507,8 +4680,8 @@ mod tests {
         recent_generated_output_from_user_request,
         replace_internal_missing_sentinel_with_structured_observation,
         route_observation_facts_entry, route_requires_synthesized_delivery,
-        scalar_count_diagnostic_line_for_answer, structured_observed_body, AgentRunContext,
-        OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
+        scalar_count_diagnostic_line_for_answer, scalar_route_prefers_structured_observed_answer,
+        structured_observed_body, AgentRunContext, OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
     };
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
@@ -4787,6 +4960,56 @@ mod tests {
         assert_eq!(
             extract_direct_scalar_from_generic_output(&loop_state, None).as_deref(),
             Some("rustclaw")
+        );
+    }
+
+    #[test]
+    fn direct_answer_reads_config_basic_extract_field_value() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"run_cmd.planner_kind","value_text":"tool","value":"tool","value_type":"string"}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint = "configs/skills_registry.toml".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("tool")
+        );
+        assert!(has_observed_answer_candidates(&loop_state));
+    }
+
+    #[test]
+    fn direct_answer_formats_config_basic_validate_result_as_pass_fail() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"validate_structured","path":"configs/config.toml","resolved_path":"/tmp/configs/config.toml","format":"toml","valid":true,"root_type":"object"}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint = "configs/config.toml".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            original_user_request: Some(
+                "Validate configs/config.toml and answer pass or fail.".to_string(),
+            ),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("pass: toml parsed successfully")
         );
     }
 
@@ -5262,6 +5485,44 @@ version.workspace = true
     }
 
     #[test]
+    fn fs_search_file_paths_contract_preserves_multi_candidates_when_not_decisive() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"find_name","pattern":"README","count":5,"results":["README.md","README.zh-CN.md","UI/README.md","data/vendor/whisper.cpp/examples/whisper.android.java/README_files","data/vendor/whisper.cpp/README.md"],"root":""}"#,
+        ));
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route.routed_mode = crate::RoutedMode::Act;
+        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::Act);
+        route.resolved_intent =
+            "Find files named README under the current repo. If there are multiple candidates, list candidates instead of choosing one."
+                .to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint = "/home/guagua/rustclaw".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("multi-candidate search should produce a direct candidate list");
+
+        assert!(answer.contains("README.md"));
+        assert!(answer.contains("README.zh-CN.md"));
+        assert!(
+            answer.contains('\n'),
+            "answer should not collapse to one path: {answer}"
+        );
+        assert_ne!(
+            answer.trim(),
+            "data/vendor/whisper.cpp/examples/whisper.android.java/README_files"
+        );
+    }
+
+    #[test]
     fn direct_scalar_count_uses_latest_fs_search_count() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -5301,6 +5562,52 @@ version.workspace = true
             super::fs_search_direct_answer_candidate(None, &value, None, false, true, false)
                 .as_deref(),
             Some("Cargo.toml\nconfigs/config.toml\nconfigs/git_basic.toml")
+        );
+    }
+
+    #[test]
+    fn fs_search_grep_text_direct_answer_returns_unique_matching_paths() {
+        let value = serde_json::json!({
+            "action": "grep_text",
+            "query": "FirstLayerDecision",
+            "count": 4,
+            "match_count": 5,
+            "matches": [
+                {"path": "README.md", "line": 45, "text": "FirstLayerDecision"},
+                {"path": "README.md", "line": 95, "text": "FirstLayerDecision"},
+                {"path": "crates/clawd/src/ask_flow.rs", "line": 10, "text": "FirstLayerDecision"},
+                {"path": "crates/clawd/src/intent_router.rs", "line": 20, "text": "FirstLayerDecision"},
+                {"path": "crates/clawd/src/main.rs", "line": 30, "text": "FirstLayerDecision"}
+            ]
+        });
+
+        assert_eq!(
+            super::fs_search_direct_answer_candidate(None, &value, None, false, true, false)
+                .as_deref(),
+            Some("README.md\ncrates/clawd/src/ask_flow.rs\ncrates/clawd/src/intent_router.rs")
+        );
+    }
+
+    #[test]
+    fn virtual_fs_basic_grep_text_output_can_direct_answer_file_paths() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"grep_text","query":"FirstLayerDecision","count":4,"match_count":5,"matches":[{"path":"README.md","line":45,"text":"FirstLayerDecision"},{"path":"README.md","line":95,"text":"FirstLayerDecision"},{"path":"crates/clawd/src/ask_flow.rs","line":10,"text":"FirstLayerDecision"},{"path":"crates/clawd/src/intent_router.rs","line":20,"text":"FirstLayerDecision"},{"path":"crates/clawd/src/main.rs","line":30,"text":"FirstLayerDecision"}]}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route_result.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+        route_result.output_contract.requires_content_evidence = true;
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("README.md\ncrates/clawd/src/ask_flow.rs\ncrates/clawd/src/intent_router.rs")
         );
     }
 
@@ -6032,6 +6339,73 @@ version.workspace = true
     }
 
     #[test]
+    fn scalar_route_fs_basic_tail_read_range_prefers_structured_excerpt() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "run_cmd",
+            "older output mentioning scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+        ));
+        let skill_output = serde_json::json!({
+            "action": "read_range",
+            "path": "/home/guagua/rustclaw/logs/clawd.log",
+            "resolved_path": "/home/guagua/rustclaw/logs/clawd.log",
+            "mode": "tail",
+            "requested_n": 2,
+            "excerpt": "1858|2026-05-13T18:29:58Z finalize_ok\n1859|2026-05-13T18:29:59Z prior task mentioned release_checklist.md"
+        })
+        .to_string();
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_2", "fs_basic", &skill_output));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "查看 logs 目录下第二个文件（clawd.log）的最后2行内容".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::None,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::None,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        assert!(scalar_route_prefers_structured_observed_answer(
+            &route_result,
+            &loop_state
+        ));
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("fs_basic read_range direct answer");
+
+        assert!(answer.contains("finalize_ok"));
+        assert!(answer.contains("release_checklist.md"));
+        assert!(!answer.contains(r#""action":"read_range""#));
+        assert!(!answer.contains("older output mentioning"));
+    }
+
+    #[test]
     fn direct_answer_passthroughs_chat_act_path_read_range_when_no_transform_is_requested() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -6414,6 +6788,53 @@ version.workspace = true
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
             Some("act_plan.log\nclawd.log\nfeishud.log")
+        );
+    }
+
+    #[test]
+    fn direct_answer_uses_inventory_dir_names_for_fs_basic() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"inventory_dir","path":"/tmp/document","resolved_path":"/tmp/document","files_only":true,"names_only":true,"names":["a.txt","b.md","c.png"]}"#,
+        ));
+        let route_result = RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "List file names from a known directory.".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::FileNames,
+                locator_hint: "document".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("a.txt\nb.md\nc.png")
         );
     }
 

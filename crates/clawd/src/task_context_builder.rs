@@ -24,6 +24,7 @@ pub(crate) struct PlannerContextView {
 pub(crate) struct RouteContextView {
     pub(crate) budget_tier: RouteContextBudgetTier,
     pub(crate) active_task_context: String,
+    pub(crate) active_execution_anchor_context: String,
     pub(crate) session_alias_context: String,
     pub(crate) request_surface_hints: String,
     pub(crate) recent_execution_context: String,
@@ -193,6 +194,84 @@ fn build_active_task_context(
         lines.push(truncate_context_snippet(output, 1000));
     }
     lines.join("\n")
+}
+
+fn ordered_entries_context_line(entries: &[String]) -> Option<String> {
+    let mut rendered = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (idx, entry) in entries.iter().enumerate() {
+        let trimmed = entry.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let normalized = trimmed.to_ascii_lowercase();
+        if !seen.insert(normalized) {
+            continue;
+        }
+        rendered.push(format!(
+            "{}:{}",
+            idx + 1,
+            truncate_context_snippet(trimmed, 120)
+        ));
+        if rendered.len() >= crate::followup_frame::MAX_ORDERED_ENTRIES {
+            break;
+        }
+    }
+    (!rendered.is_empty()).then(|| rendered.join(" | "))
+}
+
+fn build_active_execution_anchor_context(
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> String {
+    let mut lines = vec![
+        "### ACTIVE_EXECUTION_ANCHOR".to_string(),
+        "Latest structured execution state for immediate follow-ups. Prefer this over older active-task text, memory, and long recent-turn prose when resolving ordinal/deictic references.".to_string(),
+    ];
+    if let Some(frame) = session_snapshot.active_followup_frame.as_ref() {
+        let source_request = frame.source_request.trim();
+        if !source_request.is_empty() {
+            lines.push(format!(
+                "followup_source_request: {}",
+                truncate_context_snippet(source_request, 180)
+            ));
+        }
+        lines.push(format!("followup_op_kind: {:?}", frame.op_kind));
+        if let Some(target) = frame
+            .bound_target
+            .as_deref()
+            .map(str::trim)
+            .filter(|target| !target.is_empty())
+        {
+            lines.push(format!(
+                "followup_bound_target: {}",
+                truncate_context_snippet(target, 220)
+            ));
+        }
+        if let Some(entries) = ordered_entries_context_line(&frame.ordered_entries) {
+            lines.push(format!("followup_ordered_entries: {entries}"));
+        }
+    }
+    if let Some(facts) = session_snapshot.active_observed_facts.as_ref() {
+        if let Some(target) = facts
+            .bound_target
+            .as_deref()
+            .map(str::trim)
+            .filter(|target| !target.is_empty())
+        {
+            lines.push(format!(
+                "observed_bound_target: {}",
+                truncate_context_snippet(target, 220)
+            ));
+        }
+        if let Some(entries) = ordered_entries_context_line(&facts.ordered_entries) {
+            lines.push(format!("observed_ordered_entries: {entries}"));
+        }
+    }
+    if lines.len() <= 2 {
+        "<none>".to_string()
+    } else {
+        lines.join("\n")
+    }
 }
 
 fn build_session_alias_context(
@@ -561,6 +640,7 @@ pub(crate) fn build_route_task_context_bundle(
     let route_view = RouteContextView {
         budget_tier: route_budget,
         active_task_context: build_active_task_context(session_snapshot),
+        active_execution_anchor_context: build_active_execution_anchor_context(session_snapshot),
         session_alias_context: build_session_alias_context(session_snapshot),
         request_surface_hints: build_request_surface_hints(&user_request_surface),
         recent_execution_context: match route_budget {

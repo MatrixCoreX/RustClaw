@@ -986,6 +986,8 @@ pub(crate) fn is_builtin_skill_name(name: &str) -> bool {
     matches!(
         name,
         "run_cmd"
+            | "fs_basic"
+            | "config_basic"
             | "read_file"
             | "write_file"
             | "list_dir"
@@ -999,11 +1001,30 @@ pub(crate) async fn run_skill_with_runner_outcome(
     state: &AppState,
     task: &ClaimedTask,
     skill_name: &str,
-    args: serde_json::Value,
+    mut args: serde_json::Value,
 ) -> Result<SkillRunOutcome, String> {
-    let skill_name = state.resolve_canonical_skill_name(skill_name);
+    let mut skill_name = state.resolve_canonical_skill_name(skill_name);
     if skill_name.is_empty() {
         return Err("skill_name is empty".to_string());
+    }
+    if crate::virtual_tools::normalize_virtual_tool_arg_aliases(&skill_name, &mut args) {
+        tracing::info!(
+            "skill_virtual_args_rewrite skill={} args={}",
+            skill_name,
+            crate::truncate_for_log(&args.to_string())
+        );
+    }
+    if let Some(rewrite) =
+        crate::virtual_tools::rewrite_virtual_tool_call(&skill_name, args.clone())?
+    {
+        tracing::info!(
+            "skill_virtual_dispatch requested_skill={} runtime_skill={} args={}",
+            skill_name,
+            rewrite.runtime_tool,
+            crate::truncate_for_log(&rewrite.runtime_args.to_string())
+        );
+        skill_name = state.resolve_canonical_skill_name(&rewrite.runtime_tool);
+        args = rewrite.runtime_args;
     }
 
     let policy_token = format!("skill:{skill_name}");

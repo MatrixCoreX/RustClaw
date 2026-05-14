@@ -20,7 +20,11 @@ If the user explicitly asks to receive a produced file as an actual file/documen
 
 Capabilities may be planner-layer `tool`, `skill`, or `workflow` entries according to the registry metadata. The runtime accepts both legacy `call_skill` and modern `call_tool` envelopes; use the modern `call_tool` envelope for low-level tools and keep `call_skill` for domain skills/workflows.
 
-### Base tools (standalone — file/command/dir; do not use system_basic for these)
+### Base tools (preferred grouped filesystem/config contracts)
+- `fs_basic`: planner-facing filesystem contract. Prefer this for path facts, directory inventory/counting, bounded text ranges, candidate search, grep, path comparison, and confirmed file mutation when the structured action exists.
+- `config_basic`: planner-facing structured config contract. Prefer this for TOML/JSON/YAML field reads, key listing, parse validation, and RustClaw config guard checks. It is read-only in v1; do not invent generic patch/write actions for it. For RustClaw main-config safety checks, use `{"action":"guard_rustclaw_config"}` directly and omit `path` unless the user names a specific config file.
+
+### Base tools (standalone compatibility and shell)
 - `run_cmd`: `args.command` required; optional `args.cwd`, `args.timeout_seconds`, `args.idle_timeout_seconds`, `args.max_output_bytes`. Run one bounded shell command. On non-zero exit, use structured `extra.exit_code` and `extra.exit_category` instead of matching stderr text.
 - `read_file`: `args.path` required. Read file content.
 - `write_file`: `args.path`, `args.content` required. Write file.
@@ -28,7 +32,7 @@ Capabilities may be planner-layer `tool`, `skill`, or `workflow` entries accordi
 - `make_dir`: `args.path` required. Create directory (and parents).
 - `remove_file`: `args.path` required. Remove a single file (not directories).
 
-These six are independent base tools for filesystem and command. Do not use `system_basic` for any of them.
+The standalone filesystem tools remain valid low-level compatibility entries. Prefer `fs_basic` for new filesystem plans when its action contract covers the task; use the standalone names for literal direct primitive calls, existing compatibility plans, or when a prompt/runtime contract specifically asks for them. Do not use `system_basic` for raw file/dir/command primitives.
 
 Skill behavior notes (file/path):
 - If an admin-authorized task hits an operating-system permission denial and runtime policy allows sudo for this task, the executor may retry once with non-interactive `sudo -n` based on the structured skill/action args. Do not plan a manual explanatory refusal before that runtime retry has a chance to run.
@@ -39,6 +43,8 @@ Skill behavior notes (file/path):
 - If the user asks for the saved path only, reply with the exact saved path only.
 - Never invent assumed placeholder roots for a saved file path. The source of truth is the actual path produced by the write step or a follow-up path-resolution step.
 - When answering from a directory listing, mention only entry names that appear verbatim in that listing.
+- When answering from structured filesystem/search output, treat top-level `results` / `entries` / `matches` arrays as authoritative evidence. If the user asked to find, list, or report candidates, include every returned item unless the user requested a top-N subset or the tool explicitly reports truncation/capping. Do not substitute examples, "etc.", "and others", or a smaller sampled list for the observed array.
+- When a structured search output includes both `count` and `results`, keep them consistent in the final answer: report the observed `count`, then list the returned `results`. If `count` is larger than the visible result array, state that the displayed result set is capped instead of inventing missing items.
 - If the user explicitly asks to send/deliver a named existing file, prefer file delivery with `FILE:<resolved-path>` rather than pasting file contents.
 - Apply this to any explicit filename or file path the user names, not only README-like examples.
 - If the user already supplies an explicit absolute path or exact relative path to a file, treat that path itself as the concrete target. Do not downgrade it into unresolved filename matching or deictic clarification logic.
@@ -305,7 +311,7 @@ Skill behavior notes (file/path):
   - when the request semantically asks to import, ingest, index, or collect documents into a knowledge base, use `action="ingest"` when required args are available.
   - when the request semantically asks to search/query/retrieve from a knowledge base, use `action="search"` when the namespace is known or uniquely bound.
   - when the request semantically asks to enumerate or inspect available knowledge bases, use `action="list_namespaces"` or `action="stats"` as appropriate.
-  - do not use `kb` for one-off direct file reading, ad hoc filesystem search, or open-ended Q&A when no indexed namespace is involved; prefer `read_file` / `fs_search` / direct `respond` as appropriate.
+  - do not use `kb` for one-off direct file reading, ad hoc filesystem search, or open-ended Q&A when no indexed namespace is involved; prefer `fs_basic.read_text_range`, `fs_basic.find_entries` / `grep_text`, or direct `respond` as appropriate.
   - if the user asks to search a knowledge base but does not specify which namespace and current context does not bind exactly one namespace, ask a concise clarification instead of guessing.
   - if the user asks to ingest files into a knowledge base and provides a concrete folder/path but no namespace, you may derive a short namespace from the folder name only when it is obvious and unambiguous; otherwise ask a concise clarification.
   - if the user asks to inspect a namespace but does not name it and there is not exactly one obvious namespace in context, ask a concise clarification.
@@ -403,6 +409,7 @@ Skill behavior notes (file/path):
 - Forbid missing audio path or non-workspace path assumptions.
 
 ### config_guard
+- Do not choose `config_guard` in new planner output. Use `config_basic` with `action="guard_rustclaw_config"` instead; `config_guard` remains the runtime backing tool and compatibility entry.
 - current implementation: read-only RustClaw TOML config risk scan
 - action: no explicit action required; pass only optional `path`
 - optional: `path` (defaults to discovered `configs/config.toml`)
@@ -441,20 +448,22 @@ Skill behavior notes (file/path):
 - Forbid broad destructive cleanup actions not in supported action set.
 
 ### fs_search
+- Prefer `fs_basic.find_entries` or `fs_basic.grep_text` in new planner output. `fs_search` remains the runtime backing tool and compatibility entry.
 - action: `find_name|find_ext|grep_text|find_images`
 - required by action:
   - `find_name`: `pattern` (or `name|keyword`)
   - `find_ext`: `ext` (or `extension`)
   - `grep_text`: `query`
 - optional: `root`, `max_results`
-- Prefer `system_basic.find_path` for exact/full-path lookup tasks.
-- When the user gives an unclear, partial, or approximate directory name, first use `system_basic.find_path` with `target_kind="dir"` and a broad `contains` match before asking for clarification.
+- Prefer `fs_basic.stat_paths` for exact/full-path lookup tasks.
+- When the user gives an unclear, partial, or approximate directory name, first use `fs_basic.find_entries` with `target_kind="dir"` before asking for clarification.
 - Use `fs_search.find_name` with `target_kind="dir"` when the task is explicitly a name search over files/directories rather than a direct path-resolution request.
-- Prefer `system_basic.inventory_dir` for immediate directory listing / hidden-file / names-only inventory tasks, especially recent/last-modified listings where `sort_by="mtime_desc"` exactly and `max_entries` are required. If the user asks for files, set `files_only=true`; do not use unsupported sort aliases, including `mtime`.
+- Prefer `fs_basic.list_dir` for immediate directory listing / hidden-file / names-only inventory tasks, especially recent/last-modified listings where `sort_by="mtime_desc"` exactly and `max_entries` are required. If the user asks for files, set `files_only=true`; do not use unsupported sort aliases, including `mtime`.
+- Prefer `fs_basic.count_entries` for directory item counts when the user asks for a scalar count over a concrete directory. Use `files_only`, `dirs_only`, `include_hidden`, or `ext_filter` when the requested count is filtered. Do not use `run_cmd` pipelines for basic directory counts unless the user explicitly asks for shell command behavior.
 - When the user specifies a folder/directory and asks to find files inside it, treat search as recursive under `root` (traverse all subdirectories).
-- For repository/workspace-wide extension searches or final answers that must be file paths rather than basenames, prefer `fs_search.find_ext` over `system_basic.inventory_dir`; `inventory_dir` is an immediate directory inventory.
-- Use `system_basic.path_batch_facts` only for exact literal paths already known from the user, context, or a previous observation. Do not pass wildcard/glob strings, extension placeholders, or basename fragments to `path_batch_facts`; use `fs_search.find_name`/`find_ext` under the bounded root to resolve candidates first.
-- `fs_search.find_ext` returns matching files. If the user asks for folders/directories that contain matching files and the route contract is `semantic_kind=directory_names`, do not deliver the raw file list; either synthesize the unique parent directories from the observed file paths or use `run_cmd` to emit those parent directories directly.
+- For repository/workspace-wide extension searches or final answers that must be file paths rather than basenames, prefer `fs_basic.find_entries` with `ext` over directory inventory.
+- Use `fs_basic.stat_paths` only for exact literal paths already known from the user, context, or a previous observation. Do not pass wildcard/glob strings, extension placeholders, or basename fragments to metadata actions; use `fs_basic.find_entries` under the bounded root to resolve candidates first.
+- `fs_search.find_ext` returns matching files. If the user asks for folders/directories that contain matching files and the route contract is `semantic_kind=directory_names`, prefer `fs_basic.find_entries` with `target_kind="file"` and the extension/name criteria, then synthesize the unique parent directories from the observed file paths. Do not use `run_cmd` merely to derive parent directories when bounded `fs_basic` discovery covers the candidate search.
 - Do not invent unsupported fs_search actions. There is no `find_text` action. Use `find_name` with `pattern` first when locating a likely filename, prompt name, module name, skill name, config artifact, or path fragment; use `grep_text` with `query` only for explicit content/text searches or as a bounded fallback after name/path lookup fails.
 - For "which files/configs/docs/artifacts are related to X" discovery, the primary evidence should be candidate paths from filename/extension/directory inventory. Do not turn topic words into a `grep_text` query as the first and only step unless the user explicitly asked to search inside file contents.
 - Path matching rule for file search: case-insensitive exact basename match can be used directly; if only fuzzy/approximate matches exist, ask one concise clarification with 1-3 candidate full absolute paths before execution.
@@ -613,8 +622,9 @@ Skill behavior notes (file/path):
 - Prefer `list` for readonly queries
 - For cancel requests without a specific number, prefer `cancel_all`
 
-### system_basic (supplementary — complex readonly system/file queries)
-- **Atomic file/directory/command capabilities must still use the standalone base skills**: `run_cmd`, `read_file`, `write_file`, `list_dir`, `make_dir`, and `remove_file` must not be replaced by `system_basic`.
+### system_basic (supplementary — runtime/system facts and compatibility backing)
+- Prefer `fs_basic` for filesystem facts, inventory, search, bounded reads, and path comparison. Prefer `config_basic` for structured config fields, keys, and validation. `system_basic` remains the backing/runtime compatibility layer for several readonly filesystem/config actions and the primary tool for system/runtime facts.
+- **Atomic file/directory/command capabilities must still avoid `system_basic`**: use `fs_basic` or standalone filesystem tools for filesystem primitives, and `run_cmd` for shell commands.
 - `system_basic` remains the **higher-level query layer**:
   - `info`: host/runtime information and system self-inspection
   - `inventory_dir`: directory inventory, hidden-file detection, name lists, extension filtering

@@ -157,6 +157,7 @@ fn next_last_primary_task_prompt(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    journal: &crate::task_journal::TaskJournal,
     prompt: &str,
     resolved_prompt_for_execution: &str,
 ) -> Option<String> {
@@ -190,6 +191,9 @@ fn next_last_primary_task_prompt(
     };
     if current_prompt.is_empty() {
         return prior_prompt;
+    }
+    if unannotated_structured_listing_starts_primary_task(route_result, turn_analysis, journal) {
+        return Some(current_prompt.to_string());
     }
     let Some(turn_type) = turn_analysis.and_then(|analysis| analysis.turn_type) else {
         if unannotated_evidence_backed_deliverable_starts_primary_task(route_result, turn_analysis)
@@ -311,7 +315,7 @@ fn standalone_contextual_chat_result_starts_primary_task(
             )
         );
     if !allowed_turn
-        || !matches!(route_result.routed_mode, crate::RoutedMode::Chat)
+        || !route_result.is_chat_gate()
         || route_result.needs_clarify
         || route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
@@ -339,10 +343,7 @@ fn unannotated_evidence_backed_deliverable_starts_primary_task(
 ) -> bool {
     if turn_analysis.is_some()
         || route_result.needs_clarify
-        || !matches!(
-            route_result.routed_mode,
-            crate::RoutedMode::Act | crate::RoutedMode::ChatAct
-        )
+        || !route_result.is_execute_gate()
         || !route_result.output_contract.requires_content_evidence
         || route_result.output_contract.delivery_required
         || matches!(
@@ -354,6 +355,17 @@ fn unannotated_evidence_backed_deliverable_starts_primary_task(
     }
 
     true
+}
+
+fn unannotated_structured_listing_starts_primary_task(
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    turn_analysis.is_none()
+        && !route_result.needs_clarify
+        && route_result.is_execute_gate()
+        && !crate::followup_frame::derive_ordered_entries_from_journal(journal).is_empty()
 }
 
 fn standalone_preference_or_memory_turn_clears_primary_task(
@@ -369,7 +381,7 @@ fn standalone_preference_or_memory_turn_clears_primary_task(
             crate::intent_router::TargetTaskPolicy::ReuseActive
                 | crate::intent_router::TargetTaskPolicy::ReplaceActive
         )
-    ) && matches!(route_result.routed_mode, crate::RoutedMode::Chat)
+    ) && route_result.is_chat_gate()
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && matches!(
@@ -417,7 +429,7 @@ fn standalone_task_request_preserves_prior_primary(
             turn_analysis.and_then(|analysis| analysis.target_task_policy),
             Some(crate::intent_router::TargetTaskPolicy::Standalone)
         )
-        && matches!(route_result.routed_mode, crate::RoutedMode::Chat)
+        && route_result.is_chat_gate()
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && matches!(
@@ -437,7 +449,7 @@ fn standalone_answer_candidate_request_should_not_promote(
     ) && matches!(
         turn_analysis.and_then(|analysis| analysis.target_task_policy),
         Some(crate::intent_router::TargetTaskPolicy::Standalone)
-    ) && matches!(route_result.routed_mode, crate::RoutedMode::Chat)
+    ) && route_result.is_chat_gate()
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && matches!(
@@ -456,6 +468,7 @@ fn next_last_primary_task_output(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    journal: &crate::task_journal::TaskJournal,
     resolved_prompt_for_execution: &str,
     answer_text: &str,
     answer_messages: &[String],
@@ -478,6 +491,25 @@ fn next_last_primary_task_output(
         || !should_track_primary_task_output(turn_analysis)
     {
         if unannotated_evidence_backed_deliverable_starts_primary_task(route_result, turn_analysis)
+        {
+            let latest_output = answer_text
+                .trim()
+                .is_empty()
+                .then(|| {
+                    answer_messages
+                        .iter()
+                        .map(String::as_str)
+                        .find(|text| !text.trim().is_empty())
+                        .map(str::to_string)
+                })
+                .flatten()
+                .or_else(|| {
+                    let trimmed = answer_text.trim();
+                    (!trimmed.is_empty()).then(|| trimmed.to_string())
+                });
+            return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
+        }
+        if unannotated_structured_listing_starts_primary_task(route_result, turn_analysis, journal)
         {
             let latest_output = answer_text
                 .trim()
@@ -844,6 +876,7 @@ pub(crate) fn update_active_session_from_ask_outcome(
                 prior_state.as_ref(),
                 route_result,
                 turn_analysis,
+                journal,
                 prompt,
                 resolved_prompt_for_execution,
             ),
@@ -851,6 +884,7 @@ pub(crate) fn update_active_session_from_ask_outcome(
                 prior_state.as_ref(),
                 route_result,
                 turn_analysis,
+                journal,
                 resolved_prompt_for_execution,
                 answer_text,
                 answer_messages,
@@ -970,9 +1004,8 @@ pub(crate) fn load_active_session_snapshot(
 #[cfg(test)]
 mod tests {
     use super::{
-        effective_locale_hint, load_active_session_snapshot, next_last_primary_task_output,
-        next_last_primary_task_prompt, normalized_locale_hint, ActiveSessionPointers,
-        ActiveSessionSnapshot, ConversationState, SessionAliasBinding,
+        effective_locale_hint, load_active_session_snapshot, normalized_locale_hint,
+        ActiveSessionPointers, ActiveSessionSnapshot, ConversationState, SessionAliasBinding,
     };
     use crate::runtime::AppState;
     use crate::ClaimedTask;
@@ -1059,6 +1092,46 @@ mod tests {
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract::default(),
         }
+    }
+
+    fn empty_journal_for_test() -> crate::task_journal::TaskJournal {
+        crate::task_journal::TaskJournal::new("test")
+    }
+
+    fn next_last_primary_task_prompt(
+        prior_state: Option<&ConversationState>,
+        route_result: &crate::RouteResult,
+        turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+        prompt: &str,
+        resolved_prompt_for_execution: &str,
+    ) -> Option<String> {
+        super::next_last_primary_task_prompt(
+            prior_state,
+            route_result,
+            turn_analysis,
+            &empty_journal_for_test(),
+            prompt,
+            resolved_prompt_for_execution,
+        )
+    }
+
+    fn next_last_primary_task_output(
+        prior_state: Option<&ConversationState>,
+        route_result: &crate::RouteResult,
+        turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+        resolved_prompt_for_execution: &str,
+        answer_text: &str,
+        answer_messages: &[String],
+    ) -> Option<String> {
+        super::next_last_primary_task_output(
+            prior_state,
+            route_result,
+            turn_analysis,
+            &empty_journal_for_test(),
+            resolved_prompt_for_execution,
+            answer_text,
+            answer_messages,
+        )
     }
 
     #[test]
@@ -1430,6 +1503,59 @@ mod tests {
         assert_eq!(
             output.as_deref(),
             Some("RustClaw 0.1.7 is easier to update and operate.")
+        );
+    }
+
+    #[test]
+    fn unannotated_structured_listing_replaces_prior_primary_task() {
+        let route_result = route_result_for_test(crate::RoutedMode::Act, false);
+        let mut journal = crate::task_journal::TaskJournal::new("list");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "fs_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    serde_json::json!({
+                        "action": "inventory_dir",
+                        "resolved_path": "/tmp/logs",
+                        "names": ["act_plan.log", "clawd.log", "clawd.run.log"]
+                    })
+                    .to_string(),
+                ),
+                ..Default::default()
+            });
+        let prior_state = ConversationState {
+            last_primary_task_prompt: Some("先列出 document 目录下前 5 个文件名".to_string()),
+            last_primary_task_output: Some(
+                "builtin_write_smoke.txt\nfull_suite_trace_note.txt".to_string(),
+            ),
+            ..ConversationState::default()
+        };
+
+        let prompt = super::next_last_primary_task_prompt(
+            Some(&prior_state),
+            &route_result,
+            None,
+            &journal,
+            "那 logs 目录下前 5 个文件名呢",
+            "列出 logs 目录下前 5 个文件名",
+        );
+        let output = super::next_last_primary_task_output(
+            Some(&prior_state),
+            &route_result,
+            None,
+            &journal,
+            "列出 logs 目录下前 5 个文件名",
+            "act_plan.log\nclawd.log\nclawd.run.log",
+            &[],
+        );
+
+        assert_eq!(prompt.as_deref(), Some("那 logs 目录下前 5 个文件名呢"));
+        assert_eq!(
+            output.as_deref(),
+            Some("act_plan.log\nclawd.log\nclawd.run.log")
         );
     }
 

@@ -248,7 +248,7 @@ fn apply_ask_post_route(
     );
     if deictic_bare_locator_should_force_clarify(&route_result, turn_analysis) {
         route_result.needs_clarify = true;
-        route_result.set_routed_mode(crate::RoutedMode::AskClarify);
+        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
         if route_result.clarify_question.trim().is_empty() {
             route_result.clarify_question =
                 deictic_missing_locator_question(&route_result).to_string();

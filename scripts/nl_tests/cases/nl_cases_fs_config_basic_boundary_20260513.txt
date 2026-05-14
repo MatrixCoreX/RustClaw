@@ -1,0 +1,30 @@
+# Focused NL cases for the fs_basic / config_basic planner-facing tool boundary.
+# The suite intentionally checks structured tool routing and execution quality,
+# without relying on user-language phrase matching in Rust code.
+# Format: suite|name|tags|prompt|expect=<substring>
+
+fs_config_basic|readme_exists_cn|tool:fs_basic,requires_tool_call=true|检查当前仓库 README.md 是否存在，只用一行回答存在状态和路径|expect=README.md
+fs_config_basic|agents_readme_size_compare_en|tool:fs_basic,requires_tool_call=true|Compare README.md and AGENTS.md by file size, then answer with the larger file name and byte delta only.
+fs_config_basic|current_dir_recent_entries_cn|tool:fs_basic,requires_tool_call=true|列出当前仓库根目录最近修改的 5 个条目，包含名称和类型，不要解释
+fs_config_basic|read_readme_head_en|tool:fs_basic,requires_tool_call=true|Show exactly the first 8 raw lines of README.md. Do not summarize or explain.|expect=RustClaw
+fs_config_basic|find_shell_script_dirs_cn|tool:fs_basic,requires_tool_call=true|查找当前仓库里所有 sh 脚本所在的目录，去重后列出来
+fs_config_basic|grep_first_layer_decision_en|tool:fs_basic,requires_tool_call=true|Search the current repo for FirstLayerDecision and list up to three matching files.
+fs_config_basic|find_registry_run_cmd_block_cn|tool:config_basic,requires_tool_call=true|在 configs/skills_registry.toml 里找到 run_cmd 相关配置位置，并告诉我它的 planner_kind 是什么|expect=tool
+fs_config_basic|cargo_workspace_version_cn|tool:config_basic,requires_tool_call=true|读取 Cargo.toml 里 workspace.package.version 的值，只回答版本号
+fs_config_basic|config_selected_vendor_en|tool:config_basic,requires_tool_call=true|Read configs/config.toml and answer only the llm.selected_vendor value.
+fs_config_basic|registry_run_cmd_planner_kind_en|tool:config_basic,requires_tool_call=true|Read configs/skills_registry.toml and answer only the planner_kind value for the run_cmd skill.
+fs_config_basic|config_guard_cn|tool:config_basic,requires_tool_call=true|检查 RustClaw 主配置有没有明显风险，不能泄露任何密钥值
+fs_config_basic|missing_path_no_retry_en|tool:fs_basic,requires_tool_call=true|Check whether /home/guagua/rustclaw/definitely_missing_fs_basic_20260513.txt exists. If it does not exist, answer that it does not exist and do not search elsewhere.|expect=definitely_missing_fs_basic_20260513.txt
+fs_config_basic|missing_read_then_bounded_fallback_cn|tool:fs_basic,requires_tool_call=true|读取 plan/definitely_missing_fs_basic_20260513.md；如果不存在，就只在 plan 目录搜索 llm_first 相关 md 文件并返回候选路径
+fs_config_basic|ambiguous_name_candidates_en|tool:fs_basic,requires_tool_call=true|Find files named README under the current repo. If there are multiple candidates, list candidates instead of choosing one.
+fs_config_basic|current_workspace_no_path_clarify_cn|tool:fs_basic,requires_tool_call=true|当前仓库里有没有 README.zh-CN.md？只回答存在状态和路径|expect=README.zh-CN.md
+fs_config_basic|multi_path_status_mixed|tool:fs_basic,requires_tool_call=true|检查 README.md, README.zh-CN.md, Cargo.toml, and no_such_file_20260513.txt 是否存在，用表格返回
+fs_config_basic|prompt_layer_config_search_cn|tool:fs_basic,requires_tool_call=true|在 prompts/layers 目录下搜索 config_basic，返回最多 5 个匹配文件路径
+fs_config_basic|read_generated_fs_basic_doc_en|tool:fs_basic,requires_tool_call=true|Read prompts/layers/generated/skills/fs_basic.md and answer in one sentence what this virtual tool is for.
+fs_config_basic|list_config_keys_cn|tool:config_basic,requires_tool_call=true|列出 configs/config.toml 顶层 key，最多 12 个，不要输出密钥值
+fs_config_basic|validate_config_toml_en|tool:config_basic,requires_tool_call=true|Validate that configs/config.toml can be parsed as TOML and answer pass or fail with one short reason.
+fs_config_basic|read_skill_switches_config_basic_cn|tool:config_basic,requires_tool_call=true|读取 configs/config.toml 里 skills.skill_switches.config_basic 的值；如果字段不存在，说明它未显式配置
+fs_config_basic|read_docker_registry_fs_basic_en|tool:config_basic,requires_tool_call=true|Read docker/config/skills_registry.toml and answer whether fs_basic is registered.
+fs_config_basic|compare_registry_files_cn|tool:fs_basic,requires_tool_call=true|比较 configs/skills_registry.toml 和 docker/config/skills_registry.toml 哪个文件更大，只回答文件名和大小差
+fs_config_basic|grep_no_hard_phrase_in_virtual_tools_cn|tool:fs_basic,requires_tool_call=true|检查 crates/clawd/src/virtual_tools.rs 是否包含“帮我”这个词，只回答是否包含和文件路径
+fs_config_basic|english_current_repo_shell_dirs|tool:fs_basic,requires_tool_call=true|Within this repository, find directories that contain shell scripts and return only the directory list.

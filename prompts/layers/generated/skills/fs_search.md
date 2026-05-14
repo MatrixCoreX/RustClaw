@@ -9,6 +9,7 @@
 
 ## Capability Summary (from interface)
 - `fs_search` performs filesystem-level search by name, extension, text, or images.
+- For new planner-facing filesystem tasks, prefer the virtual `fs_basic` contract (`find_entries` / `grep_text`). `fs_search` remains the runtime backing and compatibility layer for bounded search actions.
 - It is intended for bounded queries with optional root scoping and result caps.
 - `find_name` can return directory names as well as file names; use `target_kind` to narrow when needed.
 - For locating likely filenames, prompt names, module names, or path fragments, use `find_name`.
@@ -52,6 +53,9 @@
 - Search runtime errors return readable filesystem/tool errors.
 - `find_name` may return both files and directories unless `target_kind` is provided.
 - Successful responses are returned as JSON text with stable top-level fields like `action`, `root`, `count`, and `results`.
+- For `find_name` / `find_ext` / candidate discovery, `results` is the authoritative observed candidate list and `count` is the authoritative observed count.
+- If the caller asks to list or report candidates, the final answer should include every returned `results` item unless the user requested a top-N subset or the result is explicitly capped/truncated.
+- Do not replace a returned `results` array with only examples, a smaller sample, `etc.`, or inferred candidates.
 - `grep_text` also returns `patterns`, `match_count`, and `matches` items with `path`, `line`, and `text` so callers can answer content-check questions without reading whole files.
 - Successful responses also mirror that parsed JSON into the optional `extra` field for machine-readable consumers.
 

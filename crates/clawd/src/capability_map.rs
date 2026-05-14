@@ -68,7 +68,9 @@ impl CapabilityDomain {
             | "archive" | "transform" | "workflow" | "flows" | "orchestration" => {
                 Some(Self::System)
             }
-            "ops" | "status" | "ops/status" | "service" | "runtime" => Some(Self::OpsStatus),
+            "ops" | "status" | "ops/status" | "service" | "runtime" | "config" => {
+                Some(Self::OpsStatus)
+            }
             "market" | "market/data" | "finance" => Some(Self::MarketData),
             "news" | "web" | "news/web" => Some(Self::NewsContent),
             "image" | "vision" => Some(Self::ImageMedia),
@@ -143,9 +145,8 @@ fn legacy_domain_from_skill_name(skill: &str) -> Option<CapabilityDomain> {
         "audio_transcribe" | "audio_synthesize" => Some(CapabilityDomain::AudioMedia),
         "x" => Some(CapabilityDomain::Publishing),
         "chat" => Some(CapabilityDomain::GeneralChat),
-        "read_file" | "write_file" | "list_dir" | "make_dir" | "remove_file" | "fs_search" => {
-            Some(CapabilityDomain::Filesystem)
-        }
+        "fs_basic" | "read_file" | "write_file" | "list_dir" | "make_dir" | "remove_file"
+        | "fs_search" => Some(CapabilityDomain::Filesystem),
         "process_basic" | "docker_basic" | "health_check" | "log_analyze" | "service_control"
         | "task_control" | "config_guard" => Some(CapabilityDomain::OpsStatus),
         "run_cmd" | "system_basic" | "http_basic" | "git_basic" | "install_module"

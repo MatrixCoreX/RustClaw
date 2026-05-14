@@ -16,7 +16,7 @@
 // Stage A 期间所有公开 API 都还没人调用；Stage B 起会被 RouteResult 等使用。
 #![allow(dead_code)]
 
-use super::types::{RouteGateKind, RoutedMode};
+use super::types::{FirstLayerDecision, RouteGateKind, RoutedMode};
 
 /// 二元收敛后的 ask 模式。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +97,52 @@ impl AskMode {
         }
     }
 
+    /// Build the runtime mode from the normalized first-layer decision.
+    ///
+    /// `mode_hint` is compatibility-only: it carries the execution finalization
+    /// style (`Act` vs `ChatAct`) while the semantic branch comes from
+    /// `FirstLayerDecision`.
+    pub(crate) fn from_first_layer_decision(
+        decision: FirstLayerDecision,
+        mode_hint: RoutedMode,
+    ) -> Self {
+        match decision {
+            FirstLayerDecision::Clarify => AskMode::ClarifyOrChat {
+                entry: ChatEntryStrategy::NormalizerThenClarify,
+            },
+            FirstLayerDecision::DirectAnswer => AskMode::ClarifyOrChat {
+                entry: ChatEntryStrategy::NormalizerThenChat,
+            },
+            FirstLayerDecision::PlannerExecute => match mode_hint {
+                RoutedMode::ChatAct => AskMode::Act {
+                    finalize: ActFinalizeStyle::ChatWrapped,
+                },
+                _ => AskMode::Act {
+                    finalize: ActFinalizeStyle::Plain,
+                },
+            },
+        }
+    }
+
+    /// Apply resume flags on top of an already-normalized mode.
+    pub(crate) fn with_resume_overrides(
+        self,
+        direct_resume_discussion: bool,
+        direct_resume_execution: bool,
+    ) -> Self {
+        if direct_resume_execution {
+            return AskMode::Act {
+                finalize: ActFinalizeStyle::ResumeContinue,
+            };
+        }
+        if direct_resume_discussion {
+            return AskMode::ClarifyOrChat {
+                entry: ChatEntryStrategy::ResumeFollowupDiscussion,
+            };
+        }
+        self
+    }
+
     /// 反向回退到 `RoutedMode`，给"还没切换到 AskMode"的下游代码喂值。
     ///
     /// Stage D 完成后此函数可删（双轨结束）。
@@ -130,14 +176,18 @@ impl AskMode {
         self.is_execute_gate()
     }
 
-    pub(crate) fn gate_kind(&self) -> RouteGateKind {
+    pub(crate) fn first_layer_decision(&self) -> FirstLayerDecision {
         match self {
             AskMode::ClarifyOrChat {
                 entry: ChatEntryStrategy::NormalizerThenClarify,
-            } => RouteGateKind::Clarify,
-            AskMode::ClarifyOrChat { .. } => RouteGateKind::Chat,
-            AskMode::Act { .. } => RouteGateKind::Execute,
+            } => FirstLayerDecision::Clarify,
+            AskMode::ClarifyOrChat { .. } => FirstLayerDecision::DirectAnswer,
+            AskMode::Act { .. } => FirstLayerDecision::PlannerExecute,
         }
+    }
+
+    pub(crate) fn gate_kind(&self) -> RouteGateKind {
+        self.first_layer_decision().gate_kind()
     }
 
     pub(crate) fn is_execute_gate(&self) -> bool {
@@ -339,6 +389,55 @@ mod tests {
     }
 
     #[test]
+    fn from_first_layer_decision_uses_mode_hint_only_for_execute_finalize_style() {
+        assert_eq!(
+            AskMode::from_first_layer_decision(FirstLayerDecision::Clarify, RoutedMode::ChatAct),
+            AskMode::ClarifyOrChat {
+                entry: ChatEntryStrategy::NormalizerThenClarify
+            }
+        );
+        assert_eq!(
+            AskMode::from_first_layer_decision(FirstLayerDecision::DirectAnswer, RoutedMode::Act),
+            AskMode::ClarifyOrChat {
+                entry: ChatEntryStrategy::NormalizerThenChat
+            }
+        );
+        assert_eq!(
+            AskMode::from_first_layer_decision(
+                FirstLayerDecision::PlannerExecute,
+                RoutedMode::ChatAct,
+            ),
+            AskMode::Act {
+                finalize: ActFinalizeStyle::ChatWrapped
+            }
+        );
+    }
+
+    #[test]
+    fn resume_overrides_layer_on_top_of_normalized_mode() {
+        let base =
+            AskMode::from_first_layer_decision(FirstLayerDecision::DirectAnswer, RoutedMode::Chat);
+        assert_eq!(
+            base.clone().with_resume_overrides(false, false),
+            AskMode::ClarifyOrChat {
+                entry: ChatEntryStrategy::NormalizerThenChat
+            }
+        );
+        assert_eq!(
+            base.clone().with_resume_overrides(true, false),
+            AskMode::ClarifyOrChat {
+                entry: ChatEntryStrategy::ResumeFollowupDiscussion
+            }
+        );
+        assert_eq!(
+            base.with_resume_overrides(true, true),
+            AskMode::Act {
+                finalize: ActFinalizeStyle::ResumeContinue
+            }
+        );
+    }
+
+    #[test]
     fn round_trip_for_pure_routed_modes() {
         for routed in [
             RoutedMode::Chat,
@@ -436,6 +535,26 @@ mod tests {
         assert_eq!(
             AskMode::from_routed_mode(RoutedMode::ChatAct).gate_kind(),
             RouteGateKind::Execute
+        );
+    }
+
+    #[test]
+    fn first_layer_decision_collapses_legacy_modes_to_three_decisions() {
+        assert_eq!(
+            AskMode::from_routed_mode(RoutedMode::Chat).first_layer_decision(),
+            FirstLayerDecision::DirectAnswer
+        );
+        assert_eq!(
+            AskMode::from_routed_mode(RoutedMode::AskClarify).first_layer_decision(),
+            FirstLayerDecision::Clarify
+        );
+        assert_eq!(
+            AskMode::from_routed_mode(RoutedMode::Act).first_layer_decision(),
+            FirstLayerDecision::PlannerExecute
+        );
+        assert_eq!(
+            AskMode::from_routed_mode(RoutedMode::ChatAct).first_layer_decision(),
+            FirstLayerDecision::PlannerExecute
         );
     }
 

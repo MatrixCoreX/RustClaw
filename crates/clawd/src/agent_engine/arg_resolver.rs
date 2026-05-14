@@ -135,6 +135,9 @@ fn set_root_field_if_missing(args: &mut Value, auto_locator_path: &str) -> bool 
 }
 
 pub(super) fn normalize_skill_arg_aliases(normalized_skill: &str, args: &mut Value) -> bool {
+    if crate::virtual_tools::normalize_virtual_tool_arg_aliases(normalized_skill, args) {
+        return true;
+    }
     match normalized_skill {
         "fs_search" => normalize_fs_search_arg_aliases(args),
         _ => false,

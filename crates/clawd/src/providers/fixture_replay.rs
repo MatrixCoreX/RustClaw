@@ -497,6 +497,7 @@ pub(crate) fn build_fixture_replay_runtime(name: &str) -> Arc<LlmProviderRuntime
             base_url: "http://fixture.invalid".to_string(),
             api_key: "fixture".to_string(),
             model: "fixture-model".to_string(),
+            context_window_tokens: None,
             priority: 1,
             timeout_seconds: 5,
             max_concurrency: 1,

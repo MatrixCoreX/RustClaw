@@ -113,6 +113,169 @@ fn validate_skill_output_contract(
     validate_json_contract(&candidate, &schema)
 }
 
+fn string_contains_unresolved_runtime_placeholder(value: &str) -> bool {
+    let mut search_start = 0usize;
+    while let Some(open_rel) = value[search_start..].find("{{") {
+        let inner_start = search_start + open_rel + 2;
+        let Some(close_rel) = value[inner_start..].find("}}") else {
+            return false;
+        };
+        let inner_end = inner_start + close_rel;
+        if unresolved_runtime_placeholder_key(&value[inner_start..inner_end]) {
+            return true;
+        }
+        search_start = inner_end + 2;
+    }
+    false
+}
+
+fn unresolved_runtime_placeholder_key(key: &str) -> bool {
+    let key = key.trim();
+    !key.is_empty()
+        && key.len() <= 160
+        && key.chars().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || matches!(
+                    ch,
+                    '_' | '-' | '.' | '[' | ']' | '"' | '\'' | ' ' | '\t' | '\n'
+                )
+        })
+}
+
+fn contains_unresolved_runtime_template_arg(value: &Value) -> bool {
+    match value {
+        Value::String(value) => string_contains_unresolved_runtime_placeholder(value),
+        Value::Array(items) => items.iter().any(contains_unresolved_runtime_template_arg),
+        Value::Object(map) => map.values().any(contains_unresolved_runtime_template_arg),
+        _ => false,
+    }
+}
+
+fn run_cmd_is_literal_user_command(args: &Value) -> bool {
+    args.get(super::CLAWD_LITERAL_COMMAND_ARG)
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn unresolved_runtime_template_argument_error(
+    normalized_skill: &str,
+    exec_args: &Value,
+    classification_args: &Value,
+) -> Option<String> {
+    if normalized_skill.eq_ignore_ascii_case("run_cmd")
+        && run_cmd_is_literal_user_command(classification_args)
+    {
+        return None;
+    }
+    if !contains_unresolved_runtime_template_arg(exec_args) {
+        return None;
+    }
+    Some(crate::skills::structured_skill_error_from_parts(
+        normalized_skill,
+        "invalid_args",
+        "execution argument still contains an unresolved runtime placeholder; replan with concrete observed values or use a single command pipeline",
+        None,
+        Some(json!({
+            "reason": "unresolved_runtime_placeholder",
+        })),
+    ))
+}
+
+fn handle_preflight_argument_failure(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    global_step: usize,
+    step_in_round: usize,
+    normalized_skill: &str,
+    classification_args: &Value,
+    err: &str,
+    action_trace_kind: &str,
+) -> SkillActionOutcome {
+    let user_visible_err = crate::skills::normalize_skill_error_for_user(normalized_skill, err);
+    super::attempt_ledger::record_attempt_with_retry_instruction(
+        loop_state,
+        normalized_skill,
+        "preflight=rejected_unresolved_runtime_placeholder",
+        crate::executor::StepExecutionStatus::Error,
+        "",
+        Some("invalid_args"),
+        &user_visible_err,
+        Some(
+            "Do not retry the same unresolved runtime placeholder. Use concrete observed values, synthesize_answer, or one command pipeline.",
+        ),
+    );
+    let effect = crate::execution_recipe::classify_skill_action_effect(
+        state,
+        normalized_skill,
+        classification_args,
+    );
+    crate::execution_recipe::apply_action_effect_failure(&mut loop_state.execution_recipe, effect);
+    super::maybe_publish_execution_recipe_phase_hint(state, task, loop_state);
+    crate::append_subtask_result(
+        &mut loop_state.subtask_results,
+        global_step,
+        &format!("skill({normalized_skill})"),
+        false,
+        &user_visible_err,
+    );
+    register_failed_step_output(
+        loop_state,
+        global_step,
+        step_in_round,
+        &format!("skill.{normalized_skill}"),
+        &format!("skill({normalized_skill})"),
+        &user_visible_err,
+    );
+    let now = crate::now_ts_u64();
+    let step_execution = crate::executor::StepExecutionResult {
+        step_id: format!("step_{global_step}"),
+        skill: normalized_skill.to_string(),
+        status: crate::executor::StepExecutionStatus::Error,
+        output: None,
+        error: Some(err.to_string()),
+        started_at: now,
+        finished_at: now,
+    };
+    loop_state
+        .executed_step_results
+        .push(step_execution.clone());
+    log_step_journal_summary(
+        task,
+        loop_state.round_no,
+        step_in_round,
+        action_trace_kind,
+        loop_state
+            .execution_recipe
+            .is_active()
+            .then(|| loop_state.execution_recipe.phase_summary_line())
+            .as_deref(),
+        &step_execution,
+    );
+    loop_state.history_compact.push(format!(
+        "round={} step={} skill={} rejected_unresolved_runtime_placeholder",
+        loop_state.round_no, step_in_round, normalized_skill
+    ));
+    publish_failure_recovery_progress(
+        state,
+        task,
+        loop_state,
+        step_in_round,
+        normalized_skill,
+        &user_visible_err,
+        "recoverable_failure_continue_round",
+    );
+    info!(
+        "executor_preflight_arg_rejected task_id={} round={} step={} type={} skill={} reason=unresolved_runtime_placeholder",
+        task.task_id, loop_state.round_no, step_in_round, action_trace_kind, normalized_skill
+    );
+    SkillActionOutcome {
+        ended_with_user_visible_output: false,
+        stop_signal: Some("recoverable_failure_continue_round".to_string()),
+        continue_in_round: false,
+    }
+}
+
 fn remember_skill_metadata(loop_state: &mut LoopState, normalized_skill: &str) {
     loop_state
         .output_vars
@@ -1026,6 +1189,23 @@ pub(super) async fn execute_prepared_skill_action(
     action_trace_kind: &str,
 ) -> Result<SkillActionOutcome, String> {
     let classification_args = recovery_args.as_ref().unwrap_or(&exec_args);
+    if let Some(err) = unresolved_runtime_template_argument_error(
+        normalized_skill,
+        &exec_args,
+        classification_args,
+    ) {
+        return Ok(handle_preflight_argument_failure(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            normalized_skill,
+            classification_args,
+            &err,
+            action_trace_kind,
+        ));
+    }
     info!(
         "{} executor_step_execute task_id={} round={} step={} type={} skill={} args={}",
         crate::highlight_tag("skill"),
@@ -1162,8 +1342,9 @@ mod tests {
     use std::sync::{Arc, RwLock};
 
     use super::{
-        build_auto_sudo_retry_args, handle_skill_step_failure, handle_skill_step_success,
-        skill_extra_requests_user_input, AgentLoopGuardPolicy, LoopState,
+        build_auto_sudo_retry_args, contains_unresolved_runtime_template_arg,
+        handle_skill_step_failure, handle_skill_step_success, skill_extra_requests_user_input,
+        unresolved_runtime_template_argument_error, AgentLoopGuardPolicy, LoopState,
     };
     use crate::{
         AgentRuntimeConfig, AppState, ClaimedTask, SkillViewsSnapshot, ToolsPolicy,
@@ -1279,6 +1460,64 @@ mod tests {
             answer_verifier_retry_limit: 2,
             ops_closed_loop: Default::default(),
         }
+    }
+
+    #[test]
+    fn unresolved_runtime_template_arg_is_detected_structurally() {
+        let args = serde_json::json!({
+            "action": "stat_paths",
+            "paths": "{{s1.paths}}"
+        });
+
+        assert!(contains_unresolved_runtime_template_arg(&args));
+        let err = unresolved_runtime_template_argument_error("fs_basic", &args, &args)
+            .expect("unresolved template should be rejected");
+        let parsed = crate::skills::parse_structured_skill_error(&err)
+            .expect("preflight error should be structured");
+        assert_eq!(parsed.error_kind, "invalid_args");
+        assert_eq!(
+            parsed
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("reason"))
+                .and_then(|value| value.as_str()),
+            Some("unresolved_runtime_placeholder")
+        );
+        assert!(
+            !parsed.error_text.contains("{{"),
+            "user-facing error text must not leak unresolved templates"
+        );
+    }
+
+    #[test]
+    fn literal_run_cmd_keeps_user_supplied_handlebars_text() {
+        let exec_args = serde_json::json!({
+            "command": "printf '%s\\n' '{{literal_template}}'",
+        });
+        let classification_args = serde_json::json!({
+            "command": "printf '%s\\n' '{{literal_template}}'",
+            "_clawd_literal_command": true,
+        });
+
+        assert!(contains_unresolved_runtime_template_arg(&exec_args));
+        assert!(unresolved_runtime_template_argument_error(
+            "run_cmd",
+            &exec_args,
+            &classification_args,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn generated_run_cmd_with_unresolved_placeholder_is_rejected() {
+        let args = serde_json::json!({
+            "command": "wc -c {{s1.path}}",
+        });
+
+        assert!(
+            unresolved_runtime_template_argument_error("run_cmd", &args, &args).is_some(),
+            "generated commands must not execute unresolved runtime placeholders"
+        );
     }
 
     #[test]

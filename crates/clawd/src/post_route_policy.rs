@@ -116,7 +116,7 @@ fn should_force_content_evidence_for_path_bound_chat_act(
 ) -> bool {
     if route_result.output_contract.semantic_kind != OutputSemanticKind::None
         || route_result.output_contract.delivery_required
-        || route_result.routed_mode != RoutedMode::ChatAct
+        || !route_result.ask_mode.finalize_chat_wrapped()
         || !matches!(
             route_result.output_contract.response_shape,
             OutputResponseShape::Free | OutputResponseShape::OneSentence
@@ -263,7 +263,7 @@ pub(crate) fn apply_post_route_policy(
         || fuzzy_locator_requires_clarify;
     if force_clarify {
         execution_route_result.needs_clarify = true;
-        execution_route_result.set_routed_mode(RoutedMode::AskClarify);
+        execution_route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
     }
 
     let (clarify_reason, clarify_reason_kind) = if missing_locator_for_path_scoped_content {
@@ -645,7 +645,7 @@ mod tests {
         let mut route = route_result();
         route.resolved_intent =
             "列出 docs 目录最近修改的两个文件，再判断这些是干什么的".to_string();
-        route.routed_mode = RoutedMode::ChatAct;
+        route.set_routed_mode(RoutedMode::ChatAct);
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.requires_content_evidence = false;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -677,7 +677,7 @@ mod tests {
     fn generic_directory_chat_act_request_no_longer_defaults_to_directory_purpose_summary() {
         let mut route = route_result();
         route.resolved_intent = "看看 docs 目录".to_string();
-        route.routed_mode = RoutedMode::ChatAct;
+        route.set_routed_mode(RoutedMode::ChatAct);
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.requires_content_evidence = false;
         route.output_contract.locator_kind = OutputLocatorKind::Path;

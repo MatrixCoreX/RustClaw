@@ -292,7 +292,10 @@ fn split_locator_targets(raw: &str) -> Vec<String> {
         }
     }
 
-    dedup_locators(raw.split(['|', '\n', ';']).map(normalize_target_locator))
+    dedup_locators(
+        raw.split(['|', '\n', ';', ',', '、'])
+            .map(normalize_target_locator),
+    )
 }
 
 fn normalize_target_locator(value: &str) -> String {
@@ -460,10 +463,12 @@ pub(crate) fn required_evidence_fields_for_output_contract(
             fields.insert("path");
         }
         OutputSemanticKind::ContentExcerptSummary
-        | OutputSemanticKind::DirectoryPurposeSummary
         | OutputSemanticKind::WorkspaceProjectSummary
         | OutputSemanticKind::ExcerptKindJudgment => {
             fields.insert("content_excerpt");
+        }
+        OutputSemanticKind::DirectoryPurposeSummary => {
+            fields.insert("candidates");
         }
         OutputSemanticKind::FileNames
         | OutputSemanticKind::DirectoryNames
@@ -636,6 +641,27 @@ mod tests {
     }
 
     #[test]
+    fn directory_purpose_summary_uses_listing_candidates_as_required_evidence() {
+        let route = route_with_contract(
+            RoutedMode::ChatAct,
+            IntentOutputContract {
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
+                requires_content_evidence: true,
+                ..IntentOutputContract::default()
+            },
+        );
+
+        let contract = TaskContract::from_route_result(&route);
+
+        assert_eq!(contract.operation, TaskOperation::Summarize);
+        assert_eq!(contract.required_evidence_fields, vec!["candidates"]);
+        assert!(!contract
+            .compact_prompt_line()
+            .contains("required_evidence_fields=content_excerpt"));
+    }
+
+    #[test]
     fn existence_contract_requires_structural_path_evidence() {
         let route = route_with_contract(
             RoutedMode::Act,
@@ -684,5 +710,26 @@ mod tests {
         assert!(contract
             .compact_prompt_line()
             .contains("\"locator\":\"AGENTS.md\""));
+    }
+
+    #[test]
+    fn task_contract_splits_comma_multi_target_locator() {
+        let route = route_with_contract(
+            RoutedMode::Act,
+            IntentOutputContract {
+                locator_kind: OutputLocatorKind::Filename,
+                locator_hint: "README.md, README.zh-CN.md, Cargo.toml".to_string(),
+                semantic_kind: OutputSemanticKind::ExistenceWithPath,
+                requires_content_evidence: true,
+                ..IntentOutputContract::default()
+            },
+        );
+
+        let contract = TaskContract::from_route_result(&route);
+
+        assert_eq!(contract.targets.len(), 3);
+        assert_eq!(contract.targets[0].locator, "README.md");
+        assert_eq!(contract.targets[1].locator, "README.zh-CN.md");
+        assert_eq!(contract.targets[2].locator, "Cargo.toml");
     }
 }

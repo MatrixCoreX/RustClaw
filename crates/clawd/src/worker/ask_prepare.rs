@@ -147,7 +147,7 @@ fn active_clarify_run_control_prompt(
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
     current_prompt: &str,
 ) -> Option<String> {
-    if !matches!(route_result.routed_mode, crate::RoutedMode::Chat)
+    if !route_result.is_chat_gate()
         || route_result.output_contract.delivery_required
         || !matches!(
             turn_analysis.and_then(|analysis| analysis.turn_type),
@@ -794,7 +794,7 @@ fn bind_structural_file_delivery_to_recent_read_target(
         return false;
     };
     route_result.needs_clarify = false;
-    route_result.set_routed_mode(crate::RoutedMode::Act);
+    route_result.set_first_layer_decision(crate::FirstLayerDecision::PlannerExecute);
     if route_result.resolved_intent.trim().is_empty() {
         route_result.resolved_intent = format!("file_delivery_target: {bound_target}");
     } else if !route_result.resolved_intent.contains(&bound_target) {
@@ -819,7 +819,7 @@ fn bind_structural_file_delivery_to_recent_read_target(
 
 fn force_unresolved_file_delivery_clarify(route_result: &mut crate::RouteResult) {
     route_result.needs_clarify = true;
-    route_result.set_routed_mode(crate::RoutedMode::AskClarify);
+    route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
     route_result.clarify_question = "请提供要发送的文件路径或文件名。".to_string();
     route_result.wants_file_delivery = false;
     route_result.output_contract.delivery_required = false;
@@ -837,7 +837,7 @@ fn force_unresolved_file_delivery_clarify(route_result: &mut crate::RouteResult)
 fn allow_generated_file_delivery_without_locator(route_result: &mut crate::RouteResult) {
     route_result.needs_clarify = false;
     if route_result.is_clarify_gate() {
-        route_result.set_routed_mode(crate::RoutedMode::Act);
+        route_result.set_first_layer_decision(crate::FirstLayerDecision::PlannerExecute);
     }
     route_result.clarify_question.clear();
     route_result.wants_file_delivery = true;
@@ -955,11 +955,11 @@ fn promote_active_clarify_locator_reply_to_execute(
     if locator.is_empty() {
         return;
     }
-    if route_result.ask_mode.is_execute_gate() && !route_result.needs_clarify {
+    if route_result.is_execute_gate() && !route_result.needs_clarify {
         return;
     }
 
-    route_result.set_routed_mode(crate::RoutedMode::Act);
+    route_result.set_first_layer_decision(crate::FirstLayerDecision::PlannerExecute);
     route_result.needs_clarify = false;
     route_result.clarify_question.clear();
     route_result.resolved_intent = hit.resolved_intent.clone();
@@ -1174,7 +1174,7 @@ pub(super) async fn prepare_ask_routing(
         reason: route_result.route_reason.clone(),
     };
     let resolved_prompt = context_resolution.resolved_user_intent.clone();
-    if route_result.needs_clarify || !route_result.ask_mode.is_execute_gate() {
+    if route_result.needs_clarify || !route_result.is_execute_gate() {
         execution_recipe_hint = None;
     }
     crate::intent::safety_class::apply_route_risk_ceiling(
@@ -1202,19 +1202,17 @@ pub(super) async fn prepare_ask_routing(
             analysis.attachment_processing_required
         );
     }
-    let ask_mode = crate::AskMode::from_legacy(
-        route_result.routed_mode,
+    let ask_mode = route_result.ask_mode.clone().with_resume_overrides(
         resume_runtime.should_discuss_context,
         resume_runtime.should_apply_context,
     );
-    // 仅在没有 resume flag 主导时校验反向 round-trip；resume_continue/discussion
-    // 命中时 to_routed_mode 会做"语义等价但取值不同"的折叠
-    // （比如 ResumeContinue → Act 即便原 routed_mode 是 ChatAct），不等于即合理。
+    // 仅在没有 resume flag 主导时校验 RouteResult 已经携带规范化后的 ask_mode；
+    // routed_mode 只保留为旧日志/旧 UI 兼容和执行收尾风格提示。
     if !resume_runtime.should_discuss_context && !resume_runtime.should_apply_context {
         debug_assert_eq!(
-            ask_mode.to_routed_mode(),
-            route_result.routed_mode,
-            "ask_mode <-> routed_mode invariant broken when no flag dominates"
+            ask_mode,
+            route_result.ask_mode,
+            "prepared ask_mode should come from normalized RouteResult when no resume flag dominates"
         );
     }
     PreparedAskRouting {

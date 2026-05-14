@@ -1551,6 +1551,35 @@ fn chinese_filename_candidates_are_extracted() {
 }
 
 #[test]
+fn dotted_hyphenated_filename_candidates_are_not_split() {
+    let out = extract_filename_candidates(
+        "检查 README.md, README.zh-CN.md, Cargo.toml, and no_such_file_20260513.txt 是否存在",
+    );
+    assert_eq!(
+        out,
+        vec![
+            "README.md".to_string(),
+            "README.zh-CN.md".to_string(),
+            "Cargo.toml".to_string(),
+            "no_such_file_20260513.txt".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn ideographic_delimiter_filename_candidates_are_split() {
+    let out = extract_filename_candidates("检查 README.md、AGENTS.md、Cargo.toml 是否都存在");
+    assert_eq!(
+        out,
+        vec![
+            "README.md".to_string(),
+            "AGENTS.md".to_string(),
+            "Cargo.toml".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn dotted_version_numbers_are_not_filename_candidates() {
     let out = extract_filename_candidates("Correction: mention Python 3.11, not Python 3.10.");
     assert!(out.is_empty());

@@ -242,6 +242,8 @@ pub struct SkillRegistryEntry {
     pub name: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub planner_visible: bool,
     #[serde(default)]
     pub kind: SkillKind,
     #[serde(default)]
@@ -697,6 +699,12 @@ impl SkillsRegistry {
         names
     }
 
+    pub fn is_planner_visible(&self, canonical_name: &str) -> bool {
+        self.get(canonical_name)
+            .map(|entry| entry.planner_visible)
+            .unwrap_or(true)
+    }
+
     /// 该技能在 registry 中配置的 timeout（秒）；0 表示用全局默认
     pub fn timeout_seconds(&self, canonical_name: &str) -> u64 {
         self.get(canonical_name)
@@ -938,6 +946,8 @@ fn to_canonical_key(s: &str) -> String {
 /// `registry_covers_all_required_builtins` 守底，registry 漏一个就红。
 pub const REQUIRED_BUILTIN_SKILLS: &[&str] = &[
     "run_cmd",
+    "fs_basic",
+    "config_basic",
     "read_file",
     "write_file",
     "list_dir",
@@ -1047,6 +1057,30 @@ output_kind = "image"
         assert_eq!(reg.timeout_seconds("image_vision"), 90);
         assert!(reg.enabled_names().contains(&"run_cmd".to_string()));
         assert!(reg.enabled_names().contains(&"image_vision".to_string()));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn planner_visible_defaults_true_and_can_hide_runtime_backing_tools() {
+        let toml = r#"
+[[skills]]
+name = "config_basic"
+enabled = true
+kind = "builtin"
+
+[[skills]]
+name = "config_guard"
+enabled = true
+planner_visible = false
+kind = "runner"
+"#;
+        let path = std::env::temp_dir().join("test_registry_planner_visible.toml");
+        std::fs::write(&path, toml).unwrap();
+        let reg = SkillsRegistry::load_from_path(&path).unwrap();
+
+        assert!(reg.enabled_names().contains(&"config_guard".to_string()));
+        assert!(reg.is_planner_visible("config_basic"));
+        assert!(!reg.is_planner_visible("config_guard"));
         let _ = std::fs::remove_file(path);
     }
 

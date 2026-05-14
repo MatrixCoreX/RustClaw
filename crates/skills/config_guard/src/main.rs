@@ -58,11 +58,7 @@ fn execute(args: Value) -> Result<String, String> {
         .as_object()
         .ok_or_else(|| "args must be object".to_string())?;
     let root = workspace_root();
-    let config_path = obj
-        .get("path")
-        .and_then(|v| v.as_str())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| discover_default_config_path(&root));
+    let config_path = resolve_config_path(&root, obj);
 
     let raw = std::fs::read_to_string(&config_path)
         .map_err(|err| format!("read config failed: {err}"))?;
@@ -156,4 +152,75 @@ fn discover_default_config_path(root: &PathBuf) -> PathBuf {
         .into_iter()
         .find(|p| p.is_file())
         .unwrap_or_else(|| root.join("configs/config.toml"))
+}
+
+fn resolve_config_path(root: &PathBuf, obj: &serde_json::Map<String, Value>) -> PathBuf {
+    let default_path = discover_default_config_path(root);
+    let Some(raw_path) = obj.get("path").and_then(|v| v.as_str()).map(str::trim) else {
+        return default_path;
+    };
+    if raw_path.is_empty() {
+        return default_path;
+    }
+    let requested = PathBuf::from(raw_path);
+    if requested.is_file() {
+        return requested;
+    }
+    if default_path.is_file() && looks_like_rustclaw_config_path(&requested) {
+        return default_path;
+    }
+    requested
+}
+
+fn looks_like_rustclaw_config_path(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "config.toml")
+        && path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(name) if name == "configs"
+            )
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn temp_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "rustclaw_config_guard_{name}_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("configs")).expect("create temp configs");
+        root
+    }
+
+    #[test]
+    fn resolve_config_path_uses_existing_requested_file() {
+        let root = temp_root("existing_requested");
+        let requested = root.join("custom.toml");
+        std::fs::write(&requested, "[tools]\n").expect("write requested config");
+        let obj = json!({ "path": requested.display().to_string() });
+        let resolved = resolve_config_path(&root, obj.as_object().expect("object"));
+
+        assert_eq!(resolved, requested);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_config_path_falls_back_for_missing_configs_config_toml() {
+        let root = temp_root("missing_requested");
+        let default_path = root.join("configs/config.toml");
+        std::fs::write(&default_path, "[tools]\n").expect("write default config");
+        let obj =
+            json!({ "path": root.join("rustclaw/configs/config.toml").display().to_string() });
+        let resolved = resolve_config_path(&root, obj.as_object().expect("object"));
+
+        assert_eq!(resolved, default_path);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

@@ -175,13 +175,16 @@ fn execute_action(
         "extract_field" => extract_field(workspace_root, obj, allow_path_outside_workspace),
         "extract_fields" => extract_fields(workspace_root, obj, allow_path_outside_workspace),
         "structured_keys" => structured_keys(workspace_root, obj, allow_path_outside_workspace),
+        "validate_structured" => {
+            validate_structured(workspace_root, obj, allow_path_outside_workspace)
+        }
         "find_path" => find_path(workspace_root, obj, allow_path_outside_workspace),
         "read_range" => read_range(workspace_root, obj, allow_path_outside_workspace),
         "compare_paths" => compare_paths(workspace_root, obj, allow_path_outside_workspace),
         "path_batch_facts" => path_batch_facts(workspace_root, obj, allow_path_outside_workspace),
         "diagnose_runtime" => diagnose_runtime(workspace_root, obj),
         other => Err(SkillError::unsupported_action(format!(
-            "unknown action: {other}; allowed: info|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|find_path|read_range|compare_paths|path_batch_facts|diagnose_runtime"
+            "unknown action: {other}; allowed: info|inventory_dir|count_inventory|workspace_glance|tree_summary|dir_compare|extract_field|extract_fields|structured_keys|validate_structured|find_path|read_range|compare_paths|path_batch_facts|diagnose_runtime"
         ))),
     }
 }
@@ -868,6 +871,41 @@ fn structured_keys(
             "keys": [],
         })
         .to_string()),
+    }
+}
+
+fn validate_structured(
+    workspace_root: &Path,
+    obj: &Map<String, Value>,
+    allow_path_outside_workspace: bool,
+) -> SkillResult<String> {
+    let path = required_str(obj, "path")?;
+    let real = resolve_path(workspace_root, path, allow_path_outside_workspace)?;
+    match parse_structured_root(&real, obj.get("format").and_then(Value::as_str)) {
+        Ok((format, root_value)) => Ok(json!({
+            "action": "validate_structured",
+            "path": path,
+            "resolved_path": real.display().to_string(),
+            "format": format,
+            "valid": true,
+            "root_type": json_value_type(&root_value),
+        })
+        .to_string()),
+        Err(err) if matches!(err.kind, "invalid_data" | "invalid_input") => Ok(json!({
+            "action": "validate_structured",
+            "path": path,
+            "resolved_path": real.display().to_string(),
+            "format": obj
+                .get("format")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| detect_format_from_path(&real)),
+            "valid": false,
+            "error_kind": err.kind,
+            "error_text": err.message,
+        })
+        .to_string()),
+        Err(err) => Err(err),
     }
 }
 
@@ -1682,6 +1720,10 @@ fn lookup_field_value_with_resolution<'a>(value: &'a Value, field_path: &str) ->
         };
     }
 
+    if let Some(found) = lookup_array_item_key_path(value, field_path) {
+        return found;
+    }
+
     let Some(key) = bare_field_key_selector(field_path) else {
         return FieldLookup {
             value: None,
@@ -1755,6 +1797,116 @@ fn collect_bare_key_matches<'a>(
         }
         _ => {}
     }
+}
+
+fn lookup_array_item_key_path<'a>(value: &'a Value, field_path: &str) -> Option<FieldLookup<'a>> {
+    let segments = split_field_path(field_path)?;
+    if segments.len() < 2 {
+        return None;
+    }
+    let selector_value = segments[0].trim();
+    if selector_value.is_empty() || selector_value.contains('[') || selector_value.contains(']') {
+        return None;
+    }
+    let nested_field_path = segments[1..].join(".");
+    if nested_field_path.trim().is_empty() {
+        return None;
+    }
+
+    let mut matches = Vec::new();
+    collect_array_item_key_path_matches(
+        value,
+        selector_value,
+        &nested_field_path,
+        "",
+        &mut matches,
+    );
+    if matches.len() == 1 {
+        let (resolved_field_path, found) = matches.remove(0);
+        return Some(FieldLookup {
+            value: Some(found),
+            resolved_field_path: Some(resolved_field_path),
+            match_strategy: "array_item_key_path",
+            match_count: 1,
+        });
+    }
+    (!matches.is_empty()).then_some(FieldLookup {
+        value: None,
+        resolved_field_path: None,
+        match_strategy: "array_item_key_path",
+        match_count: matches.len(),
+    })
+}
+
+fn collect_array_item_key_path_matches<'a>(
+    value: &'a Value,
+    selector_value: &str,
+    nested_field_path: &str,
+    current_path: &str,
+    out: &mut Vec<(String, &'a Value)>,
+) {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                let child_path = if current_path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{current_path}.{key}")
+                };
+                collect_array_item_key_path_matches(
+                    child,
+                    selector_value,
+                    nested_field_path,
+                    &child_path,
+                    out,
+                );
+            }
+        }
+        Value::Array(items) => {
+            for (idx, child) in items.iter().enumerate() {
+                let item_path = if current_path.is_empty() {
+                    format!("[{idx}]")
+                } else {
+                    format!("{current_path}[{idx}]")
+                };
+                if let Some((selector_key, nested_value)) =
+                    array_item_key_path_match(child, selector_value, nested_field_path)
+                {
+                    let resolved_path = format!(
+                        "{current_path}[{selector_key}={selector_value}].{nested_field_path}"
+                    );
+                    out.push((resolved_path, nested_value));
+                }
+                collect_array_item_key_path_matches(
+                    child,
+                    selector_value,
+                    nested_field_path,
+                    &item_path,
+                    out,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+fn array_item_key_path_match<'a>(
+    item: &'a Value,
+    selector_value: &str,
+    nested_field_path: &str,
+) -> Option<(&'static str, &'a Value)> {
+    let map = item.as_object()?;
+    for selector_key in ["name", "id", "key"] {
+        if map
+            .get(selector_key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == selector_value)
+        {
+            let nested_value = lookup_field_value(item, nested_field_path)?;
+            return Some((selector_key, nested_value));
+        }
+    }
+    None
 }
 
 fn split_field_path(field_path: &str) -> Option<Vec<&str>> {
@@ -2286,6 +2438,51 @@ planner_kind = "tool"
     }
 
     #[test]
+    fn extract_field_resolves_array_item_key_path_for_toml() {
+        let root = temp_root("extract_field_array_item_key");
+        let target = root.join("skills_registry.toml");
+        std::fs::write(
+            &target,
+            r#"
+[[skills]]
+name = "read_file"
+planner_kind = "tool"
+
+[[skills]]
+name = "stock"
+planner_kind = "skill"
+
+[[skills]]
+name = "run_cmd"
+planner_kind = "tool"
+"#,
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("format".to_string(), json!("toml"));
+        obj.insert("field_path".to_string(), json!("run_cmd.planner_kind"));
+
+        let out = extract_field(&root, &obj, true).expect("extract field");
+        let value: Value = serde_json::from_str(&out).expect("json");
+
+        assert_eq!(value.get("exists").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            value.get("value_text").and_then(Value::as_str),
+            Some("tool")
+        );
+        assert_eq!(
+            value.get("resolved_field_path").and_then(Value::as_str),
+            Some("skills[name=run_cmd].planner_kind")
+        );
+        assert_eq!(
+            value.get("match_strategy").and_then(Value::as_str),
+            Some("array_item_key_path")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn extract_field_resolves_unique_bare_key_in_nested_toml() {
         let root = temp_root("extract_field_unique_bare_key");
         let target = root.join("config.toml");
@@ -2527,5 +2724,54 @@ name = "beta"
             "permissions": {"allow_path_outside_workspace": false}
         }))));
         assert!(!context_allows_path_outside_workspace(None));
+    }
+
+    #[test]
+    fn validate_structured_reports_parse_success_without_listing_keys() {
+        let root = temp_root("validate_structured_ok");
+        std::fs::write(
+            root.join("config.toml"),
+            "[llm]\nselected_vendor = \"mimo\"\n",
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!("config.toml"));
+        obj.insert("format".to_string(), json!("toml"));
+
+        let out = validate_structured(&root, &obj, true).expect("validate");
+        let value: Value = serde_json::from_str(&out).expect("json");
+        assert_eq!(
+            value.get("action").and_then(Value::as_str),
+            Some("validate_structured")
+        );
+        assert_eq!(value.get("valid").and_then(Value::as_bool), Some(true));
+        assert!(value.get("keys").is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn validate_structured_reports_parse_failure_as_structured_output() {
+        let root = temp_root("validate_structured_fail");
+        std::fs::write(
+            root.join("config.toml"),
+            "[llm\nselected_vendor = \"mimo\"\n",
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!("config.toml"));
+        obj.insert("format".to_string(), json!("toml"));
+
+        let out = validate_structured(&root, &obj, true).expect("validate");
+        let value: Value = serde_json::from_str(&out).expect("json");
+        assert_eq!(value.get("valid").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            value.get("error_kind").and_then(Value::as_str),
+            Some("invalid_data")
+        );
+        assert!(value
+            .get("error_text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| text.contains("toml parse failed")));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

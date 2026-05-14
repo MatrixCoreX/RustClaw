@@ -221,6 +221,7 @@ fn plan_trace_json(plan: &crate::PlanResult) -> Value {
 fn route_result_json(route: &crate::RouteResult) -> Value {
     json!({
         "route_gate_kind": route.gate_kind().as_str(),
+        "first_layer_decision": route.first_layer_decision().as_str(),
         "routed_mode": route.routed_mode.as_str(),
         "needs_clarify": route.needs_clarify,
         "should_refresh_long_term_memory": route.should_refresh_long_term_memory,
