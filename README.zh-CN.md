@@ -44,7 +44,10 @@ flowchart TD
     E2 -->|恢复执行| H
     E2 -->|标准 ask| F{第一层决策}
     F -->|Clarify| G[澄清问句]
-    F -->|DirectAnswer| CH[构建直接回答聊天上下文与提示词]
+    F -->|DirectAnswer| DG[直接回答预检 gate<br/>契约 / advice-only 检查]
+    DG -->|直接回答| CH[构建直接回答聊天上下文与提示词]
+    DG -->|澄清| G
+    DG -->|提升为执行| H
     CH --> CR[聊天回复 LLM]
     F -->|PlannerExecute| H[使用执行提示词 / 上下文]
     SK[技能注册表 + 生成技能文档<br/>configs/skills_registry.toml] --> I
@@ -93,7 +96,8 @@ flowchart TD
 - **路由后策略**：ask 上下文包可用之后、分发之前处理 locator 解析、缺 locator 澄清和契约护栏；它可以细化门控，但不是语义快路径。
 - **调度 / 恢复支路**：调度器触发的直达文本任务可在归一化前收尾；普通调度直达请求可在路由后、进入规划器前完成收尾；恢复讨论走恢复提示词；恢复执行回到正常执行运行时。
 - **第一层决策**：运行时门控收敛为 `Clarify / DirectAnswer / PlannerExecute`。`AskMode` 是代码分发类型；旧的 `RoutedMode`（`AskClarify`、`Chat`、`Act`、`ChatAct`）只保留为兼容/收尾形状提示，不再是权威第一层门控。
-- **聊天回复 LLM**：`DirectAnswer` 直接走聊天回复；纯聊天不进入执行规划器循环。
+- **直接回答预检 gate**：正常聊天答案发送前，运行时可先跑轻量契约 / advice-only 检查。纯聊天仍保持 `DirectAnswer`，但如果发现需要工具证据，会提升到 `PlannerExecute`；如果发现缺少唯一关键参数，会转成一次澄清。
+- **聊天回复 LLM**：只处理确认后的 `DirectAnswer`；纯聊天不进入执行规划器循环。
 - **规划器 / 运行时循环**：`PlannerExecute` 下多轮执行；规划步骤类型为 `think`、`call_tool`、`call_skill`、`synthesize_answer`、`respond`（当前**没有** `delegate` 类型；子任务前缀多用于日志与追踪，而非独立的子循环委派）。规划器可见的 `fs_basic` / `config_basic` 是虚拟工具契约，会按结构化 action 映射到现有稳定的文件系统/配置底层工具。
 - **执行提示词 / 上下文**：`PlannerExecute` 执行复用 ask 上下文包和解析后的提示词，避免记忆压过最新用户指令。
 - **技能注册表 + 生成技能文档**：规划器可见技能来自运行时 skill views 与生成接口文档，主要由 `configs/skills_registry.toml`、`crates/skills/*/INTERFACE.md`、`prompts/layers/generated/skills/*` 提供。新增技能应扩展这些契约，而不是新增特定语言的规划分支。
@@ -117,7 +121,10 @@ flowchart TD
     E2 -->|恢复讨论| Fr[恢复讨论提示词]
     E2 -->|恢复执行| H
     E2 -->|first_layer_decision=clarify| F[澄清问句]
-    E2 -->|first_layer_decision=direct_answer| G[构建直接回答聊天提示词]
+    E2 -->|first_layer_decision=direct_answer| G0[直接回答预检 LLM<br/>契约 / advice-only 检查]
+    G0 -->|直接回答| G[构建直接回答聊天提示词]
+    G0 -->|澄清| F
+    G0 -->|提升为执行| H
     E2 -->|first_layer_decision=planner_execute| H[构建规划提示词]
     SK[技能注册表 + 生成技能文档] --> H
     G --> Ic[LLM 请求2<br/>聊天回复]
@@ -157,7 +164,8 @@ flowchart TD
 - 本图只覆盖常规 `kind=ask` 的 LLM 路径。`kind=run_skill` 和调度器触发的直达文本 ask 不发生归一化 / 规划器 LLM 请求，会走各自的直接任务路径收尾。
 - **构建聊天 / 规划提示词**：把模式、会话态、工作上下文与输出约定拼进后续请求。
 - **技能注册表 + 生成技能文档**：规划提示词从已启用技能视图与生成接口文档构建，技能能力增长应由数据/契约驱动。
-- **LLM 请求2**：**DirectAnswer** 通常只需**一次**聊天补全后进入收尾。**PlannerExecute** 则按循环进行**一轮或多轮**规划 LLM；规划 JSON 只包含 `{think, call_tool, call_skill, synthesize_answer, respond}`（**没有** `clarify`、`delegate` 步骤类型）。旧的 `Act / ChatAct` 仍可影响收尾形状，但不再决定第一层门控。
+- **DirectAnswer 预检**：**DirectAnswer** 在发送聊天回复前可能先跑一次轻量预检 LLM。预检确认纯回答时才进入聊天回复并收尾；发现缺少必要信息时转澄清；发现需要真实工具/工作区/系统证据时提升到 `PlannerExecute`。
+- **PlannerExecute**：按循环进行**一轮或多轮**规划 LLM；规划 JSON 只包含 `{think, call_tool, call_skill, synthesize_answer, respond}`（**没有** `clarify`、`delegate` 步骤类型）。旧的 `Act / ChatAct` 仍可影响收尾形状，但不再决定第一层门控。
 - **执行工具或技能**：跑真实能力，避免模型假装已执行。技能执行使用共享调度层；只有 runner 技能会启动 `skill-runner`。
 - **synthesize_answer**：当规划里包含该步骤时会**额外**触发合成 LLM；可与执行交错，**不一定**是「全部规划结束后的固定第三次 LLM」。
 - **观测输出收尾**：如果计划在观测步骤后没有终端 `respond`，运行时仍可发布结构化直答，或走观测答案合成路径。可恢复失败会作为已尝试方法证据交给后续规划轮，而不是藏在 shell fallback 里。
