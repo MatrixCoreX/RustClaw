@@ -228,7 +228,7 @@ pub(crate) fn extract_filename_candidates(text: &str) -> Vec<String> {
     static RE: OnceLock<Regex> = OnceLock::new();
     let regex = RE.get_or_init(|| {
         Regex::new(
-            r#"(?P<name>"[^"\n]+?\.[A-Za-z0-9]{1,16}"|'[^'\n]+?\.[A-Za-z0-9]{1,16}'|[^\s/\\]+?\.[A-Za-z0-9]{1,16})"#,
+            r#"(?P<name>"[^"\n]+\.[A-Za-z0-9]{1,16}"|'[^'\n]+\.[A-Za-z0-9]{1,16}'|[^\s/\\,，、;；:：]+\.[A-Za-z0-9]{1,16})"#,
         )
         .expect("filename regex")
     });

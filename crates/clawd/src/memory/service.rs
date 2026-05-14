@@ -298,6 +298,9 @@ pub(crate) fn dynamic_chat_memory_budget_chars(
 }
 
 pub(crate) fn estimate_context_window_tokens(provider: &LlmProviderRuntime) -> usize {
+    if let Some(configured) = provider.config.context_window_tokens {
+        return configured.max(512);
+    }
     let model = provider.config.model.trim().to_ascii_lowercase();
     if let Some(explicit) = extract_model_k_or_m_capacity_tokens(&model) {
         return explicit.max(512);
@@ -306,9 +309,7 @@ pub(crate) fn estimate_context_window_tokens(provider: &LlmProviderRuntime) -> u
         "anthropic_claude" => 200_000,
         "google_gemini" => 256_000,
         "openai_compat" => {
-            if model.contains("minimax") {
-                2_013
-            } else if model.contains("gpt-4.1")
+            if model.contains("gpt-4.1")
                 || model.contains("gpt-4o")
                 || model.contains("o3")
                 || model.contains("o4")
@@ -741,14 +742,45 @@ pub(crate) fn insert_memory_with_kind(
 #[cfg(test)]
 mod tests {
     use super::{
-        knowledge_source_ref, parse_long_term_refresh_llm_out, validate_knowledge_candidate,
-        KnowledgeCandidateLlmOut, KNOWLEDGE_KIND_PROJECT_FACT, KNOWLEDGE_KIND_RULE,
-        KNOWLEDGE_KIND_TRANSIENT, KNOWLEDGE_KIND_USER_PREFERENCE, KNOWLEDGE_KIND_USER_PROFILE_FACT,
-        KNOWLEDGE_NAMESPACE_NONE, KNOWLEDGE_NAMESPACE_PROJECT_FACTS,
-        KNOWLEDGE_NAMESPACE_USER_PROFILE,
+        estimate_context_window_tokens, knowledge_source_ref, parse_long_term_refresh_llm_out,
+        validate_knowledge_candidate, KnowledgeCandidateLlmOut, KNOWLEDGE_KIND_PROJECT_FACT,
+        KNOWLEDGE_KIND_RULE, KNOWLEDGE_KIND_TRANSIENT, KNOWLEDGE_KIND_USER_PREFERENCE,
+        KNOWLEDGE_KIND_USER_PROFILE_FACT, KNOWLEDGE_NAMESPACE_NONE,
+        KNOWLEDGE_NAMESPACE_PROJECT_FACTS, KNOWLEDGE_NAMESPACE_USER_PROFILE,
     };
+    use claw_core::config::{LlmProviderConfig, LlmProviderParams};
     use serde_json::Value;
     use std::collections::HashSet;
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
+
+    fn test_provider_with_context_window(
+        context_window_tokens: Option<usize>,
+    ) -> crate::LlmProviderRuntime {
+        crate::LlmProviderRuntime {
+            config: LlmProviderConfig {
+                name: "vendor-test".to_string(),
+                provider_type: "openai_compat".to_string(),
+                base_url: "https://example.invalid/v1".to_string(),
+                api_key: "test-key".to_string(),
+                model: "opaque-compatible-model".to_string(),
+                context_window_tokens,
+                priority: 1,
+                timeout_seconds: 30,
+                max_concurrency: 1,
+                params: LlmProviderParams::default(),
+            },
+            client: reqwest::Client::new(),
+            semaphore: Arc::new(Semaphore::new(1)),
+            breaker: Arc::new(crate::providers::CircuitBreaker::new()),
+        }
+    }
+
+    #[test]
+    fn estimate_context_window_prefers_configured_capacity() {
+        let provider = test_provider_with_context_window(Some(2013));
+        assert_eq!(estimate_context_window_tokens(&provider), 2013);
+    }
 
     #[test]
     fn parse_long_term_refresh_output_falls_back_to_plain_summary() {

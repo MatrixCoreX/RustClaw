@@ -32,6 +32,7 @@ Canonical output contract:
 - For `direct_answer`: keep `requires_content_evidence=false`, `delivery_required=false`, `locator_kind="none"`, `delivery_intent="none"`.
 - For `planner_execute`: set `requires_content_evidence=true` when evidence is needed; set `locator_kind` and `semantic_kind` when clear; otherwise keep `semantic_kind="none"` and let the planner choose tools.
 - For current workspace/project/repository synthesis, use `locator_kind="current_workspace"` and `semantic_kind="workspace_project_summary"` when appropriate.
+- For existing-file delivery, including a file selected from a directory/listing by ordinal or order, use `decision="planner_execute"`, `response_shape="file_token"`, `delivery_required=true`, `delivery_intent="file_single"`, and `requires_content_evidence=true`. The planner/finalizer must deliver `FILE:<path>`, not a bare filename, a prose description, or pasted content.
 
 Input:
 
@@ -86,11 +87,33 @@ Current workspace project article:
   }
 }
 
+Existing selected file delivery:
+{
+  "decision": "planner_execute",
+  "reason": "existing_file_delivery_requires_runtime_resolution_and_file_token",
+  "confidence": 0.9,
+  "clarify_question": "",
+  "resolved_user_intent": "Resolve and deliver the selected existing file from the target directory.",
+  "output_contract": {
+    "response_shape": "file_token",
+    "exact_sentence_count": null,
+    "requires_content_evidence": true,
+    "delivery_required": true,
+    "locator_kind": "path",
+    "delivery_intent": "file_single",
+    "semantic_kind": "none",
+    "locator_hint": "",
+    "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
+  }
+}
+
 ## Multilingual Reinforcement
 ### zh-CN
 - “只聊天/不要读取/不要执行/不要使用工具”这类约束本身不是执行意图；如果交付物能用纯讨论完成，选择 `direct_answer`。
 - 当前项目、当前仓库、这里的代码、配置、文件、目录、系统状态等事实型请求，应选择 `planner_execute`，不要让 chat 编造。
 - 缺少必要对象时用 `clarify`，不要猜路径或名字。
+- 如果中文语义是在要文件本体，例如发送/交付一个已存在文件或目录列表里选中的文件，输出合同应是 `file_token`，不能只返回文件名。
 ### en
 - Imperative tone alone is not execution intent. Grounding requirements decide the route.
 - For current workspace/repository/project claims, prefer `planner_execute` unless the user explicitly asks for a non-observational discussion.
+- If the semantic goal is to receive the existing file itself, use file-token delivery rather than filename-only text.

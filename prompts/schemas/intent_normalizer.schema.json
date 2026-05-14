@@ -63,9 +63,15 @@
       "minimum": 0.0,
       "maximum": 1.0
     },
+    "decision": {
+      "type": "string",
+      "description": "Primary first-layer decision. This is the semantic gate; `mode` remains a legacy compatibility/finalization hint.",
+      "enum": ["clarify", "direct_answer", "planner_execute", ""],
+      "default": ""
+    },
     "mode": {
       "type": "string",
-      "description": "Terminal routed mode. `parse_mode_text` is permissive (substring + quoted-form match), but the canonical tokens are listed below.",
+      "description": "Legacy terminal routed mode / execution finalization hint. `parse_mode_text` accepts canonical enum tokens after schema repair.",
       "enum": ["chat", "act", "chat_act", "ask_clarify"]
     },
     "schedule_intent": {
@@ -137,6 +143,9 @@
             "content_excerpt_summary",
             "document_excerpt_summary",
             "file_excerpt_summary",
+            "excerpt_kind_judgment",
+            "content_excerpt_judgment",
+            "log_vs_checklist",
             "recent_artifacts_judgment",
             "artifact_style_classification",
             "workspace_project_summary",

@@ -3397,6 +3397,44 @@ struct UsageHistoryPage {
 struct SkillListItem {
     name: String,
     description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    planner_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    group: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    risk_level: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_invocable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    requires_confirmation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    side_effect: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retryable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime_available: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_os: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unsupported_os: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    missing_required_bins: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    missing_optional_bins: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    supported_os: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    required_bins: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    optional_bins: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    platform_notes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    capabilities: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -6020,10 +6058,7 @@ async fn list_skills(
     skills.sort_unstable();
     let skill_items = skills
         .iter()
-        .map(|name| SkillListItem {
-            name: name.clone(),
-            description: ui_skill_description(&state, name),
-        })
+        .map(|name| build_skill_list_item(&state, name))
         .collect::<Vec<_>>();
     (
         StatusCode::OK,
@@ -6037,6 +6072,122 @@ async fn list_skills(
             error: None,
         }),
     )
+}
+
+fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
+    let registry_entry = state
+        .get_skills_registry()
+        .and_then(|registry| registry.get(skill_name).cloned());
+    let planner_kind = state
+        .get_skills_registry()
+        .and_then(|registry| registry.planner_kind(skill_name));
+    let availability = registry_entry
+        .as_ref()
+        .map(crate::skill_availability::evaluate_entry_availability);
+    let description = registry_entry
+        .as_ref()
+        .and_then(|entry| entry.description.as_ref())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| ui_skill_description(state, skill_name));
+    SkillListItem {
+        name: skill_name.to_string(),
+        description,
+        kind: registry_entry
+            .as_ref()
+            .map(|entry| skill_kind_token(entry.kind).to_string()),
+        planner_kind: planner_kind.map(|kind| kind.as_token().to_string()),
+        group: registry_entry.as_ref().and_then(|entry| {
+            entry
+                .group
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        }),
+        risk_level: registry_entry.as_ref().and_then(|entry| {
+            entry
+                .risk_level
+                .map(skill_risk_token)
+                .map(ToString::to_string)
+        }),
+        auto_invocable: registry_entry
+            .as_ref()
+            .and_then(|entry| entry.auto_invocable),
+        requires_confirmation: registry_entry
+            .as_ref()
+            .and_then(|entry| entry.requires_confirmation),
+        side_effect: registry_entry.as_ref().and_then(|entry| entry.side_effect),
+        retryable: registry_entry.as_ref().and_then(|entry| entry.retryable),
+        output_kind: registry_entry
+            .as_ref()
+            .map(|entry| output_kind_token(entry.output_kind).to_string()),
+        runtime_available: availability.as_ref().map(|item| item.is_available()),
+        current_os: availability.as_ref().map(|item| item.current_os.clone()),
+        unsupported_os: availability
+            .as_ref()
+            .and_then(|item| item.unsupported_os.clone()),
+        missing_required_bins: availability
+            .as_ref()
+            .map(|item| item.missing_required_bins.clone())
+            .filter(|items| !items.is_empty()),
+        missing_optional_bins: availability
+            .as_ref()
+            .map(|item| item.missing_optional_bins.clone())
+            .filter(|items| !items.is_empty()),
+        supported_os: registry_entry
+            .as_ref()
+            .map(|entry| entry.supported_os.clone())
+            .filter(|items| !items.is_empty()),
+        required_bins: registry_entry
+            .as_ref()
+            .map(|entry| entry.required_bins.clone())
+            .filter(|items| !items.is_empty()),
+        optional_bins: registry_entry
+            .as_ref()
+            .map(|entry| entry.optional_bins.clone())
+            .filter(|items| !items.is_empty()),
+        platform_notes: registry_entry
+            .as_ref()
+            .map(|entry| entry.platform_notes.clone())
+            .filter(|items| !items.is_empty()),
+        capabilities: registry_entry
+            .as_ref()
+            .map(|entry| {
+                entry
+                    .resolved_capabilities
+                    .iter()
+                    .map(|cap| cap.as_token())
+                    .collect::<Vec<_>>()
+            })
+            .filter(|items| !items.is_empty()),
+    }
+}
+
+fn skill_kind_token(kind: SkillKind) -> &'static str {
+    match kind {
+        SkillKind::Builtin => "builtin",
+        SkillKind::Runner => "runner",
+        SkillKind::External => "external",
+    }
+}
+
+fn output_kind_token(kind: claw_core::skill_registry::OutputKind) -> &'static str {
+    match kind {
+        claw_core::skill_registry::OutputKind::Text => "text",
+        claw_core::skill_registry::OutputKind::File => "file",
+        claw_core::skill_registry::OutputKind::Image => "image",
+        claw_core::skill_registry::OutputKind::Mixed => "mixed",
+    }
+}
+
+fn skill_risk_token(kind: claw_core::skill_registry::SkillRiskLevel) -> &'static str {
+    match kind {
+        claw_core::skill_registry::SkillRiskLevel::Unknown => "unknown",
+        claw_core::skill_registry::SkillRiskLevel::Low => "low",
+        claw_core::skill_registry::SkillRiskLevel::Medium => "medium",
+        claw_core::skill_registry::SkillRiskLevel::High => "high",
+    }
 }
 
 fn ui_skill_description(state: &AppState, skill_name: &str) -> Option<String> {
@@ -8101,6 +8252,7 @@ fn build_llm_test_runtime(
         base_url: vendor_base_url.trim().to_string(),
         api_key: vendor_api_key.trim().to_string(),
         model: selected_model.trim().to_string(),
+        context_window_tokens: None,
         priority: 1,
         timeout_seconds: 20,
         max_concurrency: 1,
@@ -8407,6 +8559,10 @@ async fn get_skills_config(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let skill_items = managed
+        .iter()
+        .map(|name| build_skill_list_item(&state, name))
+        .collect::<Vec<_>>();
     (
         StatusCode::OK,
         Json(ApiResponse {
@@ -8421,6 +8577,7 @@ async fn get_skills_config(
                 "tool_skill_names": tool_skill_names,
                 "locked_skill_names": locked_skill_names,
                 "external_skill_names": external_skill_names,
+                "skill_items": skill_items,
                 "effective_enabled_skills_preview": effective,
                 "runtime_enabled_skills": runtime_visible,
                 "restart_required": restart_required

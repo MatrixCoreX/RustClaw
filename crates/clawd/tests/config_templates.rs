@@ -358,6 +358,8 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("config_guard", &["fs.read"]),
         ("doc_parse", &["fs.read"]),
         ("extension_manager", &["llm"]),
+        ("config_basic", &["fs.read"]),
+        ("fs_basic", &["fs.read", "fs.write"]),
         ("fs_search", &["fs.read"]),
         ("http_basic", &["net"]),
         ("image_edit", &["fs.write", "llm", "net"]),
@@ -390,6 +392,8 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         ("config_guard", &["fs.read"]),
         ("doc_parse", &["fs.read"]),
         ("extension_manager", &["llm"]),
+        ("config_basic", &["fs.read"]),
+        ("fs_basic", &["fs.read", "fs.write"]),
         ("fs_search", &["fs.read"]),
         ("http_basic", &["net"]),
         (

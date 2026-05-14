@@ -520,6 +520,269 @@ fn normalize_file_token_delivery_from_observed_paths(
     loop_state.delivery_messages = replacements;
 }
 
+fn planned_file_delivery_used_unresolved_runtime_placeholder(loop_state: &LoopState) -> bool {
+    loop_state
+        .round_traces
+        .iter()
+        .rev()
+        .filter_map(|round| round.plan_result.as_ref())
+        .any(|plan| {
+            plan.steps.iter().any(|step| {
+                if step.action_type != "respond" {
+                    return false;
+                }
+                let content = step
+                    .args
+                    .get("content")
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .unwrap_or_default();
+                crate::finalize::parse_delivery_token(content).is_some()
+                    && content.contains("{{")
+                    && content.contains("}}")
+            }) || {
+                let raw = plan.raw_plan_text.as_str();
+                raw.contains("FILE:") && raw.contains("{{") && raw.contains("}}")
+            }
+        })
+}
+
+fn inventory_root_path(value: &serde_json::Value) -> Option<PathBuf> {
+    value
+        .get("resolved_path")
+        .or_else(|| value.get("path"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+}
+
+fn inventory_ranked_for_single_file_selection(value: &serde_json::Value) -> bool {
+    value
+        .get("sort_by")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .is_some_and(|sort_by| {
+            matches!(
+                sort_by,
+                "mtime_desc" | "mtime_asc" | "size_desc" | "size_asc"
+            )
+        })
+}
+
+fn inventory_has_deterministic_order(value: &serde_json::Value) -> bool {
+    value
+        .get("sort_by")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .is_some_and(|sort_by| {
+            matches!(
+                sort_by,
+                "name" | "mtime_desc" | "mtime_asc" | "size_desc" | "size_asc"
+            )
+        })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlannedInventorySelection {
+    First,
+    Last,
+}
+
+fn planned_inventory_selection_from_template_text(text: &str) -> Option<PlannedInventorySelection> {
+    let mut rest = text;
+    let mut selection = None;
+    while let Some(start) = rest.find("{{") {
+        let after_start = &rest[start + 2..];
+        let Some(end) = after_start.find("}}") else {
+            break;
+        };
+        let expression = after_start[..end]
+            .chars()
+            .filter(|ch| !ch.is_whitespace())
+            .collect::<String>()
+            .to_ascii_lowercase();
+        rest = &after_start[end + 2..];
+
+        if !expression.contains("last_output") {
+            continue;
+        }
+        let next = if expression.contains(".last(")
+            || expression.contains("[-1]")
+            || expression.contains(".rev().next(")
+        {
+            PlannedInventorySelection::Last
+        } else if expression.contains(".first(")
+            || expression.contains("[0]")
+            || expression.contains(".next(")
+        {
+            PlannedInventorySelection::First
+        } else {
+            continue;
+        };
+        if selection.is_some_and(|existing| existing != next) {
+            return None;
+        }
+        selection = Some(next);
+    }
+    selection
+}
+
+fn planned_file_delivery_inventory_selection(
+    loop_state: &LoopState,
+) -> Option<PlannedInventorySelection> {
+    for plan in loop_state
+        .round_traces
+        .iter()
+        .rev()
+        .filter_map(|round| round.plan_result.as_ref())
+    {
+        for step in &plan.steps {
+            if step.action_type != "respond" {
+                continue;
+            }
+            let Some(content) = step
+                .args
+                .get("content")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+            else {
+                continue;
+            };
+            if crate::finalize::parse_delivery_token(content).is_some()
+                || (content.contains("FILE:") && content.contains("{{"))
+            {
+                if let Some(selection) = planned_inventory_selection_from_template_text(content) {
+                    return Some(selection);
+                }
+            }
+        }
+        let raw = plan.raw_plan_text.as_str();
+        if raw.contains("FILE:") && raw.contains("{{") && raw.contains("}}") {
+            if let Some(selection) = planned_inventory_selection_from_template_text(raw) {
+                return Some(selection);
+            }
+        }
+    }
+    None
+}
+
+fn inventory_candidate_names(value: &serde_json::Value) -> Vec<String> {
+    if let Some(names) = value.get("names").and_then(|value| value.as_array()) {
+        return names
+            .iter()
+            .filter_map(|value| value.as_str())
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(ToString::to_string)
+            .collect();
+    }
+    value
+        .get("entries")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .get("kind")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .map(|kind| kind == "file")
+                .unwrap_or(true)
+        })
+        .filter_map(|entry| entry.get("name").and_then(|value| value.as_str()))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn observed_inventory_file_candidates(value: &serde_json::Value) -> Option<Vec<PathBuf>> {
+    if value.get("action").and_then(|value| value.as_str()) != Some("inventory_dir") {
+        return None;
+    }
+    let root = inventory_root_path(value)?;
+    let mut candidates = Vec::new();
+    for name in inventory_candidate_names(value) {
+        let name_path = Path::new(&name);
+        let candidate = if name_path.is_absolute() {
+            name_path.to_path_buf()
+        } else {
+            root.join(name_path)
+        };
+        if candidate.is_file() {
+            candidates.push(candidate.canonicalize().unwrap_or(candidate));
+        }
+    }
+    (!candidates.is_empty()).then_some(candidates)
+}
+
+fn direct_file_token_from_observed_inventory(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if !route_requires_file_token(agent_run_context) {
+        return None;
+    }
+    let malformed_placeholder_delivery =
+        planned_file_delivery_used_unresolved_runtime_placeholder(loop_state);
+    let planned_inventory_selection = planned_file_delivery_inventory_selection(loop_state);
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok()
+            || !matches!(
+                step.skill.as_str(),
+                "fs_basic" | "system_basic" | "list_dir"
+            )
+        {
+            continue;
+        }
+        let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|output| !output.is_empty())
+        else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+            continue;
+        };
+        let Some(candidates) = observed_inventory_file_candidates(&value) else {
+            continue;
+        };
+        let selected = if candidates.len() == 1 {
+            candidates.first()
+        } else if planned_inventory_selection.is_some() && inventory_has_deterministic_order(&value)
+        {
+            match planned_inventory_selection? {
+                PlannedInventorySelection::First => candidates.first(),
+                PlannedInventorySelection::Last => candidates.last(),
+            }
+        } else if malformed_placeholder_delivery
+            && inventory_ranked_for_single_file_selection(&value)
+        {
+            candidates.first()
+        } else {
+            None
+        }?;
+        return Some((
+            format!("FILE:{}", selected.display()),
+            crate::task_journal::TaskJournalFinalizerSummary {
+                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                contract_ok: true,
+                completion_ok: Some(true),
+                grounded_ok: Some(true),
+                format_ok: Some(true),
+                needs_clarify: Some(false),
+                used_evidence_ids_count: 1,
+                ..Default::default()
+            },
+        ));
+    }
+    None
+}
+
 async fn enforce_delivery_output_contract(
     state: &AppState,
     task: &ClaimedTask,
@@ -671,6 +934,20 @@ async fn discard_meta_respond_placeholder_for_content_evidence(
     ) else {
         return;
     };
+    if !raw_passthrough
+        && content_evidence_terminal_respond_is_contractual_answer(
+            loop_state,
+            agent_run_context,
+            respond,
+        )
+    {
+        info!(
+            "content_evidence_keep_contractual_terminal_respond task_id={} text={}",
+            task.task_id,
+            crate::truncate_for_log(respond)
+        );
+        return;
+    }
     // §3.4 finalize-tier: drop_passthrough_delivery 是 finalize 决策层。
     let meta_placeholder =
         crate::semantic_judge::is_meta_respond_instruction(state, task, respond).await;
@@ -760,6 +1037,81 @@ fn should_drop_passthrough_delivery_for_content_evidence(
     Some(raw_passthrough)
 }
 
+fn content_evidence_terminal_respond_is_contractual_answer(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    respond: &str,
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if !route.output_contract.requires_content_evidence {
+        return false;
+    }
+    if !matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Free
+            | crate::OutputResponseShape::OneSentence
+            | crate::OutputResponseShape::Strict
+    ) {
+        return false;
+    }
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::RawCommandOutput
+    ) {
+        return false;
+    }
+    let has_answer_semantic = !matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    );
+    let has_constrained_answer_shape = matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Strict
+    );
+    if !has_answer_semantic && !has_constrained_answer_shape {
+        return false;
+    }
+    let answer = respond.trim();
+    if answer.is_empty()
+        || answer.chars().count() > 800
+        || crate::finalize::looks_like_planner_artifact(answer)
+        || crate::finalize::looks_like_internal_trace_artifact(answer)
+        || crate::finalize::is_execution_summary_message(answer)
+        || looks_like_structured_machine_output(answer)
+        || looks_like_raw_command_snapshot(answer)
+    {
+        return false;
+    }
+    if crate::finalize::parse_delivery_token(answer).is_some() {
+        return true;
+    }
+    let has_successful_observation = loop_state.executed_step_results.iter().any(|step| {
+        step.is_ok()
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "think" | "synthesize_answer"
+            )
+            && step
+                .output
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|output| !output.is_empty())
+    });
+    if !has_successful_observation {
+        return false;
+    }
+    !matches!(
+        crate::output_contract_verifier::verify_output_contract(
+            &route.output_contract,
+            answer,
+            &route.resolved_intent,
+        ),
+        crate::output_contract_verifier::OutputContractVerdict::Reject { .. }
+    )
+}
+
 fn discard_raw_passthrough_delivery_when_structured_answer_available(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
@@ -830,7 +1182,7 @@ fn direct_scalar_observed_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.output_contract.response_shape != crate::OutputResponseShape::Scalar {
+    if !route_allows_direct_scalar_observed_answer(route) {
         return None;
     }
     if let Some(answer) = state.and_then(|state| {
@@ -1758,6 +2110,31 @@ fn prefer_observed_answer_for_exact_contract(
             return;
         }
     }
+    let current_delivery_is_publishable_synthesis =
+        delivery_messages.last().is_some_and(|message| {
+            loop_state
+                .last_publishable_synthesis_output
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|synthesis| synthesis == message.trim())
+        });
+    if !current_delivery_is_publishable_synthesis
+        && delivery_messages
+            .last()
+            .is_some_and(|message| planned_delivery_is_explicit_contractual_answer(route, message))
+    {
+        info!(
+            "delivery exact_contract_keep_planned_contractual_answer task_id={} answer={}",
+            task_id,
+            crate::truncate_for_log(
+                delivery_messages
+                    .last()
+                    .map(String::as_str)
+                    .unwrap_or_default()
+            )
+        );
+        return;
+    }
     let Some((answer, summary)) =
         direct_scalar_observed_answer(Some(state), loop_state, agent_run_context).or_else(|| {
             direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
@@ -1808,6 +2185,52 @@ fn prefer_observed_answer_for_exact_contract(
     delivery_messages.push(answer.to_string());
     loop_state.last_user_visible_respond = Some(answer.to_string());
     *finalizer_summary = Some(summary);
+}
+
+fn planned_delivery_is_explicit_contractual_answer(
+    route: &crate::RouteResult,
+    delivery: &str,
+) -> bool {
+    let delivery = delivery.trim();
+    if delivery.is_empty()
+        || crate::finalize::is_execution_summary_message(delivery)
+        || crate::finalize::parse_delivery_token(delivery).is_some()
+        || crate::finalize::looks_like_planner_artifact(delivery)
+        || crate::finalize::looks_like_internal_trace_artifact(delivery)
+    {
+        return false;
+    }
+    matches!(
+        crate::output_contract_verifier::verify_output_contract(
+            &route.output_contract,
+            delivery,
+            ""
+        ),
+        crate::output_contract_verifier::OutputContractVerdict::Pass
+    ) && list_contract_candidate_is_line_list(route, delivery)
+}
+
+fn list_contract_candidate_is_line_list(route: &crate::RouteResult, delivery: &str) -> bool {
+    if !matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::FilePaths
+            | crate::OutputSemanticKind::StructuredKeys
+    ) {
+        return true;
+    }
+    let lines = delivery
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if lines.len() > 1 {
+        return true;
+    }
+    lines
+        .first()
+        .is_some_and(|line| !line.chars().any(char::is_whitespace))
 }
 
 fn direct_non_builtin_skill_raw_answer(
@@ -1882,6 +2305,16 @@ fn direct_non_builtin_skill_raw_answer(
             ..Default::default()
         },
     ))
+}
+
+fn route_allows_direct_scalar_observed_answer(route: &crate::RouteResult) -> bool {
+    if route.output_contract.response_shape == crate::OutputResponseShape::Scalar {
+        return true;
+    }
+    route.output_contract.response_shape == crate::OutputResponseShape::Strict
+        && route.output_contract.exact_sentence_count == Some(1)
+        && !route.output_contract.delivery_required
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
 }
 
 async fn direct_publishable_observed_answer(
@@ -2231,7 +2664,12 @@ fn execution_summary_invocation_label(
     let action_type = plan_step
         .map(|step| step.action_type.as_str())
         .unwrap_or("call_skill");
-    let kind = match (language, action_type == "call_tool") {
+    let skill = plan_step
+        .map(|step| step.skill.as_str())
+        .unwrap_or(step.skill.as_str());
+    let is_tool =
+        action_type == "call_tool" || crate::virtual_tools::is_planner_facing_virtual_tool(skill);
+    let kind = match (language, is_tool) {
         (ExecutionSummaryLanguage::Zh, true) => "工具",
         (ExecutionSummaryLanguage::Zh, false) => "技能",
         (ExecutionSummaryLanguage::En, true) => "tool",
@@ -2241,9 +2679,6 @@ fn execution_summary_invocation_label(
         (ExecutionSummaryLanguage::Ko, true) => "도구",
         (ExecutionSummaryLanguage::Ko, false) => "스킬",
     };
-    let skill = plan_step
-        .map(|step| step.skill.as_str())
-        .unwrap_or(step.skill.as_str());
     let args = plan_step
         .map(|step| safe_execution_args_summary(&step.args, EXECUTION_SUMMARY_ARGS_MAX_CHARS))
         .unwrap_or_default();
@@ -3145,6 +3580,9 @@ fn deterministic_observed_execution_status_answer(
     if steps.len() < 2 || !steps.iter().any(|step| !step.is_ok()) {
         return None;
     }
+    if steps.last().is_some_and(|step| step.is_ok()) {
+        return None;
+    }
 
     let lines = steps
         .iter()
@@ -3824,6 +4262,20 @@ pub(crate) async fn finalize_loop_reply(
     }
 
     if loop_state.delivery_messages.is_empty() {
+        if let Some((answer, summary)) =
+            direct_file_token_from_observed_inventory(&loop_state, agent_run_context)
+        {
+            finalizer_summary = Some(summary);
+            loop_state.last_user_visible_respond = Some(answer.clone());
+            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+            info!(
+                "delivery fallback_from_observed_inventory_file_token task_id={}",
+                task.task_id
+            );
+        }
+    }
+
+    if loop_state.delivery_messages.is_empty() {
         attach_deterministic_execution_failed_step_answer(
             state,
             task,
@@ -4244,10 +4696,11 @@ mod tests {
         attach_execution_recipe_closeout_to_delivery, attach_execution_summary_to_delivery,
         auto_requested_success_marker, build_execution_summary_message,
         build_execution_summary_messages, content_evidence_step_failure_answer,
+        content_evidence_terminal_respond_is_contractual_answer,
         deterministic_missing_observed_target_answer,
-        deterministic_observed_execution_status_answer, direct_non_builtin_skill_raw_answer,
-        direct_publishable_observed_answer, direct_scalar_observed_answer,
-        direct_structured_observed_answer,
+        deterministic_observed_execution_status_answer, direct_file_token_from_observed_inventory,
+        direct_non_builtin_skill_raw_answer, direct_publishable_observed_answer,
+        direct_scalar_observed_answer, direct_structured_observed_answer,
         discard_raw_passthrough_delivery_when_structured_answer_available,
         ensure_requested_success_marker_visible, execution_recipe_closeout_note,
         final_answer_text_from_delivery, finalize_loop_reply, finalizer_requires_clarify,
@@ -4786,6 +5239,67 @@ mod tests {
         assert!(summary.contains("Called skill `archive_basic`"));
         assert!(summary.contains("Called skill `system_basic`"));
         assert!(!summary.contains("Called skill `respond`"));
+    }
+
+    #[test]
+    fn virtual_tool_execution_summary_uses_tool_label_without_plan_step() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"inventory_dir","count":5}"#,
+        ));
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(free_route_result()),
+            ..Default::default()
+        };
+
+        let summary = build_execution_summary_message(
+            &loop_state,
+            Some(&ctx),
+            Some("列出当前目录最近修改的文件"),
+        )
+        .expect("execution summary");
+
+        assert!(summary.contains("调用工具 `fs_basic`"));
+        assert!(!summary.contains("调用技能 `fs_basic`"));
+    }
+
+    #[test]
+    fn virtual_tool_execution_summary_uses_tool_label_even_when_plan_used_call_skill() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "compare file sizes".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "fs_basic".to_string(),
+                    args: serde_json::json!({"action": "stat_paths"}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"path_batch_facts","count":2}"#,
+        ));
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(free_route_result()),
+            ..Default::default()
+        };
+
+        let summary =
+            build_execution_summary_message(&loop_state, Some(&ctx), Some("Compare file sizes."))
+                .expect("execution summary");
+
+        assert!(summary.contains("Called tool `fs_basic`"));
+        assert!(!summary.contains("Called skill `fs_basic`"));
     }
 
     #[tokio::test]
@@ -6245,6 +6759,46 @@ mod tests {
             finalizer_summary.and_then(|summary| summary.completion_ok),
             Some(true)
         );
+    }
+
+    #[test]
+    fn deterministic_observed_execution_status_keeps_recovered_content_answer() {
+        let state = test_state();
+        let task = claimed_task("task-deterministic-observed-status-recovered");
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        let answer =
+            "目标文件不存在；候选路径：plan/llm_first_agent_convergence_plan_20260511_已完成.md"
+                .to_string();
+        loop_state.delivery_messages.push(answer.clone());
+        loop_state.last_user_visible_respond = Some(answer.clone());
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"exists":false}"#,
+        ));
+        loop_state.executed_step_results.push(err_step_result(
+            "step_2",
+            "read_file",
+            "file not found: /home/guagua/rustclaw/plan/missing.md",
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_3",
+            "fs_basic",
+            r#"{"results":["plan/llm_first_agent_convergence_plan_20260511_已完成.md"]}"#,
+        ));
+        let mut finalizer_summary = None;
+
+        assert!(
+            !replace_delivery_with_deterministic_observed_execution_status_answer(
+                &state,
+                &task,
+                "读取缺失文件；如果不存在就返回候选路径",
+                &mut loop_state,
+                &mut finalizer_summary,
+            )
+        );
+        assert_eq!(loop_state.delivery_messages, vec![answer]);
+        assert!(finalizer_summary.is_none());
     }
 
     #[test]
@@ -7786,6 +8340,196 @@ mod tests {
     }
 
     #[test]
+    fn file_delivery_fallback_uses_ranked_inventory_after_placeholder_plan() {
+        let dir = TempDirGuard::new("ranked_inventory_file_delivery");
+        let newest = dir.path().join("newest.txt");
+        let older = dir.path().join("older.txt");
+        fs::write(&newest, "new").expect("write newest");
+        fs::write(&older, "old").expect("write older");
+
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "deliver selected file from directory".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![
+                    crate::PlanStep {
+                        step_id: "step_1".to_string(),
+                        action_type: "call_tool".to_string(),
+                        skill: "fs_basic".to_string(),
+                        args: serde_json::json!({
+                            "action": "list_dir",
+                            "path": dir.path().display().to_string(),
+                            "names_only": true,
+                            "sort_by": "mtime_desc"
+                        }),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    crate::PlanStep {
+                        step_id: "step_2".to_string(),
+                        action_type: "respond".to_string(),
+                        skill: "respond".to_string(),
+                        args: serde_json::json!({
+                            "content": format!("FILE:{}/{{{{last_output}}}}", dir.path().display())
+                        }),
+                        depends_on: vec!["step_1".to_string()],
+                        why: String::new(),
+                    },
+                ])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            &serde_json::json!({
+                "action": "inventory_dir",
+                "resolved_path": dir.path().display().to_string(),
+                "names_only": true,
+                "sort_by": "mtime_desc",
+                "names": ["newest.txt", "older.txt"],
+                "counts": {"files": 2, "dirs": 0, "total": 2}
+            })
+            .to_string(),
+        ));
+        let mut route = scalar_route_result();
+        route.wants_file_delivery = true;
+        route.output_contract.delivery_required = true;
+        route.output_contract.response_shape = OutputResponseShape::FileToken;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = dir.path().display().to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let (token, summary) = direct_file_token_from_observed_inventory(&loop_state, Some(&ctx))
+            .expect("ranked inventory should recover file token");
+
+        assert_eq!(token, format!("FILE:{}", newest.display()));
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
+    fn file_delivery_fallback_uses_last_inventory_selection_from_placeholder_plan() {
+        let dir = TempDirGuard::new("last_inventory_file_delivery");
+        let first = dir.path().join("alpha.txt");
+        let last = dir.path().join("zeta.txt");
+        fs::write(&first, "first").expect("write first");
+        fs::write(&last, "last").expect("write last");
+
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "deliver selected file from directory".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![
+                    crate::PlanStep {
+                        step_id: "step_1".to_string(),
+                        action_type: "call_tool".to_string(),
+                        skill: "fs_basic".to_string(),
+                        args: serde_json::json!({
+                            "action": "list_dir",
+                            "path": dir.path().display().to_string(),
+                            "names_only": true,
+                            "sort_by": "name"
+                        }),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    crate::PlanStep {
+                        step_id: "step_2".to_string(),
+                        action_type: "respond".to_string(),
+                        skill: "respond".to_string(),
+                        args: serde_json::json!({
+                            "content": format!(
+                                "FILE:{}/{{{{last_output.lines().last().unwrap()}}}}",
+                                dir.path().display()
+                            )
+                        }),
+                        depends_on: vec!["step_1".to_string()],
+                        why: String::new(),
+                    },
+                ])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            &serde_json::json!({
+                "action": "inventory_dir",
+                "resolved_path": dir.path().display().to_string(),
+                "names_only": true,
+                "sort_by": "name",
+                "names": ["alpha.txt", "zeta.txt"],
+                "counts": {"files": 2, "dirs": 0, "total": 2}
+            })
+            .to_string(),
+        ));
+        let mut route = scalar_route_result();
+        route.wants_file_delivery = true;
+        route.output_contract.delivery_required = true;
+        route.output_contract.response_shape = OutputResponseShape::FileToken;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = dir.path().display().to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let (token, summary) = direct_file_token_from_observed_inventory(&loop_state, Some(&ctx))
+            .expect("explicit last selection over deterministic inventory should recover token");
+
+        assert_eq!(token, format!("FILE:{}", last.display()));
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
+    fn file_delivery_fallback_defers_ambiguous_unranked_inventory() {
+        let dir = TempDirGuard::new("ambiguous_inventory_file_delivery");
+        fs::write(dir.path().join("a.txt"), "a").expect("write a");
+        fs::write(dir.path().join("b.txt"), "b").expect("write b");
+
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            &serde_json::json!({
+                "action": "inventory_dir",
+                "resolved_path": dir.path().display().to_string(),
+                "names_only": true,
+                "sort_by": "name",
+                "names": ["a.txt", "b.txt"],
+                "counts": {"files": 2, "dirs": 0, "total": 2}
+            })
+            .to_string(),
+        ));
+        let mut route = scalar_route_result();
+        route.wants_file_delivery = true;
+        route.output_contract.delivery_required = true;
+        route.output_contract.response_shape = OutputResponseShape::FileToken;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(direct_file_token_from_observed_inventory(&loop_state, Some(&ctx)).is_none());
+    }
+
+    #[test]
     fn direct_scalar_finalize_preserves_planned_count_inventory_breakdown() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state
@@ -8293,6 +9037,48 @@ mod tests {
     }
 
     #[test]
+    fn exact_contract_keeps_planned_subset_over_raw_observed_file_paths() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"find_ext","count":4,"ext":"toml","results":["Cargo.toml","configs/config.toml","configs/skills_registry.toml","crates/clawd/Cargo.toml"]}"#,
+        ));
+        let planned = "Cargo.toml\nconfigs/config.toml\nconfigs/skills_registry.toml".to_string();
+        loop_state.last_user_visible_respond = Some(planned.clone());
+        let mut delivery_messages = vec![planned.clone()];
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::Act;
+        route.ask_mode = crate::AskMode::from_routed_mode(route.routed_mode);
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut finalizer_summary = None;
+
+        prefer_observed_answer_for_exact_contract(
+            &state,
+            "task-planned-subset-file-paths",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut delivery_messages,
+            &mut finalizer_summary,
+        );
+
+        assert_eq!(delivery_messages, vec![planned]);
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some("Cargo.toml\nconfigs/config.toml\nconfigs/skills_registry.toml")
+        );
+        assert!(finalizer_summary.is_none());
+    }
+
+    #[test]
     fn exact_contract_keeps_explicit_json_delivery_over_observed_phrase() {
         let state = test_state();
         let mut loop_state = crate::agent_engine::LoopState::new(3);
@@ -8411,6 +9197,68 @@ mod tests {
         )
         .await
         .is_none());
+    }
+
+    #[test]
+    fn direct_scalar_finalize_accepts_strict_single_line_observation() {
+        let mut loop_state = crate::agent_engine::LoopState::new(1);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "run_cmd".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("ThinkPad-X1\n".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::Act;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.exact_sentence_count = Some(1);
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let (answer, summary) =
+            direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
+                .expect("direct scalar answer");
+        assert_eq!(answer, "ThinkPad-X1");
+        assert!(summary.contract_ok);
+    }
+
+    #[test]
+    fn direct_scalar_finalize_skips_strict_raw_command_output_contract() {
+        let mut loop_state = crate::agent_engine::LoopState::new(1);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "run_cmd".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("ThinkPad-X1\n".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = free_route_result();
+        route.routed_mode = crate::RoutedMode::Act;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.exact_sentence_count = Some(1);
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(
+            direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context)).is_none()
+        );
     }
 
     #[test]
@@ -8546,6 +9394,104 @@ mod tests {
             ),
             Some(false)
         );
+    }
+
+    #[test]
+    fn content_evidence_contractual_terminal_answer_is_kept_before_meta_classifier() {
+        let answer = "最先该做的是：验证配置能否正确加载。";
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.last_user_visible_respond = Some(answer.to_string());
+        loop_state.delivery_messages.push(answer.to_string());
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
+        ));
+        loop_state
+            .executed_step_results
+            .push(ok_step_result("step_2", "respond", answer));
+        let mut route = free_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "release_checklist.md".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(content_evidence_terminal_respond_is_contractual_answer(
+            &loop_state,
+            Some(&agent_run_context),
+            answer,
+        ));
+        assert_eq!(
+            should_drop_passthrough_delivery_for_content_evidence(
+                &loop_state,
+                true,
+                Some(&agent_run_context),
+                answer,
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn content_evidence_one_sentence_terminal_answer_is_kept_without_semantic_kind() {
+        let answer = "最先该做的是**验证配置能正确加载**。";
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.last_user_visible_respond = Some(answer.to_string());
+        loop_state.delivery_messages.push(answer.to_string());
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
+        ));
+        loop_state
+            .executed_step_results
+            .push(ok_step_result("step_2", "respond", answer));
+        let mut route = free_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(content_evidence_terminal_respond_is_contractual_answer(
+            &loop_state,
+            Some(&agent_run_context),
+            answer,
+        ));
+    }
+
+    #[test]
+    fn content_evidence_contractual_terminal_answer_requires_observation() {
+        let answer = "配置加载检查应先做。";
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state
+            .executed_step_results
+            .push(ok_step_result("step_1", "respond", answer));
+        let mut route = free_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(!content_evidence_terminal_respond_is_contractual_answer(
+            &loop_state,
+            Some(&agent_run_context),
+            answer,
+        ));
     }
 
     #[test]

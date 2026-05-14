@@ -153,6 +153,9 @@ api_key = ""
 base_url = "https://api.minimaxi.com/v1"
 max_concurrency = 1
 model = "MiniMax-M2.7"
+# Optional prompt-budget capacity override for compatible providers whose
+# public model name does not expose a reliable context window.
+context_window_tokens = 2013
 models = [
     "MiniMax-M2.7",
     "MiniMax-M2.5",
@@ -291,6 +294,8 @@ skill_timeout_seconds = 86400
 # 与 configs/skills_registry.toml 中全部 [[skills]].name 一致（未启用 registry 时作 fallback 基线）。
 skills_list = [
     "run_cmd",
+    "fs_basic",
+    "config_basic",
     "read_file",
     "write_file",
     "list_dir",

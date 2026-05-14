@@ -1,6 +1,6 @@
 use crate::{
     execution_recipe::{ExecutionRecipeProfile, ExecutionRecipeSpec, ExecutionRecipeTargetScope},
-    RiskCeiling, RouteGateKind, RouteResult, SelfExtensionMode,
+    RiskCeiling, RouteResult, SelfExtensionMode,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +24,7 @@ pub(crate) fn classify_route_risk_ceiling(
         };
     }
 
-    if route_result.needs_clarify || !route_result.ask_mode.is_execute_gate() {
+    if route_result.needs_clarify || !route_result.is_execute_gate() {
         return SafetyClassDecision {
             risk_ceiling: RiskCeiling::Low,
             reason: "non_mutating_route",
@@ -69,7 +69,7 @@ pub(crate) fn classify_route_risk_ceiling(
         };
     }
 
-    if matches!(route_result.ask_mode.gate_kind(), RouteGateKind::Execute) {
+    if route_result.is_execute_gate() {
         return SafetyClassDecision {
             risk_ceiling: RiskCeiling::Medium,
             reason: "action_route_without_recipe",

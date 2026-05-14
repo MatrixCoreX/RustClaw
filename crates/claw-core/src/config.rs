@@ -651,6 +651,10 @@ pub struct LlmVendorConfig {
     #[serde(default)]
     pub api_key: String,
     pub model: String,
+    /// Optional model/provider context window override. Use this for providers
+    /// whose compatible API does not expose a reliable model capacity.
+    #[serde(default)]
+    pub context_window_tokens: Option<usize>,
     #[serde(default)]
     pub models: Vec<String>,
     #[serde(default = "default_llm_timeout_seconds")]
@@ -683,6 +687,9 @@ pub struct LlmProviderConfig {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    /// Optional resolved context window for prompt budgeting.
+    #[serde(default)]
+    pub context_window_tokens: Option<usize>,
     pub priority: i32,
     pub timeout_seconds: u64,
     pub max_concurrency: usize,
@@ -1337,6 +1344,8 @@ fn default_skill_max_concurrency() -> usize {
 pub fn base_skill_names() -> &'static [&'static str] {
     &[
         "run_cmd",
+        "fs_basic",
+        "config_basic",
         "read_file",
         "write_file",
         "list_dir",
@@ -1356,6 +1365,8 @@ pub fn base_skill_names() -> &'static [&'static str] {
 pub fn core_skills_always_enabled() -> &'static [&'static str] {
     &[
         "run_cmd",
+        "fs_basic",
+        "config_basic",
         "read_file",
         "write_file",
         "list_dir",
@@ -1375,6 +1386,8 @@ fn default_skills_list() -> Vec<String> {
     // Keep in sync with `configs/skills_registry.toml` [[skills]] names (no-registry fallback baseline).
     vec![
         "run_cmd".to_string(),
+        "fs_basic".to_string(),
+        "config_basic".to_string(),
         "read_file".to_string(),
         "write_file".to_string(),
         "list_dir".to_string(),

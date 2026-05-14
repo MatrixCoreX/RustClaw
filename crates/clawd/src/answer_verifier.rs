@@ -72,6 +72,139 @@ pub(crate) fn should_verify_answer(
         || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
 }
 
+pub(crate) fn structurally_satisfies_answer_contract(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    route_requires_single_file_delivery(route_result)
+        && candidate_answer_has_grounded_existing_file_token(journal, candidate_answer)
+}
+
+fn route_requires_single_file_delivery(route: &RouteResult) -> bool {
+    matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::FileToken
+    ) || matches!(
+        route.output_contract.delivery_intent,
+        crate::OutputDeliveryIntent::FileSingle
+    ) || (route.wants_file_delivery
+        && !matches!(
+            route.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::DirectoryBatchFiles
+        ))
+}
+
+fn candidate_answer_has_grounded_existing_file_token(
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    let Some((_kind, raw_path)) =
+        crate::finalize::parse_delivery_file_token(candidate_answer.trim())
+    else {
+        return false;
+    };
+    let token_path = std::path::Path::new(raw_path.trim());
+    let Ok(canonical_token_path) = token_path.canonicalize() else {
+        return false;
+    };
+    file_token_path_is_grounded_in_observations(journal, &canonical_token_path)
+}
+
+fn file_token_path_is_grounded_in_observations(
+    journal: &crate::task_journal::TaskJournal,
+    canonical_token_path: &std::path::Path,
+) -> bool {
+    let current_dir = std::env::current_dir().ok();
+    journal.step_results.iter().any(|step| {
+        step.status == crate::executor::StepExecutionStatus::Ok
+            && step.output_excerpt.as_deref().is_some_and(|output| {
+                observed_output_contains_path(output, canonical_token_path, current_dir.as_deref())
+            })
+    })
+}
+
+fn observed_output_contains_path(
+    output: &str,
+    canonical_token_path: &std::path::Path,
+    current_dir: Option<&std::path::Path>,
+) -> bool {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
+        return json_value_contains_path(&value, canonical_token_path, current_dir);
+    }
+    candidate_path_matches(output.trim(), canonical_token_path, current_dir)
+}
+
+fn json_value_contains_path(
+    value: &serde_json::Value,
+    canonical_token_path: &std::path::Path,
+    current_dir: Option<&std::path::Path>,
+) -> bool {
+    match value {
+        serde_json::Value::String(candidate) => {
+            candidate_path_matches(candidate, canonical_token_path, current_dir)
+        }
+        serde_json::Value::Array(items) => items
+            .iter()
+            .any(|item| json_value_contains_path(item, canonical_token_path, current_dir)),
+        serde_json::Value::Object(map) => {
+            if resolved_dir_names_contain_path(map, canonical_token_path) {
+                return true;
+            }
+            map.values()
+                .any(|item| json_value_contains_path(item, canonical_token_path, current_dir))
+        }
+        _ => false,
+    }
+}
+
+fn resolved_dir_names_contain_path(
+    map: &serde_json::Map<String, serde_json::Value>,
+    canonical_token_path: &std::path::Path,
+) -> bool {
+    let Some(resolved_dir) = map
+        .get("resolved_path")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(std::path::Path::new)
+    else {
+        return false;
+    };
+    let Some(names) = map.get("names").and_then(|value| value.as_array()) else {
+        return false;
+    };
+    names.iter().filter_map(|value| value.as_str()).any(|name| {
+        let candidate = resolved_dir.join(name.trim());
+        candidate
+            .canonicalize()
+            .is_ok_and(|path| path == canonical_token_path)
+    })
+}
+
+fn candidate_path_matches(
+    candidate: &str,
+    canonical_token_path: &std::path::Path,
+    current_dir: Option<&std::path::Path>,
+) -> bool {
+    let candidate = candidate.trim();
+    if candidate.is_empty() {
+        return false;
+    }
+    let candidate_path = std::path::Path::new(candidate);
+    if candidate_path
+        .canonicalize()
+        .is_ok_and(|path| path == canonical_token_path)
+    {
+        return true;
+    }
+    current_dir.is_some_and(|dir| {
+        dir.join(candidate_path)
+            .canonicalize()
+            .is_ok_and(|path| path == canonical_token_path)
+    })
+}
+
 pub(crate) async fn verify_answer_observe_only(
     state: &AppState,
     task: &ClaimedTask,
@@ -81,6 +214,13 @@ pub(crate) async fn verify_answer_observe_only(
     candidate_answer: &str,
 ) -> Option<AnswerVerifierOut> {
     if !should_verify_answer(route_result, journal, candidate_answer) {
+        return None;
+    }
+    if structurally_satisfies_answer_contract(route_result, journal, candidate_answer) {
+        tracing::info!(
+            task_id = %task.task_id,
+            "answer_verifier_skipped_structural_satisfaction"
+        );
         return None;
     }
     let resolved = match crate::bootstrap::load_required_prompt_template_for_state_with_meta(
@@ -223,7 +363,7 @@ fn execution_evidence_prompt_block(journal: &crate::task_journal::TaskJournal) -
 mod tests {
     use serde_json::json;
 
-    use super::{should_verify_answer, AnswerVerifierOut};
+    use super::{should_verify_answer, structurally_satisfies_answer_contract, AnswerVerifierOut};
 
     fn route_with_mode(routed_mode: crate::RoutedMode) -> crate::RouteResult {
         crate::RouteResult {
@@ -313,5 +453,56 @@ mod tests {
             &journal,
             "please provide the missing path"
         ));
+    }
+
+    #[test]
+    fn grounded_file_token_satisfies_file_delivery_contract_before_llm_verifier() {
+        let root = std::env::temp_dir().join(format!(
+            "rustclaw-answer-verifier-file-token-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("create temp root");
+        let file = root.join("release_checklist.md");
+        std::fs::write(&file, "ok").expect("write temp file");
+
+        let mut route = route_with_mode(crate::RoutedMode::Act);
+        route.wants_file_delivery = true;
+        route.output_contract.delivery_required = true;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-file-token", "ask", "send that file");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "fs_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    json!({
+                        "action": "path_batch_facts",
+                        "facts": [{
+                            "path": file.display().to_string(),
+                            "fact": {
+                                "kind": "file",
+                                "resolved_path": file.display().to_string()
+                            }
+                        }]
+                    })
+                    .to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            &format!("FILE:{}", file.display())
+        ));
+
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

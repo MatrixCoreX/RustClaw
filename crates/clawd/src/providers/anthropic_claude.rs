@@ -217,6 +217,7 @@ mod tests {
                 base_url: base_url.to_string(),
                 api_key: "test-key".to_string(),
                 model: "test-model".to_string(),
+                context_window_tokens: None,
                 priority: 1,
                 timeout_seconds: 30,
                 max_concurrency: 1,

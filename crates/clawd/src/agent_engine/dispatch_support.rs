@@ -67,6 +67,14 @@ fn synthesize_route_allows_direct_fallback(agent_run_context: Option<&AgentRunCo
     {
         return true;
     }
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::FilePaths
+    ) {
+        return true;
+    }
     if route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
         && route.output_contract.response_shape == crate::OutputResponseShape::Strict
     {
@@ -1377,6 +1385,44 @@ mod tests {
     }
 
     #[test]
+    fn synthesize_route_allows_direct_fallback_for_structured_listing_contract() {
+        let route = crate::RouteResult {
+            routed_mode: crate::RoutedMode::Act,
+            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            resolved_intent: "List files from a known directory.".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "structured file listing".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::FileNames,
+                locator_hint: "document".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let ctx = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+
+        assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
+    }
+
+    #[test]
     fn synthesize_route_uses_llm_for_chat_wrapped_unclassified_delivery() {
         let route = crate::RouteResult {
             routed_mode: crate::RoutedMode::ChatAct,
@@ -1677,7 +1723,7 @@ pub(super) async fn handle_call_tool_action(
     args: &Value,
 ) -> Result<ActionLoopDecision, String> {
     let mut resolved_args = resolve_arg_value(args, loop_state);
-    let normalized_skill = state.resolve_canonical_skill_name(tool);
+    let mut normalized_skill = state.resolve_canonical_skill_name(tool);
     if normalize_skill_arg_aliases(&normalized_skill, &mut resolved_args) {
         info!(
             "executor_args_rewrite task_id={} round={} step={} type=arg_alias skill={} args={}",
@@ -1687,6 +1733,31 @@ pub(super) async fn handle_call_tool_action(
             normalized_skill,
             crate::truncate_for_log(&resolved_args.to_string())
         );
+    }
+    if let Some(rewrite) =
+        crate::virtual_tools::rewrite_virtual_tool_call(&normalized_skill, resolved_args.clone())?
+    {
+        info!(
+            "executor_virtual_tool_rewrite task_id={} round={} step={} requested_tool={} runtime_tool={} args={}",
+            task.task_id,
+            loop_state.round_no,
+            step_in_round,
+            normalized_skill,
+            rewrite.runtime_tool,
+            crate::truncate_for_log(&rewrite.runtime_args.to_string())
+        );
+        normalized_skill = state.resolve_canonical_skill_name(&rewrite.runtime_tool);
+        resolved_args = rewrite.runtime_args;
+        if normalize_skill_arg_aliases(&normalized_skill, &mut resolved_args) {
+            info!(
+                "executor_args_rewrite task_id={} round={} step={} type=runtime_arg_alias skill={} args={}",
+                task.task_id,
+                loop_state.round_no,
+                step_in_round,
+                normalized_skill,
+                crate::truncate_for_log(&resolved_args.to_string())
+            );
+        }
     }
     if rewrite_args_with_auto_locator_path(&normalized_skill, &mut resolved_args, loop_state) {
         info!(
@@ -1698,7 +1769,7 @@ pub(super) async fn handle_call_tool_action(
             crate::truncate_for_log(&resolved_args.to_string())
         );
     }
-    let read_file_requested_path = read_file_requested_path(tool, &resolved_args);
+    let read_file_requested_path = read_file_requested_path(&normalized_skill, &resolved_args);
     let write_file_effective_path =
         write_file_effective_path(state, &normalized_skill, &resolved_args);
     if normalized_skill == "run_cmd" {
@@ -1775,7 +1846,7 @@ pub(super) async fn handle_call_skill_action(
 ) -> Result<ActionLoopDecision, String> {
     let mut resolved_args = resolve_arg_value(args, loop_state);
     loop_state.tool_calls_total += 1;
-    let normalized_skill = state.resolve_canonical_skill_name(skill);
+    let mut normalized_skill = state.resolve_canonical_skill_name(skill);
     if normalize_skill_arg_aliases(&normalized_skill, &mut resolved_args) {
         info!(
             "executor_args_rewrite task_id={} round={} step={} type=arg_alias skill={} args={}",
@@ -1785,6 +1856,31 @@ pub(super) async fn handle_call_skill_action(
             normalized_skill,
             crate::truncate_for_log(&resolved_args.to_string())
         );
+    }
+    if let Some(rewrite) =
+        crate::virtual_tools::rewrite_virtual_tool_call(&normalized_skill, resolved_args.clone())?
+    {
+        info!(
+            "executor_virtual_tool_rewrite task_id={} round={} step={} requested_tool={} runtime_tool={} args={}",
+            task.task_id,
+            loop_state.round_no,
+            step_in_round,
+            normalized_skill,
+            rewrite.runtime_tool,
+            crate::truncate_for_log(&rewrite.runtime_args.to_string())
+        );
+        normalized_skill = state.resolve_canonical_skill_name(&rewrite.runtime_tool);
+        resolved_args = rewrite.runtime_args;
+        if normalize_skill_arg_aliases(&normalized_skill, &mut resolved_args) {
+            info!(
+                "executor_args_rewrite task_id={} round={} step={} type=runtime_arg_alias skill={} args={}",
+                task.task_id,
+                loop_state.round_no,
+                step_in_round,
+                normalized_skill,
+                crate::truncate_for_log(&resolved_args.to_string())
+            );
+        }
     }
     if rewrite_args_with_auto_locator_path(&normalized_skill, &mut resolved_args, loop_state) {
         info!(

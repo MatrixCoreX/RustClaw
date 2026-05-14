@@ -141,8 +141,33 @@ interface ResolveChannelBindingResponse {
   identity?: AuthIdentityResponse | null;
 }
 
+interface SkillListItem {
+  name: string;
+  description?: string | null;
+  kind?: string | null;
+  planner_kind?: string | null;
+  group?: string | null;
+  risk_level?: string | null;
+  auto_invocable?: boolean | null;
+  requires_confirmation?: boolean | null;
+  side_effect?: boolean | null;
+  retryable?: boolean | null;
+  output_kind?: string | null;
+  runtime_available?: boolean | null;
+  current_os?: string | null;
+  unsupported_os?: string[] | null;
+  missing_required_bins?: string[] | null;
+  missing_optional_bins?: string[] | null;
+  supported_os?: string[] | null;
+  required_bins?: string[] | null;
+  optional_bins?: string[] | null;
+  platform_notes?: string[] | null;
+  capabilities?: string[] | null;
+}
+
 interface SkillsResponse {
   skills: string[];
+  skill_items?: SkillListItem[];
   skill_runner_path?: string;
 }
 
@@ -160,6 +185,7 @@ interface SkillsConfigResponse {
   /** 后端判定的 UI 锁定名单，保存时也会被强制保持开启 */
   locked_skill_names?: string[];
   external_skill_names?: string[];
+  skill_items?: SkillListItem[];
   effective_enabled_skills_preview: string[];
   runtime_enabled_skills: string[];
   restart_required: boolean;
@@ -394,6 +420,8 @@ const UI_HIDDEN_SKILLS = new Set<string>(["chat"]);
 /** 基本技能（与后端 base_skill_names 一致），API 未返回时用此兜底 */
 const FALLBACK_BASE_SKILL_NAMES = [
   "run_cmd",
+  "fs_basic",
+  "config_basic",
   "read_file",
   "write_file",
   "list_dir",
@@ -413,12 +441,14 @@ const SKILL_SUMMARY: Record<string, { zh: string; en: string }> = {
   audio_transcribe: { zh: "把语音转成文字。", en: "Turn speech into text." },
   browser_web: { zh: "打开网页并提取页面内容。", en: "Open webpages and extract page content." },
   config_guard: { zh: "检查配置是否缺项或明显不合理。", en: "Check configs for missing or risky values." },
+  config_basic: { zh: "读取并校验结构化配置字段。", en: "Read and validate structured config fields." },
   crypto: { zh: "查看币价、账户、订单和交易相关能力。", en: "Handle crypto quotes, balances, orders, and trading tasks." },
   db_basic: { zh: "查看和处理数据库里的基础数据。", en: "Inspect and work with basic database data." },
   doc_parse: { zh: "解析文档内容，提取可读文本。", en: "Parse documents and extract readable text." },
   docker_basic: { zh: "查看和操作 Docker 容器、镜像与服务。", en: "Inspect and control Docker containers, images, and services." },
   extension_manager: { zh: "管理外部扩展技能的接入。", en: "Manage external skill extensions." },
   fs_search: { zh: "在文件里搜索关键词或定位内容。", en: "Search files and locate content." },
+  fs_basic: { zh: "处理文件、目录、路径事实和文本搜索。", en: "Handle files, directories, path facts, and text search." },
   git_basic: { zh: "查看提交、分支和常见 Git 操作。", en: "Inspect commits, branches, and common Git actions." },
   health_check: { zh: "快速检查系统和服务是否正常。", en: "Run quick health checks for the system and services." },
   http_basic: { zh: "发起 HTTP 请求并查看返回结果。", en: "Send HTTP requests and inspect responses." },
@@ -3593,10 +3623,71 @@ export default function App() {
     () => (skillsData?.skills ?? []).filter((name) => !UI_HIDDEN_SKILLS.has(name)),
     [skillsData],
   );
-  const describeSkill = (name: string) =>
-    SKILL_SUMMARY[name]
+  const skillItemsByName = useMemo(() => {
+    const map = new Map<string, SkillListItem>();
+    (skillsData?.skill_items ?? []).forEach((item) => {
+      if (!item.name || UI_HIDDEN_SKILLS.has(item.name)) return;
+      map.set(item.name, item);
+    });
+    (skillsConfigData?.skill_items ?? []).forEach((item) => {
+      if (!item.name || UI_HIDDEN_SKILLS.has(item.name)) return;
+      map.set(item.name, item);
+    });
+    return map;
+  }, [skillsConfigData?.skill_items, skillsData?.skill_items]);
+  const describeSkill = (name: string) => {
+    const itemDescription = skillItemsByName.get(name)?.description?.trim();
+    if (itemDescription) return itemDescription;
+    return SKILL_SUMMARY[name]
       ? t(SKILL_SUMMARY[name].zh, SKILL_SUMMARY[name].en)
       : t("该技能无简短说明。", "No short description for this skill.");
+  };
+  const skillRiskLabel = (risk?: string | null) => {
+    switch ((risk || "").toLowerCase()) {
+      case "low":
+        return t("低风险", "Low risk");
+      case "medium":
+        return t("中风险", "Medium risk");
+      case "high":
+        return t("高风险", "High risk");
+      default:
+        return t("风险未声明", "Risk not declared");
+    }
+  };
+  const skillCapabilityLabel = (capability: string) => {
+    switch (capability) {
+      case "llm":
+        return t("会调用模型", "Uses model");
+      case "net":
+        return t("访问网络", "Network");
+      case "fs.read":
+        return t("读取文件", "Reads files");
+      case "fs.write":
+        return t("改写文件", "Changes files");
+      case "exec":
+        return t("运行命令", "Runs commands");
+      case "exec.sudo":
+        return t("可提权执行", "Can use sudo");
+      default:
+        return capability.startsWith("secrets.") ? t("需要密钥", "Needs secret") : capability;
+    }
+  };
+  const skillRuntimeIssue = (item?: SkillListItem) => {
+    if (!item || item.runtime_available !== false) return null;
+    if (item.unsupported_os?.length) {
+      return t(
+        `当前系统 ${item.current_os || "unknown"} 不在支持列表：${item.unsupported_os.join(", ")}`,
+        `Current OS ${item.current_os || "unknown"} is not supported: ${item.unsupported_os.join(", ")}`,
+      );
+    }
+    if (item.missing_required_bins?.length) {
+      return t(
+        `缺少本地工具：${item.missing_required_bins.join(", ")}`,
+        `Missing local tools: ${item.missing_required_bins.join(", ")}`,
+      );
+    }
+    return t("当前设备暂不可用", "Unavailable on this device");
+  };
   const applyLlmVendorDraft = (nextVendor: string) => {
     const vendorInfo = llmConfigData?.vendors.find((vendor) => vendor.name === nextVendor);
     setLlmDraftVendor(nextVendor);
@@ -5755,6 +5846,9 @@ export default function App() {
                     );
                   };
                   const renderSkillRow = (name: string) => {
+                    const skillItem = skillItemsByName.get(name);
+                    const runtimeIssue = skillRuntimeIssue(skillItem);
+                    const visibleCapabilities = (skillItem?.capabilities ?? []).slice(0, 3);
                     const configuredEnabled = configuredEnabledSkills.has(name);
                     const persistedSwitchValue = skillsConfigData?.skill_switches?.[name];
                     const draftSwitchValue = skillSwitchDraft[name];
@@ -5769,6 +5863,7 @@ export default function App() {
                       baseSkillNamesSet.has(name) && !isToolSkill ? t("系统基础能力", "Core capability") : null,
                       isLockedSkill ? t("固定开启", "Always on") : null,
                       isExternalSkill ? t("外部导入", "Imported") : null,
+                      skillItem?.group ? `${t("分组", "Group")}: ${skillItem.group}` : null,
                     ].filter(Boolean) as string[];
                     return (
                       <label
@@ -5786,8 +5881,44 @@ export default function App() {
                           {statusMeta.length > 0 ? (
                             <span className="mt-1 block text-[10px] leading-4 text-white/35">{statusMeta.join(" · ")}</span>
                           ) : null}
+                          <span className="mt-1 flex flex-wrap gap-1">
+                            <span className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-white/45">
+                              {skillRiskLabel(skillItem?.risk_level)}
+                            </span>
+                            {skillItem?.requires_confirmation ? (
+                              <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-100">
+                                {t("操作前确认", "Confirms first")}
+                              </span>
+                            ) : null}
+                            {skillItem?.side_effect ? (
+                              <span className="rounded border border-sky-500/25 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-100">
+                                {t("会改变状态", "Changes state")}
+                              </span>
+                            ) : null}
+                            {visibleCapabilities.map((capability) => (
+                              <span key={capability} className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-white/45">
+                                {skillCapabilityLabel(capability)}
+                              </span>
+                            ))}
+                          </span>
+                          {runtimeIssue ? (
+                            <span className="mt-1 flex items-start gap-1 text-[10px] leading-4 text-amber-200/90">
+                              <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                              <span>{runtimeIssue}</span>
+                            </span>
+                          ) : skillItem?.missing_optional_bins?.length ? (
+                            <span className="mt-1 block text-[10px] leading-4 text-white/35">
+                              {t("可选工具未找到", "Optional tools missing")}: {skillItem.missing_optional_bins.join(", ")}
+                            </span>
+                          ) : null}
                         </span>
                         <span className="mt-1 flex shrink-0 flex-wrap items-center gap-1.5 sm:mt-0">
+                          {skillItem?.runtime_available === false ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/35 bg-amber-500/12 px-2 py-0.5 text-[10px] font-medium text-amber-200">
+                              <Wrench className="h-3 w-3" />
+                              {t("需配置", "Needs setup")}
+                            </span>
+                          ) : null}
                           <span
                             className={
                               configuredEnabled

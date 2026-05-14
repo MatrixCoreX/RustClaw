@@ -1,3 +1,4 @@
+use claw_core::skill_registry::PrimaryFallbackRole;
 use regex::Regex;
 use serde_json::Value;
 use std::fs;
@@ -398,7 +399,7 @@ fn parse_plan_action_step(step: &Value, state: &AppState) -> Option<AgentAction>
     serde_json::from_value::<AgentAction>(normalized).ok()
 }
 
-fn parse_minimax_parameter_value(raw: &str) -> Value {
+fn parse_xml_tool_parameter_value(raw: &str) -> Value {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         Value::Null
@@ -411,7 +412,7 @@ fn parse_minimax_parameter_value(raw: &str) -> Value {
     }
 }
 
-fn extract_minimax_tool_call_steps(raw: &str) -> Vec<Value> {
+fn extract_xml_tool_call_steps(raw: &str) -> Vec<Value> {
     let mut steps = Vec::new();
     let mut search_from = 0usize;
     while let Some(invoke_rel) = raw[search_from..].find("<invoke name=\"") {
@@ -453,7 +454,7 @@ fn extract_minimax_tool_call_steps(raw: &str) -> Vec<Value> {
             let value_end = value_start + close_rel;
             params.insert(
                 param_name.to_string(),
-                parse_minimax_parameter_value(&body[value_start..value_end]),
+                parse_xml_tool_parameter_value(&body[value_start..value_end]),
             );
             param_search = value_end + "</parameter>".len();
         }
@@ -560,7 +561,7 @@ async fn parse_single_plan_actions(
         }
     }
     if step_values.is_empty() {
-        step_values.extend(extract_minimax_tool_call_steps(raw));
+        step_values.extend(extract_xml_tool_call_steps(raw));
     }
     if step_values.is_empty() {
         let value = crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<Value>(raw)?;
@@ -720,7 +721,7 @@ fn actions_use_ad_hoc_command_without_route_preferred_skill(
             preferred_skills
                 .iter()
                 .any(|preferred| preferred.eq_ignore_ascii_case(&canonical))
-        })
+        }) || action_satisfies_structured_key_listing_contract(route_result, action)
     }) {
         return false;
     }
@@ -729,9 +730,94 @@ fn actions_use_ad_hoc_command_without_route_preferred_skill(
             return false;
         };
         let canonical = state.resolve_canonical_skill_name(skill);
-        !(canonical.eq_ignore_ascii_case("run_cmd")
-            && action_has_internal_literal_command_marker(action))
+        if canonical.eq_ignore_ascii_case("run_cmd")
+            && action_has_internal_literal_command_marker(action)
+        {
+            return false;
+        }
+        if action_satisfies_structured_key_listing_contract(route_result, action) {
+            return false;
+        }
+        action_uses_generic_fallback_capability_for_preferred_route(state, &canonical)
     })
+}
+
+fn action_satisfies_structured_key_listing_contract(
+    route_result: &RouteResult,
+    action: &AgentAction,
+) -> bool {
+    if !action_is_structured_key_listing(action) {
+        return false;
+    }
+    match route_result.output_contract.semantic_kind {
+        crate::OutputSemanticKind::StructuredKeys => true,
+        crate::OutputSemanticKind::FileNames => action_structured_key_listing_path(action)
+            .or_else(|| {
+                let hint = route_result.output_contract.locator_hint.trim();
+                (!hint.is_empty()).then_some(hint)
+            })
+            .is_some_and(path_has_structured_document_extension),
+        _ => false,
+    }
+}
+
+fn action_is_structured_key_listing(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            let Some(action_name) = args.get("action").and_then(Value::as_str) else {
+                return false;
+            };
+            (skill.eq_ignore_ascii_case("config_basic")
+                && action_name.eq_ignore_ascii_case("list_keys"))
+                || (skill.eq_ignore_ascii_case("system_basic")
+                    && action_name.eq_ignore_ascii_case("structured_keys"))
+        }
+        AgentAction::Think { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::SynthesizeAnswer { .. } => false,
+    }
+}
+
+fn action_structured_key_listing_path(action: &AgentAction) -> Option<&str> {
+    match action {
+        AgentAction::CallSkill { args, .. } | AgentAction::CallTool { args, .. }
+            if action_is_structured_key_listing(action) =>
+        {
+            args.get("path").and_then(Value::as_str).map(str::trim)
+        }
+        _ => None,
+    }
+    .filter(|path| !path.is_empty())
+}
+
+fn path_has_structured_document_extension(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.trim().to_ascii_lowercase())
+        .is_some_and(|extension| matches!(extension.as_str(), "json" | "toml" | "yaml" | "yml"))
+}
+
+fn action_uses_generic_fallback_capability_for_preferred_route(
+    state: &AppState,
+    canonical_skill_name: &str,
+) -> bool {
+    if !canonical_skill_name.eq_ignore_ascii_case("run_cmd") {
+        return false;
+    }
+    if let Some(registry) = state.get_skills_registry() {
+        if registry.get(canonical_skill_name).is_some_and(|entry| {
+            matches!(
+                entry.primary_fallback_role,
+                Some(PrimaryFallbackRole::Fallback)
+            )
+        }) {
+            return true;
+        }
+    }
+
+    // Compatibility for older registries without `primary_fallback_role`.
+    canonical_skill_name.eq_ignore_ascii_case("run_cmd")
 }
 
 fn action_has_internal_literal_command_marker(action: &AgentAction) -> bool {
@@ -890,14 +976,18 @@ fn action_supports_direct_observed_finalize(
     route_result: Option<&RouteResult>,
     action: &AgentAction,
 ) -> bool {
-    if route_result.is_some_and(|route| {
-        route.output_contract.requires_content_evidence && route_expects_terminal_user_answer(route)
-    }) {
-        return false;
-    }
     match action {
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
             let canonical = state.resolve_canonical_skill_name(skill);
+            if action_supports_structured_direct_observed_finalize(route_result, &canonical, args) {
+                return true;
+            }
+            if route_result.is_some_and(|route| {
+                route.output_contract.requires_content_evidence
+                    && route_expects_terminal_user_answer(route)
+            }) {
+                return false;
+            }
             if canonical == "run_cmd" && route_explicitly_requests_raw_command_output(route_result)
             {
                 return true;
@@ -923,6 +1013,81 @@ fn action_supports_direct_observed_finalize(
         }
         AgentAction::SynthesizeAnswer { .. } => false,
         AgentAction::Respond { .. } | AgentAction::Think { .. } => false,
+    }
+}
+
+fn action_supports_structured_direct_observed_finalize(
+    route_result: Option<&RouteResult>,
+    canonical: &str,
+    args: &Value,
+) -> bool {
+    if route_result.is_some_and(|route| {
+        !matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+                | crate::OutputSemanticKind::StructuredKeys
+                | crate::OutputSemanticKind::FileNames
+        )
+    }) {
+        return false;
+    }
+    let action = args
+        .get("action")
+        .and_then(|value| value.as_str())
+        .map(|action| action.trim().to_ascii_lowercase());
+    let action = action.as_deref();
+    let response_shape = route_result.map(|route| route.output_contract.response_shape);
+    let one_sentence = matches!(
+        response_shape,
+        Some(crate::OutputResponseShape::OneSentence)
+    );
+    match canonical {
+        "config_basic" => match action {
+            Some("read_field" | "read_fields") => true,
+            Some("list_keys") => {
+                !one_sentence
+                    && route_result.is_none_or(|route| {
+                        !matches!(
+                            route.output_contract.semantic_kind,
+                            crate::OutputSemanticKind::FileNames
+                        ) || args
+                            .get("path")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|path| !path.is_empty())
+                            .or_else(|| {
+                                let hint = route.output_contract.locator_hint.trim();
+                                (!hint.is_empty()).then_some(hint)
+                            })
+                            .is_some_and(path_has_structured_document_extension)
+                    })
+            }
+            Some("validate") => !one_sentence,
+            _ => false,
+        },
+        "system_basic" => match action {
+            Some("extract_field" | "extract_fields") => true,
+            Some("structured_keys") => {
+                !one_sentence
+                    && route_result.is_none_or(|route| {
+                        !matches!(
+                            route.output_contract.semantic_kind,
+                            crate::OutputSemanticKind::FileNames
+                        ) || args
+                            .get("path")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|path| !path.is_empty())
+                            .or_else(|| {
+                                let hint = route.output_contract.locator_hint.trim();
+                                (!hint.is_empty()).then_some(hint)
+                            })
+                            .is_some_and(path_has_structured_document_extension)
+                    })
+            }
+            _ => false,
+        },
+        _ => false,
     }
 }
 
@@ -1044,7 +1209,7 @@ fn replace_workspace_synthesis_respond_only_plan(
         return actions;
     };
     if loop_state.has_tool_or_skill_output
-        || !route_needs_workspace_summary_default_evidence(route)
+        || !route_needs_workspace_respond_only_default_evidence(route)
         || !matches!(
             route.output_contract.response_shape,
             crate::OutputResponseShape::Free
@@ -1057,6 +1222,10 @@ fn replace_workspace_synthesis_respond_only_plan(
     }
 
     info!("plan_replace_workspace_synthesis_respond_only_with_default_evidence");
+    workspace_summary_default_evidence_actions()
+}
+
+fn workspace_summary_default_evidence_actions() -> Vec<AgentAction> {
     vec![
         AgentAction::CallSkill {
             skill: "system_basic".to_string(),
@@ -1066,10 +1235,10 @@ fn replace_workspace_synthesis_respond_only_plan(
                 "max_entries": 30,
             }),
         },
-        AgentAction::CallSkill {
-            skill: "system_basic".to_string(),
+        AgentAction::CallTool {
+            tool: "config_basic".to_string(),
             args: serde_json::json!({
-                "action": "extract_fields",
+                "action": "read_fields",
                 "path": "Cargo.toml",
                 "format": "toml",
                 "field_paths": [
@@ -1089,10 +1258,10 @@ fn replace_workspace_synthesis_respond_only_plan(
                 "n": 8,
             }),
         },
-        AgentAction::CallSkill {
-            skill: "system_basic".to_string(),
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
             args: serde_json::json!({
-                "action": "read_range",
+                "action": "read_text_range",
                 "path": "README.md",
                 "mode": "head",
                 "n": 40,
@@ -1818,10 +1987,10 @@ fn scalar_path_auto_locator_observation_plan(
     if resolved_path.is_dir() && !current_workspace_directory {
         return None;
     }
-    Some(vec![AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
+    Some(vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
         args: serde_json::json!({
-            "action": "path_batch_facts",
+            "action": "stat_paths",
             "paths": [path],
             "include_missing": true,
         }),
@@ -1838,6 +2007,7 @@ fn scalar_path_auto_locator_fast_plan_result(
         return None;
     }
     let actions = scalar_path_auto_locator_observation_plan(route_result, auto_locator_path)?;
+    let actions = canonicalize_legacy_file_config_capabilities(actions);
     let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
     Some(build_plan_result(
@@ -1865,8 +2035,15 @@ fn existence_with_path_locator_observation_plan(
         .into_iter()
         .take(8)
         .collect::<Vec<_>>();
+    if explicit_targets.len() == 1
+        && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+    {
+        return Some(vec![fs_basic_stat_paths_action_for_explicit_targets(
+            &explicit_targets,
+        )]);
+    }
     if explicit_targets.len() >= 2 {
-        return Some(vec![path_batch_facts_action_for_explicit_targets(
+        return Some(vec![fs_basic_stat_paths_action_for_explicit_targets(
             &explicit_targets,
         )]);
     }
@@ -1875,10 +2052,10 @@ fn existence_with_path_locator_observation_plan(
         crate::OutputLocatorKind::Filename | crate::OutputLocatorKind::CurrentWorkspace
             if !hint.is_empty() =>
         {
-            Some(vec![AgentAction::CallSkill {
-                skill: "fs_search".to_string(),
+            Some(vec![AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
                 args: serde_json::json!({
-                    "action": "find_name",
+                    "action": "find_entries",
                     "root": ".",
                     "pattern": hint,
                     "target_kind": "any",
@@ -1893,23 +2070,22 @@ fn existence_with_path_locator_observation_plan(
                 .or_else(|| (!hint.is_empty()).then_some(hint))?;
             if Path::new(path).is_dir() {
                 if let Some(file_name) = single_filename_target_for_directory_locator(route) {
-                    return Some(vec![AgentAction::CallSkill {
-                        skill: "system_basic".to_string(),
+                    return Some(vec![AgentAction::CallTool {
+                        tool: "fs_basic".to_string(),
                         args: serde_json::json!({
-                            "action": "find_path",
+                            "action": "find_entries",
                             "root": path,
-                            "name": file_name,
-                            "match_mode": "exact",
+                            "pattern": file_name,
                             "target_kind": "file",
                             "max_results": 50,
                         }),
                     }]);
                 }
             }
-            Some(vec![AgentAction::CallSkill {
-                skill: "system_basic".to_string(),
+            Some(vec![AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
                 args: serde_json::json!({
-                    "action": "path_batch_facts",
+                    "action": "stat_paths",
                     "paths": [path],
                     "include_missing": true,
                 }),
@@ -1934,6 +2110,7 @@ fn existence_with_path_locator_fast_plan_result(
         return None;
     }
     let actions = existence_with_path_locator_observation_plan(route_result, auto_locator_path)?;
+    let actions = canonicalize_legacy_file_config_capabilities(actions);
     let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
     Some(build_plan_result(
@@ -1958,10 +2135,10 @@ fn file_paths_locator_observation_plan(
 
     let hint = route.output_contract.locator_hint.trim();
     if !hint.is_empty() {
-        return Some(vec![AgentAction::CallSkill {
-            skill: "fs_search".to_string(),
+        return Some(vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
             args: serde_json::json!({
-                "action": "find_name",
+                "action": "find_entries",
                 "root": ".",
                 "pattern": hint,
                 "target_kind": "file",
@@ -1980,10 +2157,10 @@ fn file_paths_locator_observation_plan(
         .and_then(|parent| parent.to_str())
         .filter(|parent| !parent.is_empty())
         .unwrap_or(".");
-    Some(vec![AgentAction::CallSkill {
-        skill: "fs_search".to_string(),
+    Some(vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
         args: serde_json::json!({
-            "action": "find_name",
+            "action": "find_entries",
             "root": root,
             "pattern": name,
             "target_kind": "file",
@@ -2002,6 +2179,7 @@ fn file_paths_locator_fast_plan_result(
         return None;
     }
     let actions = file_paths_locator_observation_plan(route_result, auto_locator_path)?;
+    let actions = canonicalize_legacy_file_config_capabilities(actions);
     let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
     Some(build_plan_result(
@@ -2060,6 +2238,17 @@ fn content_excerpt_summary_auto_locator_observation_plan(
     auto_locator_path: Option<&str>,
 ) -> Option<Vec<AgentAction>> {
     let path = single_file_content_understanding_target_path(route_result, auto_locator_path)?;
+    if repo_text_artifact_prefers_bounded_fs_read(&path) {
+        return Some(vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "read_text_range",
+                "path": path,
+                "mode": "head",
+                "n": 120
+            }),
+        }]);
+    }
     if !doc_parse_supported_path(&path) {
         return None;
     }
@@ -2074,6 +2263,33 @@ fn content_excerpt_summary_auto_locator_observation_plan(
     }])
 }
 
+fn repo_text_artifact_prefers_bounded_fs_read(path: &str) -> bool {
+    let path = Path::new(path);
+    let Some(ext) = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.trim().to_ascii_lowercase())
+    else {
+        return false;
+    };
+    if !matches!(
+        ext.as_str(),
+        "md" | "txt" | "toml" | "json" | "yaml" | "yml" | "rs"
+    ) {
+        return false;
+    }
+    path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::Normal(value)
+                if matches!(
+                    value.to_str(),
+                    Some("prompts" | "crates" | "configs" | "docker" | "scripts" | "UI" | "docs")
+                )
+        )
+    })
+}
+
 fn content_excerpt_summary_auto_locator_fast_plan_result(
     goal: &str,
     route_result: Option<&RouteResult>,
@@ -2085,6 +2301,7 @@ fn content_excerpt_summary_auto_locator_fast_plan_result(
     }
     let actions =
         content_excerpt_summary_auto_locator_observation_plan(route_result, auto_locator_path)?;
+    let actions = canonicalize_legacy_file_config_capabilities(actions);
     let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
     Some(build_plan_result(
@@ -2151,10 +2368,10 @@ fn file_delivery_respond_only_observation_plan(
     }
     let token = format!("FILE:{}", resolved.display());
     Some(vec![
-        AgentAction::CallSkill {
-            skill: "system_basic".to_string(),
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
             args: serde_json::json!({
-                "action": "path_batch_facts",
+                "action": "stat_paths",
                 "paths": [resolved.display().to_string()],
                 "include_missing": true,
             }),
@@ -2232,10 +2449,10 @@ fn replace_scalar_count_plan_with_count_inventory(
             format!("{path} 不存在，无法统计匹配项数量。")
         };
         return vec![
-            AgentAction::CallSkill {
-                skill: "system_basic".to_string(),
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
                 args: serde_json::json!({
-                    "action": "path_batch_facts",
+                    "action": "stat_paths",
                     "paths": [path],
                     "include_missing": true,
                 }),
@@ -2244,10 +2461,10 @@ fn replace_scalar_count_plan_with_count_inventory(
         ];
     }
     info!("plan_replace_scalar_count_plan_with_count_inventory");
-    vec![AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
+    vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
         args: serde_json::json!({
-            "action": "count_inventory",
+            "action": "count_entries",
             "path": path,
         }),
     }]
@@ -2329,10 +2546,10 @@ fn replace_hidden_entries_count_plan_with_inventory_dir(
         return actions;
     };
     info!("plan_replace_hidden_entries_count_plan_with_inventory_dir");
-    vec![AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
+    vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
         args: serde_json::json!({
-            "action": "inventory_dir",
+            "action": "list_dir",
             "path": path,
             "include_hidden": true,
             "names_only": true,
@@ -2623,17 +2840,17 @@ fn replace_structured_keys_read_plan(
     auto_locator_path: Option<&str>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
-    if loop_state.has_tool_or_skill_output
-        || actions.iter().any(|action| {
-            matches!(
-                action,
-                AgentAction::CallSkill { skill, args }
-                    | AgentAction::CallTool { tool: skill, args }
-                    if skill.eq_ignore_ascii_case("system_basic")
-                        && args.get("action").and_then(Value::as_str) == Some("structured_keys")
-            )
-        })
-    {
+    if loop_state.has_tool_or_skill_output || actions.iter().any(|action| {
+        matches!(
+            action,
+            AgentAction::CallSkill { skill, args }
+                | AgentAction::CallTool { tool: skill, args }
+                if (skill.eq_ignore_ascii_case("config_basic")
+                    && args.get("action").and_then(Value::as_str) == Some("list_keys"))
+                    || (skill.eq_ignore_ascii_case("system_basic")
+                        && args.get("action").and_then(Value::as_str) == Some("structured_keys"))
+        )
+    }) {
         return actions;
     }
     let Some(path) = structured_keys_locator_path(route_result, auto_locator_path) else {
@@ -2642,22 +2859,29 @@ fn replace_structured_keys_read_plan(
     if !actions.iter().any(|action| {
         matches!(
             action,
-            AgentAction::CallSkill { skill, args }
-                | AgentAction::CallTool { tool: skill, args }
-                if skill.eq_ignore_ascii_case("system_basic")
-                    && matches!(
-                        args.get("action").and_then(Value::as_str),
-                        Some("read_range" | "extract_field" | "extract_fields")
-                    )
+                AgentAction::CallSkill { skill, args }
+                    | AgentAction::CallTool { tool: skill, args }
+                    if (skill.eq_ignore_ascii_case("fs_basic")
+                        && args.get("action").and_then(Value::as_str) == Some("read_text_range"))
+                        || (skill.eq_ignore_ascii_case("config_basic")
+                            && matches!(
+                                args.get("action").and_then(Value::as_str),
+                                Some("read_field" | "read_fields")
+                            ))
+                        || (skill.eq_ignore_ascii_case("system_basic")
+                            && matches!(
+                                args.get("action").and_then(Value::as_str),
+                                Some("read_range" | "extract_field" | "extract_fields")
+                            ))
         )
     }) {
         return actions;
     }
     info!("plan_replace_structured_keys_read_plan_with_structured_keys");
-    vec![AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
+    vec![AgentAction::CallTool {
+        tool: "config_basic".to_string(),
         args: serde_json::json!({
-            "action": "structured_keys",
+            "action": "list_keys",
             "path": path,
             "max_keys": 1000,
         }),
@@ -2673,8 +2897,10 @@ fn action_observes_bounded_file_content(action: &AgentAction) -> bool {
                 .and_then(Value::as_str)
                 .map(str::trim)
                 .unwrap_or_default();
-            (skill.eq_ignore_ascii_case("system_basic")
+            ((skill.eq_ignore_ascii_case("system_basic")
                 && action.eq_ignore_ascii_case("read_range"))
+                || (skill.eq_ignore_ascii_case("fs_basic")
+                    && action.eq_ignore_ascii_case("read_text_range")))
                 || skill.eq_ignore_ascii_case("read_file")
                 || (skill.eq_ignore_ascii_case("doc_parse")
                     && action.eq_ignore_ascii_case("parse_doc"))
@@ -2721,7 +2947,7 @@ fn ensure_existence_path_summary_has_bounded_content(
     };
     let mut rewritten = actions;
     if !rewritten.iter().any(action_observes_bounded_file_content)
-        && !path_batch_facts_metadata_response_is_sufficient(&rewritten)
+        && !path_metadata_facts_response_is_sufficient(&rewritten)
     {
         let insert_at = rewritten
             .iter()
@@ -2734,10 +2960,10 @@ fn ensure_existence_path_summary_has_bounded_content(
             .unwrap_or(rewritten.len());
         rewritten.insert(
             insert_at,
-            AgentAction::CallSkill {
-                skill: "system_basic".to_string(),
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
                 args: serde_json::json!({
-                    "action": "read_range",
+                    "action": "read_text_range",
                     "path": path,
                     "mode": "head",
                     "n": 30
@@ -2779,19 +3005,30 @@ fn ensure_existence_path_summary_has_bounded_content(
     rewritten
 }
 
-fn is_system_basic_path_batch_facts_action(action: &AgentAction) -> bool {
+fn planned_action_is_path_metadata_facts(action: &AgentAction) -> bool {
+    let Some(skill) = planned_action_skill_name(action).map(str::trim) else {
+        return false;
+    };
+    let Some(action_name) = action_args(action)
+        .and_then(|args| args.get("action"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+    else {
+        return false;
+    };
     matches!(
-        action,
-        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
-            if skill.eq_ignore_ascii_case("system_basic")
-                && args
-                    .get("action")
-                    .and_then(Value::as_str)
-                    .is_some_and(|action| action.eq_ignore_ascii_case("path_batch_facts"))
+        (
+            skill.to_ascii_lowercase().as_str(),
+            action_name.to_ascii_lowercase().as_str()
+        ),
+        ("fs_basic", "stat_paths")
+            | ("fs_basic", "compare_paths")
+            | ("system_basic", "path_batch_facts")
+            | ("system_basic", "compare_paths")
     )
 }
 
-fn path_batch_facts_action_requests_metadata_fields(action: &AgentAction) -> bool {
+fn path_metadata_facts_action_requests_metadata_fields(action: &AgentAction) -> bool {
     let (AgentAction::CallSkill { args, .. } | AgentAction::CallTool { args, .. }) = action else {
         return false;
     };
@@ -2808,8 +3045,8 @@ fn path_batch_facts_action_requests_metadata_fields(action: &AgentAction) -> boo
     })
 }
 
-fn path_batch_facts_metadata_response_is_sufficient(actions: &[AgentAction]) -> bool {
-    if !actions.iter().any(is_system_basic_path_batch_facts_action) {
+fn path_metadata_facts_response_is_sufficient(actions: &[AgentAction]) -> bool {
+    if !actions.iter().any(planned_action_is_path_metadata_facts) {
         return false;
     }
     let Some(AgentAction::Respond { content }) = actions.last() else {
@@ -2841,8 +3078,8 @@ fn path_batch_facts_metadata_response_is_sufficient(actions: &[AgentAction]) -> 
         || response_mentions_metadata
         || actions
             .iter()
-            .filter(|action| is_system_basic_path_batch_facts_action(action))
-            .any(path_batch_facts_action_requests_metadata_fields)
+            .filter(|action| planned_action_is_path_metadata_facts(action))
+            .any(path_metadata_facts_action_requests_metadata_fields)
 }
 
 fn strip_configured_command_prefix<'a>(request: &'a str, prefix: &str) -> Option<&'a str> {
@@ -3231,7 +3468,54 @@ fn normalize_planned_actions_with_original(
         terminal_mixed_last_output_content,
         actions,
     );
+    let actions = canonicalize_legacy_file_config_capabilities(actions);
     mark_non_mutating_run_cmd_sequences_continue_on_error(state, actions)
+}
+
+fn canonicalize_legacy_file_config_capabilities(actions: Vec<AgentAction>) -> Vec<AgentAction> {
+    actions
+        .into_iter()
+        .enumerate()
+        .map(|(idx, action)| match action {
+            AgentAction::CallTool { tool, args } => {
+                let Some(canonical) =
+                    crate::virtual_tools::canonicalize_legacy_tool_call(&tool, args.clone())
+                else {
+                    return AgentAction::CallTool { tool, args };
+                };
+                info!(
+                    "plan_canonicalize_legacy_tool idx={} from={} to={} args={}",
+                    idx,
+                    tool,
+                    canonical.tool,
+                    crate::truncate_for_log(&canonical.args.to_string())
+                );
+                AgentAction::CallTool {
+                    tool: canonical.tool,
+                    args: canonical.args,
+                }
+            }
+            AgentAction::CallSkill { skill, args } => {
+                let Some(canonical) =
+                    crate::virtual_tools::canonicalize_legacy_tool_call(&skill, args.clone())
+                else {
+                    return AgentAction::CallSkill { skill, args };
+                };
+                info!(
+                    "plan_canonicalize_legacy_tool idx={} from={} to={} args={}",
+                    idx,
+                    skill,
+                    canonical.tool,
+                    crate::truncate_for_log(&canonical.args.to_string())
+                );
+                AgentAction::CallTool {
+                    tool: canonical.tool,
+                    args: canonical.args,
+                }
+            }
+            other => other,
+        })
+        .collect()
 }
 
 fn normalize_legacy_compatibility_actions(
@@ -3356,6 +3640,12 @@ fn normalize_evidence_contract_actions(
     let actions =
         append_synthesize_for_unscoped_workspace_text_evidence(route_result, loop_state, actions);
     let actions = ensure_explicit_multi_file_targets_have_path_facts(
+        route_result,
+        loop_state,
+        user_text,
+        actions,
+    );
+    let actions = ensure_existence_multi_file_targets_have_path_facts(
         route_result,
         loop_state,
         user_text,
@@ -4256,7 +4546,10 @@ fn normalize_archive_basic_args(mut args: Value, route_result: Option<&RouteResu
                 obj,
                 "archive",
                 &[
+                    "output",
                     "archive_path",
+                    "target",
+                    "destination",
                     "output_path",
                     "target_path",
                     "destination_path",
@@ -4520,7 +4813,7 @@ fn enforce_output_contract_tool_args(
                 | AgentAction::CallTool { tool: skill, args }
                     if skill.eq_ignore_ascii_case("system_basic") =>
                 {
-                    if rewrite_inventory_ext_filter_action_to_fs_search(route, skill, args) {
+                    if rewrite_inventory_ext_filter_action_to_fs_basic(route, skill, args) {
                         return action;
                     }
                     let Some(obj) = args.as_object_mut() else {
@@ -4666,7 +4959,7 @@ fn extension_from_globish_pattern(text: &str) -> Option<String> {
         .or_else(|| cleaned.strip_prefix('.').map(ToString::to_string))
 }
 
-fn should_rewrite_inventory_ext_filter_to_fs_search(route: &RouteResult) -> bool {
+fn should_rewrite_inventory_ext_filter_to_fs_basic(route: &RouteResult) -> bool {
     route.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths
         && matches!(
             route.output_contract.locator_kind,
@@ -4675,12 +4968,12 @@ fn should_rewrite_inventory_ext_filter_to_fs_search(route: &RouteResult) -> bool
         && !route.output_contract.delivery_required
 }
 
-fn rewrite_inventory_ext_filter_action_to_fs_search(
+fn rewrite_inventory_ext_filter_action_to_fs_basic(
     route: &RouteResult,
     skill: &mut String,
     args: &mut Value,
 ) -> bool {
-    if !should_rewrite_inventory_ext_filter_to_fs_search(route) {
+    if !should_rewrite_inventory_ext_filter_to_fs_basic(route) {
         return false;
     }
     let Some(obj) = args.as_object() else {
@@ -4708,14 +5001,15 @@ fn rewrite_inventory_ext_filter_action_to_fs_search(
         .or_else(|| obj.get("limit"))
         .and_then(Value::as_u64)
         .unwrap_or(100);
-    *skill = "fs_search".to_string();
+    *skill = "fs_basic".to_string();
     *args = serde_json::json!({
-        "action": "find_ext",
+        "action": "find_entries",
         "root": root,
         "ext": ext,
+        "target_kind": "file",
         "max_results": max_results
     });
-    info!("plan_contract_rewrite_inventory_ext_filter_to_fs_search");
+    info!("plan_contract_rewrite_inventory_ext_filter_to_fs_basic");
     true
 }
 
@@ -4742,6 +5036,11 @@ fn enforce_fs_search_path_output_args(route: &RouteResult, args: &mut Value) -> 
         return false;
     };
     let mut changed = false;
+    let is_grep_text = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|action| action.eq_ignore_ascii_case("grep_text"));
     if obj
         .get("root")
         .and_then(Value::as_str)
@@ -4761,7 +5060,7 @@ fn enforce_fs_search_path_output_args(route: &RouteResult, args: &mut Value) -> 
             changed = true;
         }
     }
-    if !obj.contains_key("pattern") {
+    if !is_grep_text && !obj.contains_key("pattern") {
         if let Some(pattern) = ["basename_pattern", "name", "keyword", "query"]
             .iter()
             .find_map(|key| obj.get(*key).and_then(Value::as_str))
@@ -4785,7 +5084,8 @@ fn enforce_fs_search_path_output_args(route: &RouteResult, args: &mut Value) -> 
             changed = true;
         }
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths {
+    if !is_grep_text && route.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths
+    {
         if let Some(ext) = first_ext_filter_value(obj).or_else(|| {
             obj.get("pattern")
                 .and_then(Value::as_str)
@@ -4821,6 +5121,18 @@ fn enforce_fs_search_path_output_args(route: &RouteResult, args: &mut Value) -> 
 fn action_is_workspace_summary_evidence(action: &AgentAction) -> bool {
     match action {
         AgentAction::CallSkill { skill, .. } if skill == "list_dir" || skill == "read_file" => true,
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill == "fs_basic" =>
+        {
+            args.get("action")
+                .and_then(|value| value.as_str())
+                .is_some_and(|action| {
+                    matches!(
+                        action.trim().to_ascii_lowercase().as_str(),
+                        "list_dir" | "read_text_range" | "stat_paths"
+                    )
+                })
+        }
         AgentAction::CallSkill { skill, args } if skill == "system_basic" => args
             .get("action")
             .and_then(|value| value.as_str())
@@ -4862,6 +5174,10 @@ fn route_needs_workspace_summary_default_evidence(route: &RouteResult) -> bool {
         && route_expects_terminal_user_answer(route)
         && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::WorkspaceProjectSummary
+}
+
+fn route_needs_workspace_respond_only_default_evidence(route: &RouteResult) -> bool {
+    route_needs_workspace_synthesis_evidence(route)
 }
 
 fn route_disallows_unrequested_workspace_artifact_mutation(
@@ -4991,6 +5307,18 @@ fn action_reads_workspace_text_content(action: &AgentAction) -> bool {
             true
         }
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("fs_basic") =>
+        {
+            args.get("action")
+                .and_then(|value| value.as_str())
+                .is_some_and(|action| {
+                    matches!(
+                        action.trim().to_ascii_lowercase().as_str(),
+                        "read_text_range" | "grep_text"
+                    )
+                })
+        }
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
             if skill.eq_ignore_ascii_case("fs_search") =>
         {
             args.get("action")
@@ -5055,6 +5383,19 @@ fn executed_step_reads_workspace_text_content(step: &crate::executor::StepExecut
 fn action_observes_locator_only(action: &AgentAction) -> bool {
     match action {
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("fs_basic") =>
+        {
+            args.get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|action| {
+                    matches!(
+                        action.to_ascii_lowercase().as_str(),
+                        "find_entries" | "stat_paths"
+                    )
+                })
+        }
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
             if skill.eq_ignore_ascii_case("fs_search") =>
         {
             args.get("action")
@@ -5089,7 +5430,13 @@ fn content_evidence_plan_only_has_locator_observation(
     loop_state: &LoopState,
     actions: &[AgentAction],
 ) -> bool {
-    if path_batch_facts_metadata_plan_satisfies_route(route_result, actions) {
+    if path_metadata_facts_plan_satisfies_route(route_result, actions) {
+        return false;
+    }
+    if name_listing_observation_plan_satisfies_route(route_result, actions) {
+        return false;
+    }
+    if structured_listing_terminal_plan_satisfies_observation(actions) {
         return false;
     }
     if loop_state.has_tool_or_skill_output
@@ -5115,15 +5462,114 @@ fn content_evidence_plan_only_has_locator_observation(
             .all(|action| action_observes_locator_only(action))
 }
 
-fn path_batch_facts_metadata_plan_satisfies_route(
+fn name_listing_observation_plan_satisfies_route(
+    route_result: &RouteResult,
+    actions: &[AgentAction],
+) -> bool {
+    if !matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::FilePaths
+    ) {
+        return false;
+    }
+    actions.iter().any(action_provides_name_listing_evidence)
+}
+
+fn structured_listing_terminal_plan_satisfies_observation(actions: &[AgentAction]) -> bool {
+    if !has_discussion_followup_action(actions) {
+        return false;
+    }
+    actions.iter().any(action_provides_name_listing_evidence)
+        && actions.iter().any(|action| {
+            matches!(
+                action,
+                AgentAction::SynthesizeAnswer { evidence_refs }
+                    if !evidence_refs.is_empty()
+            )
+        })
+}
+
+fn action_provides_name_listing_evidence(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { skill, .. } | AgentAction::CallTool { tool: skill, .. }
+            if skill.eq_ignore_ascii_case("list_dir") =>
+        {
+            true
+        }
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("fs_basic") =>
+        {
+            args.get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|action| {
+                    matches!(
+                        action.to_ascii_lowercase().as_str(),
+                        "find_entries" | "list_dir"
+                    )
+                })
+        }
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("fs_search") =>
+        {
+            args.get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|action| {
+                    matches!(
+                        action.to_ascii_lowercase().as_str(),
+                        "find_name" | "find_ext"
+                    )
+                })
+        }
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("system_basic") =>
+        {
+            args.get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|action| {
+                    matches!(
+                        action.to_ascii_lowercase().as_str(),
+                        "inventory_dir" | "find_path" | "structured_keys"
+                    )
+                })
+        }
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("config_basic") =>
+        {
+            args.get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|action| action.eq_ignore_ascii_case("list_keys"))
+        }
+        _ => false,
+    }
+}
+
+fn path_metadata_facts_plan_satisfies_route(
     route_result: &RouteResult,
     actions: &[AgentAction],
 ) -> bool {
     if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath {
-        return path_batch_facts_metadata_response_is_sufficient(actions);
+        return path_metadata_facts_response_is_sufficient(actions)
+            || path_metadata_facts_synthesizes_terminal_answer(actions);
     }
     route_requests_path_metadata_compare(route_result)
         && structured_scalar_observation_units(actions) >= 2
+}
+
+fn path_metadata_facts_synthesizes_terminal_answer(actions: &[AgentAction]) -> bool {
+    actions.iter().any(planned_action_is_path_metadata_facts)
+        && actions
+            .iter()
+            .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. }))
+        && matches!(
+            actions.last(),
+            Some(AgentAction::Respond { content }) if content.contains("{{")
+        )
 }
 
 fn has_workspace_text_content_evidence(loop_state: &LoopState, actions: &[AgentAction]) -> bool {
@@ -5170,6 +5616,14 @@ fn action_is_directory_listing_observation(action: &AgentAction) -> bool {
             if skill.eq_ignore_ascii_case("list_dir") =>
         {
             true
+        }
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("fs_basic") =>
+        {
+            args.get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|action| action.eq_ignore_ascii_case("list_dir"))
         }
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
             if skill.eq_ignore_ascii_case("system_basic") =>
@@ -5302,10 +5756,10 @@ fn ensure_workspace_synthesis_has_default_text_evidence(
         });
     }
     if !has_text_evidence {
-        rewritten.push(AgentAction::CallSkill {
-            skill: "system_basic".to_string(),
+        rewritten.push(AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
             args: serde_json::json!({
-                "action": "read_range",
+                "action": "read_text_range",
                 "path": "README.md",
                 "mode": "head",
                 "n": 40,
@@ -5340,24 +5794,52 @@ fn action_is_compact_structured_observation(action: &AgentAction) -> bool {
     else {
         return false;
     };
-    if !skill.eq_ignore_ascii_case("system_basic") {
-        return false;
-    }
-    args.get("action")
+    let action_name = args
+        .get("action")
         .and_then(Value::as_str)
         .map(str::trim)
-        .is_some_and(|action_name| {
-            matches!(
-                action_name.to_ascii_lowercase().as_str(),
-                "count_inventory" | "compare_paths" | "path_batch_facts" | "extract_fields"
-            )
-        })
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if skill.eq_ignore_ascii_case("fs_basic") {
+        return matches!(
+            action_name.as_str(),
+            "list_dir" | "compare_paths" | "stat_paths"
+        );
+    }
+    if skill.eq_ignore_ascii_case("config_basic") {
+        return matches!(
+            action_name.as_str(),
+            "read_field" | "read_fields" | "list_keys"
+        );
+    }
+    skill.eq_ignore_ascii_case("system_basic")
+        && matches!(
+            action_name.as_str(),
+            "count_inventory" | "compare_paths" | "path_batch_facts" | "extract_fields"
+        )
 }
 
 fn action_workspace_summary_path(action: &AgentAction) -> Option<&str> {
     match action {
         AgentAction::CallSkill { skill, args } if skill == "list_dir" || skill == "read_file" => {
             args.get("path").and_then(|value| value.as_str())
+        }
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill == "fs_basic" =>
+        {
+            args.get("action")
+                .and_then(Value::as_str)
+                .filter(|action| {
+                    matches!(
+                        action.trim().to_ascii_lowercase().as_str(),
+                        "list_dir" | "read_text_range" | "stat_paths"
+                    )
+                })
+                .and_then(|_| {
+                    args.get("path")
+                        .or_else(|| args.get("root"))
+                        .and_then(|value| value.as_str())
+                })
         }
         AgentAction::CallSkill { skill, args } if skill == "system_basic" => args
             .get("action")
@@ -5420,6 +5902,76 @@ fn route_requests_path_metadata_compare(route: &RouteResult) -> bool {
 
 fn action_scalar_compare_observation_units(action: &AgentAction) -> usize {
     match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill == "fs_basic" =>
+        {
+            match args
+                .get("action")
+                .and_then(|value| value.as_str())
+                .map(|action| action.trim().to_ascii_lowercase())
+                .as_deref()
+            {
+                Some("compare_paths") => {
+                    let has_pair = args
+                        .get("left_path")
+                        .and_then(|value| value.as_str())
+                        .is_some_and(|path| !path.trim().is_empty())
+                        && args
+                            .get("right_path")
+                            .and_then(|value| value.as_str())
+                            .is_some_and(|path| !path.trim().is_empty());
+                    if has_pair {
+                        2
+                    } else {
+                        string_list_from_value(args.get("paths"))
+                            .into_iter()
+                            .chain(string_list_from_value(args.get("targets")))
+                            .take(2)
+                            .count()
+                    }
+                }
+                Some("stat_paths") => string_list_from_value(args.get("paths"))
+                    .into_iter()
+                    .chain(string_list_from_value(args.get("targets")))
+                    .chain(string_list_from_value(args.get("path")))
+                    .take(2)
+                    .count(),
+                Some("list_dir") => {
+                    args.get("path")
+                        .and_then(Value::as_str)
+                        .is_some_and(|path| !path.trim().is_empty()) as usize
+                }
+                _ => 0,
+            }
+        }
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill == "config_basic" =>
+        {
+            match args
+                .get("action")
+                .and_then(|value| value.as_str())
+                .map(|action| action.trim().to_ascii_lowercase())
+                .as_deref()
+            {
+                Some("read_field") => 1,
+                Some("read_fields") => args
+                    .get("field_paths")
+                    .and_then(|value| value.as_array())
+                    .map(|field_paths| field_paths.len())
+                    .or_else(|| {
+                        args.get("fields")
+                            .and_then(|value| value.as_array())
+                            .map(Vec::len)
+                    })
+                    .unwrap_or(1),
+                Some("list_keys") | Some("validate") => {
+                    args.get("path")
+                        .and_then(Value::as_str)
+                        .is_some_and(|path| !path.trim().is_empty()) as usize
+                }
+                _ => 0,
+            }
+        }
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
             if skill == "system_basic" =>
         {
@@ -5598,11 +6150,11 @@ fn append_synthesize_answer_for_structured_scalar_compare(
     rewritten
 }
 
-fn path_batch_facts_action_for_explicit_targets(targets: &[String]) -> AgentAction {
-    AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
+fn fs_basic_stat_paths_action_for_explicit_targets(targets: &[String]) -> AgentAction {
+    AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
         args: serde_json::json!({
-            "action": "path_batch_facts",
+            "action": "stat_paths",
             "paths": targets,
             "include_missing": true,
             "fields": ["exists", "kind", "size", "modified"],
@@ -5645,39 +6197,72 @@ fn action_observed_paths_for_explicit_file_targets(action: &AgentAction) -> Vec<
         }
         return paths;
     }
-    if !skill.eq_ignore_ascii_case("system_basic") {
-        return paths;
-    }
-
-    match args
+    let action_name = args
         .get("action")
         .and_then(Value::as_str)
         .map(str::trim)
         .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "path_batch_facts" => {
-            paths.extend(string_list_from_value(args.get("paths")));
-            paths.extend(string_list_from_value(args.get("targets")));
-            paths.extend(string_list_from_value(args.get("path")));
-        }
-        "compare_paths" => {
-            paths.extend(string_list_from_value(args.get("paths")));
-            paths.extend(string_list_from_value(args.get("targets")));
-            if let Some(path) = args.get("left_path").and_then(Value::as_str) {
-                paths.push(path.to_string());
+        .to_ascii_lowercase();
+
+    if skill.eq_ignore_ascii_case("fs_basic") {
+        match action_name.as_str() {
+            "stat_paths" | "find_entries" | "compare_paths" => {
+                paths.extend(string_list_from_value(args.get("paths")));
+                paths.extend(string_list_from_value(args.get("targets")));
+                paths.extend(string_list_from_value(args.get("path")));
+                if let Some(path) = args.get("left_path").and_then(Value::as_str) {
+                    paths.push(path.to_string());
+                }
+                if let Some(path) = args.get("right_path").and_then(Value::as_str) {
+                    paths.push(path.to_string());
+                }
             }
-            if let Some(path) = args.get("right_path").and_then(Value::as_str) {
-                paths.push(path.to_string());
+            "read_text_range" => {
+                if let Some(path) = args.get("path").and_then(Value::as_str) {
+                    paths.push(path.to_string());
+                }
             }
+            _ => {}
         }
-        "read_range" | "extract_field" | "extract_fields" => {
-            if let Some(path) = args.get("path").and_then(Value::as_str) {
-                paths.push(path.to_string());
+        return paths;
+    }
+
+    if skill.eq_ignore_ascii_case("config_basic") {
+        match action_name.as_str() {
+            "read_field" | "read_fields" | "list_keys" | "validate" => {
+                if let Some(path) = args.get("path").and_then(Value::as_str) {
+                    paths.push(path.to_string());
+                }
             }
+            _ => {}
         }
-        _ => {}
+        return paths;
+    }
+
+    if skill.eq_ignore_ascii_case("system_basic") {
+        match action_name.as_str() {
+            "path_batch_facts" => {
+                paths.extend(string_list_from_value(args.get("paths")));
+                paths.extend(string_list_from_value(args.get("targets")));
+                paths.extend(string_list_from_value(args.get("path")));
+            }
+            "compare_paths" => {
+                paths.extend(string_list_from_value(args.get("paths")));
+                paths.extend(string_list_from_value(args.get("targets")));
+                if let Some(path) = args.get("left_path").and_then(Value::as_str) {
+                    paths.push(path.to_string());
+                }
+                if let Some(path) = args.get("right_path").and_then(Value::as_str) {
+                    paths.push(path.to_string());
+                }
+            }
+            "read_range" | "extract_field" | "extract_fields" => {
+                if let Some(path) = args.get("path").and_then(Value::as_str) {
+                    paths.push(path.to_string());
+                }
+            }
+            _ => {}
+        }
     }
     paths
 }
@@ -5704,9 +6289,6 @@ fn explicit_multi_file_metadata_plan_covers_targets(
         let Some(skill) = planned_action_skill_name(action).map(str::trim) else {
             return false;
         };
-        if !skill.eq_ignore_ascii_case("system_basic") {
-            return false;
-        }
         let Some(args) = action_args(action).and_then(Value::as_object) else {
             return false;
         };
@@ -5715,10 +6297,17 @@ fn explicit_multi_file_metadata_plan_covers_targets(
             .and_then(Value::as_str)
             .map(str::trim)
             .unwrap_or_default();
-        if !matches!(
-            action_name.to_ascii_lowercase().as_str(),
-            "path_batch_facts" | "compare_paths"
-        ) {
+        let covers_metadata = matches!(
+            (
+                skill.to_ascii_lowercase().as_str(),
+                action_name.to_ascii_lowercase().as_str()
+            ),
+            ("fs_basic", "stat_paths")
+                | ("fs_basic", "compare_paths")
+                | ("system_basic", "path_batch_facts")
+                | ("system_basic", "compare_paths")
+        );
+        if !covers_metadata {
             return false;
         }
         explicit_file_targets_covered_by_plan(std::slice::from_ref(action), targets)
@@ -5764,10 +6353,44 @@ fn ensure_explicit_multi_file_targets_have_path_facts(
     }
 
     info!(
-        "plan_replace_scalar_multi_file_read_with_path_batch_facts targets={}",
+        "plan_replace_scalar_multi_file_read_with_fs_basic_stat_paths targets={}",
         targets.join(",")
     );
-    vec![path_batch_facts_action_for_explicit_targets(&targets)]
+    vec![fs_basic_stat_paths_action_for_explicit_targets(&targets)]
+}
+
+fn ensure_existence_multi_file_targets_have_path_facts(
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.needs_clarify
+        || !route.is_execute_gate()
+        || route.output_contract.delivery_required
+        || loop_state.has_tool_or_skill_output
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPath
+    {
+        return actions;
+    }
+    let targets = structured_or_text_multi_file_targets(route, user_text)
+        .into_iter()
+        .take(8)
+        .collect::<Vec<_>>();
+    if targets.len() < 2 || explicit_multi_file_metadata_plan_covers_targets(&actions, &targets) {
+        return actions;
+    }
+    if !actions.iter().any(planned_action_is_path_metadata_facts) {
+        return actions;
+    }
+    info!(
+        "plan_replace_incomplete_existence_multi_file_stat_paths targets={}",
+        targets.join(",")
+    );
+    vec![fs_basic_stat_paths_action_for_explicit_targets(&targets)]
 }
 
 fn rewrite_unresolved_template_arg_multi_file_read_plan(
@@ -5794,10 +6417,10 @@ fn rewrite_unresolved_template_arg_multi_file_read_plan(
 
     let mut rewritten = Vec::new();
     for target in file_targets.iter().take(4) {
-        rewritten.push(AgentAction::CallSkill {
-            skill: "system_basic".to_string(),
+        rewritten.push(AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
             args: serde_json::json!({
-                "action": "read_range",
+                "action": "read_text_range",
                 "path": target,
                 "mode": "head",
                 "n": 40,
@@ -5867,7 +6490,21 @@ fn strip_unresolved_template_reads_after_inventory_dir(
 }
 
 fn is_locator_listing_action(action: &AgentAction) -> bool {
-    is_system_basic_inventory_dir_action(action) || is_fs_search_observation_action(action)
+    is_fs_basic_listing_action(action)
+        || is_system_basic_inventory_dir_action(action)
+        || is_fs_search_observation_action(action)
+}
+
+fn is_fs_basic_listing_action(action: &AgentAction) -> bool {
+    matches!(
+        action,
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill.eq_ignore_ascii_case("fs_basic")
+                && args
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .is_some_and(|action| action.eq_ignore_ascii_case("list_dir"))
+    )
 }
 
 fn is_system_basic_inventory_dir_action(action: &AgentAction) -> bool {
@@ -5886,7 +6523,9 @@ fn is_fs_search_observation_action(action: &AgentAction) -> bool {
 }
 
 fn is_unresolved_template_read_action(action: &AgentAction) -> bool {
-    let AgentAction::CallSkill { skill, args } = action else {
+    let (AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }) =
+        action
+    else {
         return false;
     };
     if !value_contains_unresolved_template(args) {
@@ -5894,6 +6533,14 @@ fn is_unresolved_template_read_action(action: &AgentAction) -> bool {
     }
     if skill == "read_file" {
         return true;
+    }
+    if skill == "fs_basic" {
+        return args
+            .as_object()
+            .and_then(|obj| obj.get("action"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|action_name| action_name.eq_ignore_ascii_case("read_text_range"));
     }
     if skill != "system_basic" {
         return false;
@@ -5906,10 +6553,12 @@ fn is_unresolved_template_read_action(action: &AgentAction) -> bool {
 }
 
 fn is_indexed_last_output_read_action(action: &AgentAction) -> bool {
-    let AgentAction::CallSkill { skill, args } = action else {
+    let (AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }) =
+        action
+    else {
         return false;
     };
-    if skill != "system_basic" {
+    if skill != "system_basic" && skill != "fs_basic" {
         return false;
     }
     let Some(obj) = args.as_object() else {
@@ -5919,7 +6568,10 @@ fn is_indexed_last_output_read_action(action: &AgentAction) -> bool {
         .get("action")
         .and_then(Value::as_str)
         .map(str::trim)
-        .is_some_and(|action_name| action_name.eq_ignore_ascii_case("read_range"));
+        .is_some_and(|action_name| {
+            action_name.eq_ignore_ascii_case("read_range")
+                || action_name.eq_ignore_ascii_case("read_text_range")
+        });
     if !is_read_range {
         return false;
     }
@@ -5980,6 +6632,9 @@ fn structured_or_text_multi_file_targets(route: &RouteResult, user_text: &str) -
     if structured_targets.len() >= 2 {
         return structured_targets;
     }
+    // Deprecated compatibility fallback: keep this limited to structural filename
+    // tokens and document-like extensions. Semantic target selection should come
+    // from TaskContract/route output, not language-specific phrases.
     explicit_document_file_targets(user_text)
 }
 
@@ -7461,26 +8116,25 @@ fn rewrite_docker_readonly_run_cmd_to_docker_basic(
     rewritten
 }
 
-fn action_is_system_basic_path_batch_facts_for_pair(
+fn action_is_path_metadata_facts_for_pair(
     action: &AgentAction,
     source: &str,
     archive: &str,
 ) -> bool {
-    if !planned_action_skill_name(action)
-        .map(str::trim)
-        .is_some_and(|skill| {
-            skill.eq_ignore_ascii_case("system_basic") || skill.eq_ignore_ascii_case("read_file")
-        })
-    {
+    if !planned_action_is_path_metadata_facts(action) {
         return false;
     }
     let Some(args) = action_args(action).and_then(Value::as_object) else {
         return false;
     };
-    if args.get("action").and_then(Value::as_str) != Some("path_batch_facts") {
-        return false;
+    let mut paths = string_list_from_value(args.get("paths").or_else(|| args.get("path")));
+    paths.extend(string_list_from_value(args.get("targets")));
+    if let Some(path) = args.get("left_path").and_then(Value::as_str) {
+        paths.push(path.to_string());
     }
-    let paths = string_list_from_value(args.get("paths").or_else(|| args.get("path")));
+    if let Some(path) = args.get("right_path").and_then(Value::as_str) {
+        paths.push(path.to_string());
+    }
     paths
         .iter()
         .any(|path| path.ends_with(source) || path == source)
@@ -7510,7 +8164,7 @@ fn rewrite_archive_pack_plan_to_archive_basic(
     let mut rewritten = actions;
     let mut changed = false;
     for action in rewritten.iter_mut() {
-        if action_is_system_basic_path_batch_facts_for_pair(action, &source, &archive)
+        if action_is_path_metadata_facts_for_pair(action, &source, &archive)
             || action_skill_is_run_cmd(action)
         {
             *action = AgentAction::CallSkill {
@@ -7560,7 +8214,7 @@ fn rewrite_archive_pack_plan_to_archive_basic(
 ///
 /// 这种形态会被 `delivery_text_classifier` 判为 `non_informative_placeholder`，
 /// 触发 `plan_missing_terminal_user_answer` 重修，进而陷入 vendor patch 都救不回来的死循环
-/// （MiniMax 在 short-answer 类 act 任务里会反复踩这个坑，prompt 指令忠实度不够）。
+/// （兼容模型在 short-answer 类 act 任务里可能反复踩这个坑，prompt 指令忠实度不够）。
 fn is_bare_last_output_placeholder(content: &str) -> bool {
     let trimmed = content.trim();
     if !trimmed.starts_with("{{") || !trimmed.ends_with("}}") {
@@ -7732,8 +8386,8 @@ fn strip_pre_observation_synthesize_before_concrete_respond(
 ///    - 含 3+ 行换行 + 至少一个文件路径字符（`/`、`.md`、`.toml` 等）；或
 ///    - 含 `result: ` / `count: ` / `size: ` 这种结构化字段标签。
 ///
-/// 这一招专门针对 minimax 偶发的「planner 一次性把 list_dir + respond 编造
-/// 内容写在同一个 plan，respond 直接交给用户」的 adversarial v1 → adv08 复现路径。
+/// 这一招针对兼容模型偶发的「planner 一次性把 list_dir + respond 编造
+/// 内容写在同一个 plan，respond 直接交给用户」复现路径。
 /// 不命中条件时 actions 原样返回，不破坏正确 plan。
 fn rewrite_pre_observation_concrete_respond_to_placeholder(
     route_result: Option<&RouteResult>,
@@ -7913,10 +8567,10 @@ fn ensure_content_excerpt_summary_has_bounded_content(
             .unwrap_or(rewritten.len());
         rewritten.insert(
             insert_at,
-            AgentAction::CallSkill {
-                skill: "system_basic".to_string(),
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
                 args: serde_json::json!({
-                    "action": "read_range",
+                    "action": "read_text_range",
                     "path": path,
                     "mode": "head",
                     "n": 40
@@ -8441,7 +9095,7 @@ pub(super) async fn plan_round_actions(
         })
     } else {
         let history_compact = build_loop_history_compact(loop_state);
-        // Phase 3.3 / minimax-fs_search regression fix:
+        // Phase 3.3 / observation history regression fix:
         // 之前这里只读 delivery_messages.last()。delivery_messages 仅承载最终 respond/交付
         // 文本，observation-only 步骤（fs_search/list_dir/read_file/run_cmd 等）的输出从不
         // 写入这里。结果是 round N+1 的 loop planner 看到 "Last round output: (none)"，
@@ -8540,6 +9194,19 @@ pub(super) async fn plan_round_actions(
                 );
             }
             fallback
+        })
+        .or_else(|| {
+            let route = route_result?;
+            if loop_state.has_tool_or_skill_output
+                || !route_needs_workspace_respond_only_default_evidence(route)
+            {
+                return None;
+            }
+            warn!(
+                "plan_parse_failed_using_workspace_default_evidence_plan task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            Some(workspace_summary_default_evidence_actions())
         })
         .map(|actions| {
             normalize_planned_actions_with_original(
@@ -8812,6 +9479,7 @@ mod tests {
     use claw_core::skill_registry::SkillsRegistry;
 
     use super::{
+        actions_use_ad_hoc_command_without_route_preferred_skill,
         build_lightweight_skill_playbooks_text, build_lightweight_skill_quick_index_text,
         build_lightweight_tool_spec, can_fallback_to_initial_plan_after_repair_failure,
         classify_planning_prompt_class, content_excerpt_summary_auto_locator_fast_plan_result,
@@ -8822,11 +9490,13 @@ mod tests {
         inject_synthesize_answer_for_bare_placeholder_respond, is_bare_last_output_placeholder,
         normalize_archive_basic_schema_aliases, normalize_git_basic_schema_aliases,
         normalize_planned_actions, normalize_planned_actions_with_original,
-        normalize_system_basic_schema_aliases, plan_repair_reason,
+        normalize_system_basic_schema_aliases,
+        observation_only_plan_can_finalize_from_direct_output, plan_repair_reason,
+        registry_preferred_skill_names_for_route,
         replace_file_delivery_respond_only_with_path_observation,
         replace_scalar_count_plan_with_count_inventory,
         replace_scalar_path_respond_only_with_auto_locator_observation,
-        rewrite_archive_pack_plan_to_archive_basic,
+        replace_workspace_synthesis_respond_only_plan, rewrite_archive_pack_plan_to_archive_basic,
         rewrite_archive_unpack_run_cmd_to_archive_basic,
         rewrite_docker_readonly_run_cmd_to_docker_basic, rewrite_extract_field_alias_args,
         rewrite_pre_observation_concrete_respond_to_placeholder,
@@ -8853,6 +9523,36 @@ mod tests {
         DEFAULT_AGENT_ID,
     };
     use serde_json::{json, Value};
+
+    fn planned_call<'a>(action: &'a AgentAction) -> Option<(&'a str, &'a Value)> {
+        match action {
+            AgentAction::CallSkill { skill, args } => Some((skill.as_str(), args)),
+            AgentAction::CallTool { tool, args } => Some((tool.as_str(), args)),
+            _ => None,
+        }
+    }
+
+    fn planned_call_is(action: &AgentAction, name: &str, action_name: &str) -> bool {
+        planned_call(action).is_some_and(|(tool, args)| {
+            tool == name && args.get("action").and_then(Value::as_str) == Some(action_name)
+        })
+    }
+
+    fn expect_planned_call<'a>(
+        action: &'a AgentAction,
+        name: &str,
+        action_name: &str,
+    ) -> &'a Value {
+        let Some((tool, args)) = planned_call(action) else {
+            panic!("expected {name}.{action_name} call, got {action:?}");
+        };
+        assert_eq!(tool, name);
+        assert_eq!(
+            args.get("action").and_then(Value::as_str),
+            Some(action_name)
+        );
+        args
+    }
 
     struct TempDirGuard {
         path: PathBuf,
@@ -8923,6 +9623,19 @@ mod tests {
             skills_list: Arc::new(enabled),
         });
         state
+    }
+
+    fn action_capability_and_action<'a>(
+        action: &'a AgentAction,
+        capability: &str,
+        action_name: &str,
+    ) -> Option<&'a Value> {
+        match action {
+            AgentAction::CallSkill { skill, args } if skill == capability => Some(args),
+            AgentAction::CallTool { tool, args } if tool == capability => Some(args),
+            _ => None,
+        }
+        .filter(|args| args.get("action").and_then(Value::as_str) == Some(action_name))
     }
 
     fn test_state_with_registry() -> AppState {
@@ -9061,12 +9774,8 @@ mod tests {
         );
 
         assert!(normalized.iter().any(|action| {
-            matches!(
-                action,
-                AgentAction::CallSkill { skill, args }
-                    if skill == "system_basic"
-                        && args.get("action").and_then(Value::as_str) == Some("read_range")
-                        && args.get("path").and_then(Value::as_str) == Some("/tmp/rustclaw.service")
+            action_capability_and_action(action, "fs_basic", "read_text_range").is_some_and(
+                |args| args.get("path").and_then(Value::as_str) == Some("/tmp/rustclaw.service"),
             )
         }));
         assert!(normalized.iter().any(|action| {
@@ -9454,11 +10163,12 @@ mod tests {
 
         assert_eq!(rewritten.len(), 2);
         match &rewritten[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(|value| value.as_str()),
-                    Some("path_batch_facts")
+                    Some("stat_paths")
                 );
             }
             other => panic!("expected path observation, got {other:?}"),
@@ -9715,6 +10425,33 @@ mod tests {
     }
 
     #[test]
+    fn archive_basic_pack_output_alias_normalizes_to_archive() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "archive_basic".to_string(),
+            args: json!({
+                "action": "pack",
+                "source": "scripts/skill_calls",
+                "output": "tmp/nl_archive_case.zip",
+            }),
+        }];
+
+        let normalized = normalize_archive_basic_schema_aliases(None, actions);
+
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "archive_basic");
+                assert_eq!(
+                    args.get("archive").and_then(Value::as_str),
+                    Some("tmp/nl_archive_case.zip")
+                );
+                assert_eq!(args.get("format").and_then(Value::as_str), Some("zip"));
+                assert!(args.get("output").is_none());
+            }
+            other => panic!("expected archive_basic action, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn archive_basic_list_path_alias_normalizes_to_archive_contract() {
         let actions = vec![AgentAction::CallSkill {
             skill: "archive_basic".to_string(),
@@ -9737,6 +10474,47 @@ mod tests {
             }
             other => panic!("expected archive_basic action, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn preferred_route_allows_more_specific_structured_tool_action() {
+        let state = test_state_with_registry();
+        let loop_state = LoopState::new(2);
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_hint = "tmp/nl_archive_case.zip".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "archive_basic".to_string(),
+                args: json!({
+                    "action": "pack",
+                    "source": "scripts/skill_calls",
+                    "archive": "tmp/nl_archive_case.zip",
+                    "format": "zip"
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{s2.text}}".to_string(),
+            },
+        ];
+
+        assert!(super::registry_preferred_skill_matches_route(
+            &state, &route
+        ));
+        assert!(
+            !super::actions_use_ad_hoc_command_without_route_preferred_skill(
+                &state, &route, &actions
+            )
+        );
+        assert!(!should_force_actionable_plan_repair(
+            &state,
+            Some(&route),
+            &loop_state,
+            &actions
+        ));
     }
 
     #[test]
@@ -10224,9 +11002,7 @@ mod tests {
             Some(root_package.to_string_lossy().as_ref()),
             actions,
         );
-        let AgentAction::CallSkill { args, .. } = &normalized[0] else {
-            panic!("expected call skill");
-        };
+        let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
         assert_eq!(
             args.get("path").and_then(Value::as_str),
             Some(root.path.join("UI/package.json").to_string_lossy().as_ref())
@@ -10282,9 +11058,7 @@ name = "clawd"
             Some(root_cargo.to_string_lossy().as_ref()),
             actions,
         );
-        let AgentAction::CallSkill { args, .. } = &normalized[0] else {
-            panic!("expected call skill");
-        };
+        let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
         assert_eq!(
             args.get("path").and_then(Value::as_str),
             Some(
@@ -10333,9 +11107,7 @@ version = "0.1.7"
             Some(root_cargo.to_string_lossy().as_ref()),
             actions,
         );
-        let AgentAction::CallSkill { args, .. } = &normalized[0] else {
-            panic!("expected call skill");
-        };
+        let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
         assert_eq!(
             args.get("path").and_then(Value::as_str),
             Some(root_cargo.to_string_lossy().as_ref())
@@ -10461,6 +11233,105 @@ version = "0.1.7"
     }
 
     #[test]
+    fn content_evidence_route_accepts_structured_listing_terminal_plan() {
+        let loop_state = LoopState::new(2);
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "find_entries",
+                    "root": "/workspace",
+                    "target_kind": "file",
+                    "name_pattern": "README",
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+        let route = route_result(RoutedMode::Act, true, OutputResponseShape::Free);
+
+        assert!(!should_force_plan_repair(
+            Some(&route),
+            &loop_state,
+            &actions,
+        ));
+        assert_ne!(
+            repair_reason(Some(&route), &loop_state, Some(&actions)),
+            "content_evidence_requires_content_observation"
+        );
+    }
+
+    #[test]
+    fn existence_route_accepts_stat_paths_synthesized_metadata_evidence() {
+        let loop_state = LoopState::new(2);
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "stat_paths",
+                    "paths": ["README.md", "README.zh-CN.md", "Cargo.toml"]
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+
+        assert!(!should_force_plan_repair(
+            Some(&route),
+            &loop_state,
+            &actions,
+        ));
+        assert_ne!(
+            repair_reason(Some(&route), &loop_state, Some(&actions)),
+            "content_evidence_requires_content_observation"
+        );
+    }
+
+    #[test]
+    fn directory_names_route_accepts_fs_basic_find_entries_evidence() {
+        let loop_state = LoopState::new(2);
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "find_entries",
+                    "root": "/workspace",
+                    "target_kind": "file",
+                    "ext_filter": "sh",
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
+
+        assert!(!should_force_plan_repair(
+            Some(&route),
+            &loop_state,
+            &actions,
+        ));
+        assert_ne!(
+            repair_reason(Some(&route), &loop_state, Some(&actions)),
+            "content_evidence_requires_content_observation"
+        );
+    }
+
+    #[test]
     fn content_evidence_route_accepts_scoped_grep_observation_plan() {
         let loop_state = LoopState::new(2);
         let actions = vec![AgentAction::CallSkill {
@@ -10507,10 +11378,10 @@ version = "0.1.7"
         )));
         assert!(normalized.iter().any(|action| matches!(
             action,
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
+            AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+                if skill == "fs_basic"
                     && args.get("action").and_then(|value| value.as_str())
-                        == Some("read_range")
+                        == Some("read_text_range")
                     && args.get("path").and_then(|value| value.as_str()) == Some("README.md")
         )));
         assert!(!should_force_actionable_plan_repair(
@@ -10562,10 +11433,10 @@ version = "0.1.7"
         )));
         assert!(normalized.iter().any(|action| matches!(
             action,
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
+            AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+                if skill == "fs_basic"
                     && args.get("action").and_then(|value| value.as_str())
-                        == Some("read_range")
+                        == Some("read_text_range")
                     && args.get("path").and_then(|value| value.as_str()) == Some("README.md")
         )));
         let synth_refs = normalized.iter().find_map(|action| match action {
@@ -10821,12 +11692,11 @@ version = "0.1.7"
             actions,
         );
 
-        assert_eq!(normalized.len(), 1);
         assert!(matches!(
             &normalized[0],
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
-                    && args.get("action").and_then(Value::as_str) == Some("count_inventory")
+            AgentAction::CallTool { tool: skill, args }
+                if skill == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("count_entries")
         ));
         assert!(!normalized.iter().any(|action| {
             matches!(action, AgentAction::CallSkill { skill, .. } if skill == "git_basic")
@@ -10896,6 +11766,58 @@ version = "0.1.7"
             &loop_state,
             &actions
         ));
+    }
+
+    #[test]
+    fn preferred_registry_skill_route_does_not_force_repair_from_structured_tool() {
+        let state = test_state_with_registry();
+        let loop_state = LoopState::new(2);
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Free);
+        route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+        let actions = vec![AgentAction::CallTool {
+            tool: "system_basic".to_string(),
+            args: json!({"action": "diagnose_runtime"}),
+        }];
+
+        assert!(super::registry_preferred_skill_matches_route(
+            &state, &route
+        ));
+        assert!(
+            !super::actions_use_ad_hoc_command_without_route_preferred_skill(
+                &state, &route, &actions
+            )
+        );
+        assert!(!should_force_actionable_plan_repair(
+            &state,
+            Some(&route),
+            &loop_state,
+            &actions
+        ));
+    }
+
+    #[test]
+    fn fs_basic_directory_names_route_forces_repair_from_run_cmd() {
+        let state = test_state_with_registry();
+        let loop_state = LoopState::new(2);
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({"command": "find . -type f -name '*.sh' | xargs dirname | sort -u"}),
+        }];
+
+        assert!(super::registry_preferred_skill_matches_route(
+            &state, &route
+        ));
+        assert!(
+            super::actions_use_ad_hoc_command_without_route_preferred_skill(
+                &state, &route, &actions
+            )
+        );
+        assert_eq!(
+            plan_repair_reason(&state, Some(&route), &loop_state, Some(&actions)),
+            "preferred_skill_required_for_semantic_route"
+        );
     }
 
     #[test]
@@ -11037,17 +11959,12 @@ version = "0.1.7"
             actions,
         );
 
-        match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "read_file");
-                assert_eq!(
-                    args.get(super::super::CLAWD_MISSING_TARGET_REPAIRABLE_ARG)
-                        .and_then(Value::as_bool),
-                    Some(true)
-                );
-            }
-            other => panic!("expected read_file action, got {other:?}"),
-        }
+        let args = expect_planned_call(&normalized[0], "fs_basic", "read_text_range");
+        assert_eq!(
+            args.get(super::super::CLAWD_MISSING_TARGET_REPAIRABLE_ARG)
+                .and_then(Value::as_bool),
+            Some(true)
+        );
     }
 
     #[test]
@@ -11202,16 +12119,11 @@ version = "0.1.7"
             actions,
         );
 
-        match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "read_file");
-                assert_eq!(
-                    args.get("path").and_then(|value| value.as_str()),
-                    Some("scripts/nl_tests/fixtures/device_local/logs/model_io.log")
-                );
-            }
-            other => panic!("expected read_file to stay unchanged, got {other:?}"),
-        }
+        let args = expect_planned_call(&normalized[0], "fs_basic", "read_text_range");
+        assert_eq!(
+            args.get("path").and_then(|value| value.as_str()),
+            Some("scripts/nl_tests/fixtures/device_local/logs/model_io.log")
+        );
     }
 
     #[test]
@@ -11236,9 +12148,10 @@ version = "0.1.7"
             actions,
         );
 
-        assert!(matches!(
+        assert!(planned_call_is(
             &normalized[0],
-            AgentAction::CallSkill { skill, .. } if skill == "read_file"
+            "fs_basic",
+            "read_text_range"
         ));
     }
 
@@ -11276,16 +12189,11 @@ version = "0.1.7"
             actions,
         );
 
-        match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "read_file");
-                assert_eq!(
-                    args.get("path").and_then(|value| value.as_str()),
-                    Some(current_path.as_str())
-                );
-            }
-            other => panic!("expected read_file action, got {other:?}"),
-        }
+        let args = expect_planned_call(&normalized[0], "fs_basic", "read_text_range");
+        assert_eq!(
+            args.get("path").and_then(|value| value.as_str()),
+            Some(current_path.as_str())
+        );
     }
 
     #[test]
@@ -11327,20 +12235,11 @@ version = "0.1.7"
             actions,
         );
 
-        match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
-                assert_eq!(
-                    args.get("path").and_then(|value| value.as_str()),
-                    Some(current_path.as_str())
-                );
-                assert_eq!(
-                    args.get("action").and_then(|value| value.as_str()),
-                    Some("read_range")
-                );
-            }
-            other => panic!("expected system_basic read_range, got {other:?}"),
-        }
+        let args = expect_planned_call(&normalized[0], "fs_basic", "read_text_range");
+        assert_eq!(
+            args.get("path").and_then(|value| value.as_str()),
+            Some(current_path.as_str())
+        );
     }
 
     #[test]
@@ -11380,26 +12279,16 @@ version = "0.1.7"
             actions,
         );
 
-        match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "read_file");
-                assert_eq!(
-                    args.get("path").and_then(|value| value.as_str()),
-                    Some(alpha_path.as_str())
-                );
-            }
-            other => panic!("expected first read_file action, got {other:?}"),
-        }
-        match &normalized[1] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "read_file");
-                assert_eq!(
-                    args.get("path").and_then(|value| value.as_str()),
-                    Some(beta_path.as_str())
-                );
-            }
-            other => panic!("expected second read_file action, got {other:?}"),
-        }
+        let args = expect_planned_call(&normalized[0], "fs_basic", "read_text_range");
+        assert_eq!(
+            args.get("path").and_then(|value| value.as_str()),
+            Some(alpha_path.as_str())
+        );
+        let args = expect_planned_call(&normalized[1], "fs_basic", "read_text_range");
+        assert_eq!(
+            args.get("path").and_then(|value| value.as_str()),
+            Some(beta_path.as_str())
+        );
     }
 
     #[test]
@@ -11977,15 +12866,16 @@ version = "0.1.7"
             scalar_path_auto_locator_observation_plan(Some(&route), Some(&report_path)).unwrap();
         assert_eq!(actions.len(), 1);
         match &actions[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(|value| value.as_str()),
-                    Some("path_batch_facts")
+                    Some("stat_paths")
                 );
                 assert_eq!(args.get("paths"), Some(&json!([report_path])));
             }
-            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+            other => panic!("expected fs_basic stat_paths action, got {other:?}"),
         }
     }
 
@@ -12013,7 +12903,7 @@ version = "0.1.7"
 
         assert_eq!(plan.plan_kind, PlanKind::Single);
         assert_eq!(plan.steps.len(), 1);
-        assert!(plan.raw_plan_text.contains("path_batch_facts"));
+        assert!(plan.raw_plan_text.contains("stat_paths"));
         assert!(plan.raw_plan_text.contains(&report_path));
     }
 
@@ -12038,18 +12928,18 @@ version = "0.1.7"
         assert_eq!(plan.plan_kind, PlanKind::Single);
         assert_eq!(plan.steps.len(), 1);
         match &plan.steps[0].to_agent_action() {
-            Some(AgentAction::CallSkill { skill, args }) => {
-                assert_eq!(skill, "fs_search");
+            Some(AgentAction::CallTool { tool, args }) => {
+                assert_eq!(tool, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(Value::as_str),
-                    Some("find_name")
+                    Some("find_entries")
                 );
                 assert_eq!(
                     args.get("pattern").and_then(Value::as_str),
                     Some("start-all-bin.sh")
                 );
             }
-            other => panic!("expected fs_search find_name action, got {other:?}"),
+            other => panic!("expected fs_basic find_entries action, got {other:?}"),
         }
     }
 
@@ -12077,18 +12967,54 @@ version = "0.1.7"
         assert_eq!(plan.plan_kind, PlanKind::Single);
         assert_eq!(plan.steps.len(), 1);
         match &plan.steps[0].to_agent_action() {
-            Some(AgentAction::CallSkill { skill, args }) => {
-                assert_eq!(skill, "system_basic");
+            Some(AgentAction::CallTool { tool, args }) => {
+                assert_eq!(tool, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(Value::as_str),
-                    Some("path_batch_facts")
+                    Some("stat_paths")
                 );
                 assert_eq!(
                     args.get("paths"),
                     Some(&json!(["README.md", "AGENTS.md", "Cargo.toml"]))
                 );
             }
-            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+            other => panic!("expected fs_basic stat_paths action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn existence_with_path_current_workspace_single_file_target_uses_path_batch_facts() {
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.resolved_intent =
+            "Check if README.md exists in the current directory and answer with the path"
+                .to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint = "/home/guagua/rustclaw".to_string();
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let plan = existence_with_path_locator_fast_plan_result(
+            "check one explicit file in current workspace",
+            Some(&route),
+            &loop_state,
+            Some("/home/guagua/rustclaw"),
+        )
+        .expect("single-file current-workspace existence route should use path facts");
+
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        assert_eq!(plan.steps.len(), 1);
+        match &plan.steps[0].to_agent_action() {
+            Some(AgentAction::CallTool { tool, args }) => {
+                assert_eq!(tool, "fs_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("stat_paths")
+                );
+                assert_eq!(args.get("paths"), Some(&json!(["README.md"])));
+            }
+            other => panic!("expected fs_basic stat_paths action, got {other:?}"),
         }
     }
 
@@ -12113,15 +13039,15 @@ version = "0.1.7"
         assert_eq!(plan.plan_kind, PlanKind::Single);
         assert_eq!(plan.steps.len(), 1);
         match &plan.steps[0].to_agent_action() {
-            Some(AgentAction::CallSkill { skill, args }) => {
-                assert_eq!(skill, "system_basic");
+            Some(AgentAction::CallTool { tool, args }) => {
+                assert_eq!(tool, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(Value::as_str),
-                    Some("path_batch_facts")
+                    Some("stat_paths")
                 );
                 assert_eq!(args.get("paths"), Some(&json!(["/tmp/Cargo.lock"])));
             }
-            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+            other => panic!("expected fs_basic stat_paths action, got {other:?}"),
         }
     }
 
@@ -12153,23 +13079,26 @@ version = "0.1.7"
         assert_eq!(plan.plan_kind, PlanKind::Single);
         assert_eq!(plan.steps.len(), 1);
         match &plan.steps[0].to_agent_action() {
-            Some(AgentAction::CallSkill { skill, args }) => {
-                assert_eq!(skill, "system_basic");
+            Some(AgentAction::CallTool { tool, args }) => {
+                assert_eq!(tool, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(Value::as_str),
-                    Some("find_path")
+                    Some("find_entries")
                 );
                 assert_eq!(
                     args.get("root").and_then(Value::as_str),
                     Some(directory_path.as_str())
                 );
-                assert_eq!(args.get("name").and_then(Value::as_str), Some("report.md"));
+                assert_eq!(
+                    args.get("pattern").and_then(Value::as_str),
+                    Some("report.md")
+                );
                 assert_eq!(
                     args.get("target_kind").and_then(Value::as_str),
                     Some("file")
                 );
             }
-            other => panic!("expected system_basic find_path action, got {other:?}"),
+            other => panic!("expected fs_basic find_entries action, got {other:?}"),
         }
     }
 
@@ -12198,11 +13127,11 @@ version = "0.1.7"
         assert_eq!(plan.plan_kind, PlanKind::Single);
         assert_eq!(plan.steps.len(), 1);
         match &plan.steps[0].to_agent_action() {
-            Some(AgentAction::CallSkill { skill, args }) => {
-                assert_eq!(skill, "fs_search");
+            Some(AgentAction::CallTool { tool, args }) => {
+                assert_eq!(tool, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(Value::as_str),
-                    Some("find_name")
+                    Some("find_entries")
                 );
                 assert_eq!(
                     args.get("pattern").and_then(Value::as_str),
@@ -12213,7 +13142,7 @@ version = "0.1.7"
                     Some("file")
                 );
             }
-            other => panic!("expected fs_search find_name action, got {other:?}"),
+            other => panic!("expected fs_basic find_entries action, got {other:?}"),
         }
     }
 
@@ -12252,15 +13181,16 @@ version = "0.1.7"
             scalar_path_auto_locator_observation_plan(Some(&route), Some(&root_path)).unwrap();
         assert_eq!(actions.len(), 1);
         match &actions[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(|value| value.as_str()),
-                    Some("path_batch_facts")
+                    Some("stat_paths")
                 );
                 assert_eq!(args.get("paths"), Some(&json!([root_path])));
             }
-            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+            other => panic!("expected fs_basic stat_paths action, got {other:?}"),
         }
     }
 
@@ -12286,15 +13216,16 @@ version = "0.1.7"
         );
         assert_eq!(normalized.len(), 1);
         match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(|value| value.as_str()),
-                    Some("path_batch_facts")
+                    Some("stat_paths")
                 );
                 assert_eq!(args.get("paths"), Some(&json!([report_path])));
             }
-            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+            other => panic!("expected fs_basic stat_paths action, got {other:?}"),
         }
     }
 
@@ -12337,9 +13268,9 @@ version = "0.1.7"
         assert_eq!(normalized.len(), 4);
         assert!(matches!(
             &normalized[1],
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
-                    && args.get("action").and_then(Value::as_str) == Some("read_range")
+            AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+                if skill == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("read_text_range")
                     && args.get("path").and_then(Value::as_str) == Some(readme_path.as_str())
         ));
         assert!(matches!(
@@ -12349,7 +13280,54 @@ version = "0.1.7"
     }
 
     #[test]
-    fn content_excerpt_summary_auto_locator_fast_plan_uses_doc_parse() {
+    fn workspace_synthesis_respond_only_with_generic_semantic_uses_default_evidence() {
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::OneSentence);
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.delivery_required = false;
+        let actions = vec![AgentAction::Respond {
+            content: "RustClaw 是一个本地智能助手平台。".to_string(),
+        }];
+
+        let normalized = replace_workspace_synthesis_respond_only_plan(
+            Some(&route),
+            &LoopState::new(1),
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 6);
+        assert!(matches!(
+            &normalized[0],
+            AgentAction::CallSkill { skill, args }
+                if skill == "system_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("workspace_glance")
+        ));
+        assert!(matches!(
+            &normalized[1],
+            AgentAction::CallTool { tool, args }
+                if tool == "config_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("read_fields")
+        ));
+        assert!(matches!(
+            &normalized[3],
+            AgentAction::CallTool { tool, args }
+                if tool == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("read_text_range")
+        ));
+        assert!(matches!(
+            &normalized[4],
+            AgentAction::SynthesizeAnswer { evidence_refs }
+                if evidence_refs == &vec![
+                    "step_1".to_string(),
+                    "step_2".to_string(),
+                    "step_3".to_string(),
+                    "step_4".to_string(),
+                ]
+        ));
+    }
+
+    #[test]
+    fn content_excerpt_summary_auto_locator_fast_plan_uses_doc_parse_for_loose_doc() {
         let root = TempDirGuard::new("content_excerpt_fast_plan");
         let readme = root.path.join("README.md");
         fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
@@ -12384,6 +13362,51 @@ version = "0.1.7"
                 );
             }
             other => panic!("expected doc_parse parse_doc action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn content_excerpt_summary_auto_locator_fast_plan_uses_fs_basic_for_repo_prompt_doc() {
+        let root = TempDirGuard::new("content_excerpt_repo_prompt_fast_plan");
+        let prompt_dir = root.path.join("prompts/layers/generated/skills");
+        fs::create_dir_all(&prompt_dir).expect("create prompt dir");
+        let prompt_file = prompt_dir.join("fs_basic.md");
+        fs::write(
+            &prompt_file,
+            "## fs_basic\n\nFilesystem facts and bounded reads.",
+        )
+        .expect("write prompt file");
+        let prompt_path = prompt_file.display().to_string();
+        let mut route = route_result(RoutedMode::ChatAct, true, OutputResponseShape::Free);
+        route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let plan = content_excerpt_summary_auto_locator_fast_plan_result(
+            "summarize a generated skill prompt",
+            Some(&route),
+            &loop_state,
+            Some(&prompt_path),
+        )
+        .expect("repo prompt artifact should use a bounded filesystem read");
+
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        assert_eq!(plan.steps.len(), 1);
+        match &plan.steps[0].to_agent_action() {
+            Some(AgentAction::CallTool { tool, args }) => {
+                assert_eq!(tool, "fs_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("read_text_range")
+                );
+                assert_eq!(
+                    args.get("path").and_then(Value::as_str),
+                    Some(prompt_path.as_str())
+                );
+            }
+            other => panic!("expected fs_basic read_text_range action, got {other:?}"),
         }
     }
 
@@ -12459,15 +13482,16 @@ version = "0.1.7"
         );
         assert_eq!(normalized.len(), 1);
         match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(|value| value.as_str()),
-                    Some("path_batch_facts")
+                    Some("stat_paths")
                 );
                 assert_eq!(args.get("paths"), Some(&json!([report_path])));
             }
-            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+            other => panic!("expected fs_basic stat_paths action, got {other:?}"),
         }
     }
 
@@ -12502,18 +13526,18 @@ version = "0.1.7"
 
         assert_eq!(normalized.len(), 1);
         match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
+            AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(|value| value.as_str()),
-                    Some("count_inventory")
+                    Some("count_entries")
                 );
                 assert_eq!(
                     args.get("path").and_then(|value| value.as_str()),
                     Some(root_path.as_str())
                 );
             }
-            other => panic!("expected system_basic count_inventory action, got {other:?}"),
+            other => panic!("expected fs_basic count_entries action, got {other:?}"),
         }
     }
 
@@ -12552,18 +13576,18 @@ version = "0.1.7"
 
         assert_eq!(normalized.len(), 1);
         match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
+            AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(|value| value.as_str()),
-                    Some("count_inventory")
+                    Some("count_entries")
                 );
                 assert_eq!(
                     args.get("path").and_then(|value| value.as_str()),
                     Some(root_path.as_str())
                 );
             }
-            other => panic!("expected system_basic count_inventory action, got {other:?}"),
+            other => panic!("expected fs_basic count_entries action, got {other:?}"),
         }
     }
 
@@ -12599,15 +13623,16 @@ version = "0.1.7"
 
         assert_eq!(normalized.len(), 2);
         match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(Value::as_str),
-                    Some("path_batch_facts")
+                    Some("stat_paths")
                 );
                 assert_eq!(args.get("paths"), Some(&json!([missing_path])));
             }
-            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+            other => panic!("expected fs_basic stat_paths action, got {other:?}"),
         }
         match &normalized[1] {
             AgentAction::Respond { content } => {
@@ -12682,15 +13707,16 @@ version = "0.1.7"
 
         assert_eq!(normalized.len(), 2);
         match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(Value::as_str),
-                    Some("path_batch_facts")
+                    Some("stat_paths")
                 );
                 assert_eq!(args.get("paths"), Some(&json!(["configs/config_copy"])));
             }
-            other => panic!("expected system_basic path_batch_facts action, got {other:?}"),
+            other => panic!("expected fs_basic stat_paths action, got {other:?}"),
         }
         match &normalized[1] {
             AgentAction::Respond { content } => {
@@ -12738,11 +13764,12 @@ version = "0.1.7"
 
         assert_eq!(normalized.len(), 1);
         match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(|value| value.as_str()),
-                    Some("inventory_dir")
+                    Some("list_dir")
                 );
                 assert_eq!(
                     args.get("path").and_then(|value| value.as_str()),
@@ -12788,11 +13815,12 @@ version = "0.1.7"
 
         assert_eq!(normalized.len(), 1);
         match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
                 assert_eq!(
                     args.get("action").and_then(|value| value.as_str()),
-                    Some("inventory_dir")
+                    Some("list_dir")
                 );
                 assert_eq!(args.get("path").and_then(|value| value.as_str()), Some("."));
                 assert_eq!(
@@ -12955,9 +13983,10 @@ version = "0.1.7"
             actions,
         );
 
-        assert!(matches!(
+        assert!(planned_call_is(
             &normalized[0],
-            AgentAction::CallSkill { skill, .. } if skill == "read_file"
+            "fs_basic",
+            "read_text_range"
         ));
         assert_eq!(
             plan_repair_reason(&state, Some(&route), &loop_state, Some(&normalized)),
@@ -13094,7 +14123,7 @@ version = "0.1.7"
         );
 
         assert_eq!(normalized.len(), 3);
-        assert!(matches!(normalized[0], AgentAction::CallSkill { .. }));
+        assert!(planned_call_is(&normalized[0], "fs_basic", "list_dir"));
         assert!(matches!(
             &normalized[1],
             AgentAction::SynthesizeAnswer { evidence_refs }
@@ -13197,19 +14226,73 @@ version = "0.1.7"
 
         assert_eq!(normalized.len(), 1);
         match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "config_basic");
                 assert_eq!(
                     args.get("action").and_then(Value::as_str),
-                    Some("structured_keys")
+                    Some("list_keys")
                 );
                 assert_eq!(
                     args.get("path").and_then(Value::as_str),
                     Some(config_path.as_str())
                 );
             }
-            other => panic!("expected system_basic structured_keys action, got {other:?}"),
+            other => panic!("expected config_basic list_keys action, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn file_names_route_accepts_structured_key_listing_for_structured_document() {
+        let root = TempDirGuard::new("file_names_structured_keys_plan");
+        let package_path = root.path.join("package.json");
+        fs::write(
+            &package_path,
+            r#"{"scripts":{"build":"vite build","dev":"vite","lint":"eslint ."}}"#,
+        )
+        .expect("write package");
+        let package_path = package_path.display().to_string();
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = package_path.clone();
+        route.output_contract.delivery_required = false;
+        let actions = vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "list_keys",
+                "path": package_path,
+                "field_path": "scripts",
+                "max_keys": 100,
+            }),
+        }];
+
+        let state = test_state_with_registry();
+        assert!(!actions_use_ad_hoc_command_without_route_preferred_skill(
+            &state, &route, &actions
+        ));
+        assert!(observation_only_plan_can_finalize_from_direct_output(
+            &state,
+            Some(&route),
+            &actions
+        ));
+        assert!(!should_force_actionable_plan_repair(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            &actions
+        ));
+    }
+
+    #[test]
+    fn registry_prefers_config_basic_for_structured_keys_contract() {
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "package.json".to_string();
+        let preferred =
+            registry_preferred_skill_names_for_route(&test_state_with_registry(), &route);
+        assert!(preferred.iter().any(|skill| skill == "config_basic"));
     }
 
     #[test]
@@ -13300,10 +14383,7 @@ version = "0.1.7"
             actions,
         );
 
-        assert!(matches!(
-            &normalized[0],
-            AgentAction::CallSkill { skill, .. } if skill == "system_basic"
-        ));
+        assert!(planned_call_is(&normalized[0], "fs_basic", "list_dir"));
     }
 
     #[test]
@@ -13339,6 +14419,43 @@ version = "0.1.7"
                     args.get("root").and_then(|value| value.as_str()),
                     Some(root_path.as_str())
                 );
+            }
+            other => panic!("expected fs_search action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn file_paths_route_preserves_grep_text_query_as_content_query() {
+        let root = TempDirGuard::new("fs_search_grep_contract");
+        let root_path = root.path.display().to_string();
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+        route.output_contract.delivery_required = false;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "fs_search".to_string(),
+            args: json!({
+                "action": "grep_text",
+                "root": root_path,
+                "query": "FirstLayerDecision",
+                "max_results": 3
+            }),
+        }];
+
+        let normalized = enforce_output_contract_tool_args(Some(&route), actions);
+        assert_eq!(normalized.len(), 1);
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "fs_search");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("grep_text")
+                );
+                assert_eq!(
+                    args.get("query").and_then(Value::as_str),
+                    Some("FirstLayerDecision")
+                );
+                assert!(args.get("pattern").is_none());
+                assert!(args.get("ext").is_none());
             }
             other => panic!("expected fs_search action, got {other:?}"),
         }
@@ -13810,13 +14927,11 @@ version = "0.1.7"
             actions,
         );
 
-        assert!(matches!(
-            &normalized[0],
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
-                    && args.get("action").and_then(|value| value.as_str()) == Some("inventory_dir")
-                    && args.get("include_hidden").and_then(|value| value.as_bool()) == Some(true)
-        ));
+        let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
+        assert_eq!(
+            args.get("include_hidden").and_then(Value::as_bool),
+            Some(true)
+        );
     }
 
     #[test]
@@ -14038,18 +15153,8 @@ version = "0.1.7"
             actions,
         );
 
-        assert!(matches!(
-            &normalized[0],
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
-                    && args.get("action").and_then(|value| value.as_str()) == Some("inventory_dir")
-        ));
-        assert!(matches!(
-            &normalized[1],
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
-                    && args.get("action").and_then(|value| value.as_str()) == Some("inventory_dir")
-        ));
+        assert!(planned_call_is(&normalized[0], "fs_basic", "list_dir"));
+        assert!(planned_call_is(&normalized[1], "fs_basic", "list_dir"));
         assert!(!should_force_actionable_plan_repair(
             &test_state(),
             Some(&route),
@@ -14201,9 +15306,9 @@ version = "0.1.7"
         )));
         assert!(matches!(
             &normalized[0],
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
-                    && args.get("action").and_then(Value::as_str) == Some("path_batch_facts")
+            AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+                if skill == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("stat_paths")
                     && args.get("paths").and_then(Value::as_array).is_some_and(|paths| {
                         paths.iter().any(|value| value.as_str() == Some("README.md"))
                             && paths.iter().any(|value| value.as_str() == Some("AGENTS.md"))
@@ -14242,9 +15347,9 @@ version = "0.1.7"
 
         assert!(matches!(
             &normalized[0],
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
-                    && args.get("action").and_then(Value::as_str) == Some("path_batch_facts")
+            AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+                if skill == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("stat_paths")
                     && args.get("paths").and_then(Value::as_array).is_some_and(|paths| {
                         paths.iter().any(|value| value.as_str() == Some("README.md"))
                             && paths.iter().any(|value| value.as_str() == Some("AGENTS.md"))
@@ -14254,6 +15359,46 @@ version = "0.1.7"
             normalized.get(1),
             Some(AgentAction::SynthesizeAnswer { evidence_refs })
                 if evidence_refs == &vec!["step_1".to_string()]
+        ));
+    }
+
+    #[test]
+    fn existence_multi_file_stat_paths_are_repaired_from_structural_targets() {
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Free);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.requires_content_evidence = true;
+        let actions = vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "stat_paths",
+                "paths": ["README.md", "-CN.md", "Cargo.toml", "no_such_file_20260513.txt"],
+                "include_missing": true
+            }),
+        }];
+
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            "检查 README.md, README.zh-CN.md, Cargo.toml, and no_such_file_20260513.txt 是否存在，并用表格返回结果。",
+            None,
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 1);
+        assert!(matches!(
+            &normalized[0],
+            AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+                if skill == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("stat_paths")
+                    && args.get("paths").and_then(Value::as_array).is_some_and(|paths| {
+                        paths.iter().any(|value| value.as_str() == Some("README.md"))
+                            && paths.iter().any(|value| value.as_str() == Some("README.zh-CN.md"))
+                            && paths.iter().any(|value| value.as_str() == Some("Cargo.toml"))
+                            && paths.iter().any(|value| value.as_str() == Some("no_such_file_20260513.txt"))
+                            && !paths.iter().any(|value| value.as_str() == Some("-CN.md"))
+                    })
         ));
     }
 
@@ -14280,13 +15425,7 @@ version = "0.1.7"
         assert_eq!(
             normalized
                 .iter()
-                .filter(|action| matches!(
-                    action,
-                    AgentAction::CallSkill { skill, args }
-                        if skill == "system_basic"
-                            && args.get("action").and_then(Value::as_str)
-                                == Some("path_batch_facts")
-                ))
+                .filter(|action| planned_call_is(action, "fs_basic", "stat_paths"))
                 .count(),
             1
         );
@@ -14318,10 +15457,11 @@ version = "0.1.7"
         let path_fact_actions = normalized
             .iter()
             .filter_map(|action| match action {
-                AgentAction::CallSkill { skill, args } if skill == "system_basic" => Some(args),
+                AgentAction::CallSkill { skill, args } if skill == "fs_basic" => Some(args),
+                AgentAction::CallTool { tool, args } if tool == "fs_basic" => Some(args),
                 _ => None,
             })
-            .filter(|args| args.get("action").and_then(Value::as_str) == Some("path_batch_facts"))
+            .filter(|args| args.get("action").and_then(Value::as_str) == Some("stat_paths"))
             .collect::<Vec<_>>();
         assert_eq!(path_fact_actions.len(), 1);
         let args = path_fact_actions[0];
@@ -14371,9 +15511,9 @@ version = "0.1.7"
         )));
         assert!(matches!(
             &normalized[0],
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
-                    && args.get("action").and_then(Value::as_str) == Some("path_batch_facts")
+            AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+                if skill == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("stat_paths")
                     && args.get("fields").and_then(Value::as_array).is_some_and(|fields| {
                         fields.iter().any(|value| value.as_str() == Some("modified"))
                     })
@@ -14426,15 +15566,15 @@ version = "0.1.7"
         )));
         assert!(matches!(
             normalized.first(),
-            Some(AgentAction::CallSkill { skill, args })
-                if skill == "system_basic"
-                    && args.get("action").and_then(Value::as_str) == Some("extract_field")
+            Some(AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args })
+                if skill == "config_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("read_field")
                     && args.get("field_path").and_then(Value::as_str) == Some("package.version")
         ));
         assert!(matches!(
             normalized.get(1),
-            Some(AgentAction::CallSkill { skill, args })
-                if skill == "fs_search"
+            Some(AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args })
+                if skill == "fs_basic"
                     && args.get("action").and_then(Value::as_str) == Some("grep_text")
         ));
         assert!(!should_force_actionable_plan_repair(
@@ -14499,9 +15639,9 @@ version = "0.1.7"
         )));
         assert!(matches!(
             normalized.first(),
-            Some(AgentAction::CallSkill { skill, args })
-                if skill == "system_basic"
-                    && args.get("action").and_then(Value::as_str) == Some("extract_field")
+            Some(AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args })
+                if skill == "config_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("read_field")
                     && args.get("path").and_then(Value::as_str)
                         == Some(cargo_path.to_string_lossy().as_ref())
                     && args.get("field_path").and_then(Value::as_str)
@@ -14509,8 +15649,9 @@ version = "0.1.7"
         ));
         assert!(matches!(
             normalized.get(1),
-            Some(AgentAction::CallSkill { skill, args })
-                if skill == "read_file"
+            Some(AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args })
+                if skill == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("read_text_range")
                     && args.get("path").and_then(Value::as_str)
                         == Some(readme_path.to_string_lossy().as_ref())
         ));
@@ -14590,12 +15731,7 @@ version = "0.1.7"
         );
 
         assert_eq!(normalized.len(), 3);
-        assert!(matches!(
-            &normalized[0],
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
-                    && args.get("action").and_then(|value| value.as_str()) == Some("inventory_dir")
-        ));
+        assert!(planned_call_is(&normalized[0], "fs_basic", "list_dir"));
         assert!(matches!(
             &normalized[1],
             AgentAction::SynthesizeAnswer { evidence_refs }
@@ -14604,6 +15740,37 @@ version = "0.1.7"
         assert!(matches!(
             &normalized[2],
             AgentAction::Respond { content } if content == "{{last_output}}"
+        ));
+    }
+
+    #[test]
+    fn observation_only_terminal_answer_keeps_config_basic_scalar_finalizer() {
+        let actions = vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: serde_json::json!({
+                "action": "read_field",
+                "path": "configs/skills_registry.toml",
+                "field_path": "run_cmd.planner_kind"
+            }),
+        }];
+        let mut route = route_result(RoutedMode::Act, true, OutputResponseShape::Strict);
+        route.output_contract.locator_hint = "configs/skills_registry.toml".to_string();
+
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            "在 configs/skills_registry.toml 里找到 run_cmd 的 planner_kind",
+            None,
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 1);
+        assert!(matches!(
+            &normalized[0],
+            AgentAction::CallTool { tool, args }
+                if tool == "config_basic"
+                    && args.get("action").and_then(|value| value.as_str()) == Some("read_field")
         ));
     }
 
@@ -14700,10 +15867,7 @@ version = "0.1.7"
         );
 
         assert_eq!(normalized.len(), 1);
-        assert!(matches!(
-            &normalized[0],
-            AgentAction::CallSkill { skill, .. } if skill == "system_basic"
-        ));
+        assert!(planned_call_is(&normalized[0], "fs_basic", "list_dir"));
     }
 
     #[test]
@@ -14729,15 +15893,10 @@ version = "0.1.7"
             actions,
         );
 
-        match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
-                assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(false));
-                assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(false));
-                assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(false));
-            }
-            other => panic!("expected system_basic inventory_dir action, got {other:?}"),
-        }
+        let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
+        assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(false));
+        assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(false));
+        assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(false));
     }
 
     #[test]
@@ -14764,15 +15923,10 @@ version = "0.1.7"
             actions,
         );
 
-        match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
-                assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(false));
-                assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(false));
-                assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
-            }
-            other => panic!("expected system_basic inventory_dir action, got {other:?}"),
-        }
+        let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
+        assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(false));
+        assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(false));
+        assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
     }
 
     #[test]
@@ -14798,14 +15952,9 @@ version = "0.1.7"
             actions,
         );
 
-        match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
-                assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
-                assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
-            }
-            other => panic!("expected system_basic inventory_dir action, got {other:?}"),
-        }
+        let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
+        assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
+        assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
     }
 
     #[test]
@@ -14831,15 +15980,10 @@ version = "0.1.7"
             actions,
         );
 
-        match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
-                assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(false));
-                assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(true));
-                assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
-            }
-            other => panic!("expected system_basic inventory_dir action, got {other:?}"),
-        }
+        let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
+        assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(false));
+        assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(true));
+        assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
     }
 
     #[test]
@@ -14863,20 +16007,11 @@ version = "0.1.7"
             actions,
         );
 
-        match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
-                assert_eq!(
-                    args.get("action").and_then(|value| value.as_str()),
-                    Some("inventory_dir")
-                );
-                assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(false));
-                assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(true));
-                assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
-                assert!(args.get("kind_filter").is_none());
-            }
-            other => panic!("expected system_basic inventory_dir action, got {other:?}"),
-        }
+        let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
+        assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(false));
+        assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(true));
+        assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
+        assert!(args.get("kind_filter").is_none());
     }
 
     #[test]
@@ -14899,24 +16034,15 @@ version = "0.1.7"
             actions,
         );
 
-        match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "system_basic");
-                assert_eq!(
-                    args.get("action").and_then(|value| value.as_str()),
-                    Some("inventory_dir")
-                );
-                assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
-                assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(false));
-                assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
-                assert_eq!(args.get("limit").and_then(Value::as_u64), Some(3));
-            }
-            other => panic!("expected system_basic inventory_dir action, got {other:?}"),
-        }
+        let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
+        assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
+        assert_eq!(args.get("dirs_only").and_then(Value::as_bool), Some(false));
+        assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
+        assert_eq!(args.get("limit").and_then(Value::as_u64), Some(3));
     }
 
     #[test]
-    fn file_paths_contract_rewrites_extension_inventory_to_fs_search() {
+    fn file_paths_contract_rewrites_extension_inventory_to_fs_basic() {
         let actions = vec![AgentAction::CallSkill {
             skill: "system_basic".to_string(),
             args: serde_json::json!({
@@ -14942,14 +16068,22 @@ version = "0.1.7"
         );
 
         match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "fs_search");
-                assert_eq!(args.get("action").and_then(Value::as_str), Some("find_ext"));
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("find_entries")
+                );
                 assert_eq!(args.get("root").and_then(Value::as_str), Some("."));
                 assert_eq!(args.get("ext").and_then(Value::as_str), Some("toml"));
+                assert_eq!(
+                    args.get("target_kind").and_then(Value::as_str),
+                    Some("file")
+                );
                 assert_eq!(args.get("max_results").and_then(Value::as_u64), Some(5));
             }
-            other => panic!("expected fs_search find_ext action, got {other:?}"),
+            other => panic!("expected fs_basic find_entries action, got {other:?}"),
         }
     }
 
@@ -14988,7 +16122,8 @@ version = "0.1.7"
         assert_eq!(normalized.len(), 2);
         assert!(matches!(
             &normalized[0],
-            AgentAction::CallSkill { skill, .. } if skill == "fs_search"
+            AgentAction::CallSkill { skill, .. } | AgentAction::CallTool { tool: skill, .. }
+                if skill == "fs_basic"
         ));
         assert!(matches!(
             &normalized[1],
@@ -15024,9 +16159,13 @@ version = "0.1.7"
         );
 
         match &normalized[0] {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "fs_search");
-                assert_eq!(args.get("action").and_then(Value::as_str), Some("find_ext"));
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("find_entries")
+                );
                 assert_eq!(
                     args.get("root").and_then(Value::as_str),
                     Some(root_path.as_str())
@@ -15034,7 +16173,7 @@ version = "0.1.7"
                 assert_eq!(args.get("ext").and_then(Value::as_str), Some("toml"));
                 assert_eq!(args.get("max_results").and_then(Value::as_u64), Some(5));
             }
-            other => panic!("expected normalized fs_search action, got {other:?}"),
+            other => panic!("expected normalized fs_basic action, got {other:?}"),
         }
     }
 
@@ -15110,9 +16249,9 @@ version = "0.1.7"
         );
         assert!(normalized.iter().any(|action| matches!(
             action,
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
-                    && args.get("action").and_then(|value| value.as_str()) == Some("extract_field")
+            AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+                if skill == "config_basic"
+                    && args.get("action").and_then(|value| value.as_str()) == Some("read_field")
         )));
     }
 
@@ -15217,9 +16356,10 @@ version = "0.1.7"
             actions,
         );
         assert_eq!(normalized.len(), 3);
-        assert!(matches!(
+        assert!(planned_call_is(
             &normalized[0],
-            AgentAction::CallSkill { skill, .. } if skill == "read_file"
+            "fs_basic",
+            "read_text_range"
         ));
         assert!(matches!(
             &normalized[1],
@@ -15278,18 +16418,13 @@ version = "0.1.7"
             !matches!(
                 action,
                 AgentAction::CallSkill { skill, .. } if skill == "write_file"
-            )
+            ) && !planned_call_is(action, "fs_basic", "write_text")
         }));
         assert!(normalized.iter().all(|action| {
             !matches!(
                 action,
                 AgentAction::Respond { content } if content.trim().starts_with("FILE:")
             )
-        }));
-        assert!(!normalized.iter().any(|action| {
-            matches!(action, AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
-                    && args.get("action").and_then(|value| value.as_str()) == Some("read_range"))
         }));
         assert!(normalized.iter().any(|action| {
             matches!(
@@ -15336,12 +16471,9 @@ version = "0.1.7"
             None,
             actions,
         );
-        assert!(normalized.iter().any(|action| {
-            matches!(
-                action,
-                AgentAction::CallSkill { skill, .. } if skill == "write_file"
-            )
-        }));
+        assert!(normalized
+            .iter()
+            .any(|action| { planned_call_is(action, "fs_basic", "write_text") }));
     }
 
     #[test]
@@ -15379,18 +16511,12 @@ version = "0.1.7"
             None,
             actions,
         );
-        assert!(normalized.iter().any(|action| {
-            matches!(
-                action,
-                AgentAction::CallSkill { skill, .. } if skill == "make_dir"
-            )
-        }));
-        assert!(normalized.iter().any(|action| {
-            matches!(
-                action,
-                AgentAction::CallSkill { skill, .. } if skill == "write_file"
-            )
-        }));
+        assert!(normalized
+            .iter()
+            .any(|action| { planned_call_is(action, "fs_basic", "make_dir") }));
+        assert!(normalized
+            .iter()
+            .any(|action| { planned_call_is(action, "fs_basic", "write_text") }));
     }
 
     #[test]
@@ -16335,15 +17461,15 @@ version = "0.1.7"
     }
 
     #[test]
-    fn extracts_minimax_call_skill_markup_into_step_values() {
-        let raw = r#"<minimax:tool_call>
+    fn extracts_xml_call_skill_markup_into_step_values() {
+        let raw = r#"<tool_call>
 <invoke name="call_skill">
 <parameter name="skill">list_dir</parameter>
 <parameter name="args">{"path": "/tmp"}</parameter>
 </invoke>
-</minimax:tool_call>"#;
+</tool_call>"#;
         assert_eq!(
-            super::extract_minimax_tool_call_steps(raw),
+            super::extract_xml_tool_call_steps(raw),
             vec![json!({
                 "type": "call_skill",
                 "skill": "list_dir",
@@ -16353,14 +17479,14 @@ version = "0.1.7"
     }
 
     #[test]
-    fn extracts_minimax_direct_skill_invoke_markup_into_step_values() {
-        let raw = r#"<minimax:tool_call>
+    fn extracts_xml_direct_skill_invoke_markup_into_step_values() {
+        let raw = r#"<tool_call>
 <invoke name="fs_search">
 <parameter name="args">{"action":"find_name","pattern":"README"}</parameter>
 </invoke>
-</minimax:tool_call>"#;
+</tool_call>"#;
         assert_eq!(
-            super::extract_minimax_tool_call_steps(raw),
+            super::extract_xml_tool_call_steps(raw),
             vec![json!({
                 "type": "call_skill",
                 "skill": "fs_search",
@@ -16370,7 +17496,7 @@ version = "0.1.7"
     }
 
     // ---------- inject_synthesize_answer_for_bare_placeholder_respond ----------
-    // 见函数 doc：runtime 兜底，把 minimax 偶发吐出的裸 placeholder respond 注入
+    // 见函数 doc：runtime 兜底，把兼容模型偶发吐出的裸 placeholder respond 注入
     // 一个 synthesize_answer 节点，关掉裸 placeholder 导致的死循环。
 
     #[test]
@@ -17368,16 +18494,16 @@ version = "0.1.7"
         assert_eq!(rewritten.len(), 4);
         assert!(matches!(
             &rewritten[0],
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
-                    && args.get("action").and_then(|value| value.as_str()) == Some("read_range")
+            AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+                if skill == "fs_basic"
+                    && args.get("action").and_then(|value| value.as_str()) == Some("read_text_range")
                     && args.get("path").and_then(|value| value.as_str()) == Some("README.md")
         ));
         assert!(matches!(
             &rewritten[1],
-            AgentAction::CallSkill { skill, args }
-                if skill == "system_basic"
-                    && args.get("action").and_then(|value| value.as_str()) == Some("read_range")
+            AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+                if skill == "fs_basic"
+                    && args.get("action").and_then(|value| value.as_str()) == Some("read_text_range")
                     && args.get("path").and_then(|value| value.as_str()) == Some("AGENTS.md")
         ));
         assert!(matches!(

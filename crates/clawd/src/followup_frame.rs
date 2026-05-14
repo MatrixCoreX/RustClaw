@@ -243,6 +243,16 @@ fn sanitize_ordered_entry_text(entry: &str) -> String {
     current.to_string()
 }
 
+fn dedupe_ordered_entries(entries: Vec<String>) -> Vec<String> {
+    let mut deduped = Vec::with_capacity(entries.len());
+    for entry in entries {
+        if !deduped.iter().any(|seen| seen == &entry) {
+            deduped.push(entry);
+        }
+    }
+    deduped
+}
+
 fn compact_listing_payload(line: &str) -> Option<&str> {
     if let Some((_, rest)) = line.split_once('：') {
         return Some(rest);
@@ -255,25 +265,28 @@ fn compact_listing_payload(line: &str) -> Option<&str> {
 
 fn is_bare_compact_entry_list(line: &str) -> bool {
     let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let parts = trimmed
+        .split(['、', '，', ','])
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    parts.len() >= 2 && parts.into_iter().all(is_compact_entry_token)
+}
+
+fn is_compact_entry_token(token: &str) -> bool {
+    let trimmed = token.trim();
     if trimmed.is_empty() || trimmed.contains(char::is_whitespace) {
         return false;
     }
-    let mut saw_separator = false;
-    for ch in trimmed.chars() {
-        if matches!(ch, '、' | '，' | ',') {
-            saw_separator = true;
-            continue;
-        }
-        if !(ch.is_ascii_alphanumeric()
+    trimmed.chars().all(|ch| {
+        ch.is_ascii_alphanumeric()
             || matches!(
                 ch,
                 '.' | '_' | '-' | '/' | '\\' | '~' | '@' | '+' | '=' | '[' | ']' | '(' | ')'
-            ))
-        {
-            return false;
-        }
-    }
-    saw_separator
+            )
+    })
 }
 
 fn resolve_ordered_entry_target(frame: &FollowupFrame, entry: &str) -> String {
@@ -422,18 +435,10 @@ fn journal_has_listing_observation(journal: &crate::task_journal::TaskJournal) -
         if step.skill == "list_dir" {
             return true;
         }
-        if step.skill != "system_basic" {
-            return false;
-        }
         step.output_excerpt
             .as_deref()
             .and_then(parse_journal_step_output)
-            .and_then(|value| {
-                value
-                    .get("action")
-                    .and_then(Value::as_str)
-                    .map(|action| matches!(action, "inventory_dir" | "list_dir"))
-            })
+            .map(|value| listing_json_has_entries(&value))
             .unwrap_or(false)
     })
 }
@@ -469,7 +474,7 @@ pub(crate) fn extract_ordered_entries_from_text(text: &str) -> Vec<String> {
         }
     }
     if entries.len() >= 2 {
-        return entries;
+        return dedupe_ordered_entries(entries);
     }
     for line in text.lines() {
         let trimmed = line.trim();
@@ -488,7 +493,7 @@ pub(crate) fn extract_ordered_entries_from_text(text: &str) -> Vec<String> {
             .take(MAX_ORDERED_ENTRIES)
             .collect::<Vec<_>>();
         if compact_entries.len() >= 2 {
-            return compact_entries;
+            return dedupe_ordered_entries(compact_entries);
         }
     }
     let mut contiguous_lines = Vec::new();
@@ -508,7 +513,7 @@ pub(crate) fn extract_ordered_entries_from_text(text: &str) -> Vec<String> {
         }
     }
     if contiguous_lines.len() >= 2 {
-        return contiguous_lines;
+        return dedupe_ordered_entries(contiguous_lines);
     }
     let simple_lines = text
         .lines()
@@ -517,13 +522,65 @@ pub(crate) fn extract_ordered_entries_from_text(text: &str) -> Vec<String> {
         .take(MAX_ORDERED_ENTRIES)
         .collect::<Vec<_>>();
     if simple_lines.len() >= 2 {
-        return simple_lines;
+        return dedupe_ordered_entries(simple_lines);
     }
     Vec::new()
 }
 
 fn parse_journal_step_output(output: &str) -> Option<Value> {
     serde_json::from_str::<Value>(output.trim()).ok()
+}
+
+fn is_listing_json(value: &Value) -> bool {
+    value
+        .get("action")
+        .and_then(Value::as_str)
+        .is_some_and(|action| matches!(action, "inventory_dir" | "list_dir"))
+}
+
+fn entry_name_from_listing_value(value: &Value) -> Option<String> {
+    if let Some(name) = value.as_str() {
+        return Some(name.to_string());
+    }
+    let object = value.as_object()?;
+    for key in ["name", "file_name", "path", "relative_path"] {
+        if let Some(text) = object
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            return Some(text.to_string());
+        }
+    }
+    None
+}
+
+fn ordered_entries_from_listing_json(value: &Value) -> Vec<String> {
+    if !is_listing_json(value) {
+        return Vec::new();
+    }
+    for key in ["names", "entries"] {
+        let entries = value
+            .get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(entry_name_from_listing_value)
+            .map(|entry| sanitize_ordered_entry_text(&entry))
+            .map(|entry| entry.trim().to_string())
+            .filter(|entry| !entry.is_empty())
+            .take(MAX_ORDERED_ENTRIES)
+            .collect::<Vec<_>>();
+        if entries.len() >= 2 {
+            return entries;
+        }
+    }
+    Vec::new()
+}
+
+fn listing_json_has_entries(value: &Value) -> bool {
+    ordered_entries_from_listing_json(value).len() >= 2
 }
 
 pub(crate) fn derive_bound_target_from_journal(
@@ -604,6 +661,12 @@ pub(crate) fn derive_ordered_entries_from_journal(
         let Some(output) = step.output_excerpt.as_deref() else {
             continue;
         };
+        if let Some(value) = parse_journal_step_output(output) {
+            let entries = ordered_entries_from_listing_json(&value);
+            if entries.len() >= 2 {
+                return entries;
+            }
+        }
         if step.skill == "list_dir" {
             let entries = output
                 .lines()
@@ -614,27 +677,6 @@ pub(crate) fn derive_ordered_entries_from_journal(
                 .collect::<Vec<_>>();
             if entries.len() >= 2 {
                 return entries;
-            }
-        }
-        if step.skill == "system_basic" {
-            let Some(value) = parse_journal_step_output(output) else {
-                continue;
-            };
-            if value.get("action").and_then(Value::as_str) == Some("inventory_dir") {
-                let entries = value
-                    .get("names")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .map(str::trim)
-                    .filter(|line| !line.is_empty())
-                    .take(MAX_ORDERED_ENTRIES)
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>();
-                if entries.len() >= 2 {
-                    return entries;
-                }
             }
         }
     }
@@ -702,6 +744,18 @@ fn merge_frame_with_prior(
         }
     }
     frame
+}
+
+fn frame_has_session_anchor(frame: &FollowupFrame) -> bool {
+    !matches!(frame.op_kind, FollowupOpKind::Generic)
+        || frame
+            .bound_target
+            .as_deref()
+            .is_some_and(|target| !target.trim().is_empty())
+        || !frame.ordered_entries.is_empty()
+        || frame.selected_entry_index.is_some()
+        || frame.slice_spec.is_some()
+        || frame.unresolved_slot.is_some()
 }
 
 fn derive_frame_for_ask_outcome(
@@ -805,6 +859,19 @@ pub(crate) fn replace_active_frame_from_ask_outcome(
         semantic_clarify,
         journal,
     );
+    if !frame_has_session_anchor(&frame) {
+        if let Some(prior_frame) = prior_frame.as_ref() {
+            return Some(prior_frame.source_task_id.clone());
+        }
+        if let Err(err) = clear_frame(state, task) {
+            tracing::warn!(
+                "followup_frame clear empty generic failed task_id={} err={}",
+                task.task_id,
+                err
+            );
+        }
+        return None;
+    }
     if let Err(err) = persist_frame(state, task, &frame) {
         tracing::warn!(
             "followup_frame persist failed task_id={} err={}",
@@ -841,6 +908,13 @@ pub(crate) fn sync_active_frame_from_ask_outcome_tx(
         semantic_clarify,
         journal,
     );
+    if !frame_has_session_anchor(&frame) {
+        if let Some(prior_frame) = prior_frame {
+            return Ok(Some(prior_frame.source_task_id.clone()));
+        }
+        clear_frame_tx(tx, task)?;
+        return Ok(None);
+    }
     persist_frame_tx(tx, task, &frame)?;
     Ok(Some(frame.source_task_id))
 }
@@ -905,6 +979,57 @@ mod tests {
     fn extracts_ordered_entries_from_bare_compact_listing() {
         let entries = extract_ordered_entries_from_text(
             "act_plan.log,clawd.log,clawd.run.log,feishud.log,install_ops.log",
+        );
+        assert_eq!(
+            entries,
+            vec![
+                "act_plan.log",
+                "clawd.log",
+                "clawd.run.log",
+                "feishud.log",
+                "install_ops.log"
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_ordered_entries_from_comma_list_with_separator_spaces() {
+        let entries = extract_ordered_entries_from_text(
+            "act_plan.log, clawd.log, clawd.run.log, feishud.log, install_ops.log",
+        );
+        assert_eq!(
+            entries,
+            vec![
+                "act_plan.log",
+                "clawd.log",
+                "clawd.run.log",
+                "feishud.log",
+                "install_ops.log"
+            ]
+        );
+    }
+
+    #[test]
+    fn extracts_ordered_entries_from_duplicated_compact_answer_line() {
+        let entries = extract_ordered_entries_from_text(
+            "act_plan.log, clawd.log, clawd.run.log, feishud.log, install_ops.log\nact_plan.log, clawd.log, clawd.run.log, feishud.log, install_ops.log",
+        );
+        assert_eq!(
+            entries,
+            vec![
+                "act_plan.log",
+                "clawd.log",
+                "clawd.run.log",
+                "feishud.log",
+                "install_ops.log"
+            ]
+        );
+    }
+
+    #[test]
+    fn dedupes_ordered_entries_from_repeated_multiline_answer() {
+        let entries = extract_ordered_entries_from_text(
+            "act_plan.log\nclawd.log\nclawd.run.log\nfeishud.log\ninstall_ops.log\nact_plan.log\nclawd.log\nclawd.run.log\nfeishud.log\ninstall_ops.log",
         );
         assert_eq!(
             entries,
@@ -1196,6 +1321,180 @@ mod tests {
                 "install_ops.log"
             ]
         );
+    }
+
+    #[test]
+    fn fs_basic_inventory_journal_replaces_prior_ordered_entries_for_followup() {
+        let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+        let task = crate::ClaimedTask {
+            task_id: "task-followup-fs-basic-list".to_string(),
+            user_id: 31,
+            chat_id: 32,
+            user_key: Some("test-user".to_string()),
+            channel: "ui".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".to_string(),
+            payload_json: "{}".to_string(),
+        };
+        let now_ts = crate::now_ts_u64();
+        persist_frame(
+            &state,
+            &task,
+            &FollowupFrame {
+                source_request: "先列出 document 目录下前 5 个文件名".to_string(),
+                op_kind: FollowupOpKind::List,
+                bound_target: Some("/home/guagua/rustclaw/document".to_string()),
+                ordered_entries: vec![
+                    "builtin_write_smoke.txt".to_string(),
+                    "full_suite_trace_note.txt".to_string(),
+                    "hello.sh".to_string(),
+                ],
+                source_task_id: "older-list-task".to_string(),
+                updated_at_ts: now_ts,
+                expires_at_ts: now_ts + 3600,
+                ..FollowupFrame::default()
+            },
+        )
+        .expect("seed prior frame");
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "fs_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    r#"{"action":"inventory_dir","names":["act_plan.log","clawd.log","clawd.run.log","clawd.test.log","clawd_manual.log"],"names_only":true,"path":"logs","resolved_path":"/home/guagua/rustclaw/logs"}"#
+                        .to_string(),
+                ),
+                ..Default::default()
+            });
+        let route_result = RouteResult {
+            routed_mode: RoutedMode::Act,
+            ask_mode: AskMode::from_routed_mode(RoutedMode::Act),
+            resolved_intent: "List first 5 filenames in logs directory".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "test".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::Free,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::None,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        replace_active_frame_from_ask_outcome(
+            &state,
+            &task,
+            "那 logs 目录下前 5 个文件名呢",
+            &route_result,
+            "前 5 个文件名为 act_plan.log、clawd.log、clawd.run.log、clawd.test.log、clawd_manual.log。",
+            &[],
+            false,
+            &journal,
+        );
+        let frame = load_active_followup_frame(&state, &task).expect("frame should load");
+        assert_eq!(frame.op_kind, FollowupOpKind::List);
+        assert_eq!(
+            frame.bound_target.as_deref(),
+            Some("/home/guagua/rustclaw/logs")
+        );
+        assert_eq!(
+            frame.ordered_entries,
+            vec![
+                "act_plan.log",
+                "clawd.log",
+                "clawd.run.log",
+                "clawd.test.log",
+                "clawd_manual.log"
+            ]
+        );
+        assert_eq!(
+            super::ordered_entry_target_at(&frame, 1).as_deref(),
+            Some("/home/guagua/rustclaw/logs/clawd.log")
+        );
+    }
+
+    #[test]
+    fn empty_generic_outcome_preserves_prior_structured_frame() {
+        let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+        let task = crate::ClaimedTask {
+            task_id: "task-followup-empty-generic".to_string(),
+            user_id: 41,
+            chat_id: 42,
+            user_key: Some("test-user".to_string()),
+            channel: "ui".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".to_string(),
+            payload_json: "{}".to_string(),
+        };
+        let now_ts = crate::now_ts_u64();
+        let prior_frame = FollowupFrame {
+            source_request: "先列出 logs 目录下前 4 个文件名".to_string(),
+            op_kind: FollowupOpKind::List,
+            bound_target: Some("/tmp/logs".to_string()),
+            ordered_entries: vec![
+                "act_plan.log".to_string(),
+                "clawd.log".to_string(),
+                "clawd.run.log".to_string(),
+            ],
+            source_task_id: "prior-list-task".to_string(),
+            updated_at_ts: now_ts,
+            expires_at_ts: now_ts + 3600,
+            ..FollowupFrame::default()
+        };
+        persist_frame(&state, &task, &prior_frame).expect("seed prior frame");
+        let route_result = RouteResult {
+            routed_mode: RoutedMode::Chat,
+            ask_mode: AskMode::from_routed_mode(RoutedMode::Chat),
+            resolved_intent: "plain acknowledgement".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "test".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract::default(),
+        };
+        let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
+
+        let active_id = replace_active_frame_from_ask_outcome(
+            &state,
+            &task,
+            "好的",
+            &route_result,
+            "好的",
+            &[],
+            false,
+            &journal,
+        );
+        let frame = load_active_followup_frame(&state, &task).expect("frame should load");
+
+        assert_eq!(active_id.as_deref(), Some("prior-list-task"));
+        assert_eq!(frame, prior_frame);
     }
 
     #[test]

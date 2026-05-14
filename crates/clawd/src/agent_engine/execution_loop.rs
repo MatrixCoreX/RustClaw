@@ -90,6 +90,9 @@ fn check_repeat_action_guard(
     fingerprint: &str,
     step_in_round: usize,
 ) -> Option<String> {
+    if matches!(action, AgentAction::Respond { .. }) {
+        return None;
+    }
     let repeat_count = loop_state
         .repeat_action_counts
         .entry(fingerprint.to_string())
@@ -216,7 +219,7 @@ pub(super) async fn execute_actions_once(
 mod tests {
     use super::{
         action_effect_is_repeatable_for_active_recipe, capture_round_progress_snapshot,
-        finalize_execute_round_outcome,
+        check_repeat_action_guard, finalize_execute_round_outcome,
     };
 
     #[test]
@@ -279,5 +282,52 @@ mod tests {
             recipe,
             crate::execution_recipe::ActionEffect::observe(),
         ));
+    }
+
+    #[test]
+    fn repeat_guard_allows_repeated_respond_delivery() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let task = crate::ClaimedTask {
+            task_id: "task-repeat-respond".to_string(),
+            user_id: 1,
+            chat_id: 2,
+            user_key: None,
+            channel: "telegram".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".to_string(),
+            payload_json: "{}".to_string(),
+        };
+        let mut loop_state = super::LoopState::new(2);
+        let action = crate::AgentAction::Respond {
+            content: "final answer".to_string(),
+        };
+        let fingerprint = "respond:final answer".to_string();
+        loop_state
+            .successful_action_fingerprints
+            .insert(fingerprint.clone(), 1);
+        let policy = super::AgentLoopGuardPolicy {
+            max_steps: 8,
+            max_rounds: 2,
+            recoverable_failure_extra_rounds: 0,
+            repeat_action_limit: 1,
+            no_progress_limit: 1,
+            multi_round_enabled: true,
+            answer_verifier_retry_limit: 1,
+            ops_closed_loop: Default::default(),
+        };
+
+        assert_eq!(
+            check_repeat_action_guard(
+                &state,
+                &task,
+                &mut loop_state,
+                &policy,
+                &action,
+                &fingerprint,
+                1,
+            ),
+            None
+        );
     }
 }

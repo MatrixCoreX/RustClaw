@@ -68,6 +68,7 @@ mod task_context_builder;
 mod task_contract;
 mod task_journal;
 mod verifier;
+mod virtual_tools;
 mod visible_text;
 mod worker;
 
@@ -145,11 +146,11 @@ pub(crate) use runtime::{
     build_skill_views, llm_model_kind, llm_vendor_name, log_ask_transition, reload_skill_views,
     ActFinalizeStyle, AgentAction, AgentRuntimeConfig, AppState, AskMode, AskReply, AskState,
     AskStateRegistry, AskTransition, ChannelConfig, ChatEntryStrategy, ClaimedTask,
-    CommandIntentRules, CommandIntentRuntime, CoreServices, LlmPromptBucket, LlmProviderRuntime,
-    LocalInteractionContext, MemoryConfigFileWrapper, PolicyConfig, RateLimiter, ReloadContext,
-    RouteGateKind, RoutedMode, RuntimeChannel, ScheduleIntentOutput, ScheduleRuntime,
-    ScheduledJobDue, SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry, ToolsPolicy,
-    WhatsappDeliveryRoute, WorkerConfig,
+    CommandIntentRules, CommandIntentRuntime, CoreServices, FirstLayerDecision, LlmPromptBucket,
+    LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper, PolicyConfig,
+    RateLimiter, ReloadContext, RouteGateKind, RoutedMode, RuntimeChannel, ScheduleIntentOutput,
+    ScheduleRuntime, ScheduledJobDue, SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry,
+    ToolsPolicy, WhatsappDeliveryRoute, WorkerConfig,
 };
 pub(crate) use skills::{canonical_skill_name, is_builtin_skill_name};
 use skills::{run_skill_with_runner, run_skill_with_runner_outcome};

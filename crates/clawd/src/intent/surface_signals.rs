@@ -64,6 +64,12 @@ impl PromptSurfaceSignals {
         self.single_filename_candidate.is_some()
     }
 
+    pub(crate) fn has_filename_candidates(&self) -> bool {
+        !self
+            .filename_candidates_excluding_field_selectors()
+            .is_empty()
+    }
+
     pub(crate) fn single_filename_candidate(&self) -> Option<&str> {
         self.single_filename_candidate.as_deref()
     }

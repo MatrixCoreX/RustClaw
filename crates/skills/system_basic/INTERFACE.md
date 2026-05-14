@@ -5,6 +5,7 @@
 
 ## Capability Summary
 - `system_basic` provides system/runtime introspection plus higher-level read-only query helpers.
+- For new planner-facing filesystem tasks, prefer the virtual `fs_basic` contract. For new structured config field/key tasks, prefer the virtual `config_basic` contract. `system_basic` remains the runtime backing and compatibility layer for many read-only helpers.
 - It does **not** replace standalone base skills for raw file, directory, or command operations.
 - It is intended for complex composed queries where builtin primitives alone are too low-level for stable planning.
 - It is not the semantic document parser. For supported local documents that need key-point extraction, section understanding, excerpt judgment, or grounded summarization, prefer `doc_parse` when that skill is enabled; use `read_range` only for exact bounded line slices or raw text previews.
@@ -14,6 +15,7 @@
 - For recent/latest/last-modified directory inventory, use `inventory_dir` with `sort_by="mtime_desc"` exactly. If the request asks for files, set `files_only=true`; use `max_entries` for the requested count. Do not emit unsupported values such as `mtime`.
 - `extract_field` and `extract_fields` operate on exactly one structured file per call: use `path` plus `field_path`/`field_paths`. Do not pass `paths`, `targets`, or other multi-file arrays to these actions; for multiple files, call the action once per file.
 - `extract_field` / `extract_fields` first resolve exact dot/bracket paths. If a caller supplies one bare field key and exact root-level lookup misses, the skill may resolve it to a unique nested key in that structured document and report `resolved_field_path`, `match_strategy`, and `match_count`; ambiguous bare keys remain missing instead of guessing.
+- When a request asks for a value from the same JSON/TOML/YAML array item or TOML `[[array_table]]` block where another field equals a specified value, encode that relationship in `field_path` with an array filter selector, for example `items[?(@.id=='abc')].status` or `skills.[name=run_cmd].planner_kind`. Do not flatten it to `items.status` / `skills.planner_kind`; that drops the row/block condition.
 - For file metadata checks or comparisons, use `compare_paths` for two paths or `path_batch_facts` for multiple explicit paths. Do not model filesystem metadata such as size, modified time, path type, or content equality as `extract_field` / `extract_fields` document fields.
 
 ## Actions
@@ -26,6 +28,7 @@
 - `extract_field`
 - `extract_fields`
 - `structured_keys`
+- `validate_structured`
 - `find_path`
 - `read_range`
 - `compare_paths`
@@ -74,6 +77,8 @@
 | `structured_keys` | `field_path` | no | string | root | Optional dot path to an object/array inside the parsed document. |
 | `structured_keys` | `format` | no | string | auto | `json|toml|yaml`, auto-detected from extension when omitted. |
 | `structured_keys` | `max_keys` | no | integer | `200` | Cap for returned object keys preview, clamped to `1..1000`. |
+| `validate_structured` | `path` | yes | string(path) | - | Local JSON/TOML/YAML file path to parse. |
+| `validate_structured` | `format` | no | string | auto | `json|toml|yaml`, auto-detected from extension when omitted. |
 | `find_path` | `root` | no | string(path) | `.` | Search root inside workspace. |
 | `find_path` | `name`/`pattern` | yes | string | - | Name or pattern to match. |
 | `find_path` | `match_mode` | no | string | `contains` | `contains|exact|starts_with|ends_with`. |

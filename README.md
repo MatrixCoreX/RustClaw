@@ -21,7 +21,7 @@ Current repository highlights:
 
 ## Planner-First Architecture
 
-RustClaw's main natural-language path is moving toward a planner-first single-loop design. The goal is to keep one authoritative runtime path for normal requests: bind the turn to session state, run a single intent-normalizer LLM for routing signals (including when to clarify), then either chat once or enter the planner/runtime loop for tools, skills, optional grounded synthesis, and response. Post-route policy runs before dispatch; final delivery and output-contract guards run before the result is saved.
+RustClaw's main natural-language path is moving toward a planner-first single-loop design. The goal is to keep one authoritative runtime path for normal requests: bind the turn to session state, run a single intent-normalizer LLM for routing signals and the first-layer decision, then clarify, answer directly once, or enter the planner/runtime loop for tools, skills, optional grounded synthesis, and response. Post-route policy runs before dispatch; final delivery and output-contract guards run before the result is saved.
 
 ### Runtime Flow
 
@@ -42,17 +42,17 @@ flowchart TD
     E2 -->|schedule direct| SD[Schedule direct finalize]
     E2 -->|resume discussion| RD[Resume discussion prompt]
     E2 -->|resume execution| H
-    E2 -->|standard ask| F{Ask gate}
-    F -->|AskClarify| G[Clarify question]
-    F -->|chat| CH[Build chat context + prompt]
+    E2 -->|standard ask| F{FirstLayerDecision}
+    F -->|Clarify| G[Clarify question]
+    F -->|DirectAnswer| CH[Build direct-answer chat context + prompt]
     CH --> CR[Chat response LLM]
-    F -->|execute| H[Use execution prompt/context]
+    F -->|PlannerExecute| H[Use execution prompt/context]
     SK[Skill registry + generated skill docs<br/>configs/skills_registry.toml] --> I
     H --> I[Planner / runtime loop]
     I --> L{Planner action}
     L -->|respond| M[Respond]
     L -->|synthesize_answer| SS[Grounded synthesis LLM]
-    L -->|tool| N[Tool execution]
+    L -->|tool| N[Tool execution<br/>fs_basic/config_basic adapter]
     L -->|call_skill| N1[run_skill_with_runner<br/>skill dispatch]
     RS --> N1
     N1 -->|builtin| N1B[In-process builtin skill]
@@ -86,16 +86,16 @@ flowchart TD
 ```
 
 - `Session snapshot + local surface hints`: attaches each turn to the active conversation and extracts bounded local facts before routing; this is not a separate “taxonomy engine” LLM.
-- `Intent normalizer LLM`: one call that emits `routed_mode`, `needs_clarify`, `output_contract`, and optional `turn_type` / `target_task_policy` style fields—**clarify vs chat vs act is decided here**, not via a `clarify` action inside the planner JSON.
+- `Intent normalizer LLM`: one call that emits `first_layer_decision`, compatibility `routed_mode`, `needs_clarify`, `output_contract`, and optional `turn_type` / `target_task_policy` style fields—**Clarify vs DirectAnswer vs PlannerExecute is decided here**, not via a `clarify` action inside the planner JSON.
 - `Task queue`: HTTP callers submit `POST /v1/tasks`; channel daemons also hand work to the same queued worker path.
 - `Task kind`: `kind=ask` enters the normalizer / post-route / ask dispatch flow; `kind=run_skill` bypasses LLM routing and runs the named skill directly through the shared skill dispatch path.
 - `Ask context bundle`: built once after normalization and before ask dispatch; it supplies chat context, execution prompt context, attachments, durable memory, and recent execution context used by post-route locator policy.
 - `Post-route policy`: applies locator resolution, missing-locator clarification, and contract guards after the ask context bundle is available and before dispatch. It can refine the gate, but it is not a semantic fast path.
 - `Schedule / resume branches`: scheduler-triggered direct-text tasks can finalize before the normalizer; normal schedule-direct requests can finalize after routing but before the planner; resume-discussion uses a recovery prompt; resume-execution returns to the normal execution runtime.
-- `Ask gate`: keeps only a thin `AskClarify / chat / execute` split. Code dispatches through `AskMode` (`ClarifyOrChat` vs `Act`), while `RoutedMode` (`AskClarify`, `Chat`, `Act`, `ChatAct`) remains the normalizer-facing compatibility shape.
-- `Chat response LLM`: handles `mode=chat` directly; chat requests do not enter the execution planner loop.
-- `Planner / runtime loop`: for act / chat_act, runs multiple rounds; planner steps are `think`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today—execution steps are traced as subtasks in logs, not a nested child loop).
-- `Execution prompt/context`: reuses the ask context bundle and resolved prompt for act / chat_act execution, so memory cannot override the latest user instruction.
+- `FirstLayerDecision`: keeps the runtime gate to `Clarify / DirectAnswer / PlannerExecute`. `AskMode` is the code-facing dispatch type; legacy `RoutedMode` (`AskClarify`, `Chat`, `Act`, `ChatAct`) remains only as a compatibility/finalization hint, not the authoritative first-layer gate.
+- `Chat response LLM`: handles `DirectAnswer` directly; pure chat requests do not enter the execution planner loop.
+- `Planner / runtime loop`: for `PlannerExecute`, runs multiple rounds; planner steps are `think`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today—execution steps are traced as subtasks in logs, not a nested child loop). Planner-facing `fs_basic` / `config_basic` tools are virtual contracts that map structured actions to existing stable filesystem/config backing tools.
+- `Execution prompt/context`: reuses the ask context bundle and resolved prompt for `PlannerExecute`, so memory cannot override the latest user instruction.
 - `Skill registry + generated skill docs`: planner-visible skills come from runtime skill views and generated interface docs, primarily `configs/skills_registry.toml`, `crates/skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`. New skills should extend those contracts instead of adding language-specific planner branches.
 - `call_skill` / direct `run_skill`: both go through `run_skill_with_runner`, which applies policy and skill switches, then dispatches by registry kind: builtins run in-process, external skills run through their external adapter, and runner skills launch `skill-runner` plus the concrete skill binary.
 - `Loop observations` and `Observed-output finalizer`: tool, skill, and synthesis outputs remain grounded evidence inside the loop; recoverable failures publish progress and re-enter the planner with compact history, while terminal failures finish with a grounded result; observation-only plans can still finish through direct structured answers or runtime-owned synthesis.
@@ -116,9 +116,9 @@ flowchart TD
     E2 -->|schedule direct| Fs[Schedule direct finalize<br/>no planner if already grounded]
     E2 -->|resume discussion| Fr[Resume discussion prompt]
     E2 -->|resume execution| H
-    E2 -->|needs_clarify=true| F[Clarify question]
-    E2 -->|mode=chat| G[Build chat prompt]
-    E2 -->|mode=act or chat_act| H[Build planner prompt]
+    E2 -->|first_layer_decision=clarify| F[Clarify question]
+    E2 -->|first_layer_decision=direct_answer| G[Build direct-answer chat prompt]
+    E2 -->|first_layer_decision=planner_execute| H[Build planner prompt]
     SK[Skill registry + generated skill docs] --> H
     G --> Ic[LLM request 2<br/>Chat response]
     Fr --> Ir[LLM request 2<br/>Resume discussion]
@@ -126,7 +126,7 @@ flowchart TD
     Ip --> J[Parse plan steps]
     J --> K{Step type}
     K -->|respond| L[Respond text]
-    K -->|call_tool| M[Execute tool]
+    K -->|call_tool| M[Execute tool<br/>fs_basic/config_basic adapter]
     K -->|call_skill| Ms[run_skill_with_runner<br/>skill dispatch]
     Ms -->|builtin| Msb[In-process builtin skill]
     Ms -->|external| Mse[External skill adapter]
@@ -157,7 +157,7 @@ flowchart TD
 - This diagram covers the normal `kind=ask` LLM path. `kind=run_skill` and scheduler-triggered direct-text asks have no normalizer / planner LLM request and are finalized by their direct task paths.
 - `Build chat / planner prompt`: combines mode, session state, working context, and output contract for follow-on requests.
 - `Skill registry + generated skill docs`: planner prompts are built from enabled skill views and generated interface documents, so skill capability growth should be data/contract driven.
-- `LLM request 2`: **Chat** mode uses one chat-completion call, then finalize. **Act / chat_act** uses one-or-more **planner** calls per loop round; the planner emits JSON steps in `{think, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types).
+- `LLM request 2`: **DirectAnswer** uses one chat-completion call, then finalize. **PlannerExecute** uses one-or-more **planner** calls per loop round; the planner emits JSON steps in `{think, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types). Legacy `Act / ChatAct` can still affect finalization shape, but not the first-layer gate.
 - `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened. Skill execution uses the shared dispatch layer; only runner skills spawn `skill-runner`.
 - `synthesize_answer`: an extra LLM call **scheduled inside the planner loop** when the plan includes that step—**not** always a single fixed “LLM 3 after all planning is done”; rounds can interleave execution, synthesis, and further planning.
 - `Observed-output finalizer`: if a plan ends after observation steps without a terminal `respond`, runtime can still publish a grounded direct answer or run the observed-answer synthesis path. Recoverable failures are fed back to later planner rounds as attempted-method evidence instead of being hidden inside shell fallbacks.
@@ -405,7 +405,7 @@ UI notes:
 RustClaw currently ships a broad skill set. Representative groups:
 
 - system and ops: `system_basic`, `process_basic`, `service_control`, `health_check`, `log_analyze`, `task_control`
-- files and developer tools: `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
+- files and developer tools: `fs_basic`, `config_basic`, `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
 - network and content: `http_basic`, `rss_fetch`, `browser_web`, `doc_parse`, `transform`, `web_search_extract`
 - multimodal: `image_generate`, `image_edit`, `image_vision`, `audio_transcribe`, `audio_synthesize`
 - domain skills: `crypto`, `stock`, `weather`, `map_merchant`, `kb`, `x`

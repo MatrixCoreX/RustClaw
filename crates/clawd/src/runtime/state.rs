@@ -390,7 +390,16 @@ pub(crate) fn build_skill_views(
             enabled.insert(c);
         }
     }
-    let mut planner_visible: Vec<String> = enabled.iter().cloned().collect();
+    let mut planner_visible: Vec<String> = enabled
+        .iter()
+        .filter(|skill| {
+            registry
+                .as_ref()
+                .map(|reg| reg.is_planner_visible(skill))
+                .unwrap_or(true)
+        })
+        .cloned()
+        .collect();
     planner_visible.sort_unstable();
 
     Ok(SkillViews {
@@ -1121,10 +1130,18 @@ impl AppState {
     }
 
     pub(crate) fn planner_visible_skills_for_task(&self, task: &ClaimedTask) -> Vec<String> {
-        let execution_skills = self.get_skills_list();
+        let snapshot = self.snapshot();
+        let execution_skills = snapshot.skills_list.clone();
+        let registry = snapshot.registry.clone();
         let agent = self.task_agent(task);
         let mut visible: Vec<String> = execution_skills
             .iter()
+            .filter(|skill| {
+                registry
+                    .as_ref()
+                    .map(|reg| reg.is_planner_visible(skill))
+                    .unwrap_or(true)
+            })
             .filter(|skill| agent.allows_skill(skill))
             .cloned()
             .collect();
@@ -1479,6 +1496,7 @@ mod llm_provider_runtime_tests {
                 base_url: "https://example.invalid/v1".to_string(),
                 api_key: api_key.to_string(),
                 model: "test-model".to_string(),
+                context_window_tokens: None,
                 priority: 1,
                 timeout_seconds: 30,
                 max_concurrency: 1,

@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
 use crate::runtime::ask_mode::AskMode;
-use crate::runtime::types::{AgentAction, RoutedMode, ScheduleIntentOutput};
+use crate::runtime::types::{AgentAction, FirstLayerDecision, RoutedMode, ScheduleIntentOutput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum OutputResponseShape {
@@ -279,18 +279,24 @@ impl RouteResult {
         self.ask_mode = AskMode::from_routed_mode(mode);
     }
 
+    pub(crate) fn set_ask_mode(&mut self, ask_mode: AskMode) {
+        self.routed_mode = ask_mode.to_routed_mode();
+        self.ask_mode = ask_mode;
+    }
+
+    pub(crate) fn set_first_layer_decision(&mut self, decision: FirstLayerDecision) {
+        self.set_ask_mode(AskMode::from_first_layer_decision(
+            decision,
+            self.routed_mode,
+        ));
+    }
+
+    pub(crate) fn first_layer_decision(&self) -> FirstLayerDecision {
+        self.ask_mode.first_layer_decision()
+    }
+
     pub(crate) fn gate_kind(&self) -> crate::RouteGateKind {
-        let ask_gate = self.ask_mode.gate_kind();
-        let routed_gate = match self.routed_mode {
-            RoutedMode::Chat => crate::RouteGateKind::Chat,
-            RoutedMode::AskClarify => crate::RouteGateKind::Clarify,
-            RoutedMode::Act | RoutedMode::ChatAct => crate::RouteGateKind::Execute,
-        };
-        if ask_gate == routed_gate {
-            ask_gate
-        } else {
-            routed_gate
-        }
+        self.first_layer_decision().gate_kind()
     }
 
     pub(crate) fn is_chat_gate(&self) -> bool {
@@ -458,8 +464,33 @@ pub(crate) fn plan_step_from_agent_action(
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_step_from_agent_action, AgentAction, PlanStep};
+    use super::{
+        plan_step_from_agent_action, AgentAction, AskMode, FirstLayerDecision,
+        IntentOutputContract, PlanStep, ResumeBehavior, RiskCeiling, RouteResult, RoutedMode,
+        ScheduleKind,
+    };
     use serde_json::json;
+
+    fn route_result_with_modes(routed_mode: RoutedMode, ask_mode: AskMode) -> RouteResult {
+        RouteResult {
+            routed_mode,
+            ask_mode,
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract::default(),
+        }
+    }
 
     #[test]
     fn plan_step_to_agent_action_parses_synthesize_answer() {
@@ -495,5 +526,35 @@ mod tests {
         assert_eq!(step.skill, "synthesize_answer");
         assert_eq!(step.args, json!({ "evidence_refs": ["last_output"] }));
         assert_eq!(step.depends_on, vec!["step_1".to_string()]);
+    }
+
+    #[test]
+    fn route_result_gate_kind_uses_first_layer_decision_over_legacy_mode() {
+        let route =
+            route_result_with_modes(RoutedMode::Act, AskMode::from_routed_mode(RoutedMode::Chat));
+
+        assert_eq!(
+            route.first_layer_decision(),
+            FirstLayerDecision::DirectAnswer
+        );
+        assert!(route.is_chat_gate());
+        assert!(!route.is_execute_gate());
+    }
+
+    #[test]
+    fn route_result_set_first_layer_decision_keeps_legacy_fields_in_sync() {
+        let mut route = route_result_with_modes(
+            RoutedMode::Chat,
+            AskMode::from_routed_mode(RoutedMode::Chat),
+        );
+
+        route.set_first_layer_decision(FirstLayerDecision::PlannerExecute);
+
+        assert_eq!(
+            route.first_layer_decision(),
+            FirstLayerDecision::PlannerExecute
+        );
+        assert_eq!(route.routed_mode, RoutedMode::Act);
+        assert!(route.is_execute_gate());
     }
 }

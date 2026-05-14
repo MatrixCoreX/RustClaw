@@ -607,7 +607,8 @@ fn walk_collect(
     f: &mut dyn FnMut(&Path) -> bool,
 ) -> Result<(), String> {
     let mut scanned_files = 0usize;
-    walk_collect_inner(path, 0, limits, &mut scanned_files, f)
+    let mut stop = false;
+    walk_collect_inner(path, 0, limits, &mut scanned_files, &mut stop, f)
 }
 
 fn walk_collect_inner(
@@ -615,14 +616,20 @@ fn walk_collect_inner(
     depth: usize,
     limits: ScanLimits,
     scanned_files: &mut usize,
+    stop: &mut bool,
     f: &mut dyn FnMut(&Path) -> bool,
 ) -> Result<(), String> {
+    if *stop {
+        return Ok(());
+    }
     if path.is_file() {
         if *scanned_files >= limits.max_files {
             return Ok(());
         }
         *scanned_files += 1;
-        let _ = f(path);
+        if f(path) {
+            *stop = true;
+        }
         return Ok(());
     }
     if depth > limits.max_depth {
@@ -651,12 +658,16 @@ fn walk_collect_inner(
         }
         *scanned_files += 1;
         if f(&p) {
+            *stop = true;
             return Ok(());
         }
     }
     for p in dirs {
+        if *stop {
+            return Ok(());
+        }
         if depth < limits.max_depth {
-            walk_collect_inner(&p, depth + 1, limits, scanned_files, f)?;
+            walk_collect_inner(&p, depth + 1, limits, scanned_files, stop, f)?;
         }
     }
     Ok(())
@@ -668,7 +679,8 @@ fn walk_collect_nodes(
     f: &mut dyn FnMut(&Path) -> bool,
 ) -> Result<(), String> {
     let mut scanned_files = 0usize;
-    walk_collect_nodes_inner(path, 0, limits, &mut scanned_files, f)
+    let mut stop = false;
+    walk_collect_nodes_inner(path, 0, limits, &mut scanned_files, &mut stop, f)
 }
 
 fn walk_collect_nodes_inner(
@@ -676,17 +688,24 @@ fn walk_collect_nodes_inner(
     depth: usize,
     limits: ScanLimits,
     scanned_files: &mut usize,
+    stop: &mut bool,
     f: &mut dyn FnMut(&Path) -> bool,
 ) -> Result<(), String> {
+    if *stop {
+        return Ok(());
+    }
     if path.is_file() {
         if *scanned_files >= limits.max_files {
             return Ok(());
         }
         *scanned_files += 1;
-        let _ = f(path);
+        if f(path) {
+            *stop = true;
+        }
         return Ok(());
     }
     if path.is_dir() && f(path) {
+        *stop = true;
         return Ok(());
     }
     if depth > limits.max_depth {
@@ -715,12 +734,16 @@ fn walk_collect_nodes_inner(
         }
         *scanned_files += 1;
         if f(&p) {
+            *stop = true;
             return Ok(());
         }
     }
     for p in dirs {
+        if *stop {
+            return Ok(());
+        }
         if depth < limits.max_depth {
-            walk_collect_nodes_inner(&p, depth + 1, limits, scanned_files, f)?;
+            walk_collect_nodes_inner(&p, depth + 1, limits, scanned_files, stop, f)?;
         }
     }
     Ok(())
@@ -927,6 +950,33 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(results.len(), 1);
         assert!(results[0].ends_with("execution_intent_routing_repair_plan_20260509.md"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn find_ext_respects_max_results_across_subdirectories() {
+        let root = unique_temp_dir("find-ext-max-results");
+        for dir in ["a", "b", "c"] {
+            std::fs::create_dir_all(root.join(dir)).expect("create nested dir");
+            std::fs::write(root.join(dir).join(format!("{dir}.toml")), "").expect("write config");
+        }
+
+        let out = execute(json!({
+            "action": "find_ext",
+            "ext": "toml",
+            "root": root.to_string_lossy().to_string(),
+            "max_depth": 2,
+            "max_results": 2
+        }))
+        .expect("find_ext succeeds");
+
+        let results = out
+            .get("results")
+            .and_then(Value::as_array)
+            .expect("results array");
+        assert_eq!(out.get("count").and_then(Value::as_u64), Some(2));
+        assert_eq!(results.len(), 2, "results={results:?}");
 
         let _ = std::fs::remove_dir_all(root);
     }

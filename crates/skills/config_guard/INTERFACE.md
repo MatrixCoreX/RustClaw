@@ -5,6 +5,7 @@
 
 ## Capability Summary
 - `config_guard` performs a read-only safety scan of RustClaw TOML configuration.
+- For new planner-facing config tasks, prefer `config_basic.guard_rustclaw_config`; `config_guard` remains the runtime backing and compatibility entry.
 - It detects risky settings and likely real secrets in selected known locations, returning a compact JSON summary.
 - It does **not** patch or write configuration in the current implementation.
 

@@ -40,7 +40,8 @@ Rules:
 6. If the first attempt failed due to wrong command, missing dependency, build failure, service not reaching target state, incomplete search scope, ambiguous path, or stale configuration, prefer `should_retry=true` and ask the planner to try an alternative.
 7. If a required user parameter is missing, set `pass=false`, include the missing field, and set `should_retry=false`; the next step should be clarification, not blind retry.
 8. If the user explicitly requested a machine-readable or constrained answer shape (for example JSON, exact keys, only a scalar value, table columns, or "only these fields"), verify the candidate answer itself follows that shape. The execution trace may be exposed separately, but the final answer must still contain the requested structured result. If evidence is present but the final answer is prose instead of the requested shape, set `pass=false`, include `output_format`, and set `should_retry=true`.
-9. If confidence is low, prefer `pass=true` unless there is a concrete evidence gap, output-shape gap, or unsupported success claim.
+9. If observed filesystem/search evidence contains `count` plus a `results` array and the user asked to list/report candidates, a final answer that lists fewer returned candidates is incomplete unless the user requested a top-N subset or the evidence says the result array was capped/truncated. Set `missing_evidence_fields=["candidates"]` and ask the next attempt to answer from the full observed `results` array.
+10. If confidence is low, prefer `pass=true` unless there is a concrete evidence gap, output-shape gap, or unsupported success claim.
 
 Output examples:
 

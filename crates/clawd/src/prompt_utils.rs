@@ -505,6 +505,384 @@ fn canonicalize_plan_result_object(mut map: serde_json::Map<String, Value>) -> (
     (Value::Object(out), normalized)
 }
 
+fn default_direct_answer_gate_contract() -> Value {
+    json!({
+        "response_shape": "free",
+        "exact_sentence_count": null,
+        "requires_content_evidence": false,
+        "delivery_required": false,
+        "locator_kind": "none",
+        "delivery_intent": "none",
+        "semantic_kind": "none",
+        "locator_hint": "",
+        "self_extension": {
+            "mode": "none",
+            "trigger": "none",
+            "execute_now": false
+        }
+    })
+}
+
+fn normalize_schema_token_for_gate(raw: &str) -> String {
+    raw.trim()
+        .to_ascii_lowercase()
+        .replace([' ', '-'], "_")
+        .trim_matches('_')
+        .to_string()
+}
+
+fn gate_locator_hint_is_path_like(hint: &str) -> bool {
+    let hint = hint.trim();
+    hint.starts_with('/')
+        || hint.starts_with("./")
+        || hint.starts_with("../")
+        || hint.starts_with("~/")
+        || hint.contains('/')
+        || hint.contains('\\')
+}
+
+fn normalize_direct_answer_gate_locator_kind(raw: &str, locator_hint: &str) -> &'static str {
+    match normalize_schema_token_for_gate(raw).as_str() {
+        "path" | "file_path" | "directory" | "directory_path" | "dir" => "path",
+        "file" | "file_locator" => {
+            if gate_locator_hint_is_path_like(locator_hint) {
+                "path"
+            } else {
+                "filename"
+            }
+        }
+        "current_workspace" | "workspace" | "repo" | "repository" => "current_workspace",
+        "url" | "uri" | "link" => "url",
+        "filename" | "file_name" | "basename" => "filename",
+        _ => "none",
+    }
+}
+
+fn normalize_direct_answer_gate_response_shape(raw: &str) -> &'static str {
+    match normalize_schema_token_for_gate(raw).as_str() {
+        "one_sentence" | "single_sentence" | "sentence" | "short_sentence" => "one_sentence",
+        "strict" | "exact" | "exact_text" | "strict_text" | "exact_format" | "one_line"
+        | "single_line" | "line_only" | "list" | "array" | "string_list" => "strict",
+        "scalar" | "value" | "value_only" | "single_value" | "field_value" => "scalar",
+        "file_token" | "delivery_token" => "file_token",
+        _ => "free",
+    }
+}
+
+fn normalize_direct_answer_gate_delivery_intent(raw: &str) -> &'static str {
+    match normalize_schema_token_for_gate(raw).as_str() {
+        "file_single" | "single_file" | "file" | "deliver_file" | "file_delivery" => "file_single",
+        "directory_lookup" | "dir_lookup" | "directory" | "list_directory" => "directory_lookup",
+        "directory_batch_files" | "batch_directory_delivery" | "dir_batch" => {
+            "directory_batch_files"
+        }
+        _ => "none",
+    }
+}
+
+fn normalize_direct_answer_gate_semantic_kind(raw: &str) -> &'static str {
+    match normalize_schema_token_for_gate(raw).as_str() {
+        "raw" | "raw_output" | "command_output" | "shell_output" | "terminal_output" => {
+            "raw_command_output"
+        }
+        "hidden_files"
+        | "hidden_entries"
+        | "hidden_file_check"
+        | "hidden_files_check"
+        | "hidden_entry_check"
+        | "hidden_entries_check" => "hidden_entries_check",
+        "file_names"
+        | "file_names_only"
+        | "file_name_only"
+        | "files_listing"
+        | "files_list"
+        | "names_only"
+        | "entry_names"
+        | "directory_entry_names"
+        | "file_listing"
+        | "file_list"
+        | "filename_listing"
+        | "filename_list"
+        | "filename_only"
+        | "filenames_list"
+        | "filenames_only"
+        | "list_filenames"
+        | "list_file_names" => "file_names",
+        "directory_names"
+        | "directory_names_only"
+        | "directory_name_only"
+        | "dir_names"
+        | "dir_names_only"
+        | "folder_names"
+        | "folder_names_only"
+        | "folders_only" => "directory_names",
+        "file_paths" | "file_paths_only" | "path_list" | "paths_list" | "file_path_list" => {
+            "file_paths"
+        }
+        "content_excerpt" | "content_excerpt_summary" | "file_excerpt" | "tail_lines" => {
+            "content_excerpt_summary"
+        }
+        "workspace_summary" | "workspace_project_summary" => "workspace_project_summary",
+        "scalar_count" | "count" => "scalar_count",
+        "quantity_comparison" | "comparison" => "quantity_comparison",
+        "failed_step" | "failed_command_step" | "execution_failure_step" => "execution_failed_step",
+        "new_file_delivery" | "created_file_delivery" | "write_then_send_file" => {
+            "generated_file_delivery"
+        }
+        "scalar_path_only" => "scalar_path_only",
+        "existence_with_path" | "exists_with_path" => "existence_with_path",
+        "existence_with_path_summary" => "existence_with_path_summary",
+        "recent_scalar_equality_check" | "one_line_comparison" | "single_line_comparison" => {
+            "recent_scalar_equality_check"
+        }
+        "git_commit_subject" | "git_commit_title" | "commit_subject" | "commit_title" => {
+            "git_commit_subject"
+        }
+        "structured_keys" => "structured_keys",
+        "sqlite_table_listing" => "sqlite_table_listing",
+        "sqlite_table_names_only" => "sqlite_table_names_only",
+        "sqlite_database_kind_judgment" => "sqlite_database_kind_judgment",
+        "sqlite_schema_version" => "sqlite_schema_version",
+        "archive_list" => "archive_list",
+        "archive_pack" => "archive_pack",
+        "archive_unpack" => "archive_unpack",
+        "docker_ps" => "docker_ps",
+        "docker_images" => "docker_images",
+        "docker_logs" => "docker_logs",
+        "docker_container_lifecycle" => "docker_container_lifecycle",
+        _ => "none",
+    }
+}
+
+fn canonicalize_direct_answer_gate_contract(value: Value) -> (Value, bool) {
+    let Value::Object(mut map) = value else {
+        return (default_direct_answer_gate_contract(), true);
+    };
+    let original_len = map.len();
+    let allowed_keys = [
+        "response_shape",
+        "exact_sentence_count",
+        "requires_content_evidence",
+        "delivery_required",
+        "locator_kind",
+        "delivery_intent",
+        "semantic_kind",
+        "locator_hint",
+        "self_extension",
+    ];
+    map.retain(|key, _| allowed_keys.contains(&key.as_str()));
+    let mut normalized = map.len() != original_len;
+    let defaults = default_direct_answer_gate_contract();
+    let default_obj = defaults
+        .as_object()
+        .expect("default direct answer gate contract is object");
+    for key in allowed_keys {
+        if !map.contains_key(key) {
+            if let Some(default_value) = default_obj.get(key) {
+                map.insert(key.to_string(), default_value.clone());
+                normalized = true;
+            }
+        }
+    }
+    let locator_hint = map
+        .get("locator_hint")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if let Some(Value::String(raw)) = map.get("response_shape").cloned() {
+        let canonical = normalize_direct_answer_gate_response_shape(&raw);
+        if canonical != raw {
+            map.insert(
+                "response_shape".to_string(),
+                Value::String(canonical.to_string()),
+            );
+            normalized = true;
+        }
+    }
+    if let Some(Value::String(raw)) = map.get("locator_kind").cloned() {
+        let canonical = normalize_direct_answer_gate_locator_kind(&raw, &locator_hint);
+        if canonical != raw {
+            map.insert(
+                "locator_kind".to_string(),
+                Value::String(canonical.to_string()),
+            );
+            normalized = true;
+        }
+    }
+    if let Some(Value::String(raw)) = map.get("delivery_intent").cloned() {
+        let canonical = normalize_direct_answer_gate_delivery_intent(&raw);
+        if canonical != raw {
+            map.insert(
+                "delivery_intent".to_string(),
+                Value::String(canonical.to_string()),
+            );
+            normalized = true;
+        }
+    }
+    if let Some(Value::String(raw)) = map.get("semantic_kind").cloned() {
+        let canonical = normalize_direct_answer_gate_semantic_kind(&raw);
+        if canonical != raw {
+            map.insert(
+                "semantic_kind".to_string(),
+                Value::String(canonical.to_string()),
+            );
+            normalized = true;
+        }
+    }
+    let self_extension = map
+        .remove("self_extension")
+        .unwrap_or_else(|| default_obj["self_extension"].clone());
+    let self_extension = match self_extension {
+        Value::Object(mut extension) => {
+            let original_len = extension.len();
+            let allowed_extension_keys = ["mode", "trigger", "execute_now"];
+            extension.retain(|key, _| allowed_extension_keys.contains(&key.as_str()));
+            normalized |= extension.len() != original_len;
+            let default_extension = default_obj["self_extension"]
+                .as_object()
+                .expect("default self_extension is object");
+            for key in allowed_extension_keys {
+                if !extension.contains_key(key) {
+                    if let Some(default_value) = default_extension.get(key) {
+                        extension.insert(key.to_string(), default_value.clone());
+                        normalized = true;
+                    }
+                }
+            }
+            Value::Object(extension)
+        }
+        _ => {
+            normalized = true;
+            default_obj["self_extension"].clone()
+        }
+    };
+    map.insert("self_extension".to_string(), self_extension);
+    (Value::Object(map), normalized)
+}
+
+fn canonicalize_direct_answer_gate_object(
+    mut map: serde_json::Map<String, Value>,
+) -> (Value, bool) {
+    let original_len = map.len();
+    let allowed_keys = [
+        "decision",
+        "reason",
+        "confidence",
+        "clarify_question",
+        "resolved_user_intent",
+        "output_contract",
+    ];
+    map.retain(|key, _| allowed_keys.contains(&key.as_str()));
+    let mut normalized = map.len() != original_len;
+    if let Some(output_contract) = map.remove("output_contract") {
+        let (output_contract, contract_normalized) =
+            canonicalize_direct_answer_gate_contract(output_contract);
+        normalized |= contract_normalized;
+        map.insert("output_contract".to_string(), output_contract);
+    } else {
+        map.insert(
+            "output_contract".to_string(),
+            default_direct_answer_gate_contract(),
+        );
+        normalized = true;
+    }
+    (Value::Object(map), normalized)
+}
+
+fn canonicalize_contract_repair_judge_execution_recipe(value: Value) -> (Value, bool) {
+    let Value::Object(mut recipe) = value else {
+        return (
+            json!({
+                "kind": "none",
+                "profile": "none",
+                "target_scope": "unknown"
+            }),
+            true,
+        );
+    };
+    let original_len = recipe.len();
+    let allowed_keys = ["kind", "profile", "target_scope"];
+    recipe.retain(|key, _| allowed_keys.contains(&key.as_str()));
+    let mut normalized = recipe.len() != original_len;
+
+    for (key, default) in [
+        ("kind", "none"),
+        ("profile", "none"),
+        ("target_scope", "unknown"),
+    ] {
+        if !recipe.contains_key(key) {
+            recipe.insert(key.to_string(), Value::String(default.to_string()));
+            normalized = true;
+        }
+        if !recipe.get(key).is_some_and(Value::is_string) {
+            recipe.insert(key.to_string(), Value::String(default.to_string()));
+            normalized = true;
+        }
+    }
+
+    if let Some(raw) = recipe.get("kind").and_then(Value::as_str) {
+        let canonical = crate::execution_recipe::parse_execution_recipe_kind_text(raw).as_str();
+        if canonical != raw {
+            recipe.insert("kind".to_string(), Value::String(canonical.to_string()));
+            normalized = true;
+        }
+    }
+    if let Some(raw) = recipe.get("profile").and_then(Value::as_str) {
+        let canonical = crate::execution_recipe::parse_execution_recipe_profile_text(raw).as_str();
+        if canonical != raw {
+            recipe.insert("profile".to_string(), Value::String(canonical.to_string()));
+            normalized = true;
+        }
+    }
+    if let Some(raw) = recipe.get("target_scope").and_then(Value::as_str) {
+        let canonical =
+            crate::execution_recipe::parse_execution_recipe_target_scope_text(raw).as_str();
+        if canonical != raw {
+            recipe.insert(
+                "target_scope".to_string(),
+                Value::String(canonical.to_string()),
+            );
+            normalized = true;
+        }
+    }
+
+    (Value::Object(recipe), normalized)
+}
+
+fn canonicalize_contract_repair_judge_object(
+    mut map: serde_json::Map<String, Value>,
+) -> (Value, bool) {
+    let original_len = map.len();
+    let allowed_keys = [
+        "apply",
+        "reason",
+        "confidence",
+        "mode",
+        "needs_clarify",
+        "clarify_question",
+        "resolved_user_intent",
+        "output_contract",
+        "execution_recipe",
+    ];
+    map.retain(|key, _| allowed_keys.contains(&key.as_str()));
+    let mut normalized = map.len() != original_len;
+
+    if let Some(output_contract) = map.remove("output_contract") {
+        let (output_contract, contract_normalized) =
+            canonicalize_direct_answer_gate_contract(output_contract);
+        normalized |= contract_normalized;
+        map.insert("output_contract".to_string(), output_contract);
+    }
+    if let Some(execution_recipe) = map.remove("execution_recipe") {
+        let (execution_recipe, recipe_normalized) =
+            canonicalize_contract_repair_judge_execution_recipe(execution_recipe);
+        normalized |= recipe_normalized;
+        map.insert("execution_recipe".to_string(), execution_recipe);
+    }
+
+    (Value::Object(map), normalized)
+}
+
 fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value, bool) {
     match (schema_id, value) {
         (PromptSchemaId::IntentNormalizer, Value::Object(mut map)) => {
@@ -578,6 +956,12 @@ fn canonicalize_schema_input(schema_id: PromptSchemaId, value: Value) -> (Value,
             (json!({ "steps": steps }), true)
         }
         (PromptSchemaId::PlanResult, Value::Object(map)) => canonicalize_plan_result_object(map),
+        (PromptSchemaId::DirectAnswerGate, Value::Object(map)) => {
+            canonicalize_direct_answer_gate_object(map)
+        }
+        (PromptSchemaId::ContractRepairJudge, Value::Object(map)) => {
+            canonicalize_contract_repair_judge_object(map)
+        }
         (_, value) => (value, false),
     }
 }
@@ -672,6 +1056,13 @@ fn strip_first_json_codefence(raw: &str) -> Option<String> {
     let lang_end = after_fence.find('\n')?;
     let body_start = lang_end + 1;
     let body_and_rest = &after_fence[body_start..];
+    // Prefer the first complete JSON value inside the fence. A planner may put
+    // markdown fences inside a JSON string field such as `respond.content`; a
+    // plain `find("```")` would treat that inner content as the closing fence
+    // and truncate the plan.
+    if let Some(json) = extract_first_json_value_any(body_and_rest) {
+        return Some(json);
+    }
     // 找闭 fence
     let close = body_and_rest.find("```")?;
     Some(body_and_rest[..close].to_string())
@@ -1650,6 +2041,116 @@ mod tests {
     }
 
     #[test]
+    fn validate_against_schema_projects_normalizer_shaped_direct_answer_gate_output() {
+        let raw = r#"{
+            "resolved_user_intent": "List current listening ports and highlight notable ports",
+            "resume_behavior": "none",
+            "schedule_kind": "none",
+            "schedule_intent": null,
+            "wants_file_delivery": false,
+            "should_refresh_long_term_memory": false,
+            "agent_display_name_hint": "",
+            "needs_clarify": false,
+            "clarify_question": "",
+            "reason": "Fresh system state observation is required.",
+            "confidence": 0.94,
+            "decision": "planner_execute",
+            "mode": "act",
+            "output_contract": {
+                "response_shape": "free",
+                "requires_content_evidence": true,
+                "delivery_required": false,
+                "locator_kind": "none",
+                "delivery_intent": "none",
+                "semantic_kind": "none",
+                "locator_hint": "",
+                "self_extension": {
+                    "mode": "none",
+                    "trigger": "none",
+                    "execute_now": false,
+                    "ignored": true
+                },
+                "ignored_contract_field": "drop"
+            },
+            "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "none"},
+            "turn_type": "task_request",
+            "target_task_policy": "standalone",
+            "should_interrupt_active_run": false,
+            "state_patch": null,
+            "attachment_processing_required": false
+        }"#;
+        let validated =
+            super::validate_against_schema::<Value>(raw, super::PromptSchemaId::DirectAnswerGate)
+                .expect("normalizer-shaped gate output should project to gate schema");
+        assert!(validated.schema_normalized);
+        assert_eq!(
+            validated.value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
+        assert_eq!(
+            validated
+                .value
+                .pointer("/output_contract/requires_content_evidence")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert!(validated.value.get("mode").is_none());
+        assert!(validated.value.get("execution_recipe").is_none());
+        assert!(validated
+            .value
+            .pointer("/output_contract/ignored_contract_field")
+            .is_none());
+        assert!(validated
+            .value
+            .pointer("/output_contract/self_extension/ignored")
+            .is_none());
+    }
+
+    #[test]
+    fn validate_against_schema_normalizes_direct_answer_gate_file_locator_alias() {
+        let raw = r#"{
+            "decision": "planner_execute",
+            "reason": "fresh file content is required",
+            "confidence": 0.95,
+            "clarify_question": "",
+            "resolved_user_intent": "Read the last lines from /tmp/clawd.log",
+            "output_contract": {
+                "response_shape": "free",
+                "requires_content_evidence": true,
+                "delivery_required": false,
+                "locator_kind": "file",
+                "delivery_intent": "none",
+                "semantic_kind": "tail_lines",
+                "locator_hint": "/tmp/clawd.log",
+                "self_extension": {
+                    "mode": "none",
+                    "trigger": "none",
+                    "execute_now": false
+                }
+            }
+        }"#;
+        let validated =
+            super::validate_against_schema::<Value>(raw, super::PromptSchemaId::DirectAnswerGate)
+                .expect("gate file locator alias should be normalized");
+
+        assert!(validated.schema_normalized);
+        assert_eq!(
+            validated
+                .value
+                .pointer("/output_contract/locator_kind")
+                .and_then(|v| v.as_str()),
+            Some("path")
+        );
+        assert_eq!(
+            validated
+                .value
+                .pointer("/output_contract/semantic_kind")
+                .and_then(|v| v.as_str()),
+            Some("content_excerpt_summary")
+        );
+    }
+
+    #[test]
     fn validate_against_schema_canonicalizes_single_plan_step_object() {
         let raw = r#"{"steps":{"type":"respond","content":"done"}}"#;
         let validated =
@@ -1663,6 +2164,19 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("respond")
         );
+    }
+
+    #[test]
+    fn fenced_plan_parser_keeps_inner_markdown_fence_in_respond_content() {
+        let raw = "模型说明。\n\n```json\n{\"steps\":[{\"type\":\"respond\",\"content\":\"前 15 行：\\n```\\n#!/usr/bin/env bash\\nset -euo pipefail\\n```\\n\\n这是一个重启 clawd 服务的脚本。\"}]}\n```\n";
+        let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
+            .expect("fenced plan with nested markdown fence should parse");
+        let content = parsed
+            .pointer("/steps/0/content")
+            .and_then(|v| v.as_str())
+            .expect("respond content should be preserved");
+        assert!(content.contains("#!/usr/bin/env bash"));
+        assert!(content.contains("这是一个重启 clawd 服务的脚本"));
     }
 
     #[test]
@@ -1697,6 +2211,75 @@ mod tests {
             .value
             .get("execution_recipe")
             .and_then(|v| v.get("unknown_extra_text"))
+            .is_none());
+    }
+
+    #[test]
+    fn validate_against_schema_normalizes_contract_repair_judge_payload_noise() {
+        let raw = r#"{
+            "apply": true,
+            "reason": "semantic repair",
+            "confidence": 0.92,
+            "mode": "act",
+            "needs_clarify": false,
+            "clarify_question": "",
+            "resolved_user_intent": "find README candidates",
+            "agent_display_name_hint": "extra field from model",
+            "output_contract": {
+                "response_shape": "list",
+                "requires_content_evidence": true,
+                "delivery_required": false,
+                "locator_kind": "file",
+                "delivery_intent": "none",
+                "semantic_kind": "path_list",
+                "locator_hint": "README",
+                "unused": "drop me",
+                "self_extension": {
+                    "mode": "none",
+                    "trigger": "none",
+                    "execute_now": false
+                }
+            },
+            "execution_recipe": {
+                "kind": "none",
+                "profile": "none",
+                "target_scope": "none",
+                "unexpected": "drop me"
+            }
+        }"#;
+
+        let validated = super::validate_against_schema::<Value>(
+            raw,
+            super::PromptSchemaId::ContractRepairJudge,
+        )
+        .expect("contract repair judge output should tolerate harmless model noise");
+
+        assert!(validated.schema_normalized);
+        assert!(validated.value.get("agent_display_name_hint").is_none());
+        assert_eq!(
+            validated
+                .value
+                .pointer("/output_contract/response_shape")
+                .and_then(Value::as_str),
+            Some("strict")
+        );
+        assert_eq!(
+            validated
+                .value
+                .pointer("/output_contract/semantic_kind")
+                .and_then(Value::as_str),
+            Some("file_paths")
+        );
+        assert_eq!(
+            validated
+                .value
+                .pointer("/execution_recipe/target_scope")
+                .and_then(Value::as_str),
+            Some("unknown")
+        );
+        assert!(validated
+            .value
+            .pointer("/execution_recipe/unexpected")
             .is_none());
     }
 
@@ -2074,7 +2657,7 @@ mod tests {
         }
     }
 
-    /// §D1：N-fold 重复键 last-wins 规则覆盖。覆盖 minimax 偶发把同一字段
+    /// §D1：N-fold 重复键 last-wins 规则覆盖。覆盖兼容模型偶发把同一字段
     /// 重复 2/3/5/10 次的全部观测形态。
     #[test]
     fn dedupe_json_object_keys_last_wins_for_n_fold_duplicates() {

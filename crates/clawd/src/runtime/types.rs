@@ -112,10 +112,35 @@ pub(crate) enum RoutedMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FirstLayerDecision {
+    Clarify,
+    DirectAnswer,
+    PlannerExecute,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RouteGateKind {
     Chat,
     Clarify,
     Execute,
+}
+
+impl FirstLayerDecision {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Clarify => "clarify",
+            Self::DirectAnswer => "direct_answer",
+            Self::PlannerExecute => "planner_execute",
+        }
+    }
+
+    pub(crate) fn gate_kind(self) -> RouteGateKind {
+        match self {
+            Self::Clarify => RouteGateKind::Clarify,
+            Self::DirectAnswer => RouteGateKind::Chat,
+            Self::PlannerExecute => RouteGateKind::Execute,
+        }
+    }
 }
 
 impl RouteGateKind {
