@@ -44,7 +44,10 @@ flowchart TD
     E2 -->|resume execution| H
     E2 -->|standard ask| F{FirstLayerDecision}
     F -->|Clarify| G[Clarify question]
-    F -->|DirectAnswer| CH[Build direct-answer chat context + prompt]
+    F -->|DirectAnswer| DG[Direct-answer preflight gate<br/>contract / advice-only check]
+    DG -->|direct| CH[Build direct-answer chat context + prompt]
+    DG -->|clarify| G
+    DG -->|promote to execute| H
     CH --> CR[Chat response LLM]
     F -->|PlannerExecute| H[Use execution prompt/context]
     SK[Skill registry + generated skill docs<br/>configs/skills_registry.toml] --> I
@@ -93,7 +96,8 @@ flowchart TD
 - `Post-route policy`: applies locator resolution, missing-locator clarification, and contract guards after the ask context bundle is available and before dispatch. It can refine the gate, but it is not a semantic fast path.
 - `Schedule / resume branches`: scheduler-triggered direct-text tasks can finalize before the normalizer; normal schedule-direct requests can finalize after routing but before the planner; resume-discussion uses a recovery prompt; resume-execution returns to the normal execution runtime.
 - `FirstLayerDecision`: keeps the runtime gate to `Clarify / DirectAnswer / PlannerExecute`. `AskMode` is the code-facing dispatch type; legacy `RoutedMode` (`AskClarify`, `Chat`, `Act`, `ChatAct`) remains only as a compatibility/finalization hint, not the authoritative first-layer gate.
-- `Chat response LLM`: handles `DirectAnswer` directly; pure chat requests do not enter the execution planner loop.
+- `Direct-answer preflight gate`: before a normal chat answer is sent, the runtime can run a lightweight contract/advice-only check. It keeps pure chat in `DirectAnswer`, but can promote tool-backed requests to `PlannerExecute` or ask one clarification when the normalizer was too weak.
+- `Chat response LLM`: handles confirmed `DirectAnswer` replies; pure chat requests do not enter the execution planner loop.
 - `Planner / runtime loop`: for `PlannerExecute`, runs multiple rounds; planner steps are `think`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today—execution steps are traced as subtasks in logs, not a nested child loop). Planner-facing `fs_basic` / `config_basic` tools are virtual contracts that map structured actions to existing stable filesystem/config backing tools.
 - `Execution prompt/context`: reuses the ask context bundle and resolved prompt for `PlannerExecute`, so memory cannot override the latest user instruction.
 - `Skill registry + generated skill docs`: planner-visible skills come from runtime skill views and generated interface docs, primarily `configs/skills_registry.toml`, `crates/skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`. New skills should extend those contracts instead of adding language-specific planner branches.
@@ -117,7 +121,10 @@ flowchart TD
     E2 -->|resume discussion| Fr[Resume discussion prompt]
     E2 -->|resume execution| H
     E2 -->|first_layer_decision=clarify| F[Clarify question]
-    E2 -->|first_layer_decision=direct_answer| G[Build direct-answer chat prompt]
+    E2 -->|first_layer_decision=direct_answer| G0[Direct-answer preflight LLM<br/>contract / advice-only check]
+    G0 -->|direct| G[Build direct-answer chat prompt]
+    G0 -->|clarify| F
+    G0 -->|promote to execute| H
     E2 -->|first_layer_decision=planner_execute| H[Build planner prompt]
     SK[Skill registry + generated skill docs] --> H
     G --> Ic[LLM request 2<br/>Chat response]
@@ -157,7 +164,8 @@ flowchart TD
 - This diagram covers the normal `kind=ask` LLM path. `kind=run_skill` and scheduler-triggered direct-text asks have no normalizer / planner LLM request and are finalized by their direct task paths.
 - `Build chat / planner prompt`: combines mode, session state, working context, and output contract for follow-on requests.
 - `Skill registry + generated skill docs`: planner prompts are built from enabled skill views and generated interface documents, so skill capability growth should be data/contract driven.
-- `LLM request 2`: **DirectAnswer** uses one chat-completion call, then finalize. **PlannerExecute** uses one-or-more **planner** calls per loop round; the planner emits JSON steps in `{think, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types). Legacy `Act / ChatAct` can still affect finalization shape, but not the first-layer gate.
+- `DirectAnswer preflight`: **DirectAnswer** may first run a lightweight preflight LLM before the chat reply is sent. If the preflight confirms direct answer, chat response runs and finalizes; if it detects missing required information, the request becomes clarification; if it detects real tool/workspace/system evidence is needed, it is promoted into `PlannerExecute`.
+- `PlannerExecute`: uses one-or-more **planner** calls per loop round; the planner emits JSON steps in `{think, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types). Legacy `Act / ChatAct` can still affect finalization shape, but not the first-layer gate.
 - `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened. Skill execution uses the shared dispatch layer; only runner skills spawn `skill-runner`.
 - `synthesize_answer`: an extra LLM call **scheduled inside the planner loop** when the plan includes that step—**not** always a single fixed “LLM 3 after all planning is done”; rounds can interleave execution, synthesis, and further planning.
 - `Observed-output finalizer`: if a plan ends after observation steps without a terminal `respond`, runtime can still publish a grounded direct answer or run the observed-answer synthesis path. Recoverable failures are fed back to later planner rounds as attempted-method evidence instead of being hidden inside shell fallbacks.
