@@ -345,17 +345,27 @@ fn inventory_dir(
     let mut dir_count = 0usize;
     let mut hidden_count = 0usize;
     let mut names = Vec::new();
+    let mut file_names = Vec::new();
+    let mut dir_names = Vec::new();
+    let mut other_names = Vec::new();
     for entry in &entries {
-        if entry.get("kind").and_then(Value::as_str) == Some("file") {
-            file_count += 1;
-        } else if entry.get("kind").and_then(Value::as_str) == Some("dir") {
-            dir_count += 1;
-        }
+        let kind = entry.get("kind").and_then(Value::as_str).unwrap_or("other");
         if entry.get("hidden").and_then(Value::as_bool) == Some(true) {
             hidden_count += 1;
         }
         if let Some(name) = entry.get("name").and_then(Value::as_str) {
             names.push(name.to_string());
+            match kind {
+                "file" => {
+                    file_count += 1;
+                    file_names.push(name.to_string());
+                }
+                "dir" => {
+                    dir_count += 1;
+                    dir_names.push(name.to_string());
+                }
+                _ => other_names.push(name.to_string()),
+            }
         }
     }
 
@@ -377,6 +387,11 @@ fn inventory_dir(
         },
         "has_hidden": hidden_count > 0,
         "names": names,
+        "names_by_kind": {
+            "files": file_names,
+            "dirs": dir_names,
+            "other": other_names,
+        },
         "entries": if names_only { Value::Array(Vec::new()) } else { Value::Array(entries) },
     })
     .to_string())
@@ -1023,6 +1038,8 @@ fn read_range(
         })
         .to_ascii_lowercase();
     let n = u64_arg(obj, "n", 20).clamp(1, 500) as usize;
+    let raw = bool_arg(obj, "raw", false) || bool_arg(obj, "verbatim", false);
+    let max_line_chars = u64_arg(obj, "max_line_chars", 800).clamp(80, 4000) as usize;
 
     let (from, to) = if total_lines == 0 {
         (0, 0)
@@ -1044,10 +1061,19 @@ fn read_range(
     };
 
     let mut excerpt_lines = Vec::new();
+    let mut compacted_lines = 0usize;
+    let mut truncated_lines = 0usize;
     if total_lines > 0 {
         for idx in from..=to {
             if let Some(line) = lines.get(idx - 1) {
-                excerpt_lines.push(format!("{idx}|{line}"));
+                let rendered = render_read_range_line(line, raw, max_line_chars);
+                if rendered.compacted {
+                    compacted_lines += 1;
+                }
+                if rendered.truncated {
+                    truncated_lines += 1;
+                }
+                excerpt_lines.push(format!("{idx}|{}", rendered.text));
             }
         }
     }
@@ -1062,8 +1088,126 @@ fn read_range(
         "end_line": to,
         "total_lines": total_lines,
         "excerpt": excerpt_lines.join("\n"),
+        "line_safety": {
+            "raw": raw,
+            "max_line_chars": max_line_chars,
+            "compacted_lines": compacted_lines,
+            "truncated_lines": truncated_lines,
+        },
     })
     .to_string())
+}
+
+#[derive(Debug, Clone)]
+struct RenderedReadRangeLine {
+    text: String,
+    compacted: bool,
+    truncated: bool,
+}
+
+fn render_read_range_line(line: &str, raw: bool, max_line_chars: usize) -> RenderedReadRangeLine {
+    if !raw {
+        if let Some(text) = compact_internal_json_log_line(line, max_line_chars) {
+            return RenderedReadRangeLine {
+                text,
+                compacted: true,
+                truncated: false,
+            };
+        }
+    }
+    let text = truncate_chars(line, max_line_chars);
+    let truncated = text != line;
+    RenderedReadRangeLine {
+        text,
+        compacted: false,
+        truncated,
+    }
+}
+
+fn compact_internal_json_log_line(line: &str, max_value_chars: usize) -> Option<String> {
+    let value = serde_json::from_str::<Value>(line.trim()).ok()?;
+    let Value::Object(obj) = value else {
+        return None;
+    };
+    const INTERNAL_BULKY_FIELDS: &[&str] = &[
+        "prompt",
+        "raw_prompt",
+        "system_prompt",
+        "raw_response",
+        "request_payload",
+        "messages",
+    ];
+    let omitted_fields = INTERNAL_BULKY_FIELDS
+        .iter()
+        .copied()
+        .filter(|key| obj.contains_key(*key))
+        .collect::<Vec<_>>();
+    if omitted_fields.is_empty() {
+        return None;
+    }
+
+    let mut compact = Map::new();
+    for key in [
+        "ts",
+        "status",
+        "vendor",
+        "provider",
+        "provider_type",
+        "model",
+        "model_kind",
+        "mode",
+        "task_id",
+        "call_id",
+        "prompt_hash",
+        "prompt_source",
+        "sanitized",
+    ] {
+        if let Some(value) = obj.get(key) {
+            compact.insert(key.to_string(), value.clone());
+        }
+    }
+    if let Some(error) = obj.get("error").filter(|value| !value.is_null()) {
+        compact.insert("error".to_string(), error.clone());
+    }
+    if let Some(usage) = obj.get("usage").filter(|value| value.is_object()) {
+        compact.insert("usage".to_string(), usage.clone());
+    }
+    for (source_key, target_key) in [
+        ("clean_response", "clean_response_preview"),
+        ("response", "response_preview"),
+    ] {
+        if let Some(value) = obj
+            .get(source_key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            compact.insert(
+                target_key.to_string(),
+                Value::String(truncate_chars(value, max_value_chars)),
+            );
+        }
+    }
+    compact.insert(
+        "omitted_fields".to_string(),
+        Value::Array(
+            omitted_fields
+                .iter()
+                .map(|field| Value::String((*field).to_string()))
+                .collect(),
+        ),
+    );
+    serde_json::to_string(&Value::Object(compact)).ok()
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    let count = text.chars().count();
+    if count <= max_chars {
+        return text.to_string();
+    }
+    let mut out = text.chars().take(max_chars).collect::<String>();
+    out.push_str("...[truncated]");
+    out
 }
 
 fn compare_paths(
@@ -1658,7 +1802,7 @@ fn parse_structured_root(path: &Path, format_hint: Option<&str>) -> SkillResult<
         other => {
             return Err(SkillError::invalid_input(format!(
                 "unsupported format: {other}; use json|toml|yaml"
-            )))
+            )));
         }
     };
     Ok((format, root_value))
@@ -1724,6 +1868,14 @@ fn lookup_field_value_with_resolution<'a>(value: &'a Value, field_path: &str) ->
         return found;
     }
 
+    if let Some(found) = lookup_parent_scoped_suffix_field(value, field_path) {
+        return found;
+    }
+
+    if let Some(found) = lookup_missing_parent_leaf_suffix_field(value, field_path) {
+        return found;
+    }
+
     let Some(key) = bare_field_key_selector(field_path) else {
         return FieldLookup {
             value: None,
@@ -1743,6 +1895,19 @@ fn lookup_field_value_with_resolution<'a>(value: &'a Value, field_path: &str) ->
             match_strategy: "unique_bare_key",
             match_count: 1,
         };
+    }
+
+    if matches.is_empty() {
+        collect_bare_key_suffix_matches(value, key, "", &mut matches);
+        if matches.len() == 1 {
+            let (resolved_field_path, found) = matches.remove(0);
+            return FieldLookup {
+                value: Some(found),
+                resolved_field_path: Some(resolved_field_path),
+                match_strategy: "unique_bare_key_suffix",
+                match_count: 1,
+            };
+        }
     }
 
     FieldLookup {
@@ -1797,6 +1962,129 @@ fn collect_bare_key_matches<'a>(
         }
         _ => {}
     }
+}
+
+fn collect_bare_key_suffix_matches<'a>(
+    value: &'a Value,
+    target_key: &str,
+    current_path: &str,
+    out: &mut Vec<(String, &'a Value)>,
+) {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                let child_path = if current_path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{current_path}.{key}")
+                };
+                if bare_key_suffix_matches(key, target_key) && is_safe_suffix_field_value(child) {
+                    out.push((child_path.clone(), child));
+                }
+                collect_bare_key_suffix_matches(child, target_key, &child_path, out);
+            }
+        }
+        Value::Array(items) => {
+            for (idx, child) in items.iter().enumerate() {
+                let child_path = if current_path.is_empty() {
+                    format!("[{idx}]")
+                } else {
+                    format!("{current_path}[{idx}]")
+                };
+                collect_bare_key_suffix_matches(child, target_key, &child_path, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_safe_suffix_field_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)
+    )
+}
+
+fn bare_key_suffix_matches(key: &str, target_key: &str) -> bool {
+    let key = key.trim();
+    let target_key = target_key.trim();
+    if target_key.len() < 3 || key.eq_ignore_ascii_case(target_key) {
+        return false;
+    }
+    let key_lower = key.to_ascii_lowercase();
+    let target_lower = target_key.to_ascii_lowercase();
+    let Some(prefix) = key_lower.strip_suffix(&target_lower) else {
+        return false;
+    };
+    prefix.ends_with(['_', '-'])
+}
+
+fn lookup_parent_scoped_suffix_field<'a>(
+    value: &'a Value,
+    field_path: &str,
+) -> Option<FieldLookup<'a>> {
+    let segments = split_field_path(field_path)?;
+    if segments.len() < 2 {
+        return None;
+    }
+    let leaf = segments.last()?.trim();
+    let target_key = bare_field_key_selector(leaf)?;
+    let parent_path = segments[..segments.len() - 1].join(".");
+    if parent_path.trim().is_empty() {
+        return None;
+    }
+    let parent = lookup_field_value(value, &parent_path)?;
+    let mut matches = Vec::new();
+    collect_bare_key_suffix_matches(parent, target_key, &parent_path, &mut matches);
+    if matches.len() == 1 {
+        let (resolved_field_path, found) = matches.remove(0);
+        return Some(FieldLookup {
+            value: Some(found),
+            resolved_field_path: Some(resolved_field_path),
+            match_strategy: "parent_scoped_key_suffix",
+            match_count: 1,
+        });
+    }
+    (!matches.is_empty()).then_some(FieldLookup {
+        value: None,
+        resolved_field_path: None,
+        match_strategy: "parent_scoped_key_suffix",
+        match_count: matches.len(),
+    })
+}
+
+fn lookup_missing_parent_leaf_suffix_field<'a>(
+    value: &'a Value,
+    field_path: &str,
+) -> Option<FieldLookup<'a>> {
+    let segments = split_field_path(field_path)?;
+    if segments.len() < 2 {
+        return None;
+    }
+    let leaf = segments.last()?.trim();
+    let target_key = bare_field_key_selector(leaf)?;
+    let parent_path = segments[..segments.len() - 1].join(".");
+    if parent_path.trim().is_empty() || lookup_field_value(value, &parent_path).is_some() {
+        return None;
+    }
+
+    let mut matches = Vec::new();
+    collect_bare_key_suffix_matches(value, target_key, "", &mut matches);
+    if matches.len() == 1 {
+        let (resolved_field_path, found) = matches.remove(0);
+        return Some(FieldLookup {
+            value: Some(found),
+            resolved_field_path: Some(resolved_field_path),
+            match_strategy: "missing_parent_leaf_key_suffix",
+            match_count: 1,
+        });
+    }
+    (!matches.is_empty()).then_some(FieldLookup {
+        value: None,
+        resolved_field_path: None,
+        match_strategy: "missing_parent_leaf_key_suffix",
+        match_count: matches.len(),
+    })
 }
 
 fn lookup_array_item_key_path<'a>(value: &'a Value, field_path: &str) -> Option<FieldLookup<'a>> {
@@ -2204,7 +2492,7 @@ fn resolve_path(
     for comp in raw.components() {
         match comp {
             Component::ParentDir => {
-                return Err(SkillError::path_denied("path with '..' is not allowed"))
+                return Err(SkillError::path_denied("path with '..' is not allowed"));
             }
             Component::CurDir => {}
             other => normalized.push(other.as_os_str()),
@@ -2520,6 +2808,198 @@ selected_model = "mimo-v2.5-pro"
     }
 
     #[test]
+    fn extract_field_resolves_unique_suffix_bare_key_in_nested_toml() {
+        let root = temp_root("extract_field_unique_suffix_bare_key");
+        let target = root.join("config.toml");
+        std::fs::write(
+            &target,
+            r#"
+[llm]
+selected_vendor = "mimo"
+selected_model = "mimo-v2.5-pro"
+"#,
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("format".to_string(), json!("toml"));
+        obj.insert("field_path".to_string(), json!("vendor"));
+
+        let out = extract_field(&root, &obj, true).expect("extract field");
+        let value: Value = serde_json::from_str(&out).expect("json");
+
+        assert_eq!(value.get("exists").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            value.get("value_text").and_then(Value::as_str),
+            Some("mimo")
+        );
+        assert_eq!(
+            value.get("resolved_field_path").and_then(Value::as_str),
+            Some("llm.selected_vendor")
+        );
+        assert_eq!(
+            value.get("match_strategy").and_then(Value::as_str),
+            Some("unique_bare_key_suffix")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extract_field_resolves_parent_scoped_suffix_key_in_nested_toml() {
+        let root = temp_root("extract_field_parent_scoped_suffix_key");
+        let target = root.join("config.toml");
+        std::fs::write(
+            &target,
+            r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M2.7"
+"#,
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("format".to_string(), json!("toml"));
+        obj.insert("field_path".to_string(), json!("llm.vendor"));
+
+        let out = extract_field(&root, &obj, true).expect("extract field");
+        let value: Value = serde_json::from_str(&out).expect("json");
+
+        assert_eq!(value.get("exists").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            value.get("value_text").and_then(Value::as_str),
+            Some("minimax")
+        );
+        assert_eq!(
+            value.get("resolved_field_path").and_then(Value::as_str),
+            Some("llm.selected_vendor")
+        );
+        assert_eq!(
+            value.get("match_strategy").and_then(Value::as_str),
+            Some("parent_scoped_key_suffix")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extract_field_resolves_missing_parent_leaf_suffix_key() {
+        let root = temp_root("extract_field_missing_parent_leaf_suffix_key");
+        let target = root.join("config.toml");
+        std::fs::write(
+            &target,
+            r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M2.7"
+"#,
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("format".to_string(), json!("toml"));
+        obj.insert("field_path".to_string(), json!("model.vendor"));
+
+        let out = extract_field(&root, &obj, true).expect("extract field");
+        let value: Value = serde_json::from_str(&out).expect("json");
+
+        assert_eq!(value.get("exists").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            value.get("value_text").and_then(Value::as_str),
+            Some("minimax")
+        );
+        assert_eq!(
+            value.get("resolved_field_path").and_then(Value::as_str),
+            Some("llm.selected_vendor")
+        );
+        assert_eq!(
+            value.get("match_strategy").and_then(Value::as_str),
+            Some("missing_parent_leaf_key_suffix")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extract_field_does_not_suffix_match_object_values() {
+        let root = temp_root("extract_field_suffix_object_value");
+        let target = root.join("config.toml");
+        std::fs::write(
+            &target,
+            r#"
+[tools.by_provider.openai]
+allow = []
+deny = []
+"#,
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("format".to_string(), json!("toml"));
+        obj.insert("field_path".to_string(), json!("provider"));
+
+        let out = extract_field(&root, &obj, true).expect("extract field");
+        let value: Value = serde_json::from_str(&out).expect("json");
+
+        assert_eq!(value.get("exists").and_then(Value::as_bool), Some(false));
+        assert_eq!(value.get("match_count").and_then(Value::as_u64), Some(0));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extract_fields_resolves_suffix_scalars_without_object_matches() {
+        let root = temp_root("extract_fields_suffix_scalars");
+        let target = root.join("config.toml");
+        std::fs::write(
+            &target,
+            r#"
+[llm]
+selected_vendor = "minimax"
+selected_model = "MiniMax-M2.7"
+
+[tools.by_provider.openai]
+allow = []
+deny = []
+"#,
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("format".to_string(), json!("toml"));
+        obj.insert(
+            "field_paths".to_string(),
+            json!(["llm.vendor", "provider", "selected_model"]),
+        );
+
+        let out = extract_fields(&root, &obj, true).expect("extract fields");
+        let value: Value = serde_json::from_str(&out).expect("json");
+        let results = value
+            .get("results")
+            .and_then(Value::as_array)
+            .expect("results");
+
+        assert_eq!(
+            results[0]
+                .get("resolved_field_path")
+                .and_then(Value::as_str),
+            Some("llm.selected_vendor")
+        );
+        assert_eq!(
+            results[0].get("value_text").and_then(Value::as_str),
+            Some("minimax")
+        );
+        assert_eq!(
+            results[1].get("exists").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            results[2]
+                .get("resolved_field_path")
+                .and_then(Value::as_str),
+            Some("llm.selected_model")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn extract_field_keeps_ambiguous_bare_key_missing() {
         let root = temp_root("extract_field_ambiguous_bare_key");
         let target = root.join("config.toml");
@@ -2600,6 +3080,52 @@ name = "beta"
             .get("excerpt")
             .and_then(Value::as_str)
             .is_some_and(|excerpt| excerpt.contains("8|8") && !excerpt.contains("9|9")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn read_range_compacts_internal_model_io_json_lines_by_default() {
+        let root = temp_root("read_range_model_io_compact");
+        let target = root.join("model_io.log");
+        let line = json!({
+            "task_id": "task-1",
+            "vendor": "minimax",
+            "model": "MiniMax-M2.7",
+            "status": "ok",
+            "prompt": "SECRET_PROMPT_SHOULD_NOT_BE_VISIBLE",
+            "raw_response": "RAW_RESPONSE_SHOULD_NOT_BE_VISIBLE",
+            "request_payload": {"messages": [{"role": "user", "content": "payload body"}]},
+            "response": "{\"steps\":[]}",
+            "usage": {"total_tokens": 12}
+        })
+        .to_string();
+        std::fs::write(&target, format!("plain\n{line}\n")).expect("write model io log");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("mode".to_string(), json!("tail"));
+        obj.insert("n".to_string(), json!(1));
+
+        let out = read_range(&root, &obj, true).expect("read range");
+        let value: Value = serde_json::from_str(&out).expect("json");
+        let excerpt = value
+            .get("excerpt")
+            .and_then(Value::as_str)
+            .expect("excerpt");
+
+        assert!(excerpt.contains("task-1"));
+        assert!(excerpt.contains("omitted_fields"));
+        assert!(excerpt.contains("response_preview"));
+        assert!(!excerpt.contains("SECRET_PROMPT_SHOULD_NOT_BE_VISIBLE"));
+        assert!(!excerpt.contains("RAW_RESPONSE_SHOULD_NOT_BE_VISIBLE"));
+        assert!(!excerpt.contains("payload body"));
+        assert_eq!(
+            value
+                .get("line_safety")
+                .and_then(|safety| safety.get("compacted_lines"))
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2692,6 +3218,20 @@ name = "beta"
         assert_eq!(
             value.pointer("/counts/total").and_then(Value::as_u64),
             Some(2)
+        );
+        assert_eq!(
+            value
+                .pointer("/names_by_kind/files")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(
+            value
+                .pointer("/names_by_kind/dirs")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(0)
         );
         let _ = std::fs::remove_dir_all(root);
     }

@@ -77,8 +77,22 @@ pub(crate) fn structurally_satisfies_answer_contract(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    route_requires_single_file_delivery(route_result)
+    if route_requires_single_file_delivery(route_result)
         && candidate_answer_has_grounded_existing_file_token(journal, candidate_answer)
+    {
+        return true;
+    }
+    if raw_command_answer_is_exact_single_successful_observation(journal, candidate_answer) {
+        return true;
+    }
+    if existence_with_path_answer_is_grounded_in_observation(
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
+        return true;
+    }
+    scalar_answer_is_grounded_in_successful_observation(route_result, journal, candidate_answer)
 }
 
 fn route_requires_single_file_delivery(route: &RouteResult) -> bool {
@@ -203,6 +217,156 @@ fn candidate_path_matches(
             .canonicalize()
             .is_ok_and(|path| path == canonical_token_path)
     })
+}
+
+fn raw_command_answer_is_exact_single_successful_observation(
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    let mut external_steps = journal
+        .step_results
+        .iter()
+        .filter(|step| is_external_execution_step(step));
+    let Some(step) = external_steps.next() else {
+        return false;
+    };
+    if external_steps.next().is_some() {
+        return false;
+    }
+    if step.status != crate::executor::StepExecutionStatus::Ok || step.skill != "run_cmd" {
+        return false;
+    }
+    let Some(output) = step.output_excerpt.as_deref().map(str::trim) else {
+        return false;
+    };
+    !output.is_empty() && !output.ends_with("...(truncated)") && output == candidate_answer.trim()
+}
+
+fn is_external_execution_step(step: &crate::task_journal::TaskJournalStepTrace) -> bool {
+    !matches!(
+        step.skill.as_str(),
+        "synthesize_answer" | "respond" | "think"
+    )
+}
+
+fn existence_with_path_answer_is_grounded_in_observation(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPath {
+        return false;
+    }
+    let candidate_answer = candidate_answer.trim();
+    if candidate_answer.is_empty() {
+        return false;
+    }
+    journal.step_results.iter().any(|step| {
+        step.status == crate::executor::StepExecutionStatus::Ok
+            && step.output_excerpt.as_deref().is_some_and(|output| {
+                path_batch_facts_contain_answer_path(output, candidate_answer)
+            })
+    })
+}
+
+fn path_batch_facts_contain_answer_path(output: &str, candidate_answer: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
+        return false;
+    };
+    let has_path_batch_shape = value.get("action").and_then(|item| item.as_str())
+        == Some("path_batch_facts")
+        || value
+            .get("facts")
+            .and_then(|item| item.as_array())
+            .is_some();
+    if !has_path_batch_shape {
+        return false;
+    }
+    value
+        .get("facts")
+        .and_then(|item| item.as_array())
+        .is_some_and(|facts| {
+            facts.iter().any(|fact| {
+                fact.get("exists").and_then(|item| item.as_bool()).is_some()
+                    && path_fact_candidates(fact)
+                        .into_iter()
+                        .any(|path| candidate_answer.contains(path.as_str()))
+            })
+        })
+}
+
+fn path_fact_candidates(fact: &serde_json::Value) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut push_path = |value: Option<&serde_json::Value>| {
+        if let Some(path) = value
+            .and_then(|item| item.as_str())
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        {
+            paths.push(path.to_string());
+        }
+    };
+    push_path(fact.get("resolved_path"));
+    push_path(fact.get("path"));
+    if let Some(inner) = fact.get("fact").and_then(|item| item.as_object()) {
+        push_path(inner.get("resolved_path"));
+        push_path(inner.get("path"));
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn scalar_answer_is_grounded_in_successful_observation(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    if !matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar
+    ) {
+        return false;
+    }
+    let candidate_answer = candidate_answer.trim();
+    if candidate_answer.is_empty() || candidate_answer.lines().count() > 1 {
+        return false;
+    }
+    journal.step_results.iter().any(|step| {
+        step.status == crate::executor::StepExecutionStatus::Ok
+            && step.output_excerpt.as_deref().is_some_and(|output| {
+                observed_output_contains_scalar_answer(output, candidate_answer)
+            })
+    })
+}
+
+fn observed_output_contains_scalar_answer(output: &str, candidate_answer: &str) -> bool {
+    let output = output.trim();
+    if output == candidate_answer {
+        return true;
+    }
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
+        return json_value_contains_scalar_answer(&value, candidate_answer);
+    }
+    output
+        .lines()
+        .map(str::trim)
+        .any(|line| line == candidate_answer)
+}
+
+fn json_value_contains_scalar_answer(value: &serde_json::Value, candidate_answer: &str) -> bool {
+    match value {
+        serde_json::Value::String(value) => value.trim() == candidate_answer,
+        serde_json::Value::Number(value) => value.to_string() == candidate_answer,
+        serde_json::Value::Bool(value) => value.to_string() == candidate_answer,
+        serde_json::Value::Array(items) => items
+            .iter()
+            .any(|item| json_value_contains_scalar_answer(item, candidate_answer)),
+        serde_json::Value::Object(map) => map
+            .values()
+            .any(|item| json_value_contains_scalar_answer(item, candidate_answer)),
+        serde_json::Value::Null => false,
+    }
 }
 
 pub(crate) async fn verify_answer_observe_only(
@@ -365,10 +529,9 @@ mod tests {
 
     use super::{should_verify_answer, structurally_satisfies_answer_contract, AnswerVerifierOut};
 
-    fn route_with_mode(routed_mode: crate::RoutedMode) -> crate::RouteResult {
+    fn route_with_mode(ask_mode: crate::AskMode) -> crate::RouteResult {
         crate::RouteResult {
-            routed_mode,
-            ask_mode: crate::AskMode::from_routed_mode(routed_mode),
+            ask_mode,
             resolved_intent: "test intent".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -436,14 +599,14 @@ mod tests {
 
     #[test]
     fn direct_answer_route_skips_answer_verifier() {
-        let route = route_with_mode(crate::RoutedMode::Chat);
+        let route = route_with_mode(crate::AskMode::direct_answer());
         let journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "hello");
         assert!(!should_verify_answer(&route, &journal, "hi"));
     }
 
     #[test]
     fn clarify_final_status_skips_answer_verifier() {
-        let mut route = route_with_mode(crate::RoutedMode::ChatAct);
+        let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
         route.output_contract.requires_content_evidence = true;
         let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "hello");
         journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Clarify);
@@ -465,7 +628,7 @@ mod tests {
         let file = root.join("release_checklist.md");
         std::fs::write(&file, "ok").expect("write temp file");
 
-        let mut route = route_with_mode(crate::RoutedMode::Act);
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
         route.wants_file_delivery = true;
         route.output_contract.delivery_required = true;
         route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
@@ -504,5 +667,215 @@ mod tests {
 
         let _ = std::fs::remove_file(&file);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scalar_answer_grounded_in_plain_observation_skips_llm_verifier() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-scalar", "ask", "where am I");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "run_cmd".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some("/home/guagua/rustclaw\n".to_string()),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "/home/guagua/rustclaw"
+        ));
+    }
+
+    #[test]
+    fn scalar_answer_grounded_in_json_observation_skips_llm_verifier() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-json-scalar", "ask", "count them");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "fs_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(json!({"count": 3, "items": ["a", "b", "c"]}).to_string()),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route, &journal, "3"
+        ));
+    }
+
+    #[test]
+    fn existence_with_path_answer_grounded_by_existing_path_fact_skips_llm_verifier() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-exists", "ask", "check path");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "system_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    json!({
+                        "action": "path_batch_facts",
+                        "facts": [{
+                            "exists": true,
+                            "path": "README.md",
+                            "fact": {
+                                "kind": "file",
+                                "resolved_path": "/repo/README.md"
+                            }
+                        }]
+                    })
+                    .to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "有，路径：/repo/README.md"
+        ));
+    }
+
+    #[test]
+    fn existence_with_path_answer_grounded_by_missing_path_fact_skips_llm_verifier() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-missing", "ask", "check path");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "system_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    json!({
+                        "action": "path_batch_facts",
+                        "facts": [{
+                            "exists": false,
+                            "path": "missing.txt",
+                            "error": "not found"
+                        }]
+                    })
+                    .to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "未找到 `missing.txt`，请确认路径后再继续。"
+        ));
+    }
+
+    #[test]
+    fn exact_single_run_cmd_output_skips_llm_verifier_without_scalar_contract() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-run-cmd", "ask", "run it");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "run_cmd".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some("line 1\nline 2\n".to_string()),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_2".to_string(),
+                skill: "synthesize_answer".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some("line 1\nline 2".to_string()),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "line 1\nline 2"
+        ));
+    }
+
+    #[test]
+    fn exact_run_cmd_output_skip_requires_single_external_step() {
+        let route = route_with_mode(crate::AskMode::planner_execute_plain());
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-two-commands", "ask", "run both");
+        for (idx, output) in ["first", "second"].into_iter().enumerate() {
+            journal
+                .step_results
+                .push(crate::task_journal::TaskJournalStepTrace {
+                    step_id: format!("step_{}", idx + 1),
+                    skill: "run_cmd".to_string(),
+                    status: crate::executor::StepExecutionStatus::Ok,
+                    output_excerpt: Some(output.to_string()),
+                    error_excerpt: None,
+                    started_at: 0,
+                    finished_at: 0,
+                });
+        }
+
+        assert!(!structurally_satisfies_answer_contract(
+            &route, &journal, "second"
+        ));
+    }
+
+    #[test]
+    fn free_shape_non_command_plain_observation_still_uses_llm_verifier() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-free", "ask", "summarize output");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "fs_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some("ok".to_string()),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(!structurally_satisfies_answer_contract(
+            &route, &journal, "ok"
+        ));
     }
 }

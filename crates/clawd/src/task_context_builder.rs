@@ -501,6 +501,9 @@ pub(crate) fn uses_light_execution_context_budget(
     if route_result.needs_clarify {
         return false;
     }
+    if route_needs_recent_execution_history(route_result) {
+        return false;
+    }
     let intent = route_result.resolved_intent.trim();
     let intent_surface = crate::intent::surface_signals::analyze_prompt_surface(intent);
     if route_uses_structured_chat_wrapped_light_budget(route_result, &intent_surface) {
@@ -522,6 +525,7 @@ fn route_uses_structured_listing(route_result: &RouteResult) -> bool {
         route_result.output_contract.semantic_kind,
         crate::OutputSemanticKind::FileNames
             | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::DirectoryEntryGroups
             | crate::OutputSemanticKind::FilePaths
             | crate::OutputSemanticKind::SqliteTableListing
             | crate::OutputSemanticKind::SqliteTableNamesOnly
@@ -573,9 +577,19 @@ fn should_suppress_execution_anchor_context(
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
     budget_tier: ExecutionContextBudgetTier,
 ) -> bool {
+    if route_needs_recent_execution_history(route_result) {
+        return false;
+    }
     session_snapshot_provides_execution_state_anchor(session_snapshot)
         && (matches!(budget_tier, ExecutionContextBudgetTier::Light)
             || should_prefer_light_execution_memory_from_session(route_result, session_snapshot))
+}
+
+fn route_needs_recent_execution_history(route_result: &RouteResult) -> bool {
+    matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::QuantityComparison
+    )
 }
 
 pub(crate) fn build_route_task_context_bundle(
@@ -744,8 +758,10 @@ pub(crate) fn build_execution_task_context_bundle(
     } else {
         ExecutionContextBudgetTier::Full
     };
+    let needs_recent_execution_history = route_needs_recent_execution_history(route_result);
     let suppress_execution_text_context = matches!(budget_tier, ExecutionContextBudgetTier::Full)
-        && session_snapshot_provides_execution_state_anchor(&session_snapshot);
+        && session_snapshot_provides_execution_state_anchor(&session_snapshot)
+        && !needs_recent_execution_history;
     let memory_budget_mode = if matches!(budget_tier, ExecutionContextBudgetTier::Light)
         || should_prefer_light_execution_memory_from_session(route_result, &session_snapshot)
     {
@@ -864,12 +880,23 @@ pub(crate) fn apply_execution_context_to_prompts(
         chat_prompt_context.push_str("\n\n");
         chat_prompt_context.push_str(&execution_view.last_turn_full);
     }
-    if execution_view.recent_execution_anchor != "<none>" {
+    let prompt_execution_context = if execution_view.recent_execution_anchor != "<none>" {
+        execution_view.recent_execution_anchor.as_str()
+    } else if execution_view
+        .recent_execution_context
+        .trim_start()
+        .starts_with("###")
+    {
+        execution_view.recent_execution_context.as_str()
+    } else {
+        "<none>"
+    };
+    if prompt_execution_context != "<none>" {
         prompt_with_memory_for_execution.push_str(
             "\n\n### RECENT_EXECUTION_CONTEXT\n\
 Use this block only as supporting evidence for genuinely short follow-up requests. Reuse a previous target only when the current request or recent context already binds exactly one concrete target of the correct type. Do not let this block override a needed clarification, and do not treat an artifact-type noun alone as a concrete target.\n",
         );
-        prompt_with_memory_for_execution.push_str(&execution_view.recent_execution_anchor);
+        prompt_with_memory_for_execution.push_str(prompt_execution_context);
     }
     if let Some(image_context) = execution_view
         .image_context
@@ -891,7 +918,7 @@ mod tests {
         build_session_alias_context, classify_route_context_budget,
         needs_text_anchor_probe_for_route, observed_facts_provide_immediate_anchor,
         request_can_fill_active_clarify_target, request_qualifies_for_anchor_only_route_context,
-        session_snapshot_provides_execution_state_anchor,
+        route_needs_recent_execution_history, session_snapshot_provides_execution_state_anchor,
         should_prefer_light_execution_memory_from_session,
         should_suppress_execution_anchor_context, uses_light_execution_context_budget,
         ExecutionContextView, PlannerContextView, RouteContextBudgetTier, TaskContextBundle,
@@ -1353,8 +1380,7 @@ mod tests {
     #[test]
     fn session_anchored_chat_wrapped_content_reads_prefer_light_memory_budget() {
         let mut route = base_route_result();
-        route.routed_mode = crate::RoutedMode::ChatAct;
-        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         route.output_contract.requires_content_evidence = true;
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: None,
@@ -1373,8 +1399,7 @@ mod tests {
     #[test]
     fn open_or_unanchored_routes_do_not_force_light_memory_budget() {
         let mut route = base_route_result();
-        route.routed_mode = crate::RoutedMode::ChatAct;
-        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         route.output_contract.requires_content_evidence = true;
         let unanchored_snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: None,
@@ -1388,7 +1413,7 @@ mod tests {
         ));
 
         let mut planning_like = route.clone();
-        planning_like.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::Act);
+        planning_like.ask_mode = crate::AskMode::planner_execute_plain();
         let anchored_snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: None,
             active_followup_frame: Some(crate::followup_frame::FollowupFrame {
@@ -1407,8 +1432,7 @@ mod tests {
     #[test]
     fn session_anchored_normalizer_chat_keeps_full_memory_budget_for_recall() {
         let mut route = base_route_result();
-        route.routed_mode = crate::RoutedMode::Chat;
-        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::Chat);
+        route.ask_mode = crate::AskMode::direct_answer();
         let anchored_snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: None,
             active_followup_frame: None,
@@ -1435,8 +1459,7 @@ mod tests {
     #[test]
     fn session_anchored_clarify_delivery_act_prefers_light_memory_budget() {
         let mut route = base_route_result();
-        route.routed_mode = crate::RoutedMode::Act;
-        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::Act);
+        route.ask_mode = crate::AskMode::planner_execute_plain();
         route.output_contract.delivery_required = true;
         route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
         let anchored_snapshot = crate::conversation_state::ActiveSessionSnapshot {
@@ -1465,8 +1488,7 @@ mod tests {
     #[test]
     fn ordinary_normalizer_chat_without_state_anchor_keeps_full_memory_budget() {
         let mut route = base_route_result();
-        route.routed_mode = crate::RoutedMode::Chat;
-        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::Chat);
+        route.ask_mode = crate::AskMode::direct_answer();
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: None,
             active_followup_frame: None,
@@ -1481,8 +1503,7 @@ mod tests {
     #[test]
     fn stateful_light_routes_suppress_execution_anchor_context() {
         let mut route = base_route_result();
-        route.routed_mode = crate::RoutedMode::ChatAct;
-        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         route.output_contract.requires_content_evidence = true;
         route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
         route.output_contract.locator_hint = "README.md".to_string();
@@ -1503,10 +1524,39 @@ mod tests {
     }
 
     #[test]
+    fn quantity_comparison_keeps_recent_execution_history() {
+        let mut route = base_route_result();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint = "/tmp/repo".to_string();
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+                bound_target: Some("document".to_string()),
+                ..crate::followup_frame::FollowupFrame::default()
+            }),
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(route_needs_recent_execution_history(&route));
+        assert!(!uses_light_execution_context_budget(
+            &route,
+            &route.resolved_intent
+        ));
+        assert!(!should_suppress_execution_anchor_context(
+            &route,
+            &snapshot,
+            crate::task_context_builder::ExecutionContextBudgetTier::Full,
+        ));
+    }
+
+    #[test]
     fn unanchored_light_routes_keep_execution_anchor_context() {
         let mut route = base_route_result();
-        route.routed_mode = crate::RoutedMode::ChatAct;
-        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         route.output_contract.requires_content_evidence = true;
         route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
         route.output_contract.locator_hint = "README.md".to_string();
@@ -1525,8 +1575,7 @@ mod tests {
 
     fn base_route_result() -> crate::RouteResult {
         crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: String::new(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1642,6 +1691,50 @@ mod tests {
     }
 
     #[test]
+    fn execution_context_uses_recent_execution_context_fallback_for_planner_prompt() {
+        let bundle = TaskContextBundle {
+            raw_sources: TaskContextRawSources::default(),
+            planner_view: PlannerContextView::default(),
+            route_view: None,
+            execution_view: Some(ExecutionContextView {
+                budget_tier: crate::task_context_builder::ExecutionContextBudgetTier::Light,
+                memory_ctx: crate::memory::service::PromptMemoryContext {
+                    prompt_with_memory: String::new(),
+                    chat_prompt_context: String::new(),
+                    long_term_summary: None,
+                    preferences: Vec::new(),
+                    recalled: Vec::new(),
+                    similar_triggers: Vec::new(),
+                    relevant_facts: Vec::new(),
+                    recent_related_events: Vec::new(),
+                },
+                runtime_context: "<none>".to_string(),
+                session_alias_context: "<none>".to_string(),
+                recent_turns_full: "<none>".to_string(),
+                last_turn_full: "<none>".to_string(),
+                recent_execution_anchor: "<none>".to_string(),
+                recent_execution_context:
+                    "### RECENT_EXECUTION_ANCHOR\n- latest_request=数一下 document\n- latest_result=document: 34"
+                        .to_string(),
+                image_context: None,
+            }),
+        };
+        let mut chat_context = "### MEMORY_CONTEXT\n<none>".to_string();
+        let mut resolved = "上一个和上上个哪个更多".to_string();
+        let mut execution = resolved.clone();
+
+        apply_execution_context_to_prompts(
+            &bundle,
+            &mut chat_context,
+            &mut resolved,
+            &mut execution,
+        );
+
+        assert!(execution.contains("### RECENT_EXECUTION_CONTEXT"));
+        assert!(execution.contains("latest_result=document: 34"));
+    }
+
+    #[test]
     fn execution_context_adds_session_alias_bindings_to_planner_prompts() {
         let bundle = TaskContextBundle {
             raw_sources: TaskContextRawSources::default(),
@@ -1753,8 +1846,7 @@ mod tests {
     #[test]
     fn light_execution_budget_detects_structured_chat_wrapped_content_reads() {
         let mut read_range = base_route_result();
-        read_range.routed_mode = crate::RoutedMode::ChatAct;
-        read_range.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        read_range.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         read_range.resolved_intent = "先读一下 README.md 前 4 行".to_string();
         read_range.output_contract.response_shape = crate::OutputResponseShape::Free;
         read_range.output_contract.requires_content_evidence = true;
@@ -1766,8 +1858,7 @@ mod tests {
         ));
 
         let mut single_read = base_route_result();
-        single_read.routed_mode = crate::RoutedMode::ChatAct;
-        single_read.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        single_read.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         single_read.resolved_intent =
             "看一下 /home/guagua/rustclaw/configs/config.toml，然后一句话说它主要配了什么"
                 .to_string();
@@ -1785,8 +1876,7 @@ mod tests {
     #[test]
     fn light_execution_budget_skips_workspace_project_summary() {
         let mut route = base_route_result();
-        route.routed_mode = crate::RoutedMode::ChatAct;
-        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         route.resolved_intent =
             "Summarize the current repository, focusing only on the UI components".to_string();
         route.output_contract.response_shape = crate::OutputResponseShape::Free;
@@ -1815,17 +1905,16 @@ mod tests {
 
     #[test]
     fn light_execution_budget_skips_non_structured_chat_wrapped_or_clarify_routes() {
-        let mut chat_act = base_route_result();
-        chat_act.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
-        chat_act.resolved_intent = "比较这两个文件大小，然后一句话总结".to_string();
+        let mut chat_wrapped_execution = base_route_result();
+        chat_wrapped_execution.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        chat_wrapped_execution.resolved_intent = "比较这两个文件大小，然后一句话总结".to_string();
         assert!(!uses_light_execution_context_budget(
-            &chat_act,
-            &chat_act.resolved_intent
+            &chat_wrapped_execution,
+            &chat_wrapped_execution.resolved_intent
         ));
 
         let mut delivery = base_route_result();
-        delivery.routed_mode = crate::RoutedMode::ChatAct;
-        delivery.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        delivery.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         delivery.resolved_intent = "把 README.md 发给我".to_string();
         delivery.output_contract.requires_content_evidence = true;
         delivery.output_contract.delivery_required = true;
@@ -1846,8 +1935,7 @@ mod tests {
     #[test]
     fn light_execution_budget_skips_unscoped_current_workspace_drafting_evidence() {
         let mut route = base_route_result();
-        route.routed_mode = crate::RoutedMode::ChatAct;
-        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         route.resolved_intent =
             "Write a short setup note grounded in the current workspace docs".to_string();
         route.output_contract.requires_content_evidence = true;
@@ -1864,8 +1952,7 @@ mod tests {
     #[test]
     fn light_execution_budget_skips_generic_current_workspace_hint_drafting_evidence() {
         let mut route = base_route_result();
-        route.routed_mode = crate::RoutedMode::ChatAct;
-        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct);
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         route.resolved_intent =
             "Write a short RustClaw setup note for the current workspace project".to_string();
         route.output_contract.response_shape = crate::OutputResponseShape::Free;

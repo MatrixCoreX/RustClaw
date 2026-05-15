@@ -8,7 +8,7 @@ pub(crate) fn has_concrete_locator_hint(text: &str) -> bool {
         return true;
     }
     text.split_whitespace()
-        .map(trim_locator_token)
+        .flat_map(locator_token_segments)
         .any(|token| {
             looks_like_filename_locator(&token) || looks_like_bare_filename_stem_locator(&token)
         })
@@ -454,6 +454,14 @@ fn trim_locator_token(token: &str) -> String {
             )
         })
         .to_string()
+}
+
+fn locator_token_segments(token: &str) -> Vec<String> {
+    token
+        .split(|ch: char| matches!(ch, ',' | '，' | '。' | ';' | '；' | '、' | ':' | '：'))
+        .map(trim_locator_token)
+        .filter(|part| !part.is_empty())
+        .collect()
 }
 
 fn has_explicit_path_or_url_locator(text: &str) -> bool {
@@ -1058,11 +1066,16 @@ fn try_resolve_implicit_direct_child_locator(
 fn extract_filename_like_tokens(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for raw in text.split_whitespace() {
-        let token = trim_locator_token(raw);
-        if (looks_like_filename_locator(&token) || looks_like_bare_filename_stem_locator(&token))
-            && !out.iter().any(|v| v == &token)
-        {
-            out.push(token);
+        for token in locator_token_segments(raw) {
+            if (looks_like_filename_locator(&token)
+                || looks_like_bare_filename_stem_locator(&token))
+                && !out.iter().any(|v| v == &token)
+            {
+                out.push(token);
+            }
+            if out.len() >= 8 {
+                break;
+            }
         }
         if out.len() >= 8 {
             break;
@@ -1167,6 +1180,35 @@ mod tests {
         assert!(tokens.iter().any(|v| v == "Config.toml"));
         assert!(tokens.iter().any(|v| v == "README.md"));
         assert!(tokens.iter().any(|v| v == "README"));
+    }
+
+    #[test]
+    fn filename_like_tokens_split_adjacent_cjk_punctuation() {
+        let tokens = super::extract_filename_like_tokens(
+            "查一下 definitely_missing_rustclaw_case_file_98765.txt，找不到就告诉我",
+        );
+        assert!(tokens
+            .iter()
+            .any(|v| v == "definitely_missing_rustclaw_case_file_98765.txt"));
+    }
+
+    #[test]
+    fn implicit_locator_does_not_anchor_on_keyword_inside_missing_filename() {
+        let workspace = TempDirGuard::new("missing_filename_keyword");
+        fs::write(workspace.path.join("rustclaw"), "binary placeholder").expect("write rustclaw");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = workspace.path.clone();
+        state.skill_rt.default_locator_search_dir = workspace.path.clone();
+
+        let out = super::try_resolve_implicit_locator_path(
+            &state,
+            "查一下当前目录有没有 definitely_missing_rustclaw_case_file_98765.txt，找不到就直接告诉我。",
+            "",
+            crate::OutputLocatorKind::Path,
+            None,
+        );
+
+        assert!(out.is_none(), "unexpected locator resolution: {out:?}");
     }
 
     #[test]

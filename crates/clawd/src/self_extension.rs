@@ -1026,10 +1026,11 @@ pub(crate) async fn maybe_handle_ask_self_extension(
         agent_run_context.and_then(|ctx| ctx.execution_recipe_hint),
     ) {
         tracing::info!(
-            "{} self_extension bypassed for active execution recipe task_id={} route_mode={:?}",
+            "{} self_extension bypassed for active execution recipe task_id={} ask_mode={} derived_route_label={}",
             crate::highlight_tag("self_extension"),
             task.task_id,
-            route.routed_mode
+            route.ask_mode.as_str(),
+            route.derived_route_label()
         );
         return Ok(None);
     }
@@ -1092,8 +1093,7 @@ mod tests {
     #[test]
     fn self_extension_gating_requires_enabled_runtime_and_non_none_mode() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Chat,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            ask_mode: crate::AskMode::direct_answer(),
             resolved_intent: "do it with a temporary script".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1124,8 +1124,7 @@ mod tests {
     #[test]
     fn capability_gap_trigger_requires_auto_flag() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Chat,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            ask_mode: crate::AskMode::direct_answer(),
             resolved_intent: "handle this by extending the system".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1470,8 +1469,7 @@ mod tests {
     #[test]
     fn effective_request_prefers_resolved_intent() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Chat,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            ask_mode: crate::AskMode::direct_answer(),
             resolved_intent: "Use a temporary script instead of built-in skills.".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),

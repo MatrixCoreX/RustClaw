@@ -37,7 +37,3 @@ pub(crate) use task::{
 // === LOOP REPLY 层（已物理位于 finalize/loop_reply.rs，Stage 2.3）===
 // 从 LoopState 选择 delivery + 构建 journal
 pub(crate) use loop_reply::finalize_loop_reply;
-
-// === OBSERVED FALLBACK 层（物理仍在 agent_engine/observed_output.rs，Stage 2.4 后搬移）===
-// observed-tier LLM 兜底（finalize 唯一允许的 semantic_judge LLM 入口之一）
-pub(crate) use crate::agent_engine::synthesize_answer_from_observed_output;

@@ -1,0 +1,60 @@
+{
+  "ok": true,
+  "data": {
+    "task_id": "fixture-verifier-issue-missing-arg",
+    "status": "succeeded",
+    "result_json": {
+      "text": "请补充要删除的文件路径。",
+      "messages": [
+        "请补充要删除的文件路径。"
+      ],
+      "task_journal": {
+        "summary": {
+          "input_text": "删除那个文件",
+          "final_answer": "请补充要删除的文件路径。",
+          "final_status": "clarify",
+          "route_result": {
+            "first_layer_decision": "planner_execute",
+            "routed_mode": "Act",
+            "route_gate_kind": "execute"
+          },
+          "task_metrics": {
+            "llm_calls_per_task": 2,
+            "llm_elapsed_ms_per_task": 100,
+            "prompt_truncation_count": 0
+          }
+        },
+        "trace": {
+          "rounds": [
+            {
+              "round_no": 1,
+              "plan_result": {
+                "steps": [
+                  {
+                    "step_id": "step_1",
+                    "action_type": "call_capability",
+                    "skill": "filesystem.remove_file"
+                  }
+                ]
+              },
+              "verify_result": {
+                "approved": true,
+                "mode": "ObserveOnly",
+                "needs_confirmation": false,
+                "issues": [
+                  {
+                    "step_id": "step_1",
+                    "kind": "MissingRequiredArg",
+                    "detail": "Missing required argument: path"
+                  }
+                ]
+              }
+            }
+          ],
+          "step_results": []
+        }
+      }
+    }
+  },
+  "error": null
+}

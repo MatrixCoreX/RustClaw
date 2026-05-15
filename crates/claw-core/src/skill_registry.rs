@@ -49,6 +49,43 @@ pub enum PrimaryFallbackRole {
     Fallback,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlannerCapabilityEffect {
+    Observe,
+    Mutate,
+    Validate,
+    External,
+}
+
+impl PlannerCapabilityEffect {
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Observe => "observe",
+            Self::Mutate => "mutate",
+            Self::Validate => "validate",
+            Self::External => "external",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PlannerCapabilityMapping {
+    pub name: String,
+    #[serde(default)]
+    pub action: Option<String>,
+    #[serde(default)]
+    pub effect: Option<PlannerCapabilityEffect>,
+    #[serde(default)]
+    pub required: Vec<String>,
+    #[serde(default)]
+    pub optional: Vec<String>,
+    #[serde(default)]
+    pub risk_level: Option<SkillRiskLevel>,
+    #[serde(default)]
+    pub preferred: bool,
+}
+
 /// Planner-facing capability layer. This is intentionally separate from
 /// [`SkillKind`]: `kind` describes execution shape (builtin/runner/external),
 /// while `planner_kind` describes how the agent should reason about the
@@ -231,6 +268,7 @@ pub struct SkillManifest {
     pub required_bins: Vec<String>,
     pub optional_bins: Vec<String>,
     pub platform_notes: Vec<String>,
+    pub planner_capabilities: Vec<PlannerCapabilityMapping>,
     /// §P4.1 主体：这条技能对外声明需要使用的能力集（去重、按 [`Capability::as_token`]
     /// 排序）。空表示"纯计算 + 标准库"，不需要任何特权资源。
     pub capabilities: Vec<Capability>,
@@ -330,6 +368,10 @@ pub struct SkillRegistryEntry {
     /// factual; do not put routing phrase examples here.
     #[serde(default)]
     pub platform_notes: Vec<String>,
+    /// Planner-facing semantic capability mappings. This is separate from
+    /// `capabilities`, which declares runtime/security resources.
+    #[serde(default)]
+    pub planner_capabilities: Vec<PlannerCapabilityMapping>,
 
     // ---------- Phase 5: 执行配置 ----------
     /// Runner 技能：在 runner 侧的执行名；未设则用 name。
@@ -433,6 +475,37 @@ fn normalize_schema_tokens(values: &[String]) -> Vec<String> {
             continue;
         }
         out.push(token);
+    }
+    out
+}
+
+fn normalize_planner_capability_name(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .replace("::", ".")
+        .replace('-', "_")
+}
+
+fn normalize_planner_capabilities(
+    mappings: &[PlannerCapabilityMapping],
+) -> Vec<PlannerCapabilityMapping> {
+    let mut out: Vec<PlannerCapabilityMapping> = Vec::new();
+    for mapping in mappings {
+        let name = normalize_planner_capability_name(&mapping.name);
+        if name.is_empty() || out.iter().any(|existing| existing.name == name) {
+            continue;
+        }
+        out.push(PlannerCapabilityMapping {
+            name,
+            action: trim_optional_string(mapping.action.as_deref())
+                .map(|value| normalize_schema_token(&value)),
+            effect: mapping.effect,
+            required: normalize_schema_tokens(&mapping.required),
+            optional: normalize_schema_tokens(&mapping.optional),
+            risk_level: mapping.risk_level,
+            preferred: mapping.preferred,
+        });
     }
     out
 }
@@ -612,6 +685,8 @@ impl SkillsRegistry {
             entry.required_bins = normalize_metadata_tokens(&entry.required_bins);
             entry.optional_bins = normalize_metadata_tokens(&entry.optional_bins);
             entry.platform_notes = normalize_metadata_lines(&entry.platform_notes);
+            entry.planner_capabilities =
+                normalize_planner_capabilities(&entry.planner_capabilities);
             // §P4.1 主体：把 capabilities_raw 翻译成强类型，未知 token 直接报错。
             // 排序 + dedup 让"声明顺序"不影响等价性，并避免重复声明在策略层
             // 引出二义性。
@@ -848,12 +923,20 @@ impl SkillsRegistry {
             required_bins: entry.required_bins.clone(),
             optional_bins: entry.optional_bins.clone(),
             platform_notes: entry.platform_notes.clone(),
+            planner_capabilities: entry.planner_capabilities.clone(),
             capabilities: entry.resolved_capabilities.clone(),
         })
     }
 
     pub fn planner_kind(&self, canonical_name: &str) -> Option<PlannerCapabilityKind> {
         self.get(canonical_name).map(resolved_planner_kind)
+    }
+
+    pub fn planner_capabilities(&self, canonical_name: &str) -> &[PlannerCapabilityMapping] {
+        match self.get(canonical_name) {
+            Some(entry) => entry.planner_capabilities.as_slice(),
+            None => &[],
+        }
     }
 
     /// §P4.1 主体：取该技能的强类型能力声明（已去重 + 排序）。
@@ -1321,6 +1404,10 @@ capabilities = ["llm", "net", "fs.write", "llm", "secrets.image_generation_minim
 	required_bins = ["sqlite3", "SQLite3"]
 	optional_bins = ["file", "FILE"]
 	platform_notes = ["SQLite file access is pure Rust in the runner.", "SQLite file access is pure Rust in the runner.", ""]
+	planner_capabilities = [
+	  { name = "Database::List-Tables", action = "List-Tables", effect = "observe", required = ["DB-Path"], optional = ["Limit"], preferred = true, risk_level = "low" },
+	  { name = "database::list-tables", action = "duplicate-ignored" }
+	]
 	"#;
         let path = std::env::temp_dir().join("test_registry_planner_metadata.toml");
         std::fs::write(&path, toml).unwrap();
@@ -1371,10 +1458,23 @@ capabilities = ["llm", "net", "fs.write", "llm", "secrets.image_generation_minim
             manifest.platform_notes,
             vec!["SQLite file access is pure Rust in the runner.".to_string()]
         );
+        assert_eq!(manifest.planner_capabilities.len(), 1);
+        let capability = &manifest.planner_capabilities[0];
+        assert_eq!(capability.name, "database.list_tables");
+        assert_eq!(capability.action.as_deref(), Some("list_tables"));
+        assert_eq!(capability.effect, Some(PlannerCapabilityEffect::Observe));
+        assert_eq!(capability.required, vec!["db_path".to_string()]);
+        assert_eq!(capability.optional, vec!["limit".to_string()]);
+        assert_eq!(capability.risk_level, Some(SkillRiskLevel::Low));
+        assert!(capability.preferred);
         let entry = reg.get("db_basic").unwrap();
         assert_eq!(entry.semantic_tags, manifest.semantic_tags);
         assert_eq!(entry.validation_actions, manifest.validation_actions);
         assert_eq!(entry.supported_os, manifest.supported_os);
+        assert_eq!(
+            reg.planner_capabilities("db_basic"),
+            manifest.planner_capabilities.as_slice()
+        );
         let _ = std::fs::remove_file(path);
     }
 

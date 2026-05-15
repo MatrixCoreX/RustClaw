@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::Path;
 
-use crate::{AppState, AskReply, ClaimedTask, RoutedMode};
+use crate::{ActFinalizeStyle, AppState, AskReply, ClaimedTask};
 
 const DIRECT_ANSWER_GATE_PROMPT_LOGICAL_PATH: &str = "prompts/direct_answer_gate_prompt.md";
 
@@ -157,7 +157,6 @@ fn normalizer_chat_direct_answer_candidate(
     state: &AppState,
     resolved_prompt: &str,
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
-    allow_budget_fallback: bool,
 ) -> Option<String> {
     let route = agent_run_context?.route_result.as_ref()?;
     if route.needs_clarify || route.is_execute_gate() {
@@ -175,7 +174,7 @@ fn normalizer_chat_direct_answer_candidate(
     if normalizer_answer_candidate_matches_runtime_fact(state, &candidate) {
         return Some(candidate);
     }
-    allow_budget_fallback.then_some(candidate)
+    None
 }
 
 fn runtime_scalar_path_direct_answer_candidate(
@@ -208,8 +207,8 @@ fn runtime_scalar_path_direct_answer_candidate(
 
 fn parse_direct_answer_gate_decision(raw: &str) -> DirectAnswerGateDecision {
     match raw.trim().to_ascii_lowercase().as_str() {
-        "planner_execute" | "execute" | "planner" => DirectAnswerGateDecision::PlannerExecute,
-        "clarify" | "ask_clarify" => DirectAnswerGateDecision::Clarify,
+        "planner_execute" => DirectAnswerGateDecision::PlannerExecute,
+        "clarify" => DirectAnswerGateDecision::Clarify,
         _ => DirectAnswerGateDecision::DirectAnswer,
     }
 }
@@ -250,6 +249,7 @@ fn parse_gate_semantic_kind(raw: &str) -> crate::OutputSemanticKind {
         "hidden_entries_check" => crate::OutputSemanticKind::HiddenEntriesCheck,
         "file_names" => crate::OutputSemanticKind::FileNames,
         "directory_names" => crate::OutputSemanticKind::DirectoryNames,
+        "directory_entry_groups" => crate::OutputSemanticKind::DirectoryEntryGroups,
         "file_paths" => crate::OutputSemanticKind::FilePaths,
         "directory_purpose_summary" => crate::OutputSemanticKind::DirectoryPurposeSummary,
         "content_excerpt_summary" => crate::OutputSemanticKind::ContentExcerptSummary,
@@ -342,6 +342,163 @@ fn direct_answer_candidate_looks_like_artifact_listing(resolved_prompt: &str) ->
             .all(|entry| ordered_entry_looks_like_workspace_artifact(entry))
 }
 
+fn trim_artifact_token(token: &str) -> &str {
+    token.trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\''
+                | '`'
+                | ','
+                | '，'
+                | '。'
+                | ':'
+                | '：'
+                | ';'
+                | '；'
+                | '('
+                | ')'
+                | '（'
+                | '）'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | '《'
+                | '》'
+        )
+    })
+}
+
+fn text_mentions_artifact_locator(text: &str) -> bool {
+    crate::delivery_utils::extract_filename_candidates(text)
+        .iter()
+        .any(|candidate| ordered_entry_looks_like_workspace_artifact(candidate))
+        || text
+            .split(|ch: char| ch.is_whitespace() || matches!(ch, ',' | '，' | ';' | '；'))
+            .map(trim_artifact_token)
+            .any(ordered_entry_looks_like_workspace_artifact)
+}
+
+fn resolve_existing_recent_file_token(state: &AppState, token: &str) -> Option<String> {
+    let token = trim_artifact_token(token);
+    if token.is_empty() {
+        return None;
+    }
+    let raw_path = Path::new(token);
+    let mut candidates = Vec::new();
+    if raw_path.is_absolute() {
+        candidates.push(raw_path.to_path_buf());
+    } else {
+        candidates.push(state.skill_rt.workspace_root.join(raw_path));
+        if let Ok(cwd) = std::env::current_dir() {
+            candidates.push(cwd.join(raw_path));
+        }
+    }
+    for candidate in candidates {
+        if candidate.is_file() {
+            return Some(
+                candidate
+                    .canonicalize()
+                    .unwrap_or(candidate)
+                    .display()
+                    .to_string(),
+            );
+        }
+    }
+    None
+}
+
+fn collect_recent_execution_request_file_targets(
+    state: &AppState,
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> Vec<String> {
+    let Some(context) = agent_run_context
+        .and_then(|ctx| ctx.cross_turn_recent_execution_context.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "<none>")
+    else {
+        return Vec::new();
+    };
+    let section = context
+        .split_once("### RECENT_EXECUTION_EVENTS")
+        .map(|(_, tail)| tail)
+        .unwrap_or(context);
+    let mut targets = Vec::new();
+    for line in section.lines() {
+        let Some((_, request_tail)) = line.split_once(" request=") else {
+            continue;
+        };
+        let request = request_tail
+            .split(" result=")
+            .next()
+            .unwrap_or(request_tail)
+            .trim();
+        for token in request.split(|ch: char| {
+            ch.is_whitespace()
+                || matches!(
+                    ch,
+                    '"' | '\''
+                        | '`'
+                        | ','
+                        | '，'
+                        | '。'
+                        | ';'
+                        | '；'
+                        | '('
+                        | ')'
+                        | '（'
+                        | '）'
+                        | '['
+                        | ']'
+                        | '{'
+                        | '}'
+                        | '<'
+                        | '>'
+                        | '《'
+                        | '》'
+                )
+        }) {
+            let Some(path) = resolve_existing_recent_file_token(state, token) else {
+                continue;
+            };
+            if !targets.iter().any(|existing| existing == &path) {
+                targets.push(path);
+            }
+        }
+    }
+    targets
+}
+
+fn direct_answer_gate_should_force_recent_file_context_execution(
+    current_user_request: &str,
+    resolved_prompt: &str,
+    contract: &crate::IntentOutputContract,
+    recent_request_file_target_count: usize,
+) -> bool {
+    if output_contract_requires_planner_execution(contract) {
+        return false;
+    }
+    if recent_request_file_target_count < 2 {
+        return false;
+    }
+    let Some(candidate) = normalizer_answer_candidate_from_resolved_prompt(resolved_prompt) else {
+        return false;
+    };
+    if !text_mentions_artifact_locator(&candidate) {
+        return false;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    if surface.has_concrete_locator_hint()
+        || surface.has_structured_target_refinement()
+        || surface.has_filename_candidates()
+    {
+        return false;
+    }
+    true
+}
+
 fn promote_artifact_listing_candidate_contract(
     resolved_prompt: &str,
     contract: &mut crate::IntentOutputContract,
@@ -371,14 +528,83 @@ fn output_contract_requires_planner_execution(contract: &crate::IntentOutputCont
         || !matches!(contract.semantic_kind, crate::OutputSemanticKind::None)
 }
 
-fn planner_mode_for_output_contract(contract: &crate::IntentOutputContract) -> RoutedMode {
+fn direct_answer_gate_can_skip_for_self_contained_payload(
+    current_user_request: &str,
+    route: Option<&crate::RouteResult>,
+) -> bool {
+    let Some(route) = route else {
+        return false;
+    };
+    if normalizer_answer_candidate_from_resolved_prompt(&route.resolved_intent).is_none() {
+        return false;
+    }
+    if route.needs_clarify
+        || route.is_execute_gate()
+        || route
+            .route_confidence
+            .is_none_or(|confidence| confidence < 0.80)
+        || route.wants_file_delivery
+        || !matches!(route.schedule_kind, crate::ScheduleKind::None)
+        || output_contract_requires_planner_execution(&route.output_contract)
+        || !route.output_contract.locator_hint.trim().is_empty()
+        || !matches!(
+            route.output_contract.self_extension.mode,
+            crate::SelfExtensionMode::None
+        )
+        || !matches!(
+            route.output_contract.self_extension.trigger,
+            crate::SelfExtensionTrigger::None
+        )
+        || route.output_contract.self_extension.execute_now
+    {
+        return false;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    surface.inline_json_shape.is_some()
+        && !surface.has_explicit_path_or_url()
+        && !surface.has_filename_candidates()
+        && !surface.has_delivery_token_reference()
+}
+
+fn direct_answer_gate_promotion_needs_unbound_deictic_clarify(
+    current_user_request: &str,
+    auto_locator_path: Option<&str>,
+    has_authoritative_deictic_anchor: bool,
+    contract: &crate::IntentOutputContract,
+) -> bool {
+    if !output_contract_requires_planner_execution(contract) {
+        return false;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    if !surface.has_deictic_reference()
+        || surface.has_concrete_locator_hint()
+        || surface.has_structured_target_refinement()
+        || surface.has_delivery_token_reference()
+    {
+        return false;
+    }
+    if auto_locator_path.is_some_and(|path| !path.trim().is_empty()) {
+        return false;
+    }
+    if has_authoritative_deictic_anchor {
+        return false;
+    }
+    if contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace {
+        return false;
+    }
+    true
+}
+
+fn planner_finalize_style_for_output_contract(
+    contract: &crate::IntentOutputContract,
+) -> ActFinalizeStyle {
     if matches!(
         contract.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
     ) {
-        RoutedMode::Act
+        ActFinalizeStyle::Plain
     } else {
-        RoutedMode::ChatAct
+        ActFinalizeStyle::ChatWrapped
     }
 }
 
@@ -392,9 +618,9 @@ fn promote_direct_answer_gate_to_planner(
         return DirectAnswerPreflight::DirectAnswer;
     };
     contract.requires_content_evidence = true;
-    let mode = planner_mode_for_output_contract(&contract);
+    let finalize_style = planner_finalize_style_for_output_contract(&contract);
     route.output_contract = contract;
-    route.set_routed_mode(mode);
+    route.set_planner_execute_finalize(finalize_style);
     route.needs_clarify = false;
     route.clarify_question.clear();
     if !gate.resolved_user_intent.trim().is_empty() {
@@ -444,16 +670,22 @@ fn append_route_reason(route: &mut crate::RouteResult, addition: &str) {
 }
 
 fn apply_direct_answer_gate_outcome(
+    state: &AppState,
     ctx: &mut crate::agent_engine::AgentRunContext,
+    current_user_request: &str,
     gate: DirectAnswerGateOut,
 ) -> DirectAnswerPreflight {
     let decision = parse_direct_answer_gate_decision(&gate.decision);
     if gate.confidence < 0.60 {
         return DirectAnswerPreflight::DirectAnswer;
     }
+    let recent_request_file_target_count =
+        collect_recent_execution_request_file_targets(state, Some(ctx)).len();
     let Some(route) = ctx.route_result.as_mut() else {
         return DirectAnswerPreflight::DirectAnswer;
     };
+    let auto_locator_path = ctx.auto_locator_path.as_deref();
+    let has_authoritative_deictic_anchor = ctx.has_authoritative_deictic_anchor;
     match decision {
         DirectAnswerGateDecision::DirectAnswer => {
             let fallback_contract = route.output_contract.clone();
@@ -464,8 +696,34 @@ fn apply_direct_answer_gate_outcome(
             );
             let promoted_artifact_listing =
                 promote_artifact_listing_candidate_contract(&resolved_prompt, &mut contract);
+            let promoted_recent_file_context =
+                direct_answer_gate_should_force_recent_file_context_execution(
+                    current_user_request,
+                    &resolved_prompt,
+                    &contract,
+                    recent_request_file_target_count,
+                );
+            if promoted_recent_file_context {
+                contract.requires_content_evidence = true;
+                if matches!(contract.locator_kind, crate::OutputLocatorKind::None) {
+                    contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+                }
+                if matches!(contract.semantic_kind, crate::OutputSemanticKind::None) {
+                    contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+                }
+            }
             if output_contract_requires_planner_execution(&contract) {
-                let reason_tag = if promoted_artifact_listing {
+                if direct_answer_gate_promotion_needs_unbound_deictic_clarify(
+                    current_user_request,
+                    auto_locator_path,
+                    has_authoritative_deictic_anchor,
+                    &contract,
+                ) {
+                    return apply_direct_answer_gate_unbound_deictic_clarify(route, &gate);
+                }
+                let reason_tag = if promoted_recent_file_context {
+                    "direct_answer_gate_recent_file_context_execute"
+                } else if promoted_artifact_listing {
                     "direct_answer_gate_artifact_listing_execute"
                 } else {
                     "direct_answer_gate_contract_execute"
@@ -496,6 +754,14 @@ fn apply_direct_answer_gate_outcome(
                 gate.output_contract.clone(),
                 &fallback_contract,
             );
+            if direct_answer_gate_promotion_needs_unbound_deictic_clarify(
+                current_user_request,
+                auto_locator_path,
+                has_authoritative_deictic_anchor,
+                &contract,
+            ) {
+                return apply_direct_answer_gate_unbound_deictic_clarify(route, &gate);
+            }
             promote_direct_answer_gate_to_planner(
                 ctx,
                 &gate,
@@ -506,10 +772,86 @@ fn apply_direct_answer_gate_outcome(
     }
 }
 
+fn apply_direct_answer_gate_unbound_deictic_clarify(
+    route: &mut crate::RouteResult,
+    gate: &DirectAnswerGateOut,
+) -> DirectAnswerPreflight {
+    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    route.needs_clarify = true;
+    route.clarify_question = if gate.clarify_question.trim().is_empty() {
+        "请提供要操作的具体文件、目录或路径。".to_string()
+    } else {
+        gate.clarify_question.trim().to_string()
+    };
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_hint.clear();
+    append_route_reason(route, "direct_answer_gate_unbound_deictic_clarify");
+    DirectAnswerPreflight::Clarify(route.clarify_question.clone())
+}
+
 fn direct_answer_gate_route_context(
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
 ) -> String {
-    chat_route_resolution_context(agent_run_context).unwrap_or_else(|| "<none>".to_string())
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return "<none>".to_string();
+    };
+    let mut lines = Vec::new();
+    let (resolved_intent, removed_answer_candidate) =
+        strip_embedded_answer_candidate_from_intent(route.resolved_intent.trim());
+    if !resolved_intent.is_empty() {
+        lines.push(format!("resolved_user_intent: {resolved_intent}"));
+    }
+    if removed_answer_candidate {
+        lines.push("normalizer_answer_candidate_present: true (not runtime evidence)".to_string());
+    }
+    let locator_hint = route.output_contract.locator_hint.trim();
+    if !locator_hint.is_empty() {
+        lines.push(format!("locator_hint: {locator_hint}"));
+    }
+    lines.push(format!(
+        "response_shape: {}",
+        route.output_contract.response_shape.as_str()
+    ));
+    lines.push(format!(
+        "semantic_kind: {}",
+        route.output_contract.semantic_kind.as_str()
+    ));
+    lines.push(format!(
+        "requires_content_evidence: {}",
+        route.output_contract.requires_content_evidence
+    ));
+    lines.push(format!(
+        "delivery_required: {}",
+        route.output_contract.delivery_required
+    ));
+    let route_reason = route.route_reason.trim();
+    if !route_reason.is_empty() {
+        lines.push(format!("prior_route_reason: {route_reason}"));
+    }
+    format!(
+        "### PRIOR_ROUTE_CONTEXT\nReview this prior route context, but do not treat it as observed evidence. The current request and runtime-evidence rules win over prior answer candidates or prior route reasons.\n{}\n",
+        lines.join("\n")
+    )
+}
+
+fn direct_answer_gate_recent_execution_context(
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> String {
+    let Some(context) = agent_run_context
+        .and_then(|ctx| ctx.cross_turn_recent_execution_context.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "<none>")
+    else {
+        return "<none>".to_string();
+    };
+    let context = crate::providers::utf8_safe_prefix(context, 6000);
+    format!(
+        "### RECENT_EXECUTION_CONTEXT\nUse this only for current-turn follow-up reference binding. Previous executed targets are authoritative for relative/ordinal file or action references. Paths mentioned inside a prior file excerpt are content, not the executed file target unless the current request explicitly asks about the excerpt content.\n{context}"
+    )
 }
 
 fn direct_answer_gate_runtime_context(state: &AppState) -> String {
@@ -545,12 +887,14 @@ async fn run_direct_answer_gate(
         }
     };
     let route_context = direct_answer_gate_route_context(agent_run_context);
+    let recent_execution_context = direct_answer_gate_recent_execution_context(agent_run_context);
     let runtime_context = direct_answer_gate_runtime_context(state);
     let prompt = crate::render_prompt_template(
         &resolved.template,
         &[
             ("__REQUEST__", user_request.trim()),
             ("__ROUTE_CONTEXT__", &route_context),
+            ("__RECENT_EXECUTION_CONTEXT__", &recent_execution_context),
             ("__RUNTIME_CONTEXT__", &runtime_context),
         ],
     );
@@ -608,6 +952,23 @@ fn ask_reply_with_chat_process(text: String, _language_hint: &str) -> AskReply {
     }
 }
 
+fn ask_reply_with_clarify_process(
+    task: &ClaimedTask,
+    user_request: &str,
+    text: String,
+    route_result: Option<&crate::RouteResult>,
+) -> AskReply {
+    let answer = text.trim().to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", user_request);
+    if let Some(route_result) = route_result {
+        journal.record_route_result(route_result);
+    }
+    journal.record_final_answer(&answer);
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Clarify);
+    AskReply::llm(answer).with_task_journal(journal)
+}
+
 fn state_patch_alias_bindings_ack(
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
     language_hint: &str,
@@ -656,6 +1017,39 @@ fn state_patch_alias_bindings_ack(
             .collect::<Vec<_>>()
             .join("\n");
         format!("已记住：\n{lines}")
+    };
+    Some(ask_reply_with_chat_process(answer, language_hint))
+}
+
+fn structural_alias_binding_ack(
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+    prompt: &str,
+    resolved_prompt_for_execution: &str,
+    language_hint: &str,
+) -> Option<AskReply> {
+    let ctx = agent_run_context?;
+    let analysis = ctx.turn_analysis.as_ref()?;
+    if analysis.turn_type != Some(crate::intent_router::TurnType::PreferenceOrMemory) {
+        return None;
+    }
+    if analysis
+        .state_patch
+        .as_ref()
+        .and_then(|patch| patch.get("alias_bindings"))
+        .is_some()
+    {
+        return None;
+    }
+    let route_result = ctx.route_result.as_ref()?;
+    let binding = crate::conversation_state::structural_alias_binding_from_prompt(
+        prompt,
+        route_result,
+        resolved_prompt_for_execution,
+    )?;
+    let answer = if language_hint == "en" {
+        format!("Remembered: `{}` -> `{}`.", binding.alias, binding.target)
+    } else {
+        format!("已记住：`{}` -> `{}`。", binding.alias, binding.target)
     };
     Some(ask_reply_with_chat_process(answer, language_hint))
 }
@@ -760,9 +1154,9 @@ pub(crate) fn build_resume_followup_discussion_prompt_from_context(
     build_resume_followup_discussion_prompt_from_parts(state, task, user_text, resume_context)
 }
 
-fn chat_act_goal_from_prompt(prompt_with_memory: &str) -> String {
+fn chat_wrapped_execution_goal_from_prompt(prompt_with_memory: &str) -> String {
     format!(
-        "{}\n\nMode hint: chat_act. Complete required actions first, then return a concise user-facing reply that confirms results naturally.",
+        "{}\n\nFinalize hint: complete required actions first, then return a concise user-facing reply that confirms results naturally.",
         prompt_with_memory
     )
 }
@@ -787,14 +1181,9 @@ fn fuzzy_locator_clarify_context(candidates: &[String]) -> Option<String> {
 fn preferred_route_clarify_question(
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
 ) -> Option<String> {
-    // Phase 0.3: 单入口复用 normalizer 的 clarify_question。
-    //
-    // 原先这里先 filter `route.needs_clarify=true`，导致 `post_route_policy`
-    // 将 routed_mode 强制覆写为 `AskClarify`（例如缺少 locator）但 normalizer
-    // 自己没把 `needs_clarify` 设为 true 的场景下，`clarify_question` 被丢弃，
-    // 后续 `generate_or_reuse_clarify_question` 会带 `AllowModel` 策略再次触发
-    // 一次 LLM 调用。只要 normalizer 已经给出 clarify_question，就直接复用，
-    // 把"这一轮澄清问题由谁出"收敛到单一入口。
+    // Reuse the normalizer's clarify_question as the single clarify entry point.
+    // Post-route policy may promote a route to first-layer Clarify after locator
+    // checks, so preserving the existing question avoids an extra LLM round.
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
     let question = route.clarify_question.trim();
     if !question.is_empty() {
@@ -892,6 +1281,19 @@ fn chat_route_resolution_context(
     ))
 }
 
+fn strip_embedded_answer_candidate_from_intent(resolved_intent: &str) -> (String, bool) {
+    let mut stripped = Vec::new();
+    let mut removed = false;
+    for line in resolved_intent.lines() {
+        if line.trim_start().starts_with("answer_candidate:") {
+            removed = true;
+            continue;
+        }
+        stripped.push(line);
+    }
+    (stripped.join("\n").trim().to_string(), removed)
+}
+
 fn chat_prompt_context_with_route_resolution(
     chat_prompt_context: &str,
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
@@ -941,6 +1343,25 @@ fn chat_user_request<'a>(resolved_prompt: &'a str, execution_user_request: &'a s
     }
 }
 
+fn direct_answer_chat_user_request(
+    semantic_request: &str,
+    original_user_request: &str,
+    direct_answer_gate_approved: bool,
+) -> String {
+    if direct_answer_gate_approved {
+        return semantic_request.to_string();
+    }
+    let (stripped, removed_answer_candidate) =
+        strip_embedded_answer_candidate_from_intent(semantic_request);
+    if removed_answer_candidate && !stripped.trim().is_empty() {
+        stripped
+    } else if removed_answer_candidate {
+        original_user_request.to_string()
+    } else {
+        semantic_request.to_string()
+    }
+}
+
 fn chat_request_for_prompt(original_user_request: &str, semantic_request: &str) -> String {
     let original = original_user_request.trim();
     let semantic = semantic_request.trim();
@@ -970,7 +1391,7 @@ async fn execute_via_planner_loop(
     agent_run_context: Option<crate::agent_engine::AgentRunContext>,
 ) -> Result<AskReply, String> {
     let planner_goal = if ask_mode.finalize_chat_wrapped() {
-        chat_act_goal_from_prompt(prompt_with_memory)
+        chat_wrapped_execution_goal_from_prompt(prompt_with_memory)
     } else {
         prompt_with_memory.to_string()
     };
@@ -996,31 +1417,27 @@ pub(crate) async fn execute_ask_routed(
     route_ask_mode: Option<crate::AskMode>,
     agent_run_context: Option<crate::agent_engine::AgentRunContext>,
 ) -> Result<AskReply, String> {
-    // Phase 2.7: legacy `route_request_mode` (second-LLM router) was removed. Callers now
-    // pass the folded route ask_mode directly; if for some reason a caller drops it, default
-    // to AskClarify rather than burning another LLM round-trip.
+    // Callers pass the first-layer AskMode directly. If it is missing, choose a
+    // conservative local fallback instead of starting another routing LLM round.
     let route_ask_mode_for_log = route_ask_mode.clone();
     let (ask_mode, override_reason) = if resume_force_chat {
-        (
-            crate::AskMode::from_routed_mode(RoutedMode::Chat),
-            Some("resume_force_chat"),
-        )
+        (crate::AskMode::direct_answer(), Some("resume_force_chat"))
     } else if let Some(mode) = route_ask_mode {
         (mode, None)
     } else if agent_mode {
         (
-            crate::AskMode::from_routed_mode(RoutedMode::AskClarify),
+            crate::AskMode::clarify(),
             Some("route_ask_mode=None and agent_mode=true"),
         )
     } else {
         (
-            crate::AskMode::from_routed_mode(RoutedMode::Chat),
+            crate::AskMode::direct_answer(),
             Some("route_ask_mode=None and agent_mode=false"),
         )
     };
-    let routed_mode = ask_mode.to_routed_mode();
+    let route_label = ask_mode.route_label();
     tracing::info!(
-        "{} worker_once: ask task_id={} first_layer_decision={} ask_mode={} routed_mode={:?} agent_mode={} override={}",
+        "{} worker_once: ask task_id={} first_layer_decision={} ask_mode={} derived_route_label={} agent_mode={} override={}",
         crate::highlight_tag("routing"),
         task.task_id,
         ask_mode.first_layer_decision().as_str(),
@@ -1028,7 +1445,7 @@ pub(crate) async fn execute_ask_routed(
             .as_ref()
             .map(crate::AskMode::as_str)
             .unwrap_or("none"),
-        routed_mode,
+        route_label,
         agent_mode,
         override_reason.unwrap_or("")
     );
@@ -1066,16 +1483,13 @@ pub(crate) async fn execute_ask_routed(
     }
     match ask_mode.first_layer_decision() {
         crate::FirstLayerDecision::DirectAnswer => {
-            let allow_candidate_budget_fallback =
-                state.task_llm_budget_exceeded(&task.task_id).is_some();
             if let Some(candidate) = normalizer_chat_direct_answer_candidate(
                 state,
                 resolved_prompt,
                 agent_run_context.as_ref(),
-                allow_candidate_budget_fallback,
             ) {
                 tracing::info!(
-                    "{} worker_once: ask normalizer_answer_candidate_budget_fallback task_id={} len={}",
+                    "{} worker_once: ask normalizer_verified_runtime_candidate task_id={} len={}",
                     crate::highlight_tag("routing"),
                     task.task_id,
                     candidate.len()
@@ -1125,66 +1539,100 @@ pub(crate) async fn execute_ask_routed(
                 );
                 return Ok(reply);
             }
-            if state.task_llm_budget_exceeded(&task.task_id).is_none() {
-                if let Some(mut gate_ctx) = agent_run_context.clone() {
-                    if let Some(gate) = run_direct_answer_gate(
+            if let Some(reply) = structural_alias_binding_ack(
+                agent_run_context.as_ref(),
+                &current_turn_user_request,
+                execution_user_request,
+                &request_language_hint,
+            ) {
+                tracing::info!(
+                    "{} worker_once: ask structural_alias_binding_ack task_id={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id
+                );
+                return Ok(reply);
+            }
+            let mut direct_answer_gate_approved = false;
+            let skip_direct_answer_gate = direct_answer_gate_can_skip_for_self_contained_payload(
+                &current_turn_user_request,
+                agent_run_context
+                    .as_ref()
+                    .and_then(|ctx| ctx.route_result.as_ref()),
+            );
+            if skip_direct_answer_gate {
+                tracing::info!(
+                    "{} worker_once: ask direct_answer_gate_skipped_self_contained_payload task_id={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id
+                );
+            } else if let Some(mut gate_ctx) = agent_run_context.clone() {
+                if let Some(gate) =
+                    run_direct_answer_gate(state, task, &current_turn_user_request, Some(&gate_ctx))
+                        .await
+                {
+                    match apply_direct_answer_gate_outcome(
                         state,
-                        task,
+                        &mut gate_ctx,
                         &current_turn_user_request,
-                        Some(&gate_ctx),
-                    )
-                    .await
-                    {
-                        match apply_direct_answer_gate_outcome(&mut gate_ctx, gate) {
-                            DirectAnswerPreflight::DirectAnswer => {}
-                            DirectAnswerPreflight::Clarify(question) => {
-                                tracing::info!(
-                                    "{} worker_once: ask direct_answer_gate_clarify task_id={}",
-                                    crate::highlight_tag("routing"),
-                                    task.task_id
-                                );
-                                return Ok(ask_reply_with_chat_process(
-                                    question,
-                                    &request_language_hint,
-                                ));
-                            }
-                            DirectAnswerPreflight::PlannerExecute(promoted_ctx) => {
-                                tracing::info!(
-                                    "{} worker_once: ask direct_answer_gate_promoted_to_planner task_id={}",
-                                    crate::highlight_tag("routing"),
-                                    task.task_id
-                                );
-                                let promoted_prompt_with_memory = promoted_ctx
-                                    .route_result
-                                    .as_ref()
-                                    .map(|route| route.resolved_intent.trim())
-                                    .filter(|intent| {
-                                        !intent.is_empty() && *intent != prompt_with_memory.trim()
-                                    })
-                                    .map(|intent| {
-                                        format!(
-                                            "{}\n\nDirect answer gate resolved execution intent:\n{}",
-                                            prompt_with_memory.trim(),
-                                            intent
-                                        )
-                                    })
-                                    .unwrap_or_else(|| prompt_with_memory.to_string());
-                                return execute_via_planner_loop(
-                                    state,
-                                    task,
-                                    &promoted_prompt_with_memory,
-                                    execution_user_request,
-                                    &crate::AskMode::from_routed_mode(RoutedMode::ChatAct),
-                                    Some(promoted_ctx),
-                                )
-                                .await;
-                            }
+                        gate,
+                    ) {
+                        DirectAnswerPreflight::DirectAnswer => {
+                            direct_answer_gate_approved = true;
+                        }
+                        DirectAnswerPreflight::Clarify(question) => {
+                            tracing::info!(
+                                "{} worker_once: ask direct_answer_gate_clarify task_id={}",
+                                crate::highlight_tag("routing"),
+                                task.task_id
+                            );
+                            return Ok(ask_reply_with_clarify_process(
+                                task,
+                                &current_turn_user_request,
+                                question,
+                                gate_ctx.route_result.as_ref(),
+                            ));
+                        }
+                        DirectAnswerPreflight::PlannerExecute(promoted_ctx) => {
+                            tracing::info!(
+                                "{} worker_once: ask direct_answer_gate_promoted_to_planner task_id={}",
+                                crate::highlight_tag("routing"),
+                                task.task_id
+                            );
+                            let promoted_prompt_with_memory = promoted_ctx
+                                .route_result
+                                .as_ref()
+                                .map(|route| route.resolved_intent.trim())
+                                .filter(|intent| {
+                                    !intent.is_empty() && *intent != prompt_with_memory.trim()
+                                })
+                                .map(|intent| {
+                                    format!(
+                                        "{}\n\nDirect answer gate resolved execution intent:\n{}",
+                                        prompt_with_memory.trim(),
+                                        intent
+                                    )
+                                })
+                                .unwrap_or_else(|| prompt_with_memory.to_string());
+                            return execute_via_planner_loop(
+                                state,
+                                task,
+                                &promoted_prompt_with_memory,
+                                execution_user_request,
+                                &crate::AskMode::planner_execute_chat_wrapped(),
+                                Some(promoted_ctx),
+                            )
+                            .await;
                         }
                     }
                 }
             }
+            let chat_user_request = direct_answer_chat_user_request(
+                chat_user_request,
+                &current_turn_user_request,
+                direct_answer_gate_approved,
+            );
             let request_for_chat_prompt =
-                chat_request_for_prompt(&current_turn_user_request, chat_user_request);
+                chat_request_for_prompt(&current_turn_user_request, &chat_user_request);
             let chat_prompt = crate::render_prompt_template(
                 &chat_prompt_template,
                 &[
@@ -1224,7 +1672,7 @@ pub(crate) async fn execute_ask_routed(
                 .as_ref()
                 .and_then(|ctx| ctx.route_result.as_ref())
                 .map(|route| route.route_reason.as_str())
-                .unwrap_or("router_selected_ask_clarify");
+                .unwrap_or("router_selected_clarify");
             let preferred_clarify = preferred_route_clarify_question(agent_run_context.as_ref());
             let structured_clarify_context =
                 route_structured_clarify_context(agent_run_context.as_ref());
@@ -1305,16 +1753,19 @@ mod tests {
     use super::{
         apply_direct_answer_gate_outcome, ask_reply_with_chat_process,
         chat_prompt_context_with_route_resolution, chat_request_for_prompt, chat_user_request,
+        direct_answer_chat_user_request, direct_answer_gate_can_skip_for_self_contained_payload,
+        direct_answer_gate_promotion_needs_unbound_deictic_clarify,
+        direct_answer_gate_recent_execution_context, direct_answer_gate_route_context,
         normalizer_chat_direct_answer_candidate, preferred_route_clarify_question,
         route_structured_clarify_context, runtime_scalar_path_direct_answer_candidate,
-        state_patch_alias_bindings_ack, task_payload_text, DirectAnswerGateContractOut,
-        DirectAnswerGateOut, DirectAnswerGateSelfExtensionOut, DirectAnswerPreflight,
+        state_patch_alias_bindings_ack, structural_alias_binding_ack, task_payload_text,
+        DirectAnswerGateContractOut, DirectAnswerGateOut, DirectAnswerGateSelfExtensionOut,
+        DirectAnswerPreflight,
     };
 
     fn chat_route_for_gate() -> crate::RouteResult {
         crate::RouteResult {
-            routed_mode: crate::RoutedMode::Chat,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            ask_mode: crate::AskMode::direct_answer(),
             resolved_intent: "帮我写一篇关于 RustClaw 的长文".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1362,6 +1813,29 @@ mod tests {
         }
     }
 
+    struct TempDirGuard {
+        path: std::path::PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(label: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "rustclaw_ask_flow_{label}_{}_{}",
+                std::process::id(),
+                std::thread::current().name().unwrap_or("test")
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
     #[test]
     fn direct_answer_gate_promotes_chat_to_planner_execute() {
         let route = chat_route_for_gate();
@@ -1371,14 +1845,19 @@ mod tests {
         };
         let gate = gate_out(
             "planner_execute",
-            gate_contract(true, "current_workspace", "workspace_project_summary"),
+            gate_contract(true, "current_workspace", "none"),
         );
+        let state = crate::AppState::test_default_with_fixture_provider();
 
-        let outcome = apply_direct_answer_gate_outcome(&mut ctx, gate);
+        let outcome =
+            apply_direct_answer_gate_outcome(&state, &mut ctx, "summarize workspace", gate);
 
         assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
         let route = ctx.route_result.expect("route");
-        assert_eq!(route.routed_mode, crate::RoutedMode::ChatAct);
+        assert_eq!(
+            route.ask_mode,
+            crate::AskMode::planner_execute_chat_wrapped()
+        );
         assert!(route.is_execute_gate());
         assert!(route.output_contract.requires_content_evidence);
         assert_eq!(
@@ -1387,7 +1866,7 @@ mod tests {
         );
         assert_eq!(
             route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::WorkspaceProjectSummary
+            crate::OutputSemanticKind::None
         );
         assert!(route.route_reason.contains("direct_answer_gate_execute"));
     }
@@ -1400,12 +1879,13 @@ mod tests {
             ..Default::default()
         };
         let gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
+        let state = crate::AppState::test_default_with_fixture_provider();
 
-        let outcome = apply_direct_answer_gate_outcome(&mut ctx, gate);
+        let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, "hello", gate);
 
         assert!(matches!(outcome, DirectAnswerPreflight::DirectAnswer));
         let route = ctx.route_result.expect("route");
-        assert_eq!(route.routed_mode, crate::RoutedMode::Chat);
+        assert_eq!(route.ask_mode, crate::AskMode::direct_answer());
         assert!(route.is_chat_gate());
         assert!(!route.output_contract.requires_content_evidence);
     }
@@ -1423,12 +1903,17 @@ mod tests {
             ..Default::default()
         };
         let gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
+        let state = crate::AppState::test_default_with_fixture_provider();
 
-        let outcome = apply_direct_answer_gate_outcome(&mut ctx, gate);
+        let outcome =
+            apply_direct_answer_gate_outcome(&state, &mut ctx, "list the selected logs", gate);
 
         assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
         let route = ctx.route_result.expect("route");
-        assert_eq!(route.routed_mode, crate::RoutedMode::ChatAct);
+        assert_eq!(
+            route.ask_mode,
+            crate::AskMode::planner_execute_chat_wrapped()
+        );
         assert!(route.is_execute_gate());
         assert!(route.output_contract.requires_content_evidence);
         assert_eq!(
@@ -1454,13 +1939,129 @@ mod tests {
             ..Default::default()
         };
         let gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
+        let state = crate::AppState::test_default_with_fixture_provider();
 
-        let outcome = apply_direct_answer_gate_outcome(&mut ctx, gate);
+        let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, "give examples", gate);
 
         assert!(matches!(outcome, DirectAnswerPreflight::DirectAnswer));
         let route = ctx.route_result.expect("route");
         assert!(route.is_chat_gate());
         assert!(!route.output_contract.requires_content_evidence);
+    }
+
+    #[test]
+    fn direct_answer_gate_can_skip_self_contained_inline_json_payload() {
+        let mut route = chat_route_for_gate();
+        route.resolved_intent =
+            "Sort inline JSON by score descending\nanswer_candidate: beta, alpha".to_string();
+        let request = r#"把这个 JSON 数组按 score 从高到低排序，只输出 name 顺序：[{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+
+        assert!(
+            direct_answer_gate_can_skip_for_self_contained_payload(request, Some(&route),),
+            "surface={surface:?}"
+        );
+    }
+
+    #[test]
+    fn direct_answer_gate_skip_rejects_locator_payload() {
+        let mut route = chat_route_for_gate();
+        route.output_contract.locator_hint = "README.md".to_string();
+
+        assert!(!direct_answer_gate_can_skip_for_self_contained_payload(
+            r#"读取 README.md 并按 [{"field":"score"}] 排序"#,
+            Some(&route),
+        ));
+    }
+
+    #[test]
+    fn direct_answer_gate_promotes_artifact_candidate_with_recent_file_targets_to_planner() {
+        let root = TempDirGuard::new("recent_file_targets");
+        let readme = root.path.join("README.md");
+        let notes = root.path.join("service_notes.md");
+        std::fs::write(&readme, "# Demo\nmentions app_config.toml\n").expect("write readme");
+        std::fs::write(&notes, "# Service\nrestart notes\n").expect("write notes");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = root.path.clone();
+
+        let mut route = chat_route_for_gate();
+        route.resolved_intent = concat!(
+            "Compare the previous file targets in one sentence\n",
+            "answer_candidate: app_config.toml is config; service_notes.md is service notes"
+        )
+        .to_string();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            cross_turn_recent_execution_context: Some(format!(
+                "### RECENT_EXECUTION_EVENTS\n\
+                 - ts=2 kind=ask request=read {} result=- `app_config.toml`: sample config\n\
+                 - ts=1 kind=ask request=read {} result=service restart notes",
+                readme.display(),
+                notes.display()
+            )),
+            ..Default::default()
+        };
+        let gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
+
+        let outcome =
+            apply_direct_answer_gate_outcome(&state, &mut ctx, "compare the recent files", gate);
+
+        assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_execute_gate());
+        assert!(route.output_contract.requires_content_evidence);
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::CurrentWorkspace
+        );
+        assert_eq!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ContentExcerptSummary
+        );
+        assert!(route
+            .route_reason
+            .contains("direct_answer_gate_recent_file_context_execute"));
+    }
+
+    #[test]
+    fn direct_answer_gate_context_marks_answer_candidate_as_unobserved() {
+        let mut route = chat_route_for_gate();
+        route.resolved_intent =
+            "get current runtime scalar\nanswer_candidate: stale_value".to_string();
+        route.route_reason = "prior normalizer said direct answer".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let context = direct_answer_gate_route_context(Some(&ctx));
+
+        assert!(context.contains("### PRIOR_ROUTE_CONTEXT"));
+        assert!(context.contains("resolved_user_intent: get current runtime scalar"));
+        assert!(context.contains("normalizer_answer_candidate_present: true"));
+        assert!(context.contains("not runtime evidence"));
+        assert!(context.contains("prior_route_reason: prior normalizer said direct answer"));
+        assert!(!context.contains("stale_value"));
+        assert!(!context.contains("answer_candidate: stale_value"));
+    }
+
+    #[test]
+    fn direct_answer_gate_recent_execution_context_exposes_targets_not_excerpt_paths() {
+        let ctx = crate::agent_engine::AgentRunContext {
+            cross_turn_recent_execution_context: Some(
+                "### RECENT_EXECUTION_EVENTS\n- request=read /tmp/README.md result=- `/tmp/config.toml`: sample config"
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
+
+        let context = direct_answer_gate_recent_execution_context(Some(&ctx));
+
+        assert!(context.contains("### RECENT_EXECUTION_CONTEXT"));
+        assert!(context.contains("Previous executed targets are authoritative"));
+        assert!(context.contains("Paths mentioned inside a prior file excerpt are content"));
+        assert!(context.contains("/tmp/README.md"));
+        assert!(context.contains("/tmp/config.toml"));
     }
 
     #[test]
@@ -1473,12 +2074,16 @@ mod tests {
         let mut contract = gate_contract(true, "path", "content_excerpt_summary");
         contract.locator_hint = "/tmp/clawd.log".to_string();
         let gate = gate_out("direct_answer", contract);
+        let state = crate::AppState::test_default_with_fixture_provider();
 
-        let outcome = apply_direct_answer_gate_outcome(&mut ctx, gate);
+        let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, "summarize log", gate);
 
         assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
         let route = ctx.route_result.expect("route");
-        assert_eq!(route.routed_mode, crate::RoutedMode::ChatAct);
+        assert_eq!(
+            route.ask_mode,
+            crate::AskMode::planner_execute_chat_wrapped()
+        );
         assert!(route.is_execute_gate());
         assert_eq!(
             route.output_contract.locator_kind,
@@ -1491,6 +2096,157 @@ mod tests {
     }
 
     #[test]
+    fn direct_answer_gate_clarifies_unbound_deictic_observation_instead_of_guessing_locator() {
+        let mut route = chat_route_for_gate();
+        route.resolved_intent =
+            "获取指定文件中 name 字段的值\nanswer_candidate: rustclaw".to_string();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut contract = gate_contract(true, "path", "structured_keys");
+        contract.locator_hint = "Cargo.toml".to_string();
+        let gate = gate_out("planner_execute", contract);
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        let outcome = apply_direct_answer_gate_outcome(
+            &state,
+            &mut ctx,
+            "读一下那个文件里的名字字段，只输出值",
+            gate,
+        );
+
+        assert!(matches!(outcome, DirectAnswerPreflight::Clarify(_)));
+        let route = ctx.route_result.expect("route");
+        assert_eq!(route.ask_mode, crate::AskMode::clarify());
+        assert!(route.needs_clarify);
+        assert!(route
+            .route_reason
+            .contains("direct_answer_gate_unbound_deictic_clarify"));
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        );
+        assert!(route.output_contract.locator_hint.is_empty());
+    }
+
+    #[test]
+    fn direct_answer_gate_allows_deictic_observation_with_structured_auto_locator() {
+        let route = chat_route_for_gate();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            auto_locator_path: Some("/tmp/bound/package.json".to_string()),
+            ..Default::default()
+        };
+        let mut contract = gate_contract(true, "path", "structured_keys");
+        contract.locator_hint = "/tmp/bound/package.json".to_string();
+        let gate = gate_out("planner_execute", contract);
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        let outcome = apply_direct_answer_gate_outcome(
+            &state,
+            &mut ctx,
+            "读一下那个文件里的名字字段，只输出值",
+            gate,
+        );
+
+        assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_execute_gate());
+        assert_eq!(
+            route.output_contract.locator_hint,
+            "/tmp/bound/package.json"
+        );
+    }
+
+    #[test]
+    fn direct_answer_gate_clarifies_deictic_observation_with_gate_locator_hint_only() {
+        let route = chat_route_for_gate();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut contract = gate_contract(true, "path", "none");
+        contract.locator_hint = "/tmp/bound/README.md".to_string();
+        let gate = gate_out("planner_execute", contract);
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        let outcome =
+            apply_direct_answer_gate_outcome(&state, &mut ctx, "把那个文件开头读 10 行", gate);
+
+        assert!(matches!(outcome, DirectAnswerPreflight::Clarify(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.needs_clarify);
+        assert!(route
+            .route_reason
+            .contains("direct_answer_gate_unbound_deictic_clarify"));
+        assert!(route.output_contract.locator_hint.is_empty());
+    }
+
+    #[test]
+    fn direct_answer_gate_allows_deictic_observation_with_authoritative_anchor() {
+        let route = chat_route_for_gate();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            has_authoritative_deictic_anchor: true,
+            ..Default::default()
+        };
+        let mut contract = gate_contract(true, "path", "none");
+        contract.locator_hint = "/tmp/bound/README.md".to_string();
+        let gate = gate_out("planner_execute", contract);
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        let outcome =
+            apply_direct_answer_gate_outcome(&state, &mut ctx, "把那个文件开头读 10 行", gate);
+
+        assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_execute_gate());
+        assert_eq!(route.output_contract.locator_hint, "/tmp/bound/README.md");
+        assert!(route.output_contract.requires_content_evidence);
+    }
+
+    #[test]
+    fn direct_answer_gate_allows_current_workspace_summary_with_deictic_surface() {
+        let route = chat_route_for_gate();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let gate = gate_out(
+            "planner_execute",
+            gate_contract(true, "current_workspace", "workspace_project_summary"),
+        );
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        let outcome = apply_direct_answer_gate_outcome(
+            &state,
+            &mut ctx,
+            "先看当前目录顶层主要文件夹，再用一句话解释这个仓库怎么分区",
+            gate,
+        );
+
+        assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_execute_gate());
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::CurrentWorkspace
+        );
+        assert!(!direct_answer_gate_promotion_needs_unbound_deictic_clarify(
+            "先看当前目录顶层主要文件夹，再用一句话解释这个仓库怎么分区",
+            None,
+            false,
+            &crate::IntentOutputContract {
+                requires_content_evidence: true,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                semantic_kind: crate::OutputSemanticKind::None,
+                ..Default::default()
+            },
+        ));
+    }
+
+    #[test]
     fn direct_answer_gate_promotes_chat_to_clarify_when_blocker_is_missing() {
         let route = chat_route_for_gate();
         let mut ctx = crate::agent_engine::AgentRunContext {
@@ -1499,14 +2255,15 @@ mod tests {
         };
         let mut gate = gate_out("clarify", gate_contract(false, "none", "none"));
         gate.clarify_question = "要创建的文件夹叫什么名字？".to_string();
+        let state = crate::AppState::test_default_with_fixture_provider();
 
-        let outcome = apply_direct_answer_gate_outcome(&mut ctx, gate);
+        let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, "create a folder", gate);
 
         assert!(
             matches!(outcome, DirectAnswerPreflight::Clarify(question) if question == "要创建的文件夹叫什么名字？")
         );
         let route = ctx.route_result.expect("route");
-        assert_eq!(route.routed_mode, crate::RoutedMode::AskClarify);
+        assert_eq!(route.ask_mode, crate::AskMode::clarify());
         assert!(route.is_clarify_gate());
         assert!(route.needs_clarify);
         assert_eq!(route.clarify_question, "要创建的文件夹叫什么名字？");
@@ -1514,10 +2271,45 @@ mod tests {
     }
 
     #[test]
+    fn direct_answer_gate_clarify_preserves_existing_file_delivery_contract() {
+        let mut route = chat_route_for_gate();
+        route.wants_file_delivery = true;
+        route.output_contract.delivery_required = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut gate = gate_out("clarify", gate_contract(false, "none", "none"));
+        gate.clarify_question = "Which file should I send?".to_string();
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, "send that file", gate);
+
+        assert!(
+            matches!(outcome, DirectAnswerPreflight::Clarify(question) if question == "Which file should I send?")
+        );
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_clarify_gate());
+        assert!(route.needs_clarify);
+        assert!(route.wants_file_delivery);
+        assert!(route.output_contract.delivery_required);
+        assert_eq!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        );
+        assert_eq!(
+            route.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::FileSingle
+        );
+    }
+
+    #[test]
     fn chat_prompt_context_appends_authoritative_route_resolution() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Chat,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            ask_mode: crate::AskMode::direct_answer(),
             resolved_intent: "上一个和上上个哪个更多，只回答目录名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1554,8 +2346,7 @@ mod tests {
     #[test]
     fn chat_prompt_context_replaces_empty_placeholder_with_route_resolution() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Chat,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            ask_mode: crate::AskMode::direct_answer(),
             resolved_intent: "client-like-continuous-20260428_144029".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1584,8 +2375,7 @@ mod tests {
     #[test]
     fn chat_prompt_context_includes_recent_execution_when_contract_requires_evidence() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Chat,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            ask_mode: crate::AskMode::direct_answer(),
             resolved_intent: "Summarize the observed README excerpt in one sentence".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1638,6 +2428,23 @@ mod tests {
         assert!(request.contains("Resolved semantic intent / answer candidate:"));
         assert!(request.contains("client-like-continuous-20260428_144029"));
         assert!(request.contains("output only the resolved value"));
+    }
+
+    #[test]
+    fn direct_answer_chat_user_request_strips_unapproved_answer_candidate() {
+        let unapproved = direct_answer_chat_user_request(
+            "get current hostname\nanswer_candidate: stale-user",
+            "只输出当前机器 hostname，不要解释",
+            false,
+        );
+        assert_eq!(unapproved, "get current hostname");
+
+        let approved = direct_answer_chat_user_request(
+            "recall stored id\nanswer_candidate: client-like-continuous-20260428_144029",
+            "刚才我让你记住的测试编号是什么？只回答编号。",
+            true,
+        );
+        assert!(approved.contains("answer_candidate: client-like-continuous-20260428_144029"));
     }
 
     #[test]
@@ -1701,6 +2508,35 @@ mod tests {
     }
 
     #[test]
+    fn structural_alias_ack_uses_quote_and_single_locator_without_gate_llm() {
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(chat_route_for_gate()),
+            turn_analysis: Some(crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
+                should_interrupt_active_run: false,
+                state_patch: None,
+                attachment_processing_required: false,
+            }),
+            ..Default::default()
+        };
+
+        let reply = structural_alias_binding_ack(
+            Some(&ctx),
+            "再记一下“乙”指 /tmp/device/docs/service_notes.md",
+            "record alias to /tmp/device/docs/service_notes.md",
+            "zh-CN",
+        )
+        .unwrap();
+
+        assert_eq!(
+            reply.text,
+            "已记住：`乙` -> `/tmp/device/docs/service_notes.md`。"
+        );
+        assert!(reply.messages.is_empty());
+    }
+
+    #[test]
     fn alias_state_patch_ack_requires_memory_turn() {
         let ctx = crate::agent_engine::AgentRunContext {
             turn_analysis: Some(crate::intent_router::TurnAnalysis {
@@ -1750,11 +2586,10 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_chat_direct_answer_uses_candidate_only_without_evidence_contract() {
+    fn normalizer_chat_direct_answer_does_not_bypass_gate_for_unverified_candidate() {
         let state = crate::AppState::test_default_with_fixture_provider();
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Chat,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            ask_mode: crate::AskMode::direct_answer(),
             resolved_intent:
                 "写一首两句的打工人短诗\nanswer_candidate: 早出晚归血汗钱\n苦中作乐笑开颜"
                     .to_string(),
@@ -1782,10 +2617,8 @@ mod tests {
                 &state,
                 "写一首两句的打工人短诗\nanswer_candidate: 早出晚归血汗钱\n苦中作乐笑开颜",
                 Some(&ctx),
-                true,
-            )
-            .as_deref(),
-            Some("早出晚归血汗钱\n苦中作乐笑开颜")
+            ),
+            None
         );
 
         assert_eq!(
@@ -1793,7 +2626,6 @@ mod tests {
                 &state,
                 "写一首两句的打工人短诗\nanswer_candidate: 早出晚归血汗钱\n苦中作乐笑开颜",
                 Some(&ctx),
-                false,
             ),
             None
         );
@@ -1803,8 +2635,7 @@ mod tests {
     fn normalizer_chat_direct_answer_does_not_bypass_evidence_contract() {
         let state = crate::AppState::test_default_with_fixture_provider();
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Chat,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            ask_mode: crate::AskMode::direct_answer(),
             resolved_intent:
                 "检查当前目录是否有隐藏文件\nanswer_candidate: 有，例如 .git、.gitignore、.pids"
                     .to_string(),
@@ -1838,7 +2669,6 @@ mod tests {
                 &state,
                 "检查当前目录是否有隐藏文件\nanswer_candidate: 有，例如 .git、.gitignore、.pids",
                 Some(&ctx),
-                true,
             ),
             None
         );
@@ -1849,8 +2679,7 @@ mod tests {
         let state = crate::AppState::test_default_with_fixture_provider();
         let runtime_path = state.skill_rt.workspace_root.to_string_lossy().to_string();
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Chat,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Chat),
+            ask_mode: crate::AskMode::direct_answer(),
             resolved_intent: format!(
                 "User request: output absolute path of current working directory\nanswer_candidate: {runtime_path}"
             ),
@@ -1880,7 +2709,6 @@ mod tests {
                     "User request: output absolute path of current working directory\nanswer_candidate: {runtime_path}"
                 ),
                 Some(&ctx),
-                false,
             )
             .as_deref(),
             Some(runtime_path.as_str())
@@ -1892,8 +2720,7 @@ mod tests {
         let state = crate::AppState::test_default_with_fixture_provider();
         let runtime_path = state.skill_rt.workspace_root.to_string_lossy().to_string();
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "Output the current workspace path".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1931,8 +2758,7 @@ mod tests {
     fn runtime_scalar_path_direct_answer_rejects_unverified_locator() {
         let state = crate::AppState::test_default_with_fixture_provider();
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "Output the current workspace path".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1969,8 +2795,7 @@ mod tests {
     #[test]
     fn preferred_route_clarify_question_respects_explicit_route_question_before_generic_fallback() {
         let mut route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::AskClarify,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
+            ask_mode: crate::AskMode::clarify(),
             resolved_intent: "看看那个目录下面都有什么".to_string(),
             needs_clarify: true,
             clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
@@ -2016,8 +2841,7 @@ mod tests {
     #[test]
     fn fuzzy_locator_candidates_are_structured_context_not_hard_question() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::AskClarify,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
+            ask_mode: crate::AskMode::clarify(),
             resolved_intent: "读取 Cargo.toml 的 package.name，只输出值".to_string(),
             needs_clarify: true,
             clarify_question: String::new(),

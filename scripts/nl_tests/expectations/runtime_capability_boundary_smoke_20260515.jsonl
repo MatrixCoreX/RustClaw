@@ -1,0 +1,5 @@
+{"case": 1, "status": "succeeded", "first_layer": "direct_answer", "route_gate": "chat", "final_shape": "non_empty"}
+{"case": 2, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "executed_any": ["run_cmd"], "verifier_approved": true, "final_shape": "path"}
+{"case": 3, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["filesystem.list_entries", "fs_basic"], "executed_any": ["fs_basic"], "verifier_approved": true, "final_shape": "list"}
+{"case": 4, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["filesystem.read_text_range", "fs_basic"], "executed_any": ["fs_basic"], "verifier_approved": true, "final_shape": "list"}
+{"case": 5, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["filesystem.find_entries", "fs_basic"], "executed_any": ["fs_basic"], "verifier_approved": true, "final_shape": "non_empty", "final_contains": ["definitely_missing_named_file_route_cleanup_001.txt"]}

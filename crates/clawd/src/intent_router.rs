@@ -1,7 +1,7 @@
 //! Intent routing and unified normalizer for ask tasks.
 //!
 //! **Ask main path:** Only `run_intent_normalizer` is used (resolved intent, resume_behavior,
-//! schedule_kind, needs_clarify, routed_mode in one LLM call).
+//! schedule_kind, first-layer decision, needs_clarify, and output contract in one LLM call).
 //!
 //! **Fallback when normalizer LLM fails / parse fails:** do not synthesize semantic execution
 //! routes locally. The fallback stays on AskClarify so semantic routing remains owned by the
@@ -14,7 +14,8 @@ use std::path::{Component, Path, PathBuf};
 use tracing::{info, warn};
 
 use crate::{
-    llm_gateway, schedule_service, AppState, ClaimedTask, RiskCeiling, RouteResult, RoutedMode,
+    llm_gateway, schedule_service, ActFinalizeStyle, AppState, ClaimedTask, FirstLayerDecision,
+    RiskCeiling, RouteResult,
 };
 
 pub(crate) use crate::{
@@ -100,7 +101,6 @@ fn render_auth_policy_context(state: &AppState, task: &ClaimedTask) -> String {
 
 #[derive(Debug)]
 struct RouteDecision {
-    mode: RoutedMode,
     resolved_user_intent: String,
     needs_clarify: bool,
     clarify_question: String,
@@ -167,12 +167,9 @@ pub(crate) struct IntentNormalizerOutput {
     pub(crate) output_contract: IntentOutputContract,
     pub(crate) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     /// First-layer semantic decision from the normalizer.
-    pub(crate) first_layer_decision: crate::FirstLayerDecision,
-    /// Terminal mode: chat / act / ask_clarify / chat_act. Used to skip the separate router LLM.
-    /// Compatibility field: first-layer business decisions should use
-    /// `first_layer_decision`; this field only preserves execution finalization style
-    /// and legacy logging/UI compatibility.
-    pub(crate) routed_mode: RoutedMode,
+    pub(crate) first_layer_decision: FirstLayerDecision,
+    /// Execution finalization style. This is not a semantic gate.
+    pub(crate) execution_finalize_style: ActFinalizeStyle,
     pub(crate) turn_analysis: Option<TurnAnalysis>,
     pub(crate) fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
 }
@@ -222,10 +219,9 @@ pub(crate) fn route_result_from_normalizer(
 ) -> RouteResult {
     let _turn_analysis_present = normalizer_out.turn_analysis.is_some();
     RouteResult {
-        routed_mode: normalizer_out.routed_mode,
-        ask_mode: crate::AskMode::from_first_layer_decision(
+        ask_mode: crate::AskMode::from_first_layer_decision_with_finalize(
             normalizer_out.first_layer_decision,
-            normalizer_out.routed_mode,
+            normalizer_out.execution_finalize_style,
         ),
         resolved_intent: normalizer_out.resolved_user_intent.clone(),
         needs_clarify: normalizer_out.needs_clarify,
@@ -271,8 +267,6 @@ struct IntentNormalizerOut {
     #[serde(default)]
     decision: String,
     #[serde(default)]
-    mode: String,
-    #[serde(default)]
     schedule_intent: Option<crate::ScheduleIntentOutput>,
     #[serde(default)]
     output_contract: Option<IntentOutputContractOut>,
@@ -299,7 +293,7 @@ struct ContractRepairJudgeOut {
     #[serde(default)]
     confidence: f64,
     #[serde(default)]
-    mode: String,
+    decision: String,
     #[serde(default)]
     needs_clarify: bool,
     #[serde(default)]
@@ -391,7 +385,7 @@ fn parse_target_task_policy(s: &str) -> Option<TargetTaskPolicy> {
 fn infer_missing_turn_type_from_policy(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    routed_mode: RoutedMode,
+    first_layer_decision: FirstLayerDecision,
     needs_clarify: bool,
     schedule_kind: ScheduleKind,
     should_refresh_long_term_memory: bool,
@@ -400,7 +394,7 @@ fn infer_missing_turn_type_from_policy(
         || needs_clarify
         || should_refresh_long_term_memory
         || !matches!(schedule_kind, ScheduleKind::None)
-        || matches!(routed_mode, RoutedMode::AskClarify)
+        || matches!(first_layer_decision, FirstLayerDecision::Clarify)
     {
         return turn_type;
     }
@@ -415,14 +409,14 @@ fn infer_missing_turn_type_from_policy(
 fn should_detach_bare_acknowledgement_from_active_task(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    routed_mode: RoutedMode,
+    first_layer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
     should_refresh_long_term_memory: bool,
 ) -> bool {
     matches!(turn_type, Some(TurnType::PreferenceOrMemory))
         && matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
-        && matches!(routed_mode, RoutedMode::Chat)
+        && matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
         && !output_contract.requires_content_evidence
         && !output_contract.delivery_required
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
@@ -430,17 +424,17 @@ fn should_detach_bare_acknowledgement_from_active_task(
         && state_patch.is_none()
 }
 
-fn should_downgrade_orphan_output_shape_clarify_to_chat(
+fn should_downgrade_orphan_output_shape_clarify_to_direct_answer(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    routed_mode: RoutedMode,
+    first_layer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
     should_refresh_long_term_memory: bool,
     attachment_processing_required: bool,
 ) -> bool {
-    matches!(routed_mode, RoutedMode::AskClarify)
+    matches!(first_layer_decision, FirstLayerDecision::Clarify)
         && active_primary_task_prompt(session_snapshot).is_none()
         && matches!(
             turn_type,
@@ -466,7 +460,7 @@ fn should_downgrade_orphan_output_shape_clarify_to_chat(
 fn infer_missing_target_policy_from_contract(
     target_task_policy: Option<TargetTaskPolicy>,
     turn_type: Option<TurnType>,
-    routed_mode: RoutedMode,
+    first_layer_decision: FirstLayerDecision,
     needs_clarify: bool,
     schedule_kind: ScheduleKind,
     should_refresh_long_term_memory: bool,
@@ -477,7 +471,7 @@ fn infer_missing_target_policy_from_contract(
         || needs_clarify
         || should_refresh_long_term_memory
         || !matches!(schedule_kind, ScheduleKind::None)
-        || !matches!(routed_mode, RoutedMode::Chat)
+        || !matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
     {
         return target_task_policy;
     }
@@ -597,6 +591,13 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         | "folder_names"
         | "folder_names_only"
         | "folders_only" => OutputSemanticKind::DirectoryNames,
+        "directory_entry_groups"
+        | "directory_file_groups"
+        | "file_directory_groups"
+        | "entry_kind_groups"
+        | "entries_by_kind"
+        | "grouped_entries"
+        | "grouped_entry_names" => OutputSemanticKind::DirectoryEntryGroups,
         "file_paths"
         | "file_paths_only"
         | "path_list"
@@ -928,7 +929,7 @@ fn apply_current_turn_structural_contract_repair(
     req: &str,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     workspace_root: &Path,
-    routed_mode: RoutedMode,
+    first_layer_decision: FirstLayerDecision,
     answer_candidate: &str,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
@@ -966,17 +967,30 @@ fn apply_current_turn_structural_contract_repair(
         reason = reason.or(Some("workspace_summary_root_locator_repair"));
     }
 
-    let scalar_direct_chat_answer = matches!(routed_mode, RoutedMode::Chat)
+    let scalar_direct_answer = matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
         && !answer_candidate.trim().is_empty()
         && !req_surface.has_structured_target_refinement();
 
     if matches!(output_contract.response_shape, OutputResponseShape::Scalar)
         && !output_contract.delivery_required
-        && !scalar_direct_chat_answer
+        && !scalar_direct_answer
         && (req_surface.has_explicit_path_or_url() || req_surface.has_filename_candidates())
     {
         output_contract.requires_content_evidence = true;
         reason = reason.or(Some("scalar_locator_requires_evidence"));
+    }
+
+    if matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
+        && !output_contract.requires_content_evidence
+        && !output_contract.delivery_required
+        && matches!(output_contract.locator_kind, OutputLocatorKind::None)
+        && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+        && (req_surface.has_explicit_path_or_url() || req_surface.has_filename_candidates())
+        && !req_surface.is_structural_locator_only_reply()
+    {
+        output_contract.requires_content_evidence = true;
+        reason = reason.or(Some("planner_locator_requires_evidence"));
     }
 
     if output_contract.requires_content_evidence
@@ -996,6 +1010,56 @@ fn apply_current_turn_structural_contract_repair(
     }
 
     reason
+}
+
+fn apply_self_contained_payload_direct_answer_contract_repair(
+    output_contract: &mut IntentOutputContract,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    wants_file_delivery: bool,
+    schedule_kind: ScheduleKind,
+    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+    needs_clarify: bool,
+    answer_candidate: &str,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
+) -> Option<&'static str> {
+    if needs_clarify
+        || answer_candidate.trim().is_empty()
+        || req_surface.inline_json_shape.is_none()
+        || wants_file_delivery
+        || !matches!(schedule_kind, ScheduleKind::None)
+        || execution_recipe_hint.is_some_and(|spec| {
+            !matches!(
+                spec.kind,
+                crate::execution_recipe::ExecutionRecipeKind::None
+            )
+        })
+        || req_surface.has_explicit_path_or_url()
+        || req_surface.has_filename_candidates()
+        || req_surface.has_delivery_token_reference()
+        || output_contract.delivery_required
+        || matches!(
+            output_contract.response_shape,
+            OutputResponseShape::FileToken
+        )
+        || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        || !matches!(output_contract.self_extension.mode, SelfExtensionMode::None)
+        || !matches!(
+            output_contract.self_extension.trigger,
+            SelfExtensionTrigger::None
+        )
+        || output_contract.self_extension.execute_now
+    {
+        return None;
+    }
+
+    output_contract.requires_content_evidence = false;
+    output_contract.locator_kind = OutputLocatorKind::None;
+    output_contract.locator_hint.clear();
+    output_contract.semantic_kind = OutputSemanticKind::None;
+    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *execution_finalize_style = ActFinalizeStyle::Plain;
+    Some("self_contained_payload_direct_answer_contract")
 }
 
 fn clean_answer_candidate_path_token(answer_candidate: &str) -> Option<String> {
@@ -1103,10 +1167,11 @@ fn apply_answer_candidate_path_evidence_repair(
     state_patch: Option<&Value>,
     workspace_root: &Path,
     needs_clarify: bool,
-    routed_mode: &mut RoutedMode,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if needs_clarify
-        || !matches!(routed_mode, RoutedMode::Chat)
+        || !matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
         || output_contract.requires_content_evidence
         || output_contract.delivery_required
         || output_contract.response_shape != OutputResponseShape::Scalar
@@ -1128,7 +1193,8 @@ fn apply_answer_candidate_path_evidence_repair(
     output_contract.locator_kind = OutputLocatorKind::Path;
     output_contract.locator_hint = path;
     output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
-    *routed_mode = RoutedMode::Act;
+    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *execution_finalize_style = ActFinalizeStyle::Plain;
     Some("answer_candidate_path_requires_evidence")
 }
 
@@ -1171,7 +1237,8 @@ fn apply_spurious_structured_observation_clarify_repair(
     state_patch: Option<&Value>,
     needs_clarify: &mut bool,
     clarify_question: &mut String,
-    routed_mode: &mut RoutedMode,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
     if !*needs_clarify || is_bare_path_only_input_for_clarify(req, req_surface) {
         return None;
@@ -1210,7 +1277,14 @@ fn apply_spurious_structured_observation_clarify_repair(
     }
 
     output_contract.requires_content_evidence = true;
-    if matches!(output_contract.locator_kind, OutputLocatorKind::None)
+    if output_contract.locator_hint.trim().is_empty() {
+        if let Some(filename) = req_surface.single_filename_candidate() {
+            output_contract.locator_kind = OutputLocatorKind::Filename;
+            output_contract.locator_hint = filename.to_string();
+        }
+    }
+    if output_contract.locator_hint.trim().is_empty()
+        && matches!(output_contract.locator_kind, OutputLocatorKind::None)
         && req_surface.locator_target_pair.is_some()
     {
         if let Some((left, right)) = req_surface.locator_target_pair.as_ref() {
@@ -1228,11 +1302,10 @@ fn apply_spurious_structured_observation_clarify_repair(
     }
     *needs_clarify = false;
     clarify_question.clear();
-    *routed_mode = crate::post_route_policy::enforce_content_evidence_execution_mode(
-        RoutedMode::Chat,
-        output_contract,
-        false,
-    );
+    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *execution_finalize_style =
+        crate::post_route_policy::content_evidence_execution_finalize_style(output_contract, false)
+            .unwrap_or_else(|| execution_finalize_style_for_contract(output_contract));
     Some("structured_observation_clarify_repair")
 }
 
@@ -1240,9 +1313,33 @@ fn bare_path_only_input_can_fill_active_observable_task(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
-    routed_mode: RoutedMode,
+    first_layer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
 ) -> bool {
+    let active_delivery_frame = session_snapshot
+        .and_then(|snapshot| snapshot.active_followup_frame.as_ref())
+        .is_some_and(|frame| {
+            matches!(
+                frame.op_kind,
+                crate::followup_frame::FollowupOpKind::Delivery
+            )
+        });
+    let file_delivery_contract = output_contract.delivery_required
+        || matches!(
+            output_contract.response_shape,
+            OutputResponseShape::FileToken
+        )
+        || matches!(
+            output_contract.delivery_intent,
+            OutputDeliveryIntent::FileSingle
+        );
+    if active_delivery_frame
+        && file_delivery_contract
+        && matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
+    {
+        return true;
+    }
+
     let active_followup_policy = matches!(
         turn_type,
         Some(TurnType::TaskAppend | TurnType::TaskCorrect | TurnType::TaskReplace)
@@ -1251,17 +1348,40 @@ fn bare_path_only_input_can_fill_active_observable_task(
         Some(TargetTaskPolicy::ReuseActive | TargetTaskPolicy::ReplaceActive)
     );
     let executable_observation_contract = output_contract.requires_content_evidence
-        && output_semantic_kind_requires_fresh_evidence(output_contract.semantic_kind);
+        && (output_semantic_kind_requires_fresh_evidence(output_contract.semantic_kind)
+            || matches!(
+                output_contract.response_shape,
+                OutputResponseShape::Scalar
+                    | OutputResponseShape::Strict
+                    | OutputResponseShape::FileToken
+            )
+            || matches!(
+                output_contract.locator_kind,
+                OutputLocatorKind::Path
+                    | OutputLocatorKind::Filename
+                    | OutputLocatorKind::Url
+                    | OutputLocatorKind::CurrentWorkspace
+            )
+            || !output_contract.locator_hint.trim().is_empty());
     let active_replacement_locator_policy = matches!(turn_type, Some(TurnType::TaskRequest))
         && matches!(target_task_policy, Some(TargetTaskPolicy::ReplaceActive))
+        && executable_observation_contract;
+    let active_clarify_locator_policy = active_clarify_locator_task_prompt(session_snapshot)
+        .is_some()
         && executable_observation_contract;
     let active_implicit_locator_policy =
         turn_type.is_none() && target_task_policy.is_none() && executable_observation_contract;
 
-    if active_primary_task_prompt(session_snapshot).is_none()
-        || !matches!(routed_mode, RoutedMode::Act | RoutedMode::ChatAct)
+    let decision_can_fill_active_task =
+        matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
+            || (matches!(first_layer_decision, FirstLayerDecision::Clarify)
+                && executable_observation_contract);
+
+    if active_observable_task_prompt(session_snapshot).is_none()
+        || !decision_can_fill_active_task
         || !(active_followup_policy
             || active_replacement_locator_policy
+            || active_clarify_locator_policy
             || active_implicit_locator_policy)
     {
         return false;
@@ -1459,7 +1579,7 @@ fn resolve_current_turn_anchor_path(state: &AppState, req: &str) -> Option<Strin
 }
 
 fn current_turn_anchor_drift_repair_allowed(
-    routed_mode: RoutedMode,
+    first_layer_decision: FirstLayerDecision,
     needs_clarify: bool,
     output_contract: &IntentOutputContract,
     wants_file_delivery: bool,
@@ -1476,7 +1596,7 @@ fn current_turn_anchor_drift_repair_allowed(
             return false;
         }
     }
-    matches!(routed_mode, RoutedMode::Act | RoutedMode::ChatAct)
+    matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
         || route_has_structured_execution_signal(
             output_contract,
             wants_file_delivery,
@@ -1485,18 +1605,19 @@ fn current_turn_anchor_drift_repair_allowed(
         )
 }
 
-fn downgrade_executionless_route_to_chat(
-    routed_mode: &mut RoutedMode,
+fn downgrade_executionless_route_to_direct_answer(
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
     needs_clarify: bool,
     output_contract: &IntentOutputContract,
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
     execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
 ) -> Option<&'static str> {
-    if needs_clarify || !matches!(routed_mode, RoutedMode::Act | RoutedMode::ChatAct) {
+    if needs_clarify || !matches!(first_layer_decision, FirstLayerDecision::PlannerExecute) {
         return None;
     }
-    if matches!(routed_mode, RoutedMode::Act) {
+    if !matches!(execution_finalize_style, ActFinalizeStyle::ChatWrapped) {
         return None;
     }
     if route_has_structured_execution_signal(
@@ -1507,8 +1628,9 @@ fn downgrade_executionless_route_to_chat(
     ) {
         return None;
     }
-    *routed_mode = RoutedMode::Chat;
-    Some("executionless_route_downgraded_to_chat")
+    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *execution_finalize_style = ActFinalizeStyle::Plain;
+    Some("executionless_route_downgraded_to_direct_answer")
 }
 
 fn route_has_structured_execution_signal(
@@ -1551,6 +1673,7 @@ fn output_semantic_kind_requires_fresh_evidence(kind: OutputSemanticKind) -> boo
             | OutputSemanticKind::HiddenEntriesCheck
             | OutputSemanticKind::FileNames
             | OutputSemanticKind::DirectoryNames
+            | OutputSemanticKind::DirectoryEntryGroups
             | OutputSemanticKind::FilePaths
             | OutputSemanticKind::DirectoryPurposeSummary
             | OutputSemanticKind::ContentExcerptSummary
@@ -1616,6 +1739,34 @@ fn active_primary_task_prompt<'a>(
         .filter(|value| !value.is_empty())
 }
 
+fn active_clarify_locator_task_prompt<'a>(
+    session_snapshot: Option<&'a crate::conversation_state::ActiveSessionSnapshot>,
+) -> Option<&'a str> {
+    session_snapshot
+        .and_then(|snapshot| snapshot.active_clarify_state.as_ref())
+        .filter(|state| {
+            matches!(
+                state.missing_slot,
+                crate::clarify_state::ClarifyMissingSlot::Locator
+            )
+        })
+        .filter(|state| {
+            state.delivery_required
+                || state.output_shape.is_some()
+                || state.semantic_kind.is_some()
+                || !state.candidate_targets.is_empty()
+        })
+        .map(|state| state.source_request.trim())
+        .filter(|value| !value.is_empty())
+}
+
+fn active_observable_task_prompt<'a>(
+    session_snapshot: Option<&'a crate::conversation_state::ActiveSessionSnapshot>,
+) -> Option<&'a str> {
+    active_primary_task_prompt(session_snapshot)
+        .or_else(|| active_clarify_locator_task_prompt(session_snapshot))
+}
+
 fn prompt_has_concrete_fileish_cue(
     surface: &crate::intent::surface_signals::PromptSurfaceSignals,
 ) -> bool {
@@ -1672,12 +1823,12 @@ fn should_resolve_task_scope_update_clarify_with_active_task(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    routed_mode: RoutedMode,
+    first_layer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
-        || !matches!(routed_mode, RoutedMode::AskClarify)
+        || !matches!(first_layer_decision, FirstLayerDecision::Clarify)
         || active_primary_task_prompt(session_snapshot).is_none()
         || !matches!(turn_type, Some(TurnType::TaskScopeUpdate))
         || !matches!(target_task_policy, Some(TargetTaskPolicy::ReuseActive))
@@ -1697,12 +1848,12 @@ fn should_resolve_task_append_clarify_with_active_task(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    routed_mode: RoutedMode,
+    first_layer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
-        || !matches!(routed_mode, RoutedMode::AskClarify)
+        || !matches!(first_layer_decision, FirstLayerDecision::Clarify)
         || active_primary_task_prompt(session_snapshot).is_none()
         || !matches!(
             turn_type,
@@ -1725,12 +1876,12 @@ fn should_resolve_task_replace_clarify_with_active_task(
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    routed_mode: RoutedMode,
+    first_layer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
-        || !matches!(routed_mode, RoutedMode::AskClarify)
+        || !matches!(first_layer_decision, FirstLayerDecision::Clarify)
         || active_primary_task_prompt(session_snapshot).is_none()
         || !matches!(turn_type, Some(TurnType::TaskReplace))
         || !matches!(target_task_policy, Some(TargetTaskPolicy::ReplaceActive))
@@ -1744,18 +1895,18 @@ fn should_resolve_task_replace_clarify_with_active_task(
     active_task_turn_can_reuse_semantic_patch(&surface, state_patch)
 }
 
-fn should_route_active_task_mutation_to_chat(
+fn should_route_active_task_mutation_to_direct_answer(
     prompt: &str,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
     target_task_policy: Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    routed_mode: RoutedMode,
+    first_layer_decision: FirstLayerDecision,
     output_contract: &IntentOutputContract,
     state_patch: Option<&Value>,
 ) -> bool {
     if attachment_processing_required
-        || !matches!(routed_mode, RoutedMode::Act | RoutedMode::ChatAct)
+        || !matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
         || active_primary_task_prompt(session_snapshot).is_none()
         || !output_contract_allows_chat_only_task_mutation(output_contract)
     {
@@ -1794,7 +1945,8 @@ fn apply_active_task_scope_refinement_repair(
     turn_type: &mut Option<TurnType>,
     target_task_policy: &mut Option<TargetTaskPolicy>,
     attachment_processing_required: bool,
-    routed_mode: &mut RoutedMode,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
     needs_clarify: &mut bool,
     schedule_kind: ScheduleKind,
     should_refresh_long_term_memory: bool,
@@ -1832,8 +1984,8 @@ fn apply_active_task_scope_refinement_repair(
     }
 
     let model_lifted_prompt_into_execution_target = matches!(
-        routed_mode,
-        RoutedMode::AskClarify | RoutedMode::Act | RoutedMode::ChatAct
+        first_layer_decision,
+        FirstLayerDecision::Clarify | FirstLayerDecision::PlannerExecute
     ) && (output_contract
         .requires_content_evidence
         || !matches!(
@@ -1849,7 +2001,8 @@ fn apply_active_task_scope_refinement_repair(
     *turn_type = Some(TurnType::TaskScopeUpdate);
     *target_task_policy = Some(TargetTaskPolicy::ReuseActive);
     *needs_clarify = false;
-    *routed_mode = RoutedMode::Chat;
+    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *execution_finalize_style = ActFinalizeStyle::Plain;
     output_contract.requires_content_evidence = false;
     output_contract.delivery_required = false;
     output_contract.locator_kind = OutputLocatorKind::None;
@@ -1886,19 +2039,35 @@ fn normalizer_output_from_fallback(
     decision: RouteDecision,
     fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
 ) -> IntentNormalizerOutput {
-    let routed_mode = crate::post_route_policy::enforce_content_evidence_execution_mode(
-        decision.mode,
+    let first_layer_decision = if decision.needs_clarify {
+        FirstLayerDecision::Clarify
+    } else if route_has_structured_execution_signal(
         &decision.output_contract,
-        decision.needs_clarify,
-    );
-    let mut reason = if decision.reason.trim().is_empty() {
+        decision.wants_file_delivery,
+        decision.schedule_kind,
+        None,
+    ) {
+        FirstLayerDecision::PlannerExecute
+    } else {
+        FirstLayerDecision::DirectAnswer
+    };
+    let mut first_layer_decision = first_layer_decision;
+    let mut execution_finalize_style =
+        execution_finalize_style_for_contract(&decision.output_contract);
+    if let Some(finalize_style) =
+        crate::post_route_policy::content_evidence_execution_finalize_style(
+            &decision.output_contract,
+            decision.needs_clarify,
+        )
+    {
+        first_layer_decision = FirstLayerDecision::PlannerExecute;
+        execution_finalize_style = finalize_style;
+    }
+    let reason = if decision.reason.trim().is_empty() {
         fallback_reason_prefix.to_string()
     } else {
         format!("{fallback_reason_prefix}; {}", decision.reason.trim())
     };
-    if routed_mode != decision.mode {
-        reason.push_str("; content_evidence_requires_execution");
-    }
     let resolved_user_intent = if decision.resolved_user_intent.trim().is_empty() {
         user_request.trim().to_string()
     } else {
@@ -1918,8 +2087,8 @@ fn normalizer_output_from_fallback(
         confidence: decision.confidence.unwrap_or(0.0),
         output_contract: decision.output_contract,
         execution_recipe_hint: None,
-        first_layer_decision: first_layer_decision_from_mode(routed_mode),
-        routed_mode,
+        first_layer_decision,
+        execution_finalize_style,
         turn_analysis: None,
         fallback_source,
     }
@@ -2162,48 +2331,48 @@ fn render_compact_intent_normalizer_prompt(
     parts.push(
         "Compact intent normalizer. Output exactly one raw JSON object and then stop. No markdown, no answer text after JSON.".to_string(),
     );
-    parts.push("Always include all top-level schema keys: resolved_user_intent, answer_candidate, resume_behavior, schedule_kind, schedule_intent, wants_file_delivery, should_refresh_long_term_memory, agent_display_name_hint, needs_clarify, clarify_question, reason, confidence, decision, mode, output_contract, execution_recipe, turn_type, target_task_policy, should_interrupt_active_run, state_patch, attachment_processing_required.".to_string());
-    parts.push("Use decision as the primary first-layer gate: clarify, direct_answer, planner_execute. Keep mode as legacy compatibility/finalization: chat for direct_answer, ask_clarify for clarify, act/chat_act for planner_execute.".to_string());
-    parts.push("Prefer decision=direct_answer and mode=chat for greetings, confirmations, memory-only requests, and pure discussion. Use clarify/ask_clarify only when a required target/action is truly missing.".to_string());
+    parts.push("Always include all top-level schema keys: resolved_user_intent, answer_candidate, resume_behavior, schedule_kind, schedule_intent, wants_file_delivery, should_refresh_long_term_memory, agent_display_name_hint, needs_clarify, clarify_question, reason, confidence, decision, output_contract, execution_recipe, turn_type, target_task_policy, should_interrupt_active_run, state_patch, attachment_processing_required.".to_string());
+    parts.push("Use decision as the only first-layer semantic gate: clarify, direct_answer, planner_execute.".to_string());
+    parts.push("Prefer decision=direct_answer for greetings, confirmations, memory-only requests, and pure discussion. Use decision=clarify only when a required target/action is truly missing.".to_string());
     parts.push("High-priority: if REQUEST asks to summarize, explain, conclude, judge, or state what a current topic/test/conversation mainly verifies or means, do not treat a prior exact ID/value as the answer. Keep answer_candidate empty unless REQUEST explicitly asks for that scalar, and copy any relevant recent background/goals/purpose into resolved_user_intent. In MEMORY lists, leading decimal numbers are retrieval scores, never user facts or answer candidates.".to_string());
     parts.push("If ACTIVE_TASK is <none>, do not use task_append, task_correct, or task_scope_update. Classify a fresh user goal as task_request or leave turn_type empty for pure chat/memory/status turns.".to_string());
     parts.push("A complete current REQUEST with its own deliverable, topic, object, audience, scope, or factual constraints is standalone unless it semantically modifies the active deliverable. Shared chat identity, similar task type, same product name, or nearby memory is not enough to merge independent tasks.".to_string());
-    parts.push("If ACTIVE_TASK or LAST shows an active writing/drafting/planning task and REQUEST only adds audience, tone, length, body-only, wording, count, format, scope, or presentation constraints, keep it attached: turn_type=\"task_append\", target_task_policy=\"reuse_active\", mode=\"chat\", execution_recipe.kind=\"none\", requires_content_evidence=false, locator_kind=\"none\". Do not route such presentation-only follow-ups to act unless the REQUEST explicitly requires fresh local/system/file/web evidence.".to_string());
+    parts.push("If ACTIVE_TASK or LAST shows an active writing/drafting/planning task and REQUEST only adds audience, tone, length, body-only, wording, count, format, scope, or presentation constraints, keep it attached: turn_type=\"task_append\", target_task_policy=\"reuse_active\", decision=\"direct_answer\", execution_recipe.kind=\"none\", requires_content_evidence=false, locator_kind=\"none\". Do not route such presentation-only follow-ups to planner_execute unless the REQUEST explicitly requires fresh local/system/file/web evidence.".to_string());
     parts.push("Do not treat a bare acknowledgement request as active-task output refinement. If REQUEST only asks for a short acknowledgement/confirmation and does not explicitly reference ACTIVE_TASK/LAST/the prior answer/result/rewrite target, use standalone chat with no state_patch; answer the acknowledgement itself, not the active task output.".to_string());
     parts.push("If REQUEST's apparent missing topic is only the generic acknowledgement/short-reply target itself, do not ask what topic to answer. Use standalone chat, needs_clarify=false, empty turn_type/target_task_policy, no evidence/delivery, and put the minimal acknowledgement/short reply in answer_candidate when inferable from REQUEST. This is semantic, not phrase-list based.".to_string());
-    parts.push("If the same active writing/drafting task is still missing its topic or core subject, keep the new constraint in resolved_user_intent and ask one concise clarification in chat/ask_clarify; never force an act planner round for a presentation-only constraint.".to_string());
+    parts.push("If the same active writing/drafting task is still missing its topic or core subject, keep the new constraint in resolved_user_intent and ask one concise clarification with decision=\"clarify\"; never force planner_execute for a presentation-only constraint.".to_string());
     parts.push("Do not ask optional preference clarifications for harmless creative/chat requests; answer generically when the deliverable is clear. For a negative constraint plus positive deliverable, preserve the constraint and route the positive deliverable.".to_string());
     parts.push("If CAPABILITIES or a visible skill contract says a missing target/parameter can be handled by safe discovery, default behavior, bounded lookup, or a candidate-returning prepare step, keep the request executable instead of asking a front-door clarification; execution can return observed candidates when it cannot choose uniquely.".to_string());
     parts.push("Example pattern: if a photo-organization capability declares external-drive discovery, route the request to execution without a source_dir so the skill can inspect mounts and either preview the unique candidate or return observed candidates. This is a contract example, not a phrase trigger.".to_string());
     parts.push("Current REQUEST overrides RECENT/MEMORY. Prior assistant refusals, tool failures, exact IDs, scalar values, or capability claims in history are background only unless the current request explicitly asks for them.".to_string());
     parts.push("Do not import a prior directory/path scope from RECENT/MEMORY into the current REQUEST when the current REQUEST names its own file/dir target. Reuse prior scope only for explicit follow-ups like same directory, that file, or previous result.".to_string());
-    parts.push("If REQUEST asks for observable local/system/workspace state, filesystem inspection, command output, file content, directory listing, counts, or extracting a value, choose mode=\"act\" or mode=\"chat_act\". Do not claim the assistant cannot execute; the runtime has tools and the AUTH block describes permission.".to_string());
+    parts.push("If REQUEST asks for observable local/system/workspace state, filesystem inspection, command output, file content, directory listing, counts, or extracting a value, choose decision=\"planner_execute\". Do not claim the assistant cannot execute; the runtime has tools and the AUTH block describes permission.".to_string());
     parts.push("If REQUEST asks about the assistant/runtime's current unfinished task queue, running tasks, queued tasks, or canceling those tasks, use the existing task_control capability with its default current-user/current-chat scope; do not ask the user to choose a queue type just because no separate system name was supplied.".to_string());
     parts.push("Never ask the user to paste local file contents when REQUEST names a local file/dir/workspace target; route the request for tool execution. Capability refusals are only valid after an actual tool failure, not inside this normalizer.".to_string());
     parts.push("Always include output_contract as a JSON object, never as a string token. It is the final answer contract, not a place to invent a task-specific schema. Put exact scalar recall/direct-answer values in answer_candidate as a string only when the current request itself asks for that exact value; never put answer_candidate as an object or inside output_contract. If unsure, still emit the full default output_contract object with response_shape=\"free\", requires_content_evidence=false, delivery_required=false, locator_kind=\"none\", delivery_intent=\"none\", semantic_kind=\"none\", locator_hint=\"\", and self_extension set to none.".to_string());
     parts.push("Allowed output_contract keys only: response_shape, exact_sentence_count, requires_content_evidence, delivery_required, locator_kind, delivery_intent, semantic_kind, locator_hint, self_extension. Do not emit exact_format, required_evidence, fields, examples, post_processing, or custom keys.".to_string());
-    parts.push("locator_hint must be a clean concrete locator value or concrete target pair, not a full instruction sentence and not explanatory prose. If no clean locator is known, leave it empty and let needs_clarify/mode express the missing target.".to_string());
+    parts.push("locator_hint must be a clean concrete locator value or concrete target pair, not a full instruction sentence and not explanatory prose. If no clean locator is known, leave it empty and let needs_clarify/decision express the missing target.".to_string());
     parts.push("Allowed response_shape: free, one_sentence, strict, scalar, file_token. Allowed locator_kind: none, path, current_workspace, url, filename. Allowed delivery_intent: none, file_single, directory_lookup, directory_batch_files.".to_string());
-    parts.push("Allowed semantic_kind: none, raw_command_output, service_status, hidden_entries_check, file_names, directory_names, file_paths, directory_purpose_summary, content_excerpt_summary, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, execution_failed_step, generated_file_delivery, scalar_path_only, existence_with_path, existence_with_path_summary, recent_scalar_equality_check, git_commit_subject, structured_keys, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment, sqlite_schema_version, archive_list, archive_pack, archive_unpack, docker_ps, docker_images, docker_logs, docker_container_lifecycle.".to_string());
-    parts.push("Allowed turn_type: task_request, task_append, task_replace, task_correct, task_scope_update, run_control, approval_decision, status_query, feedback_or_error, preference_or_memory, or empty string. ask_clarify is a mode, never a turn_type or resume_behavior.".to_string());
+    parts.push("Allowed semantic_kind: none, raw_command_output, service_status, hidden_entries_check, file_names, directory_names, directory_entry_groups, file_paths, directory_purpose_summary, content_excerpt_summary, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, execution_failed_step, generated_file_delivery, scalar_path_only, existence_with_path, existence_with_path_summary, recent_scalar_equality_check, git_commit_subject, structured_keys, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment, sqlite_schema_version, archive_list, archive_pack, archive_unpack, docker_ps, docker_images, docker_logs, docker_container_lifecycle.".to_string());
+    parts.push("Allowed turn_type: task_request, task_append, task_replace, task_correct, task_scope_update, run_control, approval_decision, status_query, feedback_or_error, preference_or_memory, or empty string. clarify is a decision, never a turn_type or resume_behavior.".to_string());
     parts.push("state_patch must be a JSON object or null. Use null when there is no structured update; never output an empty string for state_patch. For ordered-entry follow-ups against an active ordered list, set state_patch.ordered_entry_ref to {\"index\":N,\"index_base\":1} for absolute item selection or {\"relative_offset\":K} for signed relative selection. When a standalone current REQUEST creates a new user-visible deliverable that later short corrections should edit, set state_patch.primary_task_update=\"replace\" and state_patch.active_task_boundary=\"new_deliverable\". For a clear deictic reference, set state_patch.deictic_reference={\"target\":\"current_action_result\"|\"current_turn_locator\"|\"comparison_result\"|\"unresolved_prior_object\"|\"missing_locator\"|\"ambiguous_locator\"}; unresolved/missing/ambiguous targets mean safe clarify. The runtime consumes structured numbers/targets, not language-specific ordinal words, pronouns, or connectors.".to_string());
-    parts.push("Every enum field must be exactly one listed schema token. Do not output aliases, combined values, or explanatory prose in decision/mode/output_contract/execution_recipe/turn_type/target_task_policy.".to_string());
+    parts.push("Every enum field must be exactly one listed schema token. Do not output aliases, combined values, or explanatory prose in decision/output_contract/execution_recipe/turn_type/target_task_policy.".to_string());
     parts.push("Boolean fields must be JSON true/false, not prose. self_extension must be an object with mode/trigger/execute_now; use {\"mode\":\"none\",\"trigger\":\"none\",\"execute_now\":false} unless the user explicitly asks for self-extension. If locator_kind=\"none\", locator_hint must be \"\".".to_string());
-    parts.push("If the user asks to observe/list/read first but only return a scalar result, set response_shape=\"scalar\" and use a matching semantic_kind only when one applies: scalar_count for generic counts, hidden_entries_check for hidden/dot-prefixed entry counts, scalar_path_only only for a path/current-directory/workspace-location answer, sqlite_schema_version for SQLite schema-version metadata. For config field values, package names, usernames, hostnames, titles, IDs, or other non-path scalar values, keep semantic_kind=\"none\" unless another specific enum applies. If the request requires an exact non-scalar output format with fixed count, body-only delivery, one-line fixed format, placeholder format, or no-extra-output delivery, set response_shape=\"strict\" and preserve the exact format in resolved_user_intent. For any exact counted-sentence requirement, also set exact_sentence_count to that positive integer; use response_shape=\"strict\" when the count is greater than 1. Never put natural-language format descriptions in response_shape.".to_string());
+    parts.push("If the user asks to observe/list/read first but only return a scalar result, set response_shape=\"scalar\" and use a matching semantic_kind only when one applies: scalar_count for generic counts, hidden_entries_check for hidden/dot-prefixed entry counts, scalar_path_only only for a path/current-directory/workspace-location answer, sqlite_schema_version for SQLite schema-version metadata. For config field values, package names, usernames, hostnames, titles, IDs, or other non-path scalar values, keep semantic_kind=\"none\" unless another specific enum applies. If the final answer must include both a structured field/key/path identifier and its value, it is not a scalar-only value response: use response_shape=\"strict\" and preserve the key/value shape in resolved_user_intent. If the request requires an exact non-scalar output format with fixed count, body-only delivery, one-line fixed format, placeholder format, or no-extra-output delivery, set response_shape=\"strict\" and preserve the exact format in resolved_user_intent. For any exact counted-sentence requirement, also set exact_sentence_count to that positive integer; use response_shape=\"strict\" when the count is greater than 1. Never put natural-language format descriptions in response_shape.".to_string());
     parts.push("For ordered command/tool execution where the final answer should identify only the failed step(s), set response_shape=\"strict\", semantic_kind=\"execution_failed_step\", requires_content_evidence=true, delivery_required=false. This is a semantic judgment from the requested final answer shape, not a phrase-list trigger.".to_string());
     parts.push("For requests to create/save/write a new artifact and then send/deliver it, set response_shape=\"file_token\", semantic_kind=\"generated_file_delivery\", delivery_required=true, delivery_intent=\"file_single\", requires_content_evidence=true. If the user did not supply a filename but the artifact type/content is clear, do not ask for one; let execution planning choose a safe workspace filename.".to_string());
     parts.push("For requests to send/deliver/receive an existing or selected local file, including a file selected from an observed or target directory by ordinal/order such as first/last/newest/largest, set wants_file_delivery=true, response_shape=\"file_token\", delivery_required=true, delivery_intent=\"file_single\", requires_content_evidence=true. The final answer must be a file token, not a bare filename, file_path_and_content answer_candidate, or pasted file content. This is a semantic delivery contract, not a phrase list.".to_string());
-    parts.push("Text drafting/composition is not file delivery by default. If REQUEST asks to write/draft/compose an article, note, proposal, summary, checklist, tutorial, guide, or long-form text for the chat, but does not explicitly ask to save it to a file/path/document or send/deliver it as an attachment/artifact, do not use response_shape=\"file_token\" or semantic_kind=\"generated_file_delivery\". Keep delivery_required=false, wants_file_delivery=false, and use response_shape=\"free\" or \"strict\" according to the requested prose format. If the text is project-bound and needs workspace facts, use mode=\"chat_act\", requires_content_evidence=true, locator_kind=\"current_workspace\"; still keep file delivery disabled. Examples: \"帮我写一篇关于 RustClaw 的长文\" / \"Write a long article about RustClaw\" means pasted prose in chat, while \"帮我写成 md 文件并发给我\" / \"Create a markdown file and send it to me\" means generated file delivery.".to_string());
-    parts.push("For exact same/different comparison of two scalar/field values that still need observation, use mode=\"act\", requires_content_evidence=true, delivery_required=false, response_shape=\"strict\", semantic_kind=\"recent_scalar_equality_check\". Keep the requested final line format in resolved_user_intent.".to_string());
-    parts.push("For a comparison where one side is a scalar field/value from a structured manifest or config file and the other side is the corresponding value mentioned in a README/docs file, use mode=\"act\" or \"chat_act\", requires_content_evidence=true, delivery_required=false, semantic_kind=\"recent_scalar_equality_check\", and response_shape=\"one_sentence\"/\"strict\" according to the requested final answer. This is a semantic contract for field/document evidence, not generic document summarization.".to_string());
-    parts.push("For file/path metadata comparisons across concrete local targets (for example size/大小, modified time/修改时间, existence state, or other observable path facts), use mode=\"act\" or \"chat_act\", requires_content_evidence=true, delivery_required=false, semantic_kind=\"quantity_comparison\", and response_shape=\"scalar\"/\"one_sentence\"/\"strict\" according to the requested final answer. This is a semantic contract decision, not a phrase-list trigger; do not treat metadata comparison as document content summarization just because the user also asks for a short explanation.".to_string());
-    parts.push("For git commit subject/title requests, use mode=\"act\", requires_content_evidence=true, response_shape=\"scalar\" or \"strict\" according to the user's requested format, and semantic_kind=\"git_commit_subject\". Do not publish the raw git oneline hash when the final answer asks for the subject/title only.".to_string());
-    parts.push("For structured document key-name requests against JSON/TOML/YAML/config files, use mode=\"act\", requires_content_evidence=true, response_shape=\"strict\" when the user asks only for the keys, and semantic_kind=\"structured_keys\". Keep locator_kind/locator_hint pointed at the structured file; do not treat key-name requests as file excerpts.".to_string());
-    parts.push("For hidden or dot-prefixed directory entry checks, use mode=\"act\", requires_content_evidence=true, locator_kind=\"current_workspace\" or \"path\", and semantic_kind=\"hidden_entries_check\". When the final answer is constrained to count only, use response_shape=\"scalar\" with this same semantic_kind. When the final answer is constrained to yes/no plus a limited set of entries, use response_shape=\"strict\" so later stages do not prepend execution traces.".to_string());
-    parts.push("For existence checks whose final answer is a presence judgment over a concrete file, directory, path, or local artifact, use mode=\"act\", requires_content_evidence=true, semantic_kind=\"existence_with_path\", and the narrowest locator_kind that matches the target scope. If the final answer asks only for yes/no or exists/not-exists, use response_shape=\"scalar\"; if it asks to include a path/locator or other evidence fields, use response_shape=\"strict\". Do not use semantic_kind=\"scalar_count\" merely because the requested final answer is short or binary; presence judgment is not numeric counting. If the same request also asks for a brief content-grounded purpose, summary, role, or explanation when found, use semantic_kind=\"existence_with_path_summary\" instead so planning observes both the path and bounded content before synthesis. Preserve the final answer wording constraint in resolved_user_intent so later stages do not prepend execution traces.".to_string());
-    parts.push("For directory/file inventory with name or extension filtering, set requires_content_evidence=true and locator_kind=\"current_workspace\" or \"path\". Use semantic_kind=\"file_names\" only when the final answer is an exact file or mixed entry names-only list. Use semantic_kind=\"directory_names\" when the final answer is exact folder/directory names only. Use semantic_kind=\"file_paths\" when the final answer must be file paths, especially repository/workspace-wide extension searches or representative file path lists. If the same request also asks for explanation, purpose, judgment, comparison, or a brief conclusion, do not use an exact names/paths contract; use directory_purpose_summary when it asks what entries are for / more like, otherwise keep semantic_kind=\"none\" and preserve the combined listing+synthesis requirement in resolved_user_intent/reason. If a nuance has no enum, keep response_shape=\"free\" or semantic_kind=\"none\" instead of inventing enum values.".to_string());
-    parts.push("Use mode=\"chat_act\" when the request both inspects local/system/workspace state and asks for explanation, judgment, or narrative synthesis. Use mode=\"act\" when it asks only for a direct raw/scalar/list result. For current-directory or workspace-location scalar answers, set output_contract.response_shape=\"scalar\" and output_contract.semantic_kind=\"scalar_path_only\" from the request meaning, not from local phrase-classifier hints.".to_string());
-    parts.push("For recall questions, use exact values from RECENT/MEMORY. If found, put the value in answer_candidate and resolved_user_intent, set needs_clarify=false, and set mode=\"chat\". Never invent mode=\"recall\". A request for a summary, recap, explanation, conclusion, judgment, or what something verifies/means is not a recall question; keep that deliverable in resolved_user_intent and leave answer_candidate empty unless the current request also explicitly asks for an exact scalar.".to_string());
+    parts.push("Text drafting/composition is not file delivery by default. If REQUEST asks to write/draft/compose an article, note, proposal, summary, checklist, tutorial, guide, or long-form text for the chat, but does not explicitly ask to save it to a file/path/document or send/deliver it as an attachment/artifact, do not use response_shape=\"file_token\" or semantic_kind=\"generated_file_delivery\". Keep delivery_required=false, wants_file_delivery=false, and use response_shape=\"free\" or \"strict\" according to the requested prose format. If the text is project-bound and needs workspace facts, use decision=\"planner_execute\", requires_content_evidence=true, locator_kind=\"current_workspace\"; still keep file delivery disabled. Examples: \"帮我写一篇关于 RustClaw 的长文\" / \"Write a long article about RustClaw\" means pasted prose in chat, while \"帮我写成 md 文件并发给我\" / \"Create a markdown file and send it to me\" means generated file delivery.".to_string());
+    parts.push("For exact same/different comparison of two scalar/field values that still need observation, use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, response_shape=\"strict\", semantic_kind=\"recent_scalar_equality_check\". Keep the requested final line format in resolved_user_intent.".to_string());
+    parts.push("For a comparison where one side is a scalar field/value from a structured manifest or config file and the other side is the corresponding value mentioned in a README/docs file, use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, semantic_kind=\"recent_scalar_equality_check\", and response_shape=\"one_sentence\"/\"strict\" according to the requested final answer. This is a semantic contract for field/document evidence, not generic document summarization.".to_string());
+    parts.push("For file/path metadata comparisons across concrete local targets (for example size/大小, modified time/修改时间, existence state, or other observable path facts), use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, semantic_kind=\"quantity_comparison\", and response_shape=\"scalar\"/\"one_sentence\"/\"strict\" according to the requested final answer. This is a semantic contract decision, not a phrase-list trigger; do not treat metadata comparison as document content summarization just because the user also asks for a short explanation.".to_string());
+    parts.push("For git commit subject/title requests, use decision=\"planner_execute\", requires_content_evidence=true, response_shape=\"scalar\" or \"strict\" according to the user's requested format, and semantic_kind=\"git_commit_subject\". Do not publish the raw git oneline hash when the final answer asks for the subject/title only.".to_string());
+    parts.push("For structured document key-name requests against JSON/TOML/YAML/config files, use decision=\"planner_execute\", requires_content_evidence=true, response_shape=\"strict\" when the user asks only for the keys, and semantic_kind=\"structured_keys\". Keep locator_kind/locator_hint pointed at the structured file; do not treat key-name requests as file excerpts.".to_string());
+    parts.push("For hidden or dot-prefixed directory entry checks, use decision=\"planner_execute\", requires_content_evidence=true, locator_kind=\"current_workspace\" or \"path\", and semantic_kind=\"hidden_entries_check\". When the final answer is constrained to count only, use response_shape=\"scalar\" with this same semantic_kind. When the final answer is constrained to yes/no plus a limited set of entries, use response_shape=\"strict\" so later stages do not prepend execution traces.".to_string());
+    parts.push("For existence checks whose final answer is a presence judgment over a concrete file, directory, path, or local artifact, use decision=\"planner_execute\", requires_content_evidence=true, semantic_kind=\"existence_with_path\", and the narrowest locator_kind that matches the target scope. If the final answer asks only for yes/no or exists/not-exists, use response_shape=\"scalar\"; if it asks to include a path/locator or other evidence fields, use response_shape=\"strict\". Do not use semantic_kind=\"scalar_count\" merely because the requested final answer is short or binary; presence judgment is not numeric counting. If the same request also asks for a brief content-grounded purpose, summary, role, or explanation when found, use semantic_kind=\"existence_with_path_summary\" instead so planning observes both the path and bounded content before synthesis. Preserve the final answer wording constraint in resolved_user_intent so later stages do not prepend execution traces.".to_string());
+    parts.push("For directory/file inventory with name or extension filtering, set requires_content_evidence=true and locator_kind=\"current_workspace\" or \"path\". Use semantic_kind=\"file_names\" only when the final answer is an exact file or mixed entry names-only list. Use semantic_kind=\"directory_names\" when the final answer is exact folder/directory names only. Use semantic_kind=\"directory_entry_groups\" when the final answer must separate the same directory's files and directories into groups. Use semantic_kind=\"file_paths\" when the final answer must be file paths, especially repository/workspace-wide extension searches or representative file path lists. If the same request also asks for explanation, purpose, judgment, comparison, or a brief conclusion, do not use an exact names/paths contract; use directory_purpose_summary when it asks what entries are for / more like, otherwise keep semantic_kind=\"none\" and preserve the combined listing+synthesis requirement in resolved_user_intent/reason. If a nuance has no enum, keep response_shape=\"free\" or semantic_kind=\"none\" instead of inventing enum values.".to_string());
+    parts.push("Use decision=\"planner_execute\" when the request inspects local/system/workspace state, whether the final answer is direct raw/scalar/list output or a narrative synthesis. For current-directory or workspace-location scalar answers, set output_contract.response_shape=\"scalar\" and output_contract.semantic_kind=\"scalar_path_only\" from the request meaning, not from local phrase-classifier hints.".to_string());
+    parts.push("For recall questions, use exact values from RECENT/MEMORY. If found, put the value in answer_candidate and resolved_user_intent, set needs_clarify=false, and set decision=\"direct_answer\". Never invent recall-specific decisions. A request for a summary, recap, explanation, conclusion, judgment, or what something verifies/means is not a recall question; keep that deliverable in resolved_user_intent and leave answer_candidate empty unless the current request also explicitly asks for an exact scalar.".to_string());
     parts.push("For requests that depend on prior context, copy the relevant RECENT/MEMORY facts into resolved_user_intent so the next stage has enough context.".to_string());
     parts.push("Use ALIASES only for temporary references already defined in this session. When the current message mentions one, resolve it in resolved_user_intent and locator fields when relevant.".to_string());
     parts.push("For explicit temporary alias/reference mappings in the current turn, set state_patch.alias_bindings to objects with alias and target string fields. Do not infer aliases from vague references.".to_string());
@@ -2234,8 +2403,8 @@ fn render_compact_intent_normalizer_prompt(
         1800,
     ));
     parts.push(compact_prompt_slot("AUTH", auth_policy_context, 100));
-    parts.push("Required keys: resolved_user_intent, needs_clarify, clarify_question, reason, confidence, decision, mode. If unsure: use decision=\"direct_answer\"/mode=\"chat\" only for non-observable discussion; use decision=\"planner_execute\"/mode=\"act\" for clear observable local/system/workspace requests.".to_string());
-    parts.push("For ordinary chat, greetings, and confirmations: decision=\"direct_answer\", mode=\"chat\", needs_clarify=false, turn_type=\"\". Never use turn_type=\"chat\".".to_string());
+    parts.push("Required keys: resolved_user_intent, needs_clarify, clarify_question, reason, confidence, decision. If unsure: use decision=\"direct_answer\" only for non-observable discussion; use decision=\"planner_execute\" for clear observable local/system/workspace requests.".to_string());
+    parts.push("For ordinary chat, greetings, and confirmations: decision=\"direct_answer\", needs_clarify=false, turn_type=\"\". Never use turn_type=\"chat\".".to_string());
     parts.push(compact_prompt_slot(
         "RECENT",
         &route_view.recent_turns_full,
@@ -2253,9 +2422,9 @@ fn render_compact_intent_normalizer_prompt(
         .map(str::to_string)
         .unwrap_or_else(|| compact_runtime_context_from_auth(auth_policy_context));
     parts.push(format!("LANG={}", request_language_hint));
-    parts.push("CONTRACT: output_contract must be a JSON object. hidden/dot-entry check => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"hidden_entries_check\". yes/no-only existence check => response_shape=\"scalar\", semantic_kind=\"existence_with_path\"; existence check that must return a path/locator/evidence field => response_shape=\"strict\", semantic_kind=\"existence_with_path\"; if it also needs a content-grounded purpose/summary/explanation when found, use semantic_kind=\"existence_with_path_summary\". exact file or mixed entry names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_names\". exact folder/directory names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"directory_names\". exact file paths list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_paths\". local file/path metadata comparison => requires_content_evidence=true, semantic_kind=\"quantity_comparison\". git commit subject/title only => response_shape=\"scalar\", requires_content_evidence=true, semantic_kind=\"git_commit_subject\". current path only => response_shape=\"scalar\", semantic_kind=\"scalar_path_only\"; never use scalar_path_only for directory listings.".to_string());
-    // Keep memory immediately before the current request so MiniMax's compact
-    // head+tail truncation preserves recent goals with the query.
+    parts.push("CONTRACT: output_contract must be a JSON object. hidden/dot-entry check => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"hidden_entries_check\". yes/no-only existence check => response_shape=\"scalar\", semantic_kind=\"existence_with_path\"; existence check that must return a path/locator/evidence field => response_shape=\"strict\", semantic_kind=\"existence_with_path\"; if it also needs a content-grounded purpose/summary/explanation when found, use semantic_kind=\"existence_with_path_summary\". exact file or mixed entry names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_names\". exact folder/directory names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"directory_names\". grouped files-vs-directories list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"directory_entry_groups\". exact file paths list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_paths\". local file/path metadata comparison => requires_content_evidence=true, semantic_kind=\"quantity_comparison\". git commit subject/title only => response_shape=\"scalar\", requires_content_evidence=true, semantic_kind=\"git_commit_subject\". current path only => response_shape=\"scalar\", semantic_kind=\"scalar_path_only\"; never use scalar_path_only for directory listings.".to_string());
+    // Keep memory immediately before the current request so providers with
+    // compact head+tail truncation preserve recent goals with the query.
     parts.push(compact_prompt_slot(
         "MEMORY",
         &route_view.memory_context,
@@ -2269,11 +2438,11 @@ fn render_compact_intent_normalizer_prompt(
         420,
     ));
     parts.push(compact_prompt_slot("RUNTIME", &runtime_context, 260));
-    parts.push("LOCAL_EXEC: local file/dir/command/count/metadata/read/list/summarize => act/chat_act; no cannot-access-FS reply; do not ask user to paste local files; current target beats prior directory.".to_string());
+    parts.push("LOCAL_EXEC: local file/dir/command/count/metadata/read/list/summarize => decision=\"planner_execute\"; no cannot-access-FS reply; do not ask user to paste local files; current target beats prior directory.".to_string());
     parts.push("SUMMARY_RECALL: summary != ID recall; answer_candidate empty unless exact scalar requested; memory scores are metadata.".to_string());
-    // MiniMax compact prompts are head+tail capped. Keep the immediate structured
-    // follow-up anchor next to REQUEST so ordinal/deictic resolution does not fall
-    // back to older memory or prose when the middle context is truncated.
+    // Keep the immediate structured follow-up anchor next to REQUEST so
+    // ordinal/deictic resolution does not fall back to older memory or prose
+    // when a provider truncates the middle context.
     parts.push("FOLLOWUP_ANCHOR_PRIORITY: ANCHOR is the latest structured execution state and overrides MEMORY/ASSISTANT/RECENT for ordinal or deictic follow-ups unless REQUEST names a new target.".to_string());
     parts.push(compact_prompt_slot(
         "ANCHOR",
@@ -2316,10 +2485,6 @@ fn normalize_intent_normalizer_raw_for_schema_with_report(
             report,
         );
     };
-    let mode_was_missing = obj
-        .get("mode")
-        .and_then(|value| value.as_str())
-        .is_none_or(|mode| mode.trim().is_empty());
     let answer_like_payload = answer_like_normalizer_payload_text(obj);
     let explicit_answer_candidate = obj
         .get("answer_candidate")
@@ -2402,7 +2567,7 @@ fn normalize_intent_normalizer_raw_for_schema_with_report(
         }
     }
     normalize_output_contract_for_schema(obj);
-    normalize_mode_from_executable_output_contract(obj, mode_was_missing);
+    normalize_decision_from_executable_output_contract(obj);
     let report = contract_repair_report_from_before_after(&before, &value);
     (
         serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string()),
@@ -2431,15 +2596,6 @@ fn contract_repair_report_from_before_after(before: &Value, after: &Value) -> Co
         );
     }
 
-    if schema_field_alias_or_normalization_changed(
-        before_obj,
-        after_obj,
-        &["mode"],
-        "mode",
-        canonical_normalizer_mode_token,
-    ) {
-        report.add("enum_alias", "mode_enum_normalized");
-    }
     if schema_field_alias_or_normalization_changed(
         before_obj,
         after_obj,
@@ -2536,18 +2692,23 @@ fn contract_repair_report_from_before_after(before: &Value, after: &Value) -> Co
         );
     }
     if output_contract_has_executable_shape(after_contract) {
-        let before_mode = before_obj
-            .and_then(|obj| obj.get("mode"))
+        let before_decision = before_obj
+            .and_then(|obj| obj.get("decision"))
             .and_then(scalar_json_value_text)
-            .and_then(|text| canonical_normalizer_mode_token(&text).map(str::to_string));
-        let after_mode = after_obj
-            .and_then(|obj| obj.get("mode"))
+            .and_then(|value| canonical_first_layer_decision_token(&value));
+        let after_decision = after_obj
+            .and_then(|obj| obj.get("decision"))
             .and_then(scalar_json_value_text)
-            .and_then(|text| canonical_normalizer_mode_token(&text).map(str::to_string));
-        if matches!(before_mode.as_deref(), None | Some("chat"))
-            && matches!(after_mode.as_deref(), Some("act" | "chat_act"))
+            .and_then(|value| canonical_first_layer_decision_token(&value));
+        if matches!(
+            before_decision,
+            None | Some(FirstLayerDecision::DirectAnswer)
+        ) && matches!(after_decision, Some(FirstLayerDecision::PlannerExecute))
         {
-            report.add("structured_contract", "mode_promoted_by_output_contract");
+            report.add(
+                "structured_contract",
+                "decision_promoted_by_output_contract",
+            );
         }
     }
     if execution_recipe_schema_field_changed(
@@ -2578,7 +2739,9 @@ fn contract_repair_report_from_before_after(before: &Value, after: &Value) -> Co
 fn semantic_suspect_detail_for_normalizer_output(
     out: &IntentNormalizerOut,
 ) -> Option<&'static str> {
-    if parse_mode_text(&out.mode) != Some(RoutedMode::Chat) || out.needs_clarify {
+    if parse_first_layer_decision_text(&out.decision) != Some(FirstLayerDecision::DirectAnswer)
+        || out.needs_clarify
+    {
         return None;
     }
     if out.wants_file_delivery {
@@ -2889,16 +3052,8 @@ fn normalizer_object_declares_executable_route(obj: &serde_json::Map<String, Val
         .and_then(|text| canonical_first_layer_decision_token(&text))
         .is_some_and(|decision| decision == crate::FirstLayerDecision::PlannerExecute)
         || obj
-            .get("mode")
-            .and_then(scalar_json_value_text)
-            .and_then(|text| canonical_normalizer_mode_token(&text))
-            .is_some_and(|mode| matches!(mode, "act" | "chat_act"))
-        || obj
             .get("execution_recipe")
             .is_some_and(|value| output_recipe_value_declares_execution(Some(value)))
-        || obj
-            .get("execution_recipe")
-            .is_some_and(|value| execution_recipe_value_has_untrusted_text(Some(value)))
 }
 
 fn schema_text_is_neutral_none(raw: &str) -> bool {
@@ -2951,7 +3106,7 @@ fn answer_like_normalizer_payload_text(obj: &serde_json::Map<String, Value>) -> 
         "clarify_question",
         "reason",
         "confidence",
-        "mode",
+        "decision",
         "output_contract",
         "execution_recipe",
         "turn_type",
@@ -3254,6 +3409,13 @@ fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static str {
         | "folder_names"
         | "folder_names_only"
         | "folders_only" => OutputSemanticKind::DirectoryNames.as_str(),
+        "directory_entry_groups"
+        | "directory_file_groups"
+        | "file_directory_groups"
+        | "entry_kind_groups"
+        | "entries_by_kind"
+        | "grouped_entries"
+        | "grouped_entry_names" => OutputSemanticKind::DirectoryEntryGroups.as_str(),
         "file_paths"
         | "file_paths_only"
         | "path_list"
@@ -3281,29 +3443,11 @@ fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static str {
     }
 }
 
-fn canonical_normalizer_mode_token(raw: &str) -> Option<&'static str> {
-    match normalize_schema_token(raw).as_str() {
-        "chat" => Some("chat"),
-        "act" | "action" | "execute" | "execution" | "tool" | "tool_call" | "use_tool" | "read"
-        | "tools" | "local" | "local_tool" | "detect" | "detection" | "inspect" | "inspection"
-        | "search" | "lookup" => Some("act"),
-        "chat_act" | "chat+act" | "act_chat" | "act+chat" => Some("chat_act"),
-        "ask_clarify" | "clarify" | "ask" | "ask_clarification" => Some("ask_clarify"),
-        "command" | "cmd" | "local_command" | "local_exec" => Some("act"),
-        "recall" | "memory_recall" | "memory" | "memory_storage" | "save_context"
-        | "confirmation" | "respond" | "response" => Some("chat"),
-        _ => None,
-    }
-}
-
 fn canonical_first_layer_decision_token(raw: &str) -> Option<crate::FirstLayerDecision> {
     match normalize_schema_token(raw).as_str() {
-        "clarify" | "ask_clarify" | "ask_clarification" => Some(crate::FirstLayerDecision::Clarify),
-        "direct_answer" | "direct" | "answer" | "chat" | "respond" | "response" => {
-            Some(crate::FirstLayerDecision::DirectAnswer)
-        }
-        "planner_execute" | "planner" | "execute" | "execution" | "act" | "chat_act"
-        | "act_chat" => Some(crate::FirstLayerDecision::PlannerExecute),
+        "clarify" => Some(crate::FirstLayerDecision::Clarify),
+        "direct_answer" => Some(crate::FirstLayerDecision::DirectAnswer),
+        "planner_execute" => Some(crate::FirstLayerDecision::PlannerExecute),
         _ => None,
     }
 }
@@ -3312,28 +3456,22 @@ fn parse_first_layer_decision_text(raw: &str) -> Option<crate::FirstLayerDecisio
     canonical_first_layer_decision_token(raw)
 }
 
-fn first_layer_decision_from_mode(mode: RoutedMode) -> crate::FirstLayerDecision {
-    match mode {
-        RoutedMode::AskClarify => crate::FirstLayerDecision::Clarify,
-        RoutedMode::Chat => crate::FirstLayerDecision::DirectAnswer,
-        RoutedMode::Act | RoutedMode::ChatAct => crate::FirstLayerDecision::PlannerExecute,
-    }
+fn route_label_from_first_layer_decision(
+    decision: FirstLayerDecision,
+    finalize_style: ActFinalizeStyle,
+) -> &'static str {
+    crate::AskMode::from_first_layer_decision_with_finalize(decision, finalize_style).route_label()
 }
 
-fn routed_mode_from_first_layer_decision(
-    decision: crate::FirstLayerDecision,
-    mode_hint: Option<RoutedMode>,
-) -> RoutedMode {
-    match decision {
-        crate::FirstLayerDecision::Clarify => RoutedMode::AskClarify,
-        crate::FirstLayerDecision::DirectAnswer => RoutedMode::Chat,
-        crate::FirstLayerDecision::PlannerExecute => {
-            if matches!(mode_hint, Some(RoutedMode::ChatAct)) {
-                RoutedMode::ChatAct
-            } else {
-                RoutedMode::Act
-            }
-        }
+fn execution_finalize_style_for_contract(contract: &IntentOutputContract) -> ActFinalizeStyle {
+    if matches!(
+        contract.response_shape,
+        OutputResponseShape::Scalar | OutputResponseShape::FileToken
+    ) || matches!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput)
+    {
+        ActFinalizeStyle::Plain
+    } else {
+        ActFinalizeStyle::ChatWrapped
     }
 }
 
@@ -3382,6 +3520,7 @@ fn normalize_confidence_field(obj: &mut serde_json::Map<String, Value>, key: &st
 }
 
 fn normalize_intent_normalizer_top_level_for_schema(obj: &mut serde_json::Map<String, Value>) {
+    obj.remove("mode");
     obj.entry("resume_behavior".to_string())
         .or_insert_with(|| Value::String("none".to_string()));
     normalize_string_field_with_default(obj, "resume_behavior", "none");
@@ -3410,30 +3549,12 @@ fn normalize_intent_normalizer_top_level_for_schema(obj: &mut serde_json::Map<St
         .or_insert_with(|| Value::String(String::new()));
     obj.entry("confidence".to_string())
         .or_insert_with(|| Value::from(0.8));
-    obj.entry("mode".to_string())
-        .or_insert_with(|| Value::String("chat".to_string()));
-    normalize_string_field_with_default(obj, "mode", "chat");
-    let mut canonical_mode = Some("chat");
-    if let Some(mode) = obj.get("mode").and_then(|v| v.as_str()) {
-        if let Some(canonical) = canonical_normalizer_mode_token(mode) {
-            canonical_mode = Some(canonical);
-            obj.insert("mode".to_string(), Value::String(canonical.to_string()));
-        } else {
-            canonical_mode = Some("chat");
-            obj.insert("mode".to_string(), Value::String("chat".to_string()));
-        }
-    }
     normalize_string_field_with_default(obj, "decision", "");
     let canonical_decision = obj
         .get("decision")
         .and_then(|v| v.as_str())
         .and_then(canonical_first_layer_decision_token);
-    let decision = canonical_decision.unwrap_or_else(|| {
-        canonical_mode
-            .and_then(parse_mode_text)
-            .map(first_layer_decision_from_mode)
-            .unwrap_or(crate::FirstLayerDecision::DirectAnswer)
-    });
+    let decision = canonical_decision.unwrap_or(crate::FirstLayerDecision::DirectAnswer);
     obj.insert(
         "decision".to_string(),
         Value::String(decision.as_str().to_string()),
@@ -3593,10 +3714,7 @@ fn normalize_state_patch_for_schema(obj: &mut serde_json::Map<String, Value>) {
     }
 }
 
-fn normalize_mode_from_executable_output_contract(
-    obj: &mut serde_json::Map<String, Value>,
-    mode_was_missing: bool,
-) {
+fn normalize_decision_from_executable_output_contract(obj: &mut serde_json::Map<String, Value>) {
     if obj
         .get("needs_clarify")
         .and_then(Value::as_bool)
@@ -3604,12 +3722,12 @@ fn normalize_mode_from_executable_output_contract(
     {
         return;
     }
-    let current_mode = obj
-        .get("mode")
+    let current_decision = obj
+        .get("decision")
         .and_then(Value::as_str)
-        .map(normalize_schema_token)
-        .unwrap_or_default();
-    if !mode_was_missing && current_mode != "chat" {
+        .and_then(canonical_first_layer_decision_token)
+        .unwrap_or(FirstLayerDecision::DirectAnswer);
+    if current_decision != FirstLayerDecision::DirectAnswer {
         return;
     }
     let Some(contract) = obj
@@ -3637,7 +3755,10 @@ fn normalize_mode_from_executable_output_contract(
             .and_then(|value| value.as_bool())
             .unwrap_or(false);
     if has_executable_contract {
-        obj.insert("mode".to_string(), Value::String("act".to_string()));
+        obj.insert(
+            "decision".to_string(),
+            Value::String(FirstLayerDecision::PlannerExecute.as_str().to_string()),
+        );
     }
 }
 
@@ -3645,7 +3766,7 @@ fn normalize_execution_recipe_for_schema(obj: &mut serde_json::Map<String, Value
     promote_misnested_turn_analysis_from_execution_recipe(obj);
     if normalizer_object_declares_tool_action_payload(obj) {
         mark_output_contract_requires_content_evidence(obj);
-        mark_mode_act_from_execution_recipe(obj);
+        mark_decision_planner_execute_from_execution_recipe(obj);
     }
     let execution_recipe_value = obj.get("execution_recipe").cloned();
     let execution_recipe = execution_recipe_value.as_ref();
@@ -3653,10 +3774,10 @@ fn normalize_execution_recipe_for_schema(obj: &mut serde_json::Map<String, Value
         mark_output_contract_requires_content_evidence(obj);
         let locator_hint = execution_recipe_value_locator_hint(execution_recipe);
         normalize_output_contract_for_command_payload(obj, locator_hint.as_deref());
-        mark_mode_act_from_execution_recipe(obj);
+        mark_decision_planner_execute_from_execution_recipe(obj);
     } else if output_recipe_value_declares_execution(obj.get("execution_recipe")) {
         mark_output_contract_requires_content_evidence(obj);
-        mark_mode_act_from_execution_recipe(obj);
+        mark_decision_planner_execute_from_execution_recipe(obj);
     }
     let value = obj
         .entry("execution_recipe".to_string())
@@ -3883,7 +4004,7 @@ fn normalize_output_contract_for_command_payload(
     contract.insert("delivery_required".to_string(), Value::Bool(false));
 }
 
-fn mark_mode_act_from_execution_recipe(obj: &mut serde_json::Map<String, Value>) {
+fn mark_decision_planner_execute_from_execution_recipe(obj: &mut serde_json::Map<String, Value>) {
     if obj
         .get("needs_clarify")
         .and_then(Value::as_bool)
@@ -3892,11 +4013,14 @@ fn mark_mode_act_from_execution_recipe(obj: &mut serde_json::Map<String, Value>)
         return;
     }
     let current = obj
-        .get("mode")
+        .get("decision")
         .and_then(scalar_json_value_text)
-        .and_then(|text| canonical_normalizer_mode_token(&text));
-    if current.is_none() || matches!(current, Some("chat")) {
-        obj.insert("mode".to_string(), Value::String("act".to_string()));
+        .and_then(|value| canonical_first_layer_decision_token(&value));
+    if current.is_none() || matches!(current, Some(FirstLayerDecision::DirectAnswer)) {
+        obj.insert(
+            "decision".to_string(),
+            Value::String(FirstLayerDecision::PlannerExecute.as_str().to_string()),
+        );
     }
 }
 
@@ -4005,6 +4129,16 @@ fn coerce_output_contract_value_for_schema(value: &mut Value) {
 }
 
 fn normalize_output_contract_aliases(contract: &mut serde_json::Map<String, Value>) {
+    let raw_type_token = contract
+        .get("type")
+        .and_then(scalar_json_value_text)
+        .map(|value| normalize_schema_token(&value));
+    let file_delivery_type = raw_type_token.as_deref().is_some_and(|token| {
+        matches!(
+            token,
+            "file" | "file_token" | "delivery_file" | "attachment" | "artifact_file"
+        )
+    });
     if !contract.contains_key("response_shape") {
         for alias in ["shape", "answer_shape", "format", "response_format"] {
             if let Some(value) = contract.get(alias).cloned() {
@@ -4012,6 +4146,12 @@ fn normalize_output_contract_aliases(contract: &mut serde_json::Map<String, Valu
                 break;
             }
         }
+    }
+    if !contract.contains_key("response_shape") && file_delivery_type {
+        contract.insert(
+            "response_shape".to_string(),
+            Value::String("file_token".to_string()),
+        );
     }
     if !contract.contains_key("response_shape")
         && contract
@@ -4024,6 +4164,55 @@ fn normalize_output_contract_aliases(contract: &mut serde_json::Map<String, Valu
             "response_shape".to_string(),
             Value::String("strict".to_string()),
         );
+    }
+    if !contract.contains_key("locator_hint") {
+        for alias in [
+            "filename",
+            "file_name",
+            "file_path",
+            "path",
+            "target_path",
+            "locator",
+            "locator_value",
+        ] {
+            if let Some(value) = contract
+                .get(alias)
+                .and_then(scalar_json_value_text)
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+            {
+                contract.insert("locator_hint".to_string(), Value::String(value));
+                break;
+            }
+        }
+    }
+    if file_delivery_type {
+        if !contract.contains_key("delivery_required") {
+            contract.insert("delivery_required".to_string(), Value::Bool(true));
+        }
+        if !contract.contains_key("delivery_intent") {
+            contract.insert(
+                "delivery_intent".to_string(),
+                Value::String("file_single".to_string()),
+            );
+        }
+        if !contract.contains_key("locator_kind")
+            && contract
+                .get("locator_hint")
+                .and_then(scalar_json_value_text)
+                .is_some_and(|hint| !hint.trim().is_empty())
+        {
+            let hint = contract
+                .get("locator_hint")
+                .and_then(scalar_json_value_text)
+                .unwrap_or_default();
+            let kind = if hint.contains('/') || hint.contains('\\') {
+                "path"
+            } else {
+                "filename"
+            };
+            contract.insert("locator_kind".to_string(), Value::String(kind.to_string()));
+        }
     }
     if !contract.contains_key("exact_sentence_count") {
         for alias in ["sentence_count", "sentences", "exact_sentences"] {
@@ -4044,11 +4233,11 @@ fn normalize_output_contract_aliases(contract: &mut serde_json::Map<String, Valu
 }
 
 fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>) {
-    let mode_token = obj
-        .get("mode")
-        .and_then(|value| value.as_str())
-        .map(normalize_schema_token)
-        .unwrap_or_default();
+    let direct_answer_decision = obj
+        .get("decision")
+        .and_then(scalar_json_value_text)
+        .and_then(|text| canonical_first_layer_decision_token(&text))
+        .is_some_and(|decision| decision == FirstLayerDecision::DirectAnswer);
     let Some(value) = obj.get_mut("output_contract") else {
         return;
     };
@@ -4146,7 +4335,7 @@ fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>
         .map(normalize_output_semantic_kind_for_schema)
         .unwrap_or("none");
     let semantic_kind =
-        if raw_scalar_output_contract_token.as_deref() == Some("raw") && mode_token == "chat" {
+        if raw_scalar_output_contract_token.as_deref() == Some("raw") && direct_answer_decision {
             "none"
         } else {
             semantic_kind
@@ -4160,6 +4349,7 @@ fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>
         semantic_kind,
         kind if kind == OutputSemanticKind::FileNames.as_str()
             || kind == OutputSemanticKind::DirectoryNames.as_str()
+            || kind == OutputSemanticKind::DirectoryEntryGroups.as_str()
             || kind == OutputSemanticKind::FilePaths.as_str()
     ) && response_shape == "free"
     {
@@ -4170,6 +4360,7 @@ fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>
     }
     if semantic_kind == OutputSemanticKind::FileNames.as_str()
         || semantic_kind == OutputSemanticKind::DirectoryNames.as_str()
+        || semantic_kind == OutputSemanticKind::DirectoryEntryGroups.as_str()
         || semantic_kind == OutputSemanticKind::FilePaths.as_str()
         || semantic_kind == OutputSemanticKind::GitCommitSubject.as_str()
     {
@@ -4451,9 +4642,9 @@ fn apply_contract_repair_judge_output(
     if !repair.apply || repair.confidence < 0.60 {
         return false;
     }
-    if parse_mode_text(&repair.mode).is_none() {
+    let Some(decision) = parse_first_layer_decision_text(&repair.decision) else {
         return false;
-    }
+    };
     let Some(output_contract) = repair.output_contract else {
         return false;
     };
@@ -4461,7 +4652,7 @@ fn apply_contract_repair_judge_output(
         return false;
     };
 
-    out.mode = repair.mode;
+    out.decision = decision.as_str().to_string();
     out.needs_clarify = repair.needs_clarify;
     out.clarify_question = repair.clarify_question;
     if !repair.resolved_user_intent.trim().is_empty() {
@@ -4494,7 +4685,8 @@ fn append_route_reason(reason: &mut String, addition: &str) {
     }
 }
 
-/// Unified intent normalizer: one LLM call for resume decision + intent completion + schedule classification + needs_clarify + routed_mode.
+/// Unified intent normalizer: one LLM call for resume decision, intent completion,
+/// schedule classification, clarify state, and the first-layer decision.
 pub(crate) async fn run_intent_normalizer(
     state: &AppState,
     task: &ClaimedTask,
@@ -4533,7 +4725,7 @@ pub(crate) async fn run_intent_normalizer(
                 "intent_normalizer prompt load failed, falling back to safe clarify: task_id={} err={}",
                 task.task_id, err
             );
-            let fallback = empty_ask_clarify_decision(req, "normalizer_prompt_missing");
+            let fallback = empty_clarify_decision(req, "normalizer_prompt_missing");
             return normalizer_output_from_fallback(
                 req,
                 "prompt_missing_safe_clarify",
@@ -4661,7 +4853,7 @@ pub(crate) async fn run_intent_normalizer(
                 "intent_normalizer llm failed, falling back to safe clarify: task_id={} err={}",
                 task.task_id, err
             );
-            let fallback = empty_ask_clarify_decision(req, "normalizer_llm_failed");
+            let fallback = empty_clarify_decision(req, "normalizer_llm_failed");
             return normalizer_output_from_fallback(
                 req,
                 "llm_failed_safe_clarify",
@@ -4758,48 +4950,80 @@ pub(crate) async fn run_intent_normalizer(
         }
         let mut schedule_kind = parse_schedule_kind(&out.schedule_kind);
         let confidence = out.confidence.clamp(0.0, 1.0);
-        let parsed_mode = parse_mode_text(&out.mode);
         let parsed_decision = parse_first_layer_decision_text(&out.decision);
-        let mut routed_mode_raw = parsed_decision
-            .map(|decision| routed_mode_from_first_layer_decision(decision, parsed_mode))
-            .or(parsed_mode)
-            .unwrap_or(RoutedMode::AskClarify);
         let parsed_turn_type = parse_turn_type(&out.turn_type);
         let parsed_target_task_policy = parse_target_task_policy(&out.target_task_policy);
         let mut wants_file_delivery = out.wants_file_delivery;
         let mut output_contract =
             parse_output_contract(out.output_contract.clone(), wants_file_delivery);
+        let mut clarify_question = out.clarify_question.trim().to_string();
+        let mut execution_recipe_hint = parse_execution_recipe_hint(out.execution_recipe.clone());
+        let mut first_layer_decision = parsed_decision.unwrap_or_else(|| {
+            if out.needs_clarify {
+                FirstLayerDecision::Clarify
+            } else if route_has_structured_execution_signal(
+                &output_contract,
+                wants_file_delivery,
+                schedule_kind,
+                execution_recipe_hint,
+            ) {
+                FirstLayerDecision::PlannerExecute
+            } else {
+                FirstLayerDecision::DirectAnswer
+            }
+        });
+        let mut execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
+        let mut synced_route_label =
+            route_label_from_first_layer_decision(first_layer_decision, execution_finalize_style);
         let structural_contract_repair = apply_current_turn_structural_contract_repair(
             &mut output_contract,
             req,
             &req_surface,
             &state.skill_rt.workspace_root,
-            routed_mode_raw,
+            first_layer_decision,
             &out.answer_candidate,
             parsed_turn_type,
             parsed_target_task_policy,
         );
-        let mut clarify_question = out.clarify_question.trim().to_string();
-        let mut execution_recipe_hint = parse_execution_recipe_hint(out.execution_recipe.clone());
+        let self_contained_payload_repair =
+            apply_self_contained_payload_direct_answer_contract_repair(
+                &mut output_contract,
+                &req_surface,
+                wants_file_delivery,
+                schedule_kind,
+                execution_recipe_hint,
+                out.needs_clarify,
+                &out.answer_candidate,
+                &mut first_layer_decision,
+                &mut execution_finalize_style,
+            );
+        if matches!(first_layer_decision, FirstLayerDecision::PlannerExecute) {
+            execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
+            synced_route_label = route_label_from_first_layer_decision(
+                first_layer_decision,
+                execution_finalize_style,
+            );
+        }
         let decision_contract_conflict_repair = if !out.needs_clarify
-            && matches!(
-                parsed_decision,
-                Some(crate::FirstLayerDecision::DirectAnswer)
-            )
-            && matches!(parsed_mode, Some(RoutedMode::Act | RoutedMode::ChatAct))
+            && matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
             && route_has_structured_execution_signal(
                 &output_contract,
                 wants_file_delivery,
                 schedule_kind,
                 execution_recipe_hint,
             ) {
-            routed_mode_raw = parsed_mode.unwrap_or(RoutedMode::Act);
+            first_layer_decision = FirstLayerDecision::PlannerExecute;
+            execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
+            synced_route_label = route_label_from_first_layer_decision(
+                first_layer_decision,
+                execution_finalize_style,
+            );
             Some("direct_answer_decision_overridden_by_executable_contract")
         } else {
             None
         };
         let current_turn_anchor_repair_allowed = current_turn_anchor_drift_repair_allowed(
-            routed_mode_raw,
+            first_layer_decision,
             out.needs_clarify,
             &output_contract,
             wants_file_delivery,
@@ -4832,11 +5056,19 @@ pub(crate) async fn run_intent_normalizer(
                 );
             execution_recipe_hint = None;
         }
-        let mut routed_mode = crate::post_route_policy::enforce_content_evidence_execution_mode(
-            routed_mode_raw,
-            &output_contract,
-            out.needs_clarify,
-        );
+        if let Some(finalize_style) =
+            crate::post_route_policy::content_evidence_execution_finalize_style(
+                &output_contract,
+                out.needs_clarify,
+            )
+        {
+            first_layer_decision = FirstLayerDecision::PlannerExecute;
+            execution_finalize_style = finalize_style;
+            synced_route_label = route_label_from_first_layer_decision(
+                first_layer_decision,
+                execution_finalize_style,
+            );
+        }
         let mut needs_clarify = out.needs_clarify;
         let state_patch = out.state_patch.clone().filter(is_meaningful_state_patch);
         let answer_candidate_path_repair = apply_answer_candidate_path_evidence_repair(
@@ -4845,7 +5077,8 @@ pub(crate) async fn run_intent_normalizer(
             state_patch.as_ref(),
             &state.skill_rt.workspace_root,
             needs_clarify,
-            &mut routed_mode,
+            &mut first_layer_decision,
+            &mut execution_finalize_style,
         );
         let structured_clarify_repair = apply_spurious_structured_observation_clarify_repair(
             &mut output_contract,
@@ -4855,10 +5088,12 @@ pub(crate) async fn run_intent_normalizer(
             state_patch.as_ref(),
             &mut needs_clarify,
             &mut clarify_question,
-            &mut routed_mode,
+            &mut first_layer_decision,
+            &mut execution_finalize_style,
         );
-        let executionless_route_repair = downgrade_executionless_route_to_chat(
-            &mut routed_mode,
+        let executionless_route_repair = downgrade_executionless_route_to_direct_answer(
+            &mut first_layer_decision,
+            &mut execution_finalize_style,
             needs_clarify,
             &output_contract,
             wants_file_delivery,
@@ -4877,7 +5112,7 @@ pub(crate) async fn run_intent_normalizer(
         let mut target_task_policy = infer_missing_target_policy_from_contract(
             parsed_target_task_policy,
             parsed_turn_type,
-            routed_mode,
+            first_layer_decision,
             needs_clarify,
             schedule_kind,
             out.should_refresh_long_term_memory,
@@ -4886,7 +5121,7 @@ pub(crate) async fn run_intent_normalizer(
         let mut turn_type = infer_missing_turn_type_from_policy(
             parsed_turn_type,
             target_task_policy,
-            routed_mode,
+            first_layer_decision,
             needs_clarify,
             schedule_kind,
             out.should_refresh_long_term_memory,
@@ -4900,7 +5135,7 @@ pub(crate) async fn run_intent_normalizer(
         if should_detach_bare_acknowledgement_from_active_task(
             turn_type,
             target_task_policy,
-            routed_mode,
+            first_layer_decision,
             &output_contract,
             state_patch.as_ref(),
             out.should_refresh_long_term_memory,
@@ -4921,6 +5156,14 @@ pub(crate) async fn run_intent_normalizer(
             );
         }
         if let Some(repair_reason) = structural_contract_repair {
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
+        }
+        if let Some(repair_reason) = self_contained_payload_repair {
             if reason.trim().is_empty() {
                 reason = repair_reason.to_string();
             } else if !reason.contains(repair_reason) {
@@ -5001,11 +5244,11 @@ pub(crate) async fn run_intent_normalizer(
                 crate::truncate_for_log(&scope_hint)
             );
         }
-        if should_downgrade_orphan_output_shape_clarify_to_chat(
+        if should_downgrade_orphan_output_shape_clarify_to_direct_answer(
             session_snapshot,
             turn_type,
             target_task_policy,
-            routed_mode,
+            first_layer_decision,
             &output_contract,
             state_patch.as_ref(),
             out.should_refresh_long_term_memory,
@@ -5013,7 +5256,8 @@ pub(crate) async fn run_intent_normalizer(
         ) {
             needs_clarify = false;
             clarify_question.clear();
-            routed_mode = RoutedMode::Chat;
+            first_layer_decision = FirstLayerDecision::DirectAnswer;
+            execution_finalize_style = ActFinalizeStyle::Plain;
             turn_type = None;
             target_task_policy = None;
             force_current_request_resolved_intent = true;
@@ -5067,7 +5311,8 @@ pub(crate) async fn run_intent_normalizer(
             &mut turn_type,
             &mut target_task_policy,
             out.attachment_processing_required,
-            &mut routed_mode,
+            &mut first_layer_decision,
+            &mut execution_finalize_style,
             &mut needs_clarify,
             schedule_kind,
             out.should_refresh_long_term_memory,
@@ -5094,13 +5339,14 @@ pub(crate) async fn run_intent_normalizer(
             turn_type,
             target_task_policy,
             out.attachment_processing_required,
-            routed_mode,
+            first_layer_decision,
             &output_contract,
             state_patch.as_ref(),
         ) {
             needs_clarify = false;
             clarify_question.clear();
-            routed_mode = RoutedMode::Chat;
+            first_layer_decision = FirstLayerDecision::DirectAnswer;
+            execution_finalize_style = ActFinalizeStyle::Plain;
             if reason.trim().is_empty() {
                 reason = "active_task_scope_update_resolves_clarify".to_string();
             } else if !reason.contains("active_task_scope_update_resolves_clarify") {
@@ -5113,24 +5359,25 @@ pub(crate) async fn run_intent_normalizer(
                 crate::truncate_for_log(req)
             );
         }
-        if should_route_active_task_mutation_to_chat(
+        if should_route_active_task_mutation_to_direct_answer(
             req,
             session_snapshot,
             turn_type,
             target_task_policy,
             out.attachment_processing_required,
-            routed_mode,
+            first_layer_decision,
             &output_contract,
             state_patch.as_ref(),
         ) {
-            routed_mode = RoutedMode::Chat;
+            first_layer_decision = FirstLayerDecision::DirectAnswer;
+            execution_finalize_style = ActFinalizeStyle::Plain;
             if reason.trim().is_empty() {
-                reason = "active_task_mutation_to_chat".to_string();
-            } else if !reason.contains("active_task_mutation_to_chat") {
-                reason.push_str("; active_task_mutation_to_chat");
+                reason = "active_task_mutation_to_direct_answer".to_string();
+            } else if !reason.contains("active_task_mutation_to_direct_answer") {
+                reason.push_str("; active_task_mutation_to_direct_answer");
             }
             info!(
-                "{} intent_normalizer task_id={} turn_analysis_override=active_task_mutation_to_chat input={}",
+                "{} intent_normalizer task_id={} turn_analysis_override=active_task_mutation_to_direct_answer input={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 crate::truncate_for_log(req)
@@ -5142,13 +5389,14 @@ pub(crate) async fn run_intent_normalizer(
             turn_type,
             target_task_policy,
             out.attachment_processing_required,
-            routed_mode,
+            first_layer_decision,
             &output_contract,
             state_patch.as_ref(),
         ) {
             needs_clarify = false;
             clarify_question.clear();
-            routed_mode = RoutedMode::Chat;
+            first_layer_decision = FirstLayerDecision::DirectAnswer;
+            execution_finalize_style = ActFinalizeStyle::Plain;
             if reason.trim().is_empty() {
                 reason = "active_task_replace_resolves_clarify".to_string();
             } else if !reason.contains("active_task_replace_resolves_clarify") {
@@ -5167,13 +5415,14 @@ pub(crate) async fn run_intent_normalizer(
             turn_type,
             target_task_policy,
             out.attachment_processing_required,
-            routed_mode,
+            first_layer_decision,
             &output_contract,
             state_patch.as_ref(),
         ) {
             needs_clarify = false;
             clarify_question.clear();
-            routed_mode = RoutedMode::Chat;
+            first_layer_decision = FirstLayerDecision::DirectAnswer;
+            execution_finalize_style = ActFinalizeStyle::Plain;
             if reason.trim().is_empty() {
                 reason = "active_task_append_resolves_clarify".to_string();
             } else if !reason.contains("active_task_append_resolves_clarify") {
@@ -5215,28 +5464,29 @@ pub(crate) async fn run_intent_normalizer(
                 )
             })
             .unwrap_or_else(|| "none".to_string());
-        if routed_mode != routed_mode_raw {
+        let derived_route_label =
+            route_label_from_first_layer_decision(first_layer_decision, execution_finalize_style);
+        if derived_route_label != synced_route_label {
             info!(
-                "{} intent_normalizer task_id={} mode_override={:?} -> {:?} reason=content_evidence_requires_execution locator_kind={:?} shape={:?}",
+                "{} intent_normalizer task_id={} derived_route_label_override={} -> {} reason=content_evidence_requires_execution locator_kind={:?} shape={:?}",
                 crate::highlight_tag("routing"),
                 task.task_id,
-                routed_mode_raw,
-                routed_mode,
+                synced_route_label,
+                derived_route_label,
                 output_contract.locator_kind,
                 output_contract.response_shape
             );
         }
-        let first_layer_decision_for_log = first_layer_decision_from_mode(routed_mode);
         info!(
-            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} decision={:?} mode={:?} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} contract_repair_source={} contract_repair_detail={} turn_analysis={}",
+            "{} intent_normalizer task_id={} input={} resolved_user_intent={} resume_behavior={:?} schedule_kind={:?} decision={:?} derived_route_label={} wants_file_delivery={} needs_clarify={} reason={} confidence={} output_contract.shape={:?} output_contract.delivery_required={} output_contract.requires_content_evidence={} output_contract.locator_kind={:?} execution_recipe_hint={} contract_repair_source={} contract_repair_detail={} turn_analysis={}",
             crate::highlight_tag("routing"),
             task.task_id,
             crate::truncate_for_log(req),
             crate::truncate_for_log(&resolved_user_intent),
             resume_behavior,
             schedule_kind,
-            first_layer_decision_for_log,
-            routed_mode,
+            first_layer_decision,
+            derived_route_label,
             wants_file_delivery,
             needs_clarify,
             crate::truncate_for_log(&reason),
@@ -5266,13 +5516,25 @@ pub(crate) async fn run_intent_normalizer(
                 session_snapshot,
                 turn_type,
                 target_task_policy,
-                routed_mode,
+                first_layer_decision,
                 &output_contract,
             );
-        let (needs_clarify_eff, clarify_question_eff) = if !needs_clarify
-            && bare_path_only
-            && !bare_path_fills_active_observable_task
+        let (needs_clarify_eff, clarify_question_eff) = if bare_path_only
+            && bare_path_fills_active_observable_task
         {
+            if reason.trim().is_empty() {
+                reason = "bare_path_fills_active_observable_task".to_string();
+            } else if !reason.contains("bare_path_fills_active_observable_task") {
+                reason.push_str("; bare_path_fills_active_observable_task");
+            }
+            info!(
+                    "{} intent_normalizer task_id={} bare_path_active_observable_fill needs_clarify=false path_token={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    crate::truncate_for_log(req.trim())
+                );
+            (false, String::new())
+        } else if !needs_clarify && bare_path_only {
             if reason.trim().is_empty() {
                 reason = "bare_path_no_verb".to_string();
             } else if !reason.contains("bare_path_no_verb") {
@@ -5288,12 +5550,42 @@ pub(crate) async fn run_intent_normalizer(
         } else {
             (needs_clarify, clarify_question)
         };
-        let routed_mode_eff = if needs_clarify_eff && !needs_clarify {
-            RoutedMode::AskClarify
+        let bare_path_promotes_to_execute = !needs_clarify_eff
+            && bare_path_only
+            && bare_path_fills_active_observable_task
+            && matches!(first_layer_decision, FirstLayerDecision::Clarify);
+        let structured_execution_signal = route_has_structured_execution_signal(
+            &output_contract,
+            wants_file_delivery,
+            schedule_kind,
+            execution_recipe_hint,
+        );
+        let first_layer_decision_eff = if needs_clarify_eff {
+            FirstLayerDecision::Clarify
+        } else if bare_path_promotes_to_execute
+            || structured_execution_signal
+            || matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
+        {
+            FirstLayerDecision::PlannerExecute
         } else {
-            routed_mode
+            FirstLayerDecision::DirectAnswer
         };
-        let first_layer_decision_eff = first_layer_decision_from_mode(routed_mode_eff);
+        let execution_finalize_style_eff =
+            if matches!(first_layer_decision_eff, FirstLayerDecision::PlannerExecute) {
+                if bare_path_promotes_to_execute {
+                    crate::post_route_policy::content_evidence_execution_finalize_style(
+                        &output_contract,
+                        false,
+                    )
+                    .unwrap_or_else(|| execution_finalize_style_for_contract(&output_contract))
+                } else if structured_execution_signal {
+                    execution_finalize_style_for_contract(&output_contract)
+                } else {
+                    execution_finalize_style
+                }
+            } else {
+                ActFinalizeStyle::Plain
+            };
         return IntentNormalizerOutput {
             resolved_user_intent,
             resume_behavior,
@@ -5309,7 +5601,7 @@ pub(crate) async fn run_intent_normalizer(
             output_contract,
             execution_recipe_hint,
             first_layer_decision: first_layer_decision_eff,
-            routed_mode: routed_mode_eff,
+            execution_finalize_style: execution_finalize_style_eff,
             turn_analysis,
             fallback_source: None,
         };
@@ -5321,7 +5613,7 @@ pub(crate) async fn run_intent_normalizer(
     );
     // Planner-first: do not synthesize Act/ChatAct locally on parser failure.
     let _ = (resume_context, binding_context);
-    let fallback = empty_ask_clarify_decision(req, "normalizer_parse_failed");
+    let fallback = empty_clarify_decision(req, "normalizer_parse_failed");
     normalizer_output_from_fallback(req, "parse_failed_safe_clarify", fallback, None)
 }
 
@@ -5366,9 +5658,8 @@ fn token_looks_like_pathish_filename(token: &str) -> bool {
 /// Fallback `RouteDecision` used when normalizer LLM fails or its output cannot be parsed.
 /// It intentionally stays on AskClarify instead of using local semantic heuristics as
 /// a substitute planner.
-fn empty_ask_clarify_decision(user_request: &str, reason: &str) -> RouteDecision {
+fn empty_clarify_decision(user_request: &str, reason: &str) -> RouteDecision {
     RouteDecision {
-        mode: RoutedMode::AskClarify,
         resolved_user_intent: user_request.trim().to_string(),
         needs_clarify: true,
         clarify_question: String::new(),
@@ -5584,19 +5875,6 @@ fn safe_fallback_source_should_try_llm(source: crate::fallback::ClarifyFallbackS
     )
 }
 
-/// Parses the already-normalized mode enum. Free-form explanatory text is intentionally rejected
-/// here so protocol repair stays in `normalize_intent_normalizer_raw_for_schema(...)` instead of
-/// becoming substring-based route inference.
-fn parse_mode_text(raw: &str) -> Option<RoutedMode> {
-    match canonical_normalizer_mode_token(raw)? {
-        "ask_clarify" => Some(RoutedMode::AskClarify),
-        "chat_act" => Some(RoutedMode::ChatAct),
-        "act" => Some(RoutedMode::Act),
-        "chat" => Some(RoutedMode::Chat),
-        _ => None,
-    }
-}
-
 pub(crate) async fn try_handle_schedule_request(
     state: &AppState,
     task: &ClaimedTask,
@@ -5609,15 +5887,17 @@ pub(crate) async fn try_handle_schedule_request(
 #[cfg(test)]
 mod tests {
     use super::{
+        apply_self_contained_payload_direct_answer_contract_repair,
         normalizer_output_from_fallback, parse_execution_recipe_hint, ClarifyQuestionPolicy,
         IntentExecutionRecipeOut, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
-        OutputResponseShape, OutputSemanticKind, RouteDecision, TargetTaskPolicy, TurnType,
+        OutputResponseShape, OutputSemanticKind, RouteDecision, ScheduleKind, TargetTaskPolicy,
+        TurnType,
     };
     use crate::{
         execution_recipe::{
             ExecutionRecipeKind, ExecutionRecipeProfile, ExecutionRecipeTargetScope,
         },
-        RoutedMode,
+        FirstLayerDecision,
     };
 
     #[test]
@@ -5635,11 +5915,81 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_maps_recall_mode_to_chat() {
-        let raw = r#"{"resolved_user_intent":"client-like-continuous-123","needs_clarify":false,"clarify_question":"","reason":"recent memory recall","confidence":1.0,"mode":"recall"}"#;
+    fn inline_json_answer_candidate_can_repair_to_direct_answer_contract() {
+        let request = r#"把这个 JSON 数组按 score 从高到低排序，只输出 name 顺序：[{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+        let mut contract = IntentOutputContract {
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            locator_hint: "/tmp/rustclaw".to_string(),
+            semantic_kind: OutputSemanticKind::StructuredKeys,
+            ..IntentOutputContract::default()
+        };
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize = crate::ActFinalizeStyle::ChatWrapped;
+
+        let repair = apply_self_contained_payload_direct_answer_contract_repair(
+            &mut contract,
+            &surface,
+            false,
+            ScheduleKind::None,
+            None,
+            false,
+            "beta, alpha",
+            &mut decision,
+            &mut finalize,
+        );
+
+        assert_eq!(
+            repair,
+            Some("self_contained_payload_direct_answer_contract")
+        );
+        assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+        assert_eq!(finalize, crate::ActFinalizeStyle::Plain);
+        assert!(!contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+        assert!(contract.locator_hint.is_empty());
+    }
+
+    #[test]
+    fn inline_json_direct_answer_repair_rejects_explicit_path() {
+        let request = r#"读取 data/input.json 并按 [{"field":"score"}] 排序"#;
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+        let mut contract = IntentOutputContract {
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::StructuredKeys,
+            ..IntentOutputContract::default()
+        };
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize = crate::ActFinalizeStyle::ChatWrapped;
+
+        let repair = apply_self_contained_payload_direct_answer_contract_repair(
+            &mut contract,
+            &surface,
+            false,
+            ScheduleKind::None,
+            None,
+            false,
+            "beta, alpha",
+            &mut decision,
+            &mut finalize,
+        );
+
+        assert_eq!(repair, None);
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert!(contract.requires_content_evidence);
+    }
+
+    #[test]
+    fn normalizer_schema_normalization_preserves_direct_answer_decision() {
+        let raw = r#"{"resolved_user_intent":"client-like-continuous-123","needs_clarify":false,"clarify_question":"","reason":"recent memory recall","confidence":1.0,"decision":"direct_answer"}"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("direct_answer")
+        );
         assert_eq!(
             value.get("resolved_user_intent").and_then(|v| v.as_str()),
             Some("client-like-continuous-123")
@@ -5647,36 +5997,27 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_maps_structured_mode_aliases_only() {
-        let raw = r#"{"resolved_user_intent":"check then explain","needs_clarify":false,"mode":"chat+act"}"#;
+    fn normalizer_schema_normalization_preserves_planner_and_direct_decisions() {
+        let raw = r#"{"resolved_user_intent":"check then explain","needs_clarify":false,"decision":"planner_execute"}"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat_act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
 
-        let raw = r#"{"resolved_user_intent":"not an execution request","needs_clarify":false,"mode":"not act"}"#;
+        let raw = r#"{"resolved_user_intent":"not an execution request","needs_clarify":false,"decision":"direct_answer"}"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat"));
-    }
-
-    #[test]
-    fn parse_mode_text_rejects_free_form_substring_matches() {
-        assert_eq!(super::parse_mode_text("act"), Some(RoutedMode::Act));
         assert_eq!(
-            super::parse_mode_text("ask_clarify"),
-            Some(RoutedMode::AskClarify)
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("direct_answer")
         );
-        assert_eq!(
-            super::parse_mode_text("chat+act"),
-            Some(RoutedMode::ChatAct)
-        );
-        assert!(super::parse_mode_text("not act").is_none());
-        assert!(super::parse_mode_text("the mode should be act").is_none());
     }
 
     #[test]
     fn normalizer_schema_normalization_preserves_object_resolved_intent() {
-        let raw = r#"{"resolved_user_intent":{"test_id":"client-like-continuous-123"},"needs_clarify":false,"mode":"chat"}"#;
+        let raw = r#"{"resolved_user_intent":{"test_id":"client-like-continuous-123"},"needs_clarify":false,"decision":"direct_answer"}"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
         assert_eq!(
@@ -5687,23 +6028,29 @@ mod tests {
 
     #[test]
     fn normalizer_schema_normalization_accepts_percent_confidence() {
-        let raw = r#"{"resolved_user_intent":"检查当前目录隐藏文件","needs_clarify":false,"clarify_question":"","reason":"local inspection","confidence":100,"mode":"act"}"#;
+        let raw = r#"{"resolved_user_intent":"检查当前目录隐藏文件","needs_clarify":false,"clarify_question":"","reason":"local inspection","confidence":100,"decision":"planner_execute"}"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
         assert_eq!(value.get("confidence").and_then(|v| v.as_f64()), Some(1.0));
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
     }
 
     #[test]
     fn normalizer_schema_normalization_recovers_stray_quote_after_bool() {
-        let raw = r#"{"resolved_user_intent":"检查仓库中是否存在 rustclaw.service","needs_clarify":false,"clarify_question":"","reason":"repo inspection","confidence":0.95,"mode":"act","should_refresh_long_term_memory":false","agent_display_name_hint":"","output_contract":{"response_shape":"strict","requires_content_evidence":true,"delivery_required":false,"locator_kind":"current_workspace","delivery_intent":"none","semantic_kind":"existence_with_path","locator_hint":"rustclaw.service","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}}"#;
+        let raw = r#"{"resolved_user_intent":"检查仓库中是否存在 rustclaw.service","needs_clarify":false,"clarify_question":"","reason":"repo inspection","confidence":0.95,"decision":"planner_execute","should_refresh_long_term_memory":false","agent_display_name_hint":"","output_contract":{"response_shape":"strict","requires_content_evidence":true,"delivery_required":false,"locator_kind":"current_workspace","delivery_intent":"none","semantic_kind":"existence_with_path","locator_hint":"rustclaw.service","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}}"#;
         assert!(serde_json::from_str::<serde_json::Value>(raw).is_err());
         let normalized = super::normalize_intent_normalizer_raw_for_schema(
             raw,
             "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/semantic_kind")
@@ -5730,7 +6077,10 @@ mod tests {
             value.get("resolved_user_intent").and_then(|v| v.as_str()),
             Some("列出 logs 目录下的前 10 个文件名，不要读内容")
         );
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/semantic_kind")
@@ -5760,7 +6110,7 @@ mod tests {
             .contains("output_contract_semantic_kind_normalized"));
         assert!(report
             .detail_csv()
-            .contains("mode_promoted_by_output_contract"));
+            .contains("decision_promoted_by_output_contract"));
     }
 
     #[test]
@@ -5768,7 +6118,7 @@ mod tests {
         let raw = r#"{
           "resolved_user_intent":"列出 logs 目录下前 10 个文件名，不读取内容",
           "needs_clarify":false,
-          "mode":"tools",
+          "decision":"planner_execute",
           "output_contract":null,
           "execution_recipe":{
             "command":"ls -1 logs/ | head -n 10",
@@ -5799,7 +6149,7 @@ mod tests {
           "resolved_user_intent":"读取 /tmp/clawd.log 文件的最后 2 行内容",
           "needs_clarify":false,
           "decision":"direct_answer",
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"file_tail_lines",
           "execution_recipe":{
             "command":"tail -n 2 /tmp/clawd.log",
@@ -5813,7 +6163,10 @@ mod tests {
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/requires_content_evidence")
@@ -5842,7 +6195,7 @@ mod tests {
         let raw = r#"{
           "resolved_user_intent":"总结刚才的对话",
           "needs_clarify":false,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"summary",
           "execution_recipe":["SUMMARIZE"]
         }"#;
@@ -5864,7 +6217,7 @@ mod tests {
         let raw = r#"{
           "resolved_user_intent":"检查当前目录状态",
           "needs_clarify":false,
-          "mode":"act",
+          "decision":"planner_execute",
           "output_contract":{
             "response_shape":"free",
             "requires_content_evidence":true,
@@ -6017,7 +6370,7 @@ mod tests {
         let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
 
         assert!(!super::current_turn_anchor_drift_repair_allowed(
-            RoutedMode::Chat,
+            FirstLayerDecision::DirectAnswer,
             false,
             &contract,
             false,
@@ -6036,7 +6389,7 @@ mod tests {
         let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
 
         assert!(super::current_turn_anchor_drift_repair_allowed(
-            RoutedMode::Chat,
+            FirstLayerDecision::DirectAnswer,
             false,
             &contract,
             false,
@@ -6052,7 +6405,7 @@ mod tests {
         let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
 
         assert!(super::current_turn_anchor_drift_repair_allowed(
-            RoutedMode::Act,
+            FirstLayerDecision::PlannerExecute,
             false,
             &contract,
             false,
@@ -6074,7 +6427,7 @@ mod tests {
         };
 
         assert!(!super::current_turn_anchor_drift_repair_allowed(
-            RoutedMode::ChatAct,
+            FirstLayerDecision::PlannerExecute,
             false,
             &contract,
             false,
@@ -6096,7 +6449,7 @@ mod tests {
         };
 
         assert!(!super::current_turn_anchor_drift_repair_allowed(
-            RoutedMode::ChatAct,
+            FirstLayerDecision::PlannerExecute,
             false,
             &contract,
             false,
@@ -6112,7 +6465,7 @@ mod tests {
           "apply": true,
           "reason": "malformed_contract_semantically_requires_directory_listing",
           "confidence": 0.91,
-          "mode": "act",
+          "decision": "planner_execute",
           "needs_clarify": false,
           "clarify_question": "",
           "resolved_user_intent": "列出 logs 目录下前 3 个文件名，不读取内容",
@@ -6152,7 +6505,6 @@ mod tests {
             reason: "malformed recipe text was ignored".to_string(),
             confidence: 0.5,
             decision: "direct_answer".to_string(),
-            mode: "chat".to_string(),
             schedule_intent: None,
             output_contract: Some(super::IntentOutputContractOut::default()),
             execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
@@ -6166,7 +6518,7 @@ mod tests {
             apply: true,
             reason: "malformed_contract_semantically_requires_directory_listing".to_string(),
             confidence: 0.91,
-            mode: "act".to_string(),
+            decision: "planner_execute".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
             resolved_user_intent: "列出 document 目录下所有文件名，只输出文件名列表".to_string(),
@@ -6190,7 +6542,7 @@ mod tests {
 
         assert!(super::apply_contract_repair_judge_output(&mut out, repair));
 
-        assert_eq!(out.mode, "act");
+        assert_eq!(out.decision, "planner_execute");
         assert_eq!(out.confidence, 0.91);
         assert!(out.reason.contains("llm_semantic_contract_repair"));
         let contract = super::parse_output_contract(out.output_contract, false);
@@ -6215,7 +6567,6 @@ mod tests {
             reason: String::new(),
             confidence: 0.8,
             decision: "direct_answer".to_string(),
-            mode: "chat".to_string(),
             schedule_intent: None,
             output_contract: Some(super::IntentOutputContractOut {
                 response_shape: "scalar".to_string(),
@@ -6257,7 +6608,6 @@ mod tests {
             reason: String::new(),
             confidence: 0.8,
             decision: "direct_answer".to_string(),
-            mode: "chat".to_string(),
             schedule_intent: None,
             output_contract: Some(super::IntentOutputContractOut::default()),
             execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
@@ -6271,7 +6621,7 @@ mod tests {
             apply: true,
             reason: "uncertain".to_string(),
             confidence: 0.59,
-            mode: "act".to_string(),
+            decision: "planner_execute".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
             resolved_user_intent: "bad".to_string(),
@@ -6290,7 +6640,7 @@ mod tests {
         };
 
         assert!(!super::apply_contract_repair_judge_output(&mut out, repair));
-        assert_eq!(out.mode, "chat");
+        assert_eq!(out.decision, "direct_answer");
         assert_eq!(out.resolved_user_intent, "总结刚才的对话");
     }
 
@@ -6310,7 +6660,7 @@ mod tests {
             "in one sentence tell me if anything looks abnormal",
             &surface,
             std::path::Path::new("/workspace"),
-            RoutedMode::Chat,
+            FirstLayerDecision::DirectAnswer,
             "",
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
@@ -6335,7 +6685,7 @@ mod tests {
             "summarize app.log briefly",
             &surface,
             std::path::Path::new("/workspace"),
-            RoutedMode::Chat,
+            FirstLayerDecision::DirectAnswer,
             "",
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
@@ -6360,7 +6710,7 @@ mod tests {
           "clarify_question":null,
           "reason":"directory listing",
           "confidence":0.7,
-          "mode":"search",
+          "decision":"planner_execute",
           "output_contract":{"response_shape":"list","semantic_kind":"file_list"},
           "execution_recipe":"list_md_files_excluding_readme",
           "turn_type":"file_query",
@@ -6374,7 +6724,10 @@ mod tests {
             "列出 document 目录里所有 .md 文件，但排除 README，告诉我还剩哪些",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/response_shape")
@@ -6409,7 +6762,7 @@ mod tests {
           "clarify_question":"",
           "reason":"need file evidence",
           "confidence":0.78,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"summary",
           "execution_recipe":["READ","SUMMARIZE"],
           "turn_type":"",
@@ -6424,7 +6777,10 @@ mod tests {
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("direct_answer")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/requires_content_evidence")
@@ -6453,7 +6809,7 @@ mod tests {
           "clarify_question":"",
           "reason":"clear file read and summary request",
           "confidence":0.92,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"非技术用户可理解的一句话总结",
           "execution_recipe":"read_file:/home/guagua/rustclaw/README.md,line_range:[1-50],summarize:one_sentence_non_technical",
           "turn_type":"execute",
@@ -6468,7 +6824,10 @@ mod tests {
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("direct_answer")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/requires_content_evidence")
@@ -6497,14 +6856,17 @@ mod tests {
           "needs_clarify":false,
           "reason":"chat summary",
           "confidence":0.8,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"summary",
           "execution_recipe":["SUMMARIZE"]
         }"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "总结刚才的对话");
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
 
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("direct_answer")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/requires_content_evidence")
@@ -6586,7 +6948,7 @@ mod tests {
 
     #[test]
     fn normalizer_schema_normalization_coerces_string_bool_contract_fields() {
-        let raw = r#"{"resolved_user_intent":"列出 document 目录文件名","needs_clarify":false,"mode":"act","output_contract":{"response_shape":"strict","requires_content_evidence":"true","delivery_required":"filename_list","locator_kind":"path","delivery_intent":"返回 document 目录下的文件名列表","semantic_kind":"filename_list","locator_hint":"document"}}"#;
+        let raw = r#"{"resolved_user_intent":"列出 document 目录文件名","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"strict","requires_content_evidence":"true","delivery_required":"filename_list","locator_kind":"path","delivery_intent":"返回 document 目录下的文件名列表","semantic_kind":"filename_list","locator_hint":"document"}}"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(
             raw,
             "列出 document 目录下有哪些文件，只输出文件名列表",
@@ -6627,7 +6989,7 @@ mod tests {
           "clarify_question":null,
           "reason":"User explicitly requests file listing for the 'document' directory.",
           "confidence":0.98,
-          "mode":"command",
+          "decision":"planner_execute",
           "output_contract":"list_of_strings",
           "execution_recipe":"list_files(directory='document', include_subdirs=False)",
           "turn_type":"command",
@@ -6641,7 +7003,10 @@ mod tests {
             "列出 document 目录下有哪些文件，只输出文件名列表",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/response_shape")
@@ -6682,7 +7047,7 @@ mod tests {
           "clarify_question":null,
           "reason":"用户明确要求列出 document 目录下的文件列表",
           "confidence":"high",
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"text",
           "execution_recipe":"执行 ls -1 document/ 获取文件名列表",
           "turn_type":"act",
@@ -6696,7 +7061,10 @@ mod tests {
             "列出 document 目录下有哪些文件，只输出文件名列表",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("direct_answer")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/response_shape")
@@ -6737,7 +7105,7 @@ mod tests {
           "clarify_question":"",
           "reason":"clear local filesystem observation",
           "confidence":0.92,
-          "mode":"local_exec",
+          "decision":"planner_execute",
           "output_contract":"",
           "execution_recipe":"list_hidden_files",
           "turn_type":"task",
@@ -6751,7 +7119,10 @@ mod tests {
             "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/response_shape")
@@ -6785,7 +7156,7 @@ mod tests {
           "needs_clarify":false,
           "reason":"local filesystem observation",
           "confidence":0.92,
-          "mode":"local",
+          "decision":"planner_execute",
           "output_contract":"json",
           "execution_recipe":[
             "ls -a /home/guagua/rustclaw | grep '^\\.'",
@@ -6798,7 +7169,10 @@ mod tests {
             "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/response_shape")
@@ -6832,7 +7206,7 @@ mod tests {
           "needs_clarify":false,
           "reason":"requires actual directory observation",
           "confidence":0.95,
-          "mode":"execution",
+          "decision":"planner_execute",
           "output_contract":{"response_shape":"strict","semantic_kind":"existence_with_path","requires_content_evidence":true},
           "execution_recipe":{
             "command":"ls -la /home/guagua/rustclaw | grep '^\\.' | head -3",
@@ -6846,7 +7220,10 @@ mod tests {
             "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/semantic_kind")
@@ -6874,7 +7251,7 @@ mod tests {
           "needs_clarify":false,
           "reason":"local command can list directory entries",
           "confidence":0.91,
-          "mode":"tools",
+          "decision":"planner_execute",
           "output_contract":null,
           "execution_recipe":{
             "action":"local_exec",
@@ -6887,7 +7264,10 @@ mod tests {
             "列出 logs 目录下的前 10 个文件名",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/response_shape")
@@ -6929,7 +7309,7 @@ mod tests {
           "reason":"A local command payload supplies the evidence source.",
           "confidence":0.95,
           "decision":"planner_execute",
-          "mode":"chat_act",
+          "decision":"planner_execute",
           "output_contract":{
             "response_shape":"free",
             "requires_content_evidence":true,
@@ -6999,7 +7379,10 @@ mod tests {
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
         assert!(report.source_csv().contains("tool_payload"));
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/requires_content_evidence")
@@ -7021,7 +7404,7 @@ mod tests {
           "needs_clarify":false,
           "reason":"repo inspection",
           "confidence":0.87,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"strict",
           "execution_recipe":"check_file"
         }"#;
@@ -7030,7 +7413,10 @@ mod tests {
             "检查仓库里有没有 rustclaw.service",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("direct_answer")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/response_shape")
@@ -7064,7 +7450,7 @@ mod tests {
           "needs_clarify":false,
           "reason":"file existence check",
           "confidence":0.95,
-          "mode":"act",
+          "decision":"planner_execute",
           "output_contract":"raw_text",
           "execution_recipe":"find /home/guagua/rustclaw -name 'rustclaw.service' 2>/dev/null",
           "turn_type":"ask",
@@ -7075,7 +7461,10 @@ mod tests {
             "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/response_shape")
@@ -7108,7 +7497,7 @@ mod tests {
           "needs_clarify":false,
           "reason":"local file listing",
           "confidence":0.9,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"file_names_only",
           "execution_recipe":"ls document/"
         }"#;
@@ -7117,7 +7506,10 @@ mod tests {
             "列出 document 目录下有哪些文件，只输出文件名列表",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value
                 .pointer("/output_contract/response_shape")
@@ -7152,7 +7544,7 @@ mod tests {
           "needs_clarify":false,
           "reason":"用户明确请求列出 document 目录下的文件，目标清晰，属于简单文件列表操作",
           "confidence":0.98,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":{"response_shape":"scalar","semantic_kind":"scalar_path_only","requires_content_evidence":false},
           "execution_recipe":"LIST_FILES",
           "turn_type":"act"
@@ -7189,7 +7581,7 @@ mod tests {
 
     #[test]
     fn normalizer_schema_normalization_repairs_exact_format_scalar_comparison_contract() {
-        let raw = r#"{"resolved_user_intent":"读取 UI/package.json 的 name 字段和 crates/clawd/Cargo.toml 的 package.name 字段，对比后单行输出：{UI名}, {Cargo名}, {一样|不一样}","needs_clarify":false,"mode":"act","output_contract":{"response_shape":"一行字符串，格式为：{UI_name}, {Cargo_name}, {一样|不一样}","requires_content_evidence":false,"delivery_required":true,"locator_kind":"none","delivery_intent":"直接返回对比结果","semantic_kind":"key_value_comparison","locator_hint":""}}"#;
+        let raw = r#"{"resolved_user_intent":"读取 UI/package.json 的 name 字段和 crates/clawd/Cargo.toml 的 package.name 字段，对比后单行输出：{UI名}, {Cargo名}, {一样|不一样}","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"一行字符串，格式为：{UI_name}, {Cargo_name}, {一样|不一样}","requires_content_evidence":false,"delivery_required":true,"locator_kind":"none","delivery_intent":"直接返回对比结果","semantic_kind":"key_value_comparison","locator_hint":""}}"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(
             raw,
             "读取 UI/package.json 里的 name，再读取 crates/clawd/Cargo.toml 里的 package.name，最后只用一行输出：前者、后者、一样或不一样",
@@ -7214,7 +7606,7 @@ mod tests {
             Some("none")
         );
 
-        let raw = r#"{"resolved_user_intent":"比较UI/package.json的name字段与crates/clawd/Cargo.toml的package.name字段，输出一行格式：<UI名>, <Cargo名>, <一样|不一样>","needs_clarify":false,"mode":"act","output_contract":{"response_shape":"一行文字","requires_content_evidence":false,"delivery_required":"执行文件系统读取后输出单行结果","locator_hint":"UI/package.json, crates/clawd/Cargo.toml"}}"#;
+        let raw = r#"{"resolved_user_intent":"比较UI/package.json的name字段与crates/clawd/Cargo.toml的package.name字段，输出一行格式：<UI名>, <Cargo名>, <一样|不一样>","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"一行文字","requires_content_evidence":false,"delivery_required":"执行文件系统读取后输出单行结果","locator_hint":"UI/package.json, crates/clawd/Cargo.toml"}}"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(
             raw,
             "读取 UI/package.json 里的 name，再读取 crates/clawd/Cargo.toml 里的 package.name，最后只用一行输出：前者、后者、一样或不一样",
@@ -7233,7 +7625,7 @@ mod tests {
             Some(false)
         );
 
-        let raw = r#"{"resolved_user_intent":"compare two names","needs_clarify":false,"mode":"act","output_contract":{"response_shape":"single line string","requires_content_evidence":false,"delivery_required":true,"locator_kind":"file","delivery_intent":"comparison result line","semantic_kind":"comparison","locator_hint":"UI/package.json crates/clawd/Cargo.toml"}}"#;
+        let raw = r#"{"resolved_user_intent":"compare two names","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"single line string","requires_content_evidence":false,"delivery_required":true,"locator_kind":"file","delivery_intent":"comparison result line","semantic_kind":"comparison","locator_hint":"UI/package.json crates/clawd/Cargo.toml"}}"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(
             raw,
             "compare two fields in one line",
@@ -7255,7 +7647,7 @@ mod tests {
           "clarify_question": "",
           "reason": "task is clear",
           "confidence": "high",
-          "mode": "chat",
+          "decision":"direct_answer",
           "output_contract": {
             "response_shape": "free",
             "requires_content_evidence": false,
@@ -7270,7 +7662,10 @@ mod tests {
         let normalized =
             super::normalize_intent_normalizer_raw_for_schema(raw, "tell me something short");
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("chat"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("direct_answer")
+        );
         assert_eq!(
             value.get("needs_clarify").and_then(|value| value.as_bool()),
             Some(false)
@@ -7318,7 +7713,7 @@ mod tests {
           "needs_clarify": false,
           "reason": "repo inspection",
           "confidence": 0.9,
-          "mode": "chat_act",
+          "decision":"planner_execute",
           "output_contract": {
             "response_shape": "inline",
             "semantic_kind": "existence_boolean_with_path",
@@ -7375,7 +7770,7 @@ mod tests {
         let raw = r#"{
           "resolved_user_intent":"只输出当前工作目录的绝对路径，不要解释",
           "needs_clarify":false,
-          "mode":"act",
+          "decision":"planner_execute",
           "output_contract":{
             "response_shape":"plain_text",
             "semantic_kind":"filesystem_locator",
@@ -7428,7 +7823,7 @@ mod tests {
         let raw = r#"{
           "turn_type": "standalone",
           "needs_clarify": false,
-          "mode": "chat",
+          "decision":"direct_answer",
           "output_contract": {
             "response_shape": "scalar",
             "semantic_kind": "none",
@@ -7501,7 +7896,7 @@ mod tests {
           "clarify_question":null,
           "reason":"用户请求已记住的编号",
           "confidence":0.99,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"text",
           "execution_recipe":{"kind":"none"},
           "turn_type":"",
@@ -7520,8 +7915,8 @@ mod tests {
             .get("schedule_intent")
             .is_some_and(|value| value.is_null()));
         assert_eq!(
-            value.get("mode").and_then(|value| value.as_str()),
-            Some("chat")
+            value.get("decision").and_then(|value| value.as_str()),
+            Some("direct_answer")
         );
         assert_eq!(
             value
@@ -7562,7 +7957,7 @@ mod tests {
           "clarify_question":"",
           "reason":"",
           "confidence":0.98,
-          "mode":"act",
+          "decision":"planner_execute",
           "output_contract":{
             "response_shape":"strict",
             "requires_content_evidence":true,
@@ -7586,8 +7981,8 @@ mod tests {
             .get("schedule_intent")
             .is_some_and(|value| value.is_null()));
         assert_eq!(
-            value.get("mode").and_then(|value| value.as_str()),
-            Some("act")
+            value.get("decision").and_then(|value| value.as_str()),
+            Some("planner_execute")
         );
         assert_eq!(
             value
@@ -7617,7 +8012,7 @@ mod tests {
           "clarify_question":null,
           "reason":"用户请求回忆之前存储的信息",
           "confidence":1.0,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"client-like-continuous-20260430_094246",
           "execution_recipe":{"kind":"none"},
           "turn_type":"",
@@ -7666,7 +8061,7 @@ mod tests {
           "clarify_question":null,
           "reason":"User asked for the stored test ID, which is available in short-term memory.",
           "confidence":0.99,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"json",
           "execution_recipe":{"kind":"none"},
           "turn_type":"memory",
@@ -7718,7 +8113,7 @@ mod tests {
           "clarify_question":"",
           "reason":"User explicitly requests direct command execution with raw output, no summary.",
           "confidence":0.98,
-          "mode":"act",
+          "decision":"planner_execute",
           "output_contract":"raw",
           "execution_recipe":{"kind":"shell","command":"pwd","requires_content_evidence":false,"locator_kind":"none"},
           "turn_type":"task_request",
@@ -7733,8 +8128,8 @@ mod tests {
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
         assert_eq!(
-            value.get("mode").and_then(|value| value.as_str()),
-            Some("act")
+            value.get("decision").and_then(|value| value.as_str()),
+            Some("planner_execute")
         );
         assert_eq!(
             value
@@ -7776,7 +8171,7 @@ mod tests {
           "clarify_question":null,
           "reason":"User explicitly requested a joke and no execution.",
           "confidence":0.99,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"raw",
           "execution_recipe":null,
           "turn_type":"chat",
@@ -7791,8 +8186,8 @@ mod tests {
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
         assert_eq!(
-            value.get("mode").and_then(|value| value.as_str()),
-            Some("chat")
+            value.get("decision").and_then(|value| value.as_str()),
+            Some("direct_answer")
         );
         assert_eq!(
             value
@@ -7828,7 +8223,7 @@ mod tests {
           "clarify_question":"",
           "reason":"纯设计交付物；execution_recipe.kind=none。",
           "confidence":0.92,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":{
             "response_shape":"strict",
             "requires_content_evidence":false,
@@ -7852,8 +8247,8 @@ mod tests {
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
         assert_eq!(
-            value.get("mode").and_then(|value| value.as_str()),
-            Some("chat")
+            value.get("decision").and_then(|value| value.as_str()),
+            Some("direct_answer")
         );
         assert_eq!(
             value
@@ -7961,7 +8356,7 @@ mod tests {
           "clarify_question":null,
           "reason":"用户修正目标受众约束并明确要求输出正文",
           "confidence":1.0,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":{"kind":"text","text_content":"示例正文","media_type":"text/plain"},
           "execution_recipe":{"kind":"none"},
           "turn_type":"task_append",
@@ -8014,7 +8409,7 @@ mod tests {
           "clarify_question":"none",
           "reason":"字数约束更新，主题、受众、语气不变，直接输出精简版本",
           "confidence":"0.97",
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"text_only",
           "execution_recipe":{"kind":"none","requires_content_evidence":false,"locator_kind":"none"},
           "turn_type":"task_append",
@@ -8071,7 +8466,7 @@ mod tests {
           "clarify_question":null,
           "reason":"clear comparison",
           "confidence":0.95,
-          "mode":"act",
+          "decision":"planner_execute",
           "output_contract":"one_line_comparison",
           "execution_recipe":{"kind":"file_read_two"},
           "turn_type":"task_request",
@@ -8105,10 +8500,10 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_coerces_ask_clarify_aliases() {
+    fn normalizer_schema_normalization_rejects_invalid_resume_and_turn_tokens() {
         let raw = r#"{
           "resolved_user_intent":"用户希望在80字以内生成一份面向开发者的简短方案，缺少主题信息。",
-          "resume_behavior":"ask_clarify",
+          "resume_behavior":"unsupported_resume_token",
           "schedule_kind":"none",
           "schedule_intent":"none",
           "wants_file_delivery":false,
@@ -8118,10 +8513,10 @@ mod tests {
           "clarify_question":"请告诉我这份方案的主题是什么？",
           "reason":"缺少核心主题",
           "confidence":0.95,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"clarification",
           "execution_recipe":{"kind":"none"},
-          "turn_type":"ask_clarify",
+          "turn_type":"unsupported_turn_token",
           "target_task_policy":"reuse active",
           "should_interrupt_active_run":false,
           "state_patch":{},
@@ -8169,7 +8564,7 @@ mod tests {
           "clarify_question":"",
           "reason":"上下文中已有编号",
           "confidence":0.98,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"",
           "execution_recipe":{"kind":"none"},
           "turn_type":"",
@@ -8207,7 +8602,7 @@ mod tests {
           "clarify_question":"",
           "reason":"pure confirmation",
           "confidence":0.99,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":{"response_shape":"one_sentence"},
           "execution_recipe":{
             "kind":"none",
@@ -8277,7 +8672,7 @@ mod tests {
           "clarify_question":"",
           "reason":"User requested local directory size and provided a command payload.",
           "confidence":0.95,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"json",
           "execution_recipe":{"commands":[{"executor":"local","command":"du -sh target","purpose":"Get approximate size"}]},
           "turn_type":"task_request",
@@ -8290,8 +8685,8 @@ mod tests {
             super::normalize_intent_normalizer_raw_for_schema(raw, "看一下 target 大概多大");
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
         assert_eq!(
-            value.get("mode").and_then(|value| value.as_str()),
-            Some("act")
+            value.get("decision").and_then(|value| value.as_str()),
+            Some("planner_execute")
         );
         assert_eq!(
             value
@@ -8326,7 +8721,7 @@ mod tests {
           "clarify_question":null,
           "reason":"用户明确要求用一句中文回复确认其正在进行 RustClaw 真实客户端连续会话测试",
           "confidence":0.98,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":{"response_shape":"text","semantic_kind":"confirmation"},
           "execution_recipe":"respond_with_simple_chinese_confirmation",
           "turn_type":"greeting",
@@ -8341,8 +8736,8 @@ mod tests {
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
         assert_eq!(
-            value.get("mode").and_then(|value| value.as_str()),
-            Some("chat")
+            value.get("decision").and_then(|value| value.as_str()),
+            Some("direct_answer")
         );
         assert_eq!(
             value
@@ -8385,7 +8780,7 @@ mod tests {
         assert!(super::should_detach_bare_acknowledgement_from_active_task(
             Some(TurnType::PreferenceOrMemory),
             Some(TargetTaskPolicy::ReuseActive),
-            RoutedMode::Chat,
+            FirstLayerDecision::DirectAnswer,
             &contract,
             None,
             false,
@@ -8393,7 +8788,7 @@ mod tests {
         assert!(!super::should_detach_bare_acknowledgement_from_active_task(
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
-            RoutedMode::Chat,
+            FirstLayerDecision::DirectAnswer,
             &contract,
             None,
             false,
@@ -8401,7 +8796,7 @@ mod tests {
         assert!(!super::should_detach_bare_acknowledgement_from_active_task(
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
-            RoutedMode::Chat,
+            FirstLayerDecision::DirectAnswer,
             &contract,
             Some(&serde_json::json!({"output_refinement":"one_sentence_only"})),
             false,
@@ -8427,16 +8822,18 @@ mod tests {
             active_clarify_state: None,
             active_observed_facts: None,
         };
-        assert!(super::should_downgrade_orphan_output_shape_clarify_to_chat(
-            Some(&snapshot_without_primary),
-            Some(TurnType::TaskAppend),
-            Some(TargetTaskPolicy::ReuseActive),
-            RoutedMode::AskClarify,
-            &contract,
-            None,
-            false,
-            false,
-        ));
+        assert!(
+            super::should_downgrade_orphan_output_shape_clarify_to_direct_answer(
+                Some(&snapshot_without_primary),
+                Some(TurnType::TaskAppend),
+                Some(TargetTaskPolicy::ReuseActive),
+                FirstLayerDecision::Clarify,
+                &contract,
+                None,
+                false,
+                false,
+            )
+        );
 
         let snapshot_with_primary = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: Some(crate::conversation_state::ConversationState {
@@ -8448,11 +8845,11 @@ mod tests {
             active_observed_facts: None,
         };
         assert!(
-            !super::should_downgrade_orphan_output_shape_clarify_to_chat(
+            !super::should_downgrade_orphan_output_shape_clarify_to_direct_answer(
                 Some(&snapshot_with_primary),
                 Some(TurnType::TaskAppend),
                 Some(TargetTaskPolicy::ReuseActive),
-                RoutedMode::AskClarify,
+                FirstLayerDecision::Clarify,
                 &contract,
                 None,
                 false,
@@ -8467,7 +8864,7 @@ mod tests {
             super::infer_missing_turn_type_from_policy(
                 None,
                 Some(TargetTaskPolicy::Standalone),
-                RoutedMode::Chat,
+                FirstLayerDecision::DirectAnswer,
                 false,
                 crate::ScheduleKind::None,
                 false,
@@ -8478,7 +8875,7 @@ mod tests {
             super::infer_missing_turn_type_from_policy(
                 Some(TurnType::PreferenceOrMemory),
                 Some(TargetTaskPolicy::Standalone),
-                RoutedMode::Chat,
+                FirstLayerDecision::DirectAnswer,
                 false,
                 crate::ScheduleKind::None,
                 true,
@@ -8489,7 +8886,7 @@ mod tests {
             super::infer_missing_turn_type_from_policy(
                 None,
                 Some(TargetTaskPolicy::Standalone),
-                RoutedMode::AskClarify,
+                FirstLayerDecision::Clarify,
                 true,
                 crate::ScheduleKind::None,
                 false,
@@ -8504,7 +8901,7 @@ mod tests {
             super::infer_missing_turn_type_from_policy(
                 None,
                 Some(TargetTaskPolicy::ReuseActive),
-                RoutedMode::Chat,
+                FirstLayerDecision::DirectAnswer,
                 false,
                 crate::ScheduleKind::None,
                 false,
@@ -8515,7 +8912,7 @@ mod tests {
             super::infer_missing_turn_type_from_policy(
                 None,
                 Some(TargetTaskPolicy::ReplaceActive),
-                RoutedMode::Chat,
+                FirstLayerDecision::DirectAnswer,
                 false,
                 crate::ScheduleKind::None,
                 false,
@@ -8526,7 +8923,7 @@ mod tests {
             super::infer_missing_turn_type_from_policy(
                 None,
                 Some(TargetTaskPolicy::ReuseActive),
-                RoutedMode::Chat,
+                FirstLayerDecision::DirectAnswer,
                 false,
                 crate::ScheduleKind::None,
                 true,
@@ -8551,7 +8948,7 @@ mod tests {
         let policy = super::infer_missing_target_policy_from_contract(
             None,
             None,
-            RoutedMode::Chat,
+            FirstLayerDecision::DirectAnswer,
             false,
             crate::ScheduleKind::None,
             false,
@@ -8562,7 +8959,7 @@ mod tests {
             super::infer_missing_turn_type_from_policy(
                 None,
                 policy,
-                RoutedMode::Chat,
+                FirstLayerDecision::DirectAnswer,
                 false,
                 crate::ScheduleKind::None,
                 false,
@@ -8588,7 +8985,7 @@ mod tests {
             super::infer_missing_target_policy_from_contract(
                 None,
                 None,
-                RoutedMode::Chat,
+                FirstLayerDecision::DirectAnswer,
                 false,
                 crate::ScheduleKind::None,
                 false,
@@ -8647,17 +9044,15 @@ mod tests {
         assert!(prompt.contains("Do not emit exact_format, required_evidence, fields"));
         assert!(prompt.contains("instead of inventing enum values"));
         assert!(prompt.contains("Every enum field must be exactly one listed schema token"));
-        assert!(prompt.contains("ask_clarify is a mode, never a turn_type or resume_behavior"));
+        assert!(prompt.contains("clarify is a decision, never a turn_type or resume_behavior"));
         assert!(prompt.contains("state_patch must be a JSON object or null"));
-        assert!(prompt.contains("Use mode=\"chat_act\" when the request both inspects"));
+        assert!(prompt.contains("Use decision=\"planner_execute\" when the request inspects"));
         assert!(prompt.contains("Never ask the user to paste local file contents"));
         assert!(prompt.contains("Output exactly one raw JSON object and then stop"));
         assert!(prompt.contains("Always include all top-level schema keys"));
         assert!(prompt.contains("If ACTIVE_TASK is <none>, do not use task_append"));
         assert!(prompt.contains("turn_type=\"task_append\", target_task_policy=\"reuse_active\""));
-        assert!(
-            prompt.contains("never force an act planner round for a presentation-only constraint")
-        );
+        assert!(prompt.contains("never force planner_execute for a presentation-only constraint"));
         assert!(prompt.contains("Current REQUEST overrides RECENT/MEMORY"));
         assert!(prompt.contains("Do not import a prior directory/path scope"));
     }
@@ -8949,7 +9344,7 @@ mod tests {
           "needs_clarify": false,
           "reason": "local hidden entries check",
           "confidence": 1.0,
-          "mode": "act",
+          "decision":"planner_execute",
           "output_contract": {
             "response_shape": "object",
             "semantic_kind": "hidden_files_check"
@@ -8960,7 +9355,10 @@ mod tests {
             "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         let contract = value
             .get("output_contract")
             .and_then(|value| value.as_object())
@@ -8981,14 +9379,14 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_recovers_execute_mode_and_filename_listing_contract() {
+    fn normalizer_schema_normalization_recovers_planner_decision_and_filename_listing_contract() {
         let raw = r#"{
           "resolved_user_intent":"List first 10 filenames in logs directory without reading content",
           "answer_candidate":"",
           "needs_clarify":false,
           "reason":"directory listing action",
           "confidence":0.98,
-          "mode":"execute",
+          "decision":"planner_execute",
           "output_contract":"filename_listing",
           "execution_recipe":{"bash":"ls -1 logs/ | head -10"}
         }"#;
@@ -8997,7 +9395,10 @@ mod tests {
             "列出 logs 目录下的前 10 个文件名，不要读内容",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value.get("answer_candidate").and_then(|v| v.as_str()),
             Some("")
@@ -9032,7 +9433,7 @@ mod tests {
           "clarify_question":null,
           "reason":"directory listing action",
           "confidence":1.0,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":"files_listing",
           "execution_recipe":"ls -1 /home/guagua/rustclaw/logs | head -n 10",
           "turn_type":"request",
@@ -9060,12 +9461,8 @@ mod tests {
         assert_eq!(contract.semantic_kind, crate::OutputSemanticKind::FileNames);
         assert!(contract.requires_content_evidence);
         assert_eq!(
-            crate::post_route_policy::enforce_content_evidence_execution_mode(
-                super::parse_mode_text(&validated.mode).expect("mode"),
-                &contract,
-                validated.needs_clarify,
-            ),
-            crate::RoutedMode::Act
+            super::parse_first_layer_decision_text(&validated.decision),
+            Some(crate::FirstLayerDecision::PlannerExecute)
         );
     }
 
@@ -9085,7 +9482,7 @@ mod tests {
           "reason":"用户请求在当前仓库中搜索脚本文件，提取其所在目录并去重列出。这是明确且可执行的本地 FS 搜索任务。",
           "confidence":0.98,
           "decision":"planner_execute",
-          "mode":"act",
+          "decision":"planner_execute",
           "output_contract":"structured_exec_state",
           "execution_recipe":"find /workspace -name \"*.sh\" -type f -exec dirname {} \\; | sort -u",
           "turn_type":"exec",
@@ -9117,14 +9514,14 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_recovers_detection_mode_as_act() {
+    fn normalizer_schema_normalization_recovers_detection_payload_as_planner_execute() {
         let raw = r#"{
           "resolved_user_intent":"检查仓库中是否存在 rustclaw.service 文件，只回答有或没有，并给出完整路径",
           "answer_candidate":"",
           "needs_clarify":false,
           "reason":"repo existence check",
           "confidence":0.95,
-          "mode":"detection",
+          "decision":"planner_execute",
           "output_contract":{"response_shape":"strict","semantic_kind":"existence_with_path","requires_content_evidence":true}
         }"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(
@@ -9132,7 +9529,10 @@ mod tests {
             "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
             &normalized,
             crate::prompt_utils::PromptSchemaId::IntentNormalizer,
@@ -9148,7 +9548,7 @@ mod tests {
           "needs_clarify":false,
           "reason":"directory filename listing",
           "confidence":0.98,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":{"type":"list","items":{"type":"string"}},
           "execution_recipe":{"kind":"ops_closed_loop","profile":"ops_service","target_scope":"current_repo"}
         }"#;
@@ -9157,7 +9557,10 @@ mod tests {
             "列出 document 目录下有哪些文件，只输出文件名列表",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         let contract = value
             .get("output_contract")
             .and_then(|value| value.as_object())
@@ -9187,7 +9590,7 @@ mod tests {
           "needs_clarify":false,
           "reason":"chat explanation",
           "confidence":0.88,
-          "mode":"chat",
+          "decision":"direct_answer",
           "output_contract":{"response_shape":"free"},
           "execution_recipe":{"kind":"none","profile":"none","target_scope":"current_repo"}
         }"#;
@@ -9230,7 +9633,7 @@ mod tests {
             req,
             &surface,
             workspace_root,
-            RoutedMode::Act,
+            FirstLayerDecision::PlannerExecute,
             "",
             None,
             None,
@@ -9264,7 +9667,7 @@ mod tests {
             req,
             &surface,
             workspace_root,
-            RoutedMode::ChatAct,
+            FirstLayerDecision::PlannerExecute,
             "",
             None,
             None,
@@ -9294,7 +9697,7 @@ mod tests {
             req,
             &surface,
             std::path::Path::new("/tmp/rustclaw"),
-            RoutedMode::Chat,
+            FirstLayerDecision::DirectAnswer,
             "RustClaw 是一个面向自然语言自动化的本地 agent 项目。",
             None,
             None,
@@ -9330,7 +9733,7 @@ mod tests {
             req,
             &surface,
             workspace_root,
-            RoutedMode::Act,
+            FirstLayerDecision::PlannerExecute,
             "",
             None,
             None,
@@ -9361,7 +9764,7 @@ mod tests {
                 .ancestors()
                 .nth(2)
                 .expect("workspace root"),
-            RoutedMode::Act,
+            FirstLayerDecision::PlannerExecute,
             "没有 (路径未找到)",
             None,
             None,
@@ -9390,7 +9793,7 @@ mod tests {
                 .ancestors()
                 .nth(2)
                 .expect("workspace root"),
-            RoutedMode::Act,
+            FirstLayerDecision::PlannerExecute,
             "rustclaw",
             None,
             None,
@@ -9400,6 +9803,35 @@ mod tests {
         assert!(contract.requires_content_evidence);
         assert_eq!(contract.locator_kind, OutputLocatorKind::Filename);
         assert_eq!(contract.locator_hint, "package.json");
+    }
+
+    #[test]
+    fn planner_locator_contract_repair_requires_evidence_for_sparse_contract() {
+        let req = "Read configs/config.toml and output the selected_vendor field and value";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Strict,
+            ..IntentOutputContract::default()
+        };
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(2)
+                .expect("workspace root"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(reason, Some("planner_locator_requires_evidence"));
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(contract.locator_hint, "configs/config.toml");
     }
 
     #[test]
@@ -9419,7 +9851,7 @@ mod tests {
                 .ancestors()
                 .nth(2)
                 .expect("workspace root"),
-            RoutedMode::Chat,
+            FirstLayerDecision::DirectAnswer,
             "acknowledged",
             None,
             None,
@@ -9441,7 +9873,8 @@ mod tests {
             response_shape: OutputResponseShape::Scalar,
             ..IntentOutputContract::default()
         };
-        let mut routed_mode = RoutedMode::Chat;
+        let mut decision = FirstLayerDecision::DirectAnswer;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
 
         let reason = super::apply_answer_candidate_path_evidence_repair(
             &mut contract,
@@ -9449,11 +9882,13 @@ mod tests {
             None,
             &workspace,
             false,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
         );
 
         assert_eq!(reason, Some("answer_candidate_path_requires_evidence"));
-        assert!(matches!(routed_mode, RoutedMode::Act));
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
         assert!(contract.requires_content_evidence);
         assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
         assert_eq!(contract.locator_hint, relative);
@@ -9470,7 +9905,8 @@ mod tests {
             response_shape: OutputResponseShape::Scalar,
             ..IntentOutputContract::default()
         };
-        let mut routed_mode = RoutedMode::Chat;
+        let mut decision = FirstLayerDecision::DirectAnswer;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
 
         let reason = super::apply_answer_candidate_path_evidence_repair(
             &mut contract,
@@ -9478,11 +9914,12 @@ mod tests {
             None,
             &workspace,
             false,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
         );
 
         assert_eq!(reason, None);
-        assert!(matches!(routed_mode, RoutedMode::Chat));
+        assert_eq!(decision, FirstLayerDecision::DirectAnswer);
         assert!(!contract.requires_content_evidence);
         assert_eq!(contract.locator_kind, OutputLocatorKind::None);
         assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
@@ -9497,7 +9934,8 @@ mod tests {
             response_shape: OutputResponseShape::Scalar,
             ..IntentOutputContract::default()
         };
-        let mut routed_mode = RoutedMode::Chat;
+        let mut decision = FirstLayerDecision::DirectAnswer;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
 
         let reason = super::apply_answer_candidate_path_evidence_repair(
             &mut contract,
@@ -9505,11 +9943,12 @@ mod tests {
             None,
             &workspace,
             false,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
         );
 
         assert_eq!(reason, None);
-        assert!(matches!(routed_mode, RoutedMode::Chat));
+        assert_eq!(decision, FirstLayerDecision::DirectAnswer);
         assert!(!contract.requires_content_evidence);
         assert_eq!(contract.locator_kind, OutputLocatorKind::None);
         std::fs::remove_dir_all(workspace).ok();
@@ -9524,7 +9963,8 @@ mod tests {
             response_shape: OutputResponseShape::Scalar,
             ..IntentOutputContract::default()
         };
-        let mut routed_mode = RoutedMode::Chat;
+        let mut decision = FirstLayerDecision::DirectAnswer;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
         let patch = serde_json::json!({"output_format":"filename_only"});
 
         let reason = super::apply_answer_candidate_path_evidence_repair(
@@ -9533,11 +9973,12 @@ mod tests {
             Some(&patch),
             &workspace,
             false,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
         );
 
         assert_eq!(reason, None);
-        assert!(matches!(routed_mode, RoutedMode::Chat));
+        assert_eq!(decision, FirstLayerDecision::DirectAnswer);
         assert!(!contract.requires_content_evidence);
         assert_eq!(contract.locator_kind, OutputLocatorKind::None);
         assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
@@ -9560,7 +10001,7 @@ mod tests {
             req,
             &surface,
             &workspace_root,
-            RoutedMode::Act,
+            FirstLayerDecision::PlannerExecute,
             "",
             None,
             None,
@@ -9589,7 +10030,7 @@ mod tests {
             req,
             &surface,
             &workspace_root,
-            RoutedMode::Chat,
+            FirstLayerDecision::DirectAnswer,
             "",
             None,
             None,
@@ -9602,16 +10043,18 @@ mod tests {
     }
 
     #[test]
-    fn executionless_act_route_is_downgraded_to_chat() {
-        let mut mode = RoutedMode::ChatAct;
+    fn executionless_chat_wrapped_execute_is_downgraded_to_direct_answer() {
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
         let contract = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Strict,
             ..IntentOutputContract::default()
         };
 
-        let reason = super::downgrade_executionless_route_to_chat(
-            &mut mode,
+        let reason = super::downgrade_executionless_route_to_direct_answer(
+            &mut decision,
+            &mut finalize_style,
             false,
             &contract,
             false,
@@ -9619,21 +10062,27 @@ mod tests {
             None,
         );
 
-        assert_eq!(reason, Some("executionless_route_downgraded_to_chat"));
-        assert!(matches!(mode, RoutedMode::Chat));
+        assert_eq!(
+            reason,
+            Some("executionless_route_downgraded_to_direct_answer")
+        );
+        assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     }
 
     #[test]
-    fn explicit_act_route_is_not_downgraded_when_contract_is_sparse() {
-        let mut mode = RoutedMode::Act;
+    fn plain_execute_is_not_downgraded_when_contract_is_sparse() {
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
         let contract = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
             ..IntentOutputContract::default()
         };
 
-        let reason = super::downgrade_executionless_route_to_chat(
-            &mut mode,
+        let reason = super::downgrade_executionless_route_to_direct_answer(
+            &mut decision,
+            &mut finalize_style,
             false,
             &contract,
             false,
@@ -9642,12 +10091,14 @@ mod tests {
         );
 
         assert_eq!(reason, None);
-        assert!(matches!(mode, RoutedMode::Act));
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
     }
 
     #[test]
     fn execution_signal_act_route_stays_executable() {
-        let mut mode = RoutedMode::ChatAct;
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
         let contract = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Strict,
@@ -9656,8 +10107,9 @@ mod tests {
             ..IntentOutputContract::default()
         };
 
-        let reason = super::downgrade_executionless_route_to_chat(
-            &mut mode,
+        let reason = super::downgrade_executionless_route_to_direct_answer(
+            &mut decision,
+            &mut finalize_style,
             false,
             &contract,
             false,
@@ -9666,7 +10118,8 @@ mod tests {
         );
 
         assert_eq!(reason, None);
-        assert!(matches!(mode, RoutedMode::ChatAct));
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
     }
 
     #[test]
@@ -9680,7 +10133,8 @@ mod tests {
         };
         let mut needs_clarify = true;
         let mut clarify_question = "请提供 package.json 文件内容".to_string();
-        let mut routed_mode = RoutedMode::AskClarify;
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
         let reason = super::apply_spurious_structured_observation_clarify_repair(
             &mut contract,
             req,
@@ -9692,16 +10146,62 @@ mod tests {
             None,
             &mut needs_clarify,
             &mut clarify_question,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
         );
 
         assert_eq!(reason, Some("structured_observation_clarify_repair"));
         assert!(!needs_clarify);
         assert!(clarify_question.is_empty());
-        assert!(matches!(routed_mode, RoutedMode::ChatAct));
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
         assert!(contract.requires_content_evidence);
         assert_eq!(contract.locator_kind, OutputLocatorKind::Filename);
         assert_eq!(contract.locator_hint, "package.json");
+    }
+
+    #[test]
+    fn structured_observation_clarify_repair_fills_file_delivery_filename_locator() {
+        let req = "把 definitely_missing_named_file_phase0_runtime_20260515.txt 发给我";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::FileToken,
+            delivery_required: true,
+            delivery_intent: OutputDeliveryIntent::FileSingle,
+            locator_kind: OutputLocatorKind::Path,
+            ..IntentOutputContract::default()
+        };
+        let mut needs_clarify = true;
+        let mut clarify_question =
+            "请提供 definitely_missing_named_file_phase0_runtime_20260515.txt 的完整路径"
+                .to_string();
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+        let reason = super::apply_spurious_structured_observation_clarify_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(2)
+                .expect("workspace root"),
+            None,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(reason, Some("structured_observation_clarify_repair"));
+        assert!(!needs_clarify);
+        assert!(clarify_question.is_empty());
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Filename);
+        assert_eq!(
+            contract.locator_hint,
+            "definitely_missing_named_file_phase0_runtime_20260515.txt"
+        );
+        assert!(contract.requires_content_evidence);
     }
 
     #[test]
@@ -9720,7 +10220,8 @@ mod tests {
         };
         let mut needs_clarify = true;
         let mut clarify_question = "请提供具体的文件夹路径".to_string();
-        let mut routed_mode = RoutedMode::AskClarify;
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
         let reason = super::apply_spurious_structured_observation_clarify_repair(
             &mut contract,
             req,
@@ -9729,13 +10230,14 @@ mod tests {
             None,
             &mut needs_clarify,
             &mut clarify_question,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
         );
 
         assert_eq!(reason, Some("structured_observation_clarify_repair"));
         assert!(!needs_clarify);
         assert!(clarify_question.is_empty());
-        assert!(matches!(routed_mode, RoutedMode::ChatAct));
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
         assert!(contract.requires_content_evidence);
         assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
         assert_eq!(contract.locator_hint, workspace_root.display().to_string());
@@ -9756,7 +10258,8 @@ mod tests {
         };
         let mut needs_clarify = true;
         let mut clarify_question = "您希望我执行文件大小比较操作吗？".to_string();
-        let mut routed_mode = RoutedMode::AskClarify;
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
         let reason = super::apply_spurious_structured_observation_clarify_repair(
             &mut contract,
             req,
@@ -9765,13 +10268,14 @@ mod tests {
             None,
             &mut needs_clarify,
             &mut clarify_question,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
         );
 
         assert_eq!(reason, Some("structured_observation_clarify_repair"));
         assert!(!needs_clarify);
         assert!(clarify_question.is_empty());
-        assert!(matches!(routed_mode, RoutedMode::ChatAct));
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
         assert!(contract.requires_content_evidence);
         assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
         assert_eq!(
@@ -9791,7 +10295,8 @@ mod tests {
         };
         let mut needs_clarify = true;
         let mut clarify_question = "请提供 README 的具体内容或文件路径".to_string();
-        let mut routed_mode = RoutedMode::AskClarify;
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
         let reason = super::apply_spurious_structured_observation_clarify_repair(
             &mut contract,
             req,
@@ -9803,13 +10308,14 @@ mod tests {
             None,
             &mut needs_clarify,
             &mut clarify_question,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
         );
 
         assert_eq!(reason, None);
         assert!(needs_clarify);
         assert_eq!(clarify_question, "请提供 README 的具体内容或文件路径");
-        assert!(matches!(routed_mode, RoutedMode::AskClarify));
+        assert_eq!(decision, FirstLayerDecision::Clarify);
         assert!(!contract.requires_content_evidence);
     }
 
@@ -9824,7 +10330,8 @@ mod tests {
         };
         let mut needs_clarify = true;
         let mut clarify_question = "请确认具体 README 路径".to_string();
-        let mut routed_mode = RoutedMode::AskClarify;
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
         let patch = serde_json::json!({"deictic_reference":{"target":"unresolved_prior_object"}});
 
         let reason = super::apply_spurious_structured_observation_clarify_repair(
@@ -9838,13 +10345,14 @@ mod tests {
             Some(&patch),
             &mut needs_clarify,
             &mut clarify_question,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
         );
 
         assert_eq!(reason, None);
         assert!(needs_clarify);
         assert_eq!(clarify_question, "请确认具体 README 路径");
-        assert!(matches!(routed_mode, RoutedMode::AskClarify));
+        assert_eq!(decision, FirstLayerDecision::Clarify);
         assert!(!contract.requires_content_evidence);
     }
 
@@ -9859,7 +10367,8 @@ mod tests {
         };
         let mut needs_clarify = true;
         let mut clarify_question = "请确认要修正哪段内容".to_string();
-        let mut routed_mode = RoutedMode::AskClarify;
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
 
         let reason = super::apply_spurious_structured_observation_clarify_repair(
             &mut contract,
@@ -9872,13 +10381,14 @@ mod tests {
             None,
             &mut needs_clarify,
             &mut clarify_question,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
         );
 
         assert_eq!(reason, None);
         assert!(needs_clarify);
         assert_eq!(clarify_question, "请确认要修正哪段内容");
-        assert!(matches!(routed_mode, RoutedMode::AskClarify));
+        assert_eq!(decision, FirstLayerDecision::Clarify);
         assert!(!contract.requires_content_evidence);
     }
 
@@ -9895,7 +10405,8 @@ mod tests {
         };
         let mut needs_clarify = true;
         let mut clarify_question = "请提供压缩包路径".to_string();
-        let mut routed_mode = RoutedMode::AskClarify;
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
         let patch = serde_json::json!({"deictic_reference":{"target":"unresolved_prior_object"}});
 
         let reason = super::apply_spurious_structured_observation_clarify_repair(
@@ -9909,13 +10420,14 @@ mod tests {
             Some(&patch),
             &mut needs_clarify,
             &mut clarify_question,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
         );
 
         assert_eq!(reason, None);
         assert!(needs_clarify);
         assert_eq!(clarify_question, "请提供压缩包路径");
-        assert!(matches!(routed_mode, RoutedMode::AskClarify));
+        assert_eq!(decision, FirstLayerDecision::Clarify);
         assert!(!contract.requires_content_evidence);
     }
 
@@ -9952,14 +10464,17 @@ mod tests {
           "needs_clarify": false,
           "reason": "local hidden entries check",
           "confidence": 0.98,
-          "mode": "act"
+          "decision":"planner_execute"
         }"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(
             raw,
             "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         let contract = value
             .get("output_contract")
             .and_then(|value| value.as_object())
@@ -9987,7 +10502,7 @@ mod tests {
   "needs_clarify": false,
   "reason": "local hidden entries check",
   "confidence": 0.95,
-  "mode": "act",
+  "decision":"planner_execute",
   "output_contract": {
     "response_shape": "scalar",
     "requires_content_evidence": true,
@@ -10001,7 +10516,10 @@ mod tests {
             "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         let contract = value
             .get("output_contract")
             .and_then(|value| value.as_object())
@@ -10032,7 +10550,7 @@ mod tests {
           "needs_clarify": false,
           "reason": "workspace directory listing",
           "confidence": 0.9,
-          "mode": "act",
+          "decision":"planner_execute",
           "output_contract": {
             "response_shape": "list_of_strings",
             "semantic_kind": "file_names"
@@ -10044,7 +10562,10 @@ mod tests {
             "列出 logs 目录下的前 10 个文件名",
         );
         let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
-        assert_eq!(value.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             value.get("needs_clarify").and_then(|v| v.as_bool()),
             Some(false)
@@ -10075,7 +10596,7 @@ mod tests {
           "needs_clarify": false,
           "reason": "names-only inventory",
           "confidence": 0.9,
-          "mode": "act",
+          "decision":"planner_execute",
           "output_contract": "file_names"
         }"#;
         let normalized =
@@ -10095,7 +10616,7 @@ mod tests {
           "needs_clarify": false,
           "reason": "exact output",
           "confidence": 0.9,
-          "mode": "chat",
+          "decision":"direct_answer",
           "output_contract": {"shape":"exact_format","semantic":"sqlite_table_names"}
         }"#;
         let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "严格输出两行");
@@ -10111,6 +10632,52 @@ mod tests {
         assert_eq!(
             contract.get("semantic_kind").and_then(|v| v.as_str()),
             Some("sqlite_table_names_only")
+        );
+        crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+            &normalized,
+            crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+        )
+        .expect("schema validation");
+    }
+
+    #[test]
+    fn normalizer_schema_normalization_maps_file_type_filename_to_locator_hint() {
+        let raw = r#"{
+          "resolved_user_intent": "User wants to receive the file from the current workspace.",
+          "needs_clarify": false,
+          "reason": "file delivery",
+          "confidence": 0.95,
+          "decision": "planner_execute",
+          "wants_file_delivery": true,
+          "output_contract": {
+            "type": "file",
+            "filename": "definitely_missing_named_file_phase0_runtime_20260515.txt"
+          }
+        }"#;
+        let normalized = super::normalize_intent_normalizer_raw_for_schema(
+            raw,
+            "把 definitely_missing_named_file_phase0_runtime_20260515.txt 发给我",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        let contract = value
+            .get("output_contract")
+            .and_then(|value| value.as_object())
+            .expect("output contract");
+        assert_eq!(
+            contract.get("response_shape").and_then(|v| v.as_str()),
+            Some("file_token")
+        );
+        assert_eq!(
+            contract.get("delivery_required").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            contract.get("locator_kind").and_then(|v| v.as_str()),
+            Some("filename")
+        );
+        assert_eq!(
+            contract.get("locator_hint").and_then(|v| v.as_str()),
+            Some("definitely_missing_named_file_phase0_runtime_20260515.txt")
         );
         crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
             &normalized,
@@ -10178,12 +10745,11 @@ mod tests {
     }
 
     #[test]
-    fn fallback_normalizer_output_still_enforces_content_evidence_execution_mode() {
+    fn fallback_normalizer_output_still_enforces_content_evidence_planner_execute() {
         let out = normalizer_output_from_fallback(
             "把当前目录有没有隐藏文件看一下",
             "parse_failed_fallback_router",
             RouteDecision {
-                mode: RoutedMode::Chat,
                 resolved_user_intent: "看一下当前目录有没有隐藏文件".to_string(),
                 needs_clarify: false,
                 clarify_question: String::new(),
@@ -10208,7 +10774,7 @@ mod tests {
             },
             None,
         );
-        assert_eq!(out.routed_mode, RoutedMode::Act);
+        assert_eq!(out.first_layer_decision, FirstLayerDecision::PlannerExecute);
         assert!(!out.needs_clarify);
         assert_eq!(
             out.output_contract.locator_kind,
@@ -10272,7 +10838,6 @@ mod tests {
             "read scripts/nl_tests/fixtures/device_local/package.json and output only the name field",
             "llm_failed_safe_clarify",
             RouteDecision {
-                mode: RoutedMode::AskClarify,
                 resolved_user_intent: String::new(),
                 needs_clarify: true,
                 clarify_question: String::new(),
@@ -10287,7 +10852,7 @@ mod tests {
             },
             Some(crate::fallback::ClarifyFallbackSource::LlmUnavailable),
         );
-        assert_eq!(out.routed_mode, RoutedMode::AskClarify);
+        assert_eq!(out.first_layer_decision, FirstLayerDecision::Clarify);
         assert!(out.needs_clarify);
         assert!(matches!(
             out.output_contract.response_shape,
@@ -10338,7 +10903,7 @@ mod tests {
                 Some(TurnType::TaskScopeUpdate),
                 Some(TargetTaskPolicy::ReuseActive),
                 false,
-                RoutedMode::AskClarify,
+                FirstLayerDecision::Clarify,
                 &IntentOutputContract::default(),
                 None,
             )
@@ -10363,7 +10928,7 @@ mod tests {
                 Some(TurnType::TaskScopeUpdate),
                 Some(TargetTaskPolicy::ReuseActive),
                 false,
-                RoutedMode::AskClarify,
+                FirstLayerDecision::Clarify,
                 &IntentOutputContract::default(),
                 None,
             )
@@ -10387,7 +10952,7 @@ mod tests {
             Some(TurnType::TaskReplace),
             Some(TargetTaskPolicy::ReplaceActive),
             false,
-            RoutedMode::AskClarify,
+            FirstLayerDecision::Clarify,
             &IntentOutputContract::default(),
             None,
         ));
@@ -10410,14 +10975,14 @@ mod tests {
             Some(TurnType::TaskReplace),
             Some(TargetTaskPolicy::ReplaceActive),
             false,
-            RoutedMode::AskClarify,
+            FirstLayerDecision::Clarify,
             &IntentOutputContract::default(),
             None,
         ));
     }
 
     #[test]
-    fn active_task_scope_update_is_routed_back_to_chat() {
+    fn active_task_scope_update_is_routed_back_to_direct_answer() {
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: Some(crate::conversation_state::ConversationState {
                 last_primary_task_prompt: Some("帮我做一个测试计划".to_string()),
@@ -10427,13 +10992,13 @@ mod tests {
             active_clarify_state: None,
             active_observed_facts: None,
         };
-        assert!(super::should_route_active_task_mutation_to_chat(
+        assert!(super::should_route_active_task_mutation_to_direct_answer(
             "先只看登录模块",
             Some(&snapshot),
             Some(TurnType::TaskScopeUpdate),
             Some(TargetTaskPolicy::ReuseActive),
             false,
-            RoutedMode::Act,
+            FirstLayerDecision::PlannerExecute,
             &IntentOutputContract::default(),
             None,
         ));
@@ -10452,7 +11017,8 @@ mod tests {
         };
         let mut turn_type = Some(TurnType::TaskRequest);
         let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
-        let mut routed_mode = RoutedMode::AskClarify;
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
         let mut needs_clarify = true;
         let mut contract = IntentOutputContract {
             exact_sentence_count: None,
@@ -10472,7 +11038,8 @@ mod tests {
             &mut turn_type,
             &mut target_task_policy,
             false,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
             &mut needs_clarify,
             super::ScheduleKind::None,
             false,
@@ -10483,7 +11050,8 @@ mod tests {
         assert_eq!(reason, Some("active_task_scope_refinement_repair"));
         assert_eq!(turn_type, Some(TurnType::TaskScopeUpdate));
         assert_eq!(target_task_policy, Some(TargetTaskPolicy::ReuseActive));
-        assert_eq!(routed_mode, RoutedMode::Chat);
+        assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
         assert!(!needs_clarify);
         assert!(!contract.requires_content_evidence);
         assert_eq!(contract.locator_kind, OutputLocatorKind::None);
@@ -10503,7 +11071,8 @@ mod tests {
         };
         let mut turn_type = Some(TurnType::TaskRequest);
         let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
-        let mut routed_mode = RoutedMode::AskClarify;
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
         let mut needs_clarify = true;
         let mut contract = IntentOutputContract {
             exact_sentence_count: None,
@@ -10523,7 +11092,8 @@ mod tests {
             &mut turn_type,
             &mut target_task_policy,
             false,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
             &mut needs_clarify,
             super::ScheduleKind::None,
             false,
@@ -10534,7 +11104,7 @@ mod tests {
         assert_eq!(reason, None);
         assert_eq!(turn_type, Some(TurnType::TaskRequest));
         assert_eq!(target_task_policy, Some(TargetTaskPolicy::Standalone));
-        assert_eq!(routed_mode, RoutedMode::AskClarify);
+        assert_eq!(decision, FirstLayerDecision::Clarify);
         assert!(needs_clarify);
         assert!(contract.requires_content_evidence);
         assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
@@ -10554,7 +11124,8 @@ mod tests {
         };
         let mut turn_type = Some(TurnType::TaskRequest);
         let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
-        let mut routed_mode = RoutedMode::ChatAct;
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
         let mut needs_clarify = false;
         let mut contract = IntentOutputContract {
             exact_sentence_count: None,
@@ -10574,7 +11145,8 @@ mod tests {
             &mut turn_type,
             &mut target_task_policy,
             false,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
             &mut needs_clarify,
             super::ScheduleKind::None,
             false,
@@ -10585,14 +11157,15 @@ mod tests {
         assert_eq!(reason, None);
         assert_eq!(turn_type, Some(TurnType::TaskRequest));
         assert_eq!(target_task_policy, Some(TargetTaskPolicy::Standalone));
-        assert_eq!(routed_mode, RoutedMode::ChatAct);
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
         assert!(!needs_clarify);
         assert!(contract.requires_content_evidence);
         assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     }
 
     #[test]
-    fn active_task_scope_update_en_is_routed_back_to_chat_from_chat_act() {
+    fn active_task_scope_update_en_remains_direct_answer_from_chat_wrapped_execution() {
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: Some(crate::conversation_state::ConversationState {
                 last_primary_task_prompt: Some("Help me create a test plan".to_string()),
@@ -10602,20 +11175,20 @@ mod tests {
             active_clarify_state: None,
             active_observed_facts: None,
         };
-        assert!(super::should_route_active_task_mutation_to_chat(
+        assert!(super::should_route_active_task_mutation_to_direct_answer(
             "Only focus on the login module first",
             Some(&snapshot),
             Some(TurnType::TaskScopeUpdate),
             Some(TargetTaskPolicy::ReuseActive),
             false,
-            RoutedMode::ChatAct,
+            FirstLayerDecision::PlannerExecute,
             &IntentOutputContract::default(),
             None,
         ));
     }
 
     #[test]
-    fn active_task_output_table_refinement_is_routed_back_to_chat() {
+    fn active_task_output_table_refinement_is_routed_back_to_direct_answer() {
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: Some(crate::conversation_state::ConversationState {
                 last_primary_task_prompt: Some("Summarize the release checklist".to_string()),
@@ -10628,20 +11201,20 @@ mod tests {
             active_clarify_state: None,
             active_observed_facts: None,
         };
-        assert!(super::should_route_active_task_mutation_to_chat(
+        assert!(super::should_route_active_task_mutation_to_direct_answer(
             "把结果改成 markdown table 输出",
             Some(&snapshot),
             Some(TurnType::TaskScopeUpdate),
             Some(TargetTaskPolicy::ReuseActive),
             false,
-            RoutedMode::Act,
+            FirstLayerDecision::PlannerExecute,
             &IntentOutputContract::default(),
             None,
         ));
     }
 
     #[test]
-    fn active_task_correct_is_routed_back_to_chat() {
+    fn active_task_correct_is_routed_back_to_direct_answer() {
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: Some(crate::conversation_state::ConversationState {
                 last_primary_task_prompt: Some(
@@ -10653,13 +11226,13 @@ mod tests {
             active_clarify_state: None,
             active_observed_facts: None,
         };
-        assert!(super::should_route_active_task_mutation_to_chat(
+        assert!(super::should_route_active_task_mutation_to_direct_answer(
             "Correction: not Python 3.10, use Python 3.11",
             Some(&snapshot),
             Some(TurnType::TaskCorrect),
             Some(TargetTaskPolicy::ReuseActive),
             false,
-            RoutedMode::Act,
+            FirstLayerDecision::PlannerExecute,
             &IntentOutputContract::default(),
             None,
         ));
@@ -10684,20 +11257,20 @@ mod tests {
             semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
             ..IntentOutputContract::default()
         };
-        assert!(!super::should_route_active_task_mutation_to_chat(
+        assert!(!super::should_route_active_task_mutation_to_direct_answer(
             "Focus only on the UI part",
             Some(&snapshot),
             Some(TurnType::TaskScopeUpdate),
             Some(TargetTaskPolicy::ReuseActive),
             false,
-            RoutedMode::ChatAct,
+            FirstLayerDecision::PlannerExecute,
             &contract,
             None,
         ));
     }
 
     #[test]
-    fn unresolved_deictic_observation_clarify_is_not_downgraded_to_chat() {
+    fn unresolved_deictic_observation_clarify_is_not_downgraded_to_direct_answer() {
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: Some(crate::conversation_state::ConversationState {
                 last_primary_task_prompt: Some("帮我检查这个文件".to_string()),
@@ -10722,7 +11295,7 @@ mod tests {
                 Some(TurnType::TaskScopeUpdate),
                 Some(TargetTaskPolicy::ReuseActive),
                 false,
-                RoutedMode::AskClarify,
+                FirstLayerDecision::Clarify,
                 &contract,
                 None,
             )
@@ -10785,7 +11358,8 @@ mod tests {
         };
         let mut turn_type = Some(TurnType::TaskRequest);
         let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
-        let mut routed_mode = RoutedMode::AskClarify;
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
         let mut needs_clarify = true;
         let mut contract = IntentOutputContract {
             exact_sentence_count: None,
@@ -10805,7 +11379,8 @@ mod tests {
             &mut turn_type,
             &mut target_task_policy,
             false,
-            &mut routed_mode,
+            &mut decision,
+            &mut finalize_style,
             &mut needs_clarify,
             super::ScheduleKind::None,
             false,
@@ -10816,7 +11391,7 @@ mod tests {
         assert_eq!(reason, None);
         assert_eq!(turn_type, Some(TurnType::TaskRequest));
         assert_eq!(target_task_policy, Some(TargetTaskPolicy::Standalone));
-        assert_eq!(routed_mode, RoutedMode::AskClarify);
+        assert_eq!(decision, FirstLayerDecision::Clarify);
         assert!(needs_clarify);
         assert!(contract.requires_content_evidence);
     }
@@ -10841,7 +11416,7 @@ mod tests {
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
             false,
-            RoutedMode::AskClarify,
+            FirstLayerDecision::Clarify,
             &IntentOutputContract::default(),
             None,
         ));
@@ -10865,7 +11440,7 @@ mod tests {
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
             false,
-            RoutedMode::AskClarify,
+            FirstLayerDecision::Clarify,
             &IntentOutputContract::default(),
             None,
         ));
@@ -10889,7 +11464,7 @@ mod tests {
             Some(TurnType::TaskAppend),
             Some(TargetTaskPolicy::ReuseActive),
             false,
-            RoutedMode::AskClarify,
+            FirstLayerDecision::Clarify,
             &IntentOutputContract::default(),
             None,
         ));
@@ -10919,7 +11494,77 @@ mod tests {
             Some(&snapshot),
             Some(TurnType::TaskCorrect),
             Some(TargetTaskPolicy::ReuseActive),
-            RoutedMode::Act,
+            FirstLayerDecision::PlannerExecute,
+            &contract,
+        ));
+    }
+
+    #[test]
+    fn bare_path_clarify_with_observable_scalar_contract_can_fill_active_task() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some(
+                    "Extract the name field from the package file and output only the value"
+                        .to_string(),
+                ),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Scalar,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "scripts/nl_tests/fixtures/device_local/package.json".to_string(),
+            ..IntentOutputContract::default()
+        };
+
+        assert!(super::bare_path_only_input_can_fill_active_observable_task(
+            Some(&snapshot),
+            None,
+            None,
+            FirstLayerDecision::Clarify,
+            &contract,
+        ));
+    }
+
+    #[test]
+    fn bare_path_active_clarify_state_can_fill_standalone_task_request() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: Some(crate::clarify_state::ClarifyState {
+                missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
+                pending_question: "Provide the file path".to_string(),
+                candidate_targets: Vec::new(),
+                delivery_required: false,
+                output_shape: Some(OutputResponseShape::Scalar.as_str().to_string()),
+                semantic_kind: Some(OutputSemanticKind::StructuredKeys.as_str().to_string()),
+                source_request: "Find the name field in the package file and output only the value"
+                    .to_string(),
+                source_task_id: "task-1".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+            }),
+            active_observed_facts: None,
+        };
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Scalar,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "scripts/nl_tests/fixtures/device_local/package.json".to_string(),
+            ..IntentOutputContract::default()
+        };
+
+        assert!(super::bare_path_only_input_can_fill_active_observable_task(
+            Some(&snapshot),
+            Some(TurnType::TaskRequest),
+            Some(TargetTaskPolicy::Standalone),
+            FirstLayerDecision::Clarify,
             &contract,
         ));
     }
@@ -10949,7 +11594,7 @@ mod tests {
             Some(&snapshot),
             Some(TurnType::TaskRequest),
             Some(TargetTaskPolicy::ReplaceActive),
-            RoutedMode::Act,
+            FirstLayerDecision::PlannerExecute,
             &contract,
         ));
     }
@@ -10979,7 +11624,47 @@ mod tests {
             Some(&snapshot),
             None,
             None,
-            RoutedMode::Act,
+            FirstLayerDecision::PlannerExecute,
+            &contract,
+        ));
+    }
+
+    #[test]
+    fn bare_filename_can_replace_active_delivery_target() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("send the selected file".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+                source_request: "send the selected file".to_string(),
+                op_kind: crate::followup_frame::FollowupOpKind::Delivery,
+                bound_target: Some("/tmp/old.md".to_string()),
+                output_shape: Some(OutputResponseShape::FileToken.as_str().to_string()),
+                source_task_id: "task-1".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+                ..crate::followup_frame::FollowupFrame::default()
+            }),
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::FileToken,
+            requires_content_evidence: true,
+            delivery_required: true,
+            delivery_intent: OutputDeliveryIntent::FileSingle,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            locator_hint: "README.md".to_string(),
+            ..IntentOutputContract::default()
+        };
+
+        assert!(super::bare_path_only_input_can_fill_active_observable_task(
+            Some(&snapshot),
+            Some(TurnType::TaskRequest),
+            None,
+            FirstLayerDecision::PlannerExecute,
             &contract,
         ));
     }
@@ -11001,7 +11686,7 @@ mod tests {
                 Some(&snapshot),
                 Some(TurnType::TaskAppend),
                 Some(TargetTaskPolicy::ReuseActive),
-                RoutedMode::Act,
+                FirstLayerDecision::PlannerExecute,
                 &IntentOutputContract::default(),
             )
         );
@@ -11063,7 +11748,6 @@ mod tests {
             "reason",
             "confidence",
             "decision",
-            "mode",
             "schedule_intent",
             "output_contract",
             "execution_recipe",
@@ -11153,7 +11837,7 @@ mod tests {
             );
         }
 
-        // mode：schema repair handles aliases; parse_mode_text itself is exact enum parsing.
+        // decision: the only first-layer semantic gate.
         for token in enum_strings(&schema, &["properties", "decision"]) {
             if token.is_empty() {
                 continue;
@@ -11161,18 +11845,6 @@ mod tests {
             assert!(
                 super::parse_first_layer_decision_text(&token).is_some(),
                 "decision token `{}` not recognized by parse_first_layer_decision_text",
-                token
-            );
-        }
-
-        // mode：schema repair handles aliases; parse_mode_text itself is exact enum parsing.
-        for token in enum_strings(&schema, &["properties", "mode"]) {
-            if token.is_empty() {
-                continue;
-            }
-            assert!(
-                super::parse_mode_text(&token).is_some(),
-                "mode token `{}` not recognized by parse_mode_text",
                 token
             );
         }

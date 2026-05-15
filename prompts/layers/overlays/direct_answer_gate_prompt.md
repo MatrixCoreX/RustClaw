@@ -21,12 +21,14 @@ Decision meanings:
 Hard rules:
 1. If the user asks for pure discussion, conceptual explanation, memory-only answer, acknowledgement, or style preference, choose `direct_answer`.
 2. If the request depends on the current workspace/repository/project contents, local files/directories, system state, command output, tool/skill result, or generated artifact, choose `planner_execute`.
+2a. Treat dynamic runtime identity/environment scalars as system state, not memory. Current hostname, current OS user, current working directory, current listening ports, current disk/memory/process/service state, and similar "what is true on this machine now" answers require fresh runtime evidence even when prior route context contains an answer candidate.
 3. If the user explicitly constrains the assistant to not read local files, not execute commands, or not use tools, respect that constraint. Choose `direct_answer` when a discussion-only answer can satisfy it; choose `clarify` only if the requested outcome cannot be satisfied under the constraint.
 4. Do not promote just because the wording is imperative. Promote only when real observation/action is required to complete the task.
 5. Do not keep `direct_answer` merely because the chat model could produce plausible prose. If factual grounding from the local runtime is required, choose `planner_execute`.
 6. Never invent paths, commands, files, tools, or facts. If promoted, emit only a route contract for the planner.
 7. If uncertain whether local/project evidence is required, prefer `planner_execute` for user-specific/current-workspace claims and `direct_answer` for general knowledge or opinion.
 8. When a relevant capability can safely resolve an omitted parameter by bounded lookup, discovery, default behavior, or a prepare/candidates step, choose `planner_execute` instead of front-door `clarify`; let execution return observed candidates if the runtime cannot choose uniquely.
+9. For relative or ordinal follow-up references to prior files, prior actions, or prior results, bind from Recent execution context first when it is provided. Treat the previous executed target path/action as the reference target. Do not substitute a path, filename, or object merely because it appeared inside a prior file excerpt, listing text, summary, or route reason.
 
 Canonical output contract:
 - For `direct_answer`: keep `requires_content_evidence=false`, `delivery_required=false`, `locator_kind="none"`, `delivery_intent="none"`.
@@ -41,6 +43,11 @@ __REQUEST__
 
 Resolved route context:
 __ROUTE_CONTEXT__
+
+Route context may contain a prior normalizer answer candidate. That candidate is not observed runtime evidence. If the current request asks for local/runtime/workspace state, do not accept the candidate as proof; promote to planner execution.
+
+Recent execution context:
+__RECENT_EXECUTION_CONTEXT__
 
 Runtime context:
 __RUNTIME_CONTEXT__
@@ -111,9 +118,13 @@ Existing selected file delivery:
 ### zh-CN
 - “只聊天/不要读取/不要执行/不要使用工具”这类约束本身不是执行意图；如果交付物能用纯讨论完成，选择 `direct_answer`。
 - 当前项目、当前仓库、这里的代码、配置、文件、目录、系统状态等事实型请求，应选择 `planner_execute`，不要让 chat 编造。
+- 当前机器名、当前用户、当前工作目录、端口、磁盘、进程、服务等动态本机状态，要重新观察；不要从记忆或 normalizer 的 `answer_candidate` 直接回答。
 - 缺少必要对象时用 `clarify`，不要猜路径或名字。
 - 如果中文语义是在要文件本体，例如发送/交付一个已存在文件或目录列表里选中的文件，输出合同应是 `file_token`，不能只返回文件名。
+- “上个/上上个/前一个/后一个”等相对引用如果指向之前执行过的文件或动作，优先绑定最近执行目标；文件内容里提到的路径只是内容证据，不能替换成被引用的“上个文件”。
 ### en
 - Imperative tone alone is not execution intent. Grounding requirements decide the route.
 - For current workspace/repository/project claims, prefer `planner_execute` unless the user explicitly asks for a non-observational discussion.
+- Current hostname, current user, current working directory, ports, disk, processes, and service state are dynamic runtime facts. Re-observe them instead of trusting memory or a prior answer candidate.
 - If the semantic goal is to receive the existing file itself, use file-token delivery rather than filename-only text.
+- For "previous / second previous / last / next" references to executed files or actions, use the recent executed target sequence. A path mentioned inside a previous file's content is not itself the previous file target.

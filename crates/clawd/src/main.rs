@@ -27,6 +27,7 @@ mod app_helpers;
 mod ask_flow;
 mod bootstrap;
 mod capability_map;
+mod capability_resolver;
 mod channel_send;
 mod clarify_followup;
 mod clarify_state;
@@ -148,7 +149,7 @@ pub(crate) use runtime::{
     AskStateRegistry, AskTransition, ChannelConfig, ChatEntryStrategy, ClaimedTask,
     CommandIntentRules, CommandIntentRuntime, CoreServices, FirstLayerDecision, LlmPromptBucket,
     LlmProviderRuntime, LocalInteractionContext, MemoryConfigFileWrapper, PolicyConfig,
-    RateLimiter, ReloadContext, RouteGateKind, RoutedMode, RuntimeChannel, ScheduleIntentOutput,
+    RateLimiter, ReloadContext, RouteGateKind, RuntimeChannel, ScheduleIntentOutput,
     ScheduleRuntime, ScheduledJobDue, SkillRuntime, SkillViewsSnapshot, TaskMetricsRegistry,
     ToolsPolicy, WhatsappDeliveryRoute, WorkerConfig,
 };

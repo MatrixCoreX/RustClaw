@@ -24,6 +24,7 @@
         {"$ref": "#/$defs/ActionThink"},
         {"$ref": "#/$defs/ActionCallSkill"},
         {"$ref": "#/$defs/ActionCallTool"},
+        {"$ref": "#/$defs/ActionCallCapability"},
         {"$ref": "#/$defs/ActionSynthesizeAnswer"},
         {"$ref": "#/$defs/ActionRespond"}
       ]
@@ -63,6 +64,21 @@
         },
         "args": {
           "description": "Free-form per-tool argument bag."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ActionCallCapability": {
+      "type": "object",
+      "required": ["type", "capability"],
+      "properties": {
+        "type": {"const": "call_capability"},
+        "capability": {
+          "type": "string",
+          "description": "Semantic capability name resolved by runtime before execution, for example filesystem.list_entries or system.run_command."
+        },
+        "args": {
+          "description": "Free-form capability argument bag. Shape is resolved and validated downstream by capability resolver and tool contracts."
         }
       },
       "additionalProperties": false

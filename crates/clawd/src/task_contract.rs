@@ -363,6 +363,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         OutputSemanticKind::RawCommandOutput => TaskOperation::Run,
         OutputSemanticKind::FileNames
         | OutputSemanticKind::DirectoryNames
+        | OutputSemanticKind::DirectoryEntryGroups
         | OutputSemanticKind::FilePaths
         | OutputSemanticKind::SqliteTableListing
         | OutputSemanticKind::SqliteTableNamesOnly
@@ -412,6 +413,7 @@ fn delivery_shape_for_route(route: &RouteResult) -> TaskDeliveryShape {
         route.output_contract.semantic_kind,
         OutputSemanticKind::FileNames
             | OutputSemanticKind::DirectoryNames
+            | OutputSemanticKind::DirectoryEntryGroups
             | OutputSemanticKind::FilePaths
             | OutputSemanticKind::SqliteTableListing
             | OutputSemanticKind::SqliteTableNamesOnly
@@ -472,6 +474,7 @@ pub(crate) fn required_evidence_fields_for_output_contract(
         }
         OutputSemanticKind::FileNames
         | OutputSemanticKind::DirectoryNames
+        | OutputSemanticKind::DirectoryEntryGroups
         | OutputSemanticKind::FilePaths
         | OutputSemanticKind::HiddenEntriesCheck
         | OutputSemanticKind::SqliteTableListing
@@ -548,15 +551,14 @@ fn failure_policy_for_route(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AskMode, IntentOutputContract, RoutedMode};
+    use crate::{AskMode, IntentOutputContract};
 
     fn route_with_contract(
-        routed_mode: RoutedMode,
+        ask_mode: AskMode,
         output_contract: IntentOutputContract,
     ) -> RouteResult {
         RouteResult {
-            routed_mode,
-            ask_mode: AskMode::from_routed_mode(routed_mode),
+            ask_mode,
             resolved_intent: "test intent".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -577,7 +579,7 @@ mod tests {
     #[test]
     fn file_path_search_contract_is_list_with_candidate_evidence() {
         let route = route_with_contract(
-            RoutedMode::Act,
+            AskMode::planner_execute_plain(),
             IntentOutputContract {
                 response_shape: OutputResponseShape::Strict,
                 requires_content_evidence: true,
@@ -603,7 +605,7 @@ mod tests {
     #[test]
     fn missing_locator_contract_prefers_clarify_policy() {
         let mut route = route_with_contract(
-            RoutedMode::AskClarify,
+            AskMode::clarify(),
             IntentOutputContract {
                 locator_kind: OutputLocatorKind::Path,
                 requires_content_evidence: true,
@@ -622,7 +624,7 @@ mod tests {
     #[test]
     fn task_contract_includes_structured_workspace_target() {
         let route = route_with_contract(
-            RoutedMode::Act,
+            AskMode::planner_execute_plain(),
             IntentOutputContract {
                 locator_kind: OutputLocatorKind::CurrentWorkspace,
                 semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
@@ -643,7 +645,7 @@ mod tests {
     #[test]
     fn directory_purpose_summary_uses_listing_candidates_as_required_evidence() {
         let route = route_with_contract(
-            RoutedMode::ChatAct,
+            AskMode::planner_execute_chat_wrapped(),
             IntentOutputContract {
                 locator_kind: OutputLocatorKind::CurrentWorkspace,
                 semantic_kind: OutputSemanticKind::DirectoryPurposeSummary,
@@ -664,7 +666,7 @@ mod tests {
     #[test]
     fn existence_contract_requires_structural_path_evidence() {
         let route = route_with_contract(
-            RoutedMode::Act,
+            AskMode::planner_execute_plain(),
             IntentOutputContract {
                 locator_kind: OutputLocatorKind::Path,
                 locator_hint: "README.md".to_string(),
@@ -688,7 +690,7 @@ mod tests {
     #[test]
     fn task_contract_splits_structured_multi_target_locator() {
         let route = route_with_contract(
-            RoutedMode::Act,
+            AskMode::planner_execute_plain(),
             IntentOutputContract {
                 locator_kind: OutputLocatorKind::Filename,
                 locator_hint: "README.md | AGENTS.md".to_string(),
@@ -715,7 +717,7 @@ mod tests {
     #[test]
     fn task_contract_splits_comma_multi_target_locator() {
         let route = route_with_contract(
-            RoutedMode::Act,
+            AskMode::planner_execute_plain(),
             IntentOutputContract {
                 locator_kind: OutputLocatorKind::Filename,
                 locator_hint: "README.md, README.zh-CN.md, Cargo.toml".to_string(),

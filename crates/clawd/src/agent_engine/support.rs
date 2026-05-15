@@ -593,6 +593,15 @@ pub(super) fn action_fingerprint(state: &AppState, action: &AgentAction) -> Stri
                 .collect::<Vec<_>>()
                 .join(",")
         ),
+        AgentAction::CallCapability { capability, args } => {
+            let normalized = capability.trim().to_ascii_lowercase();
+            let normalized_args = normalize_args_for_fingerprint(&normalized, args);
+            format!(
+                "capability:{}:{}",
+                normalized,
+                canonical_json_string(&normalized_args)
+            )
+        }
         AgentAction::Think { .. } => "think".to_string(),
     }
 }

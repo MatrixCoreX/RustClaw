@@ -636,6 +636,7 @@ fn validate_knowledge_candidate(
         || namespace.is_empty()
         || namespace == KNOWLEDGE_NAMESPACE_NONE
         || kind == KNOWLEDGE_KIND_TRANSIENT
+        || crate::memory::fact_uses_cross_turn_deictic_locator(fact)
     {
         return None;
     }
@@ -965,6 +966,20 @@ mod tests {
             reason: "project-level rule".to_string(),
         };
         assert!(validate_knowledge_candidate("user-key", 42, &valid_project).is_some());
+    }
+
+    #[test]
+    fn validate_knowledge_candidate_rejects_cross_turn_deictic_locator_mapping() {
+        let candidate = KnowledgeCandidateLlmOut {
+            should_persist: true,
+            kind: "project_fact".to_string(),
+            namespace: KNOWLEDGE_NAMESPACE_PROJECT_FACTS.to_string(),
+            fact: "那个日志指 /tmp/device/app.log".to_string(),
+            confidence: 0.97,
+            reason: "stale alias-like locator mapping".to_string(),
+        };
+
+        assert!(validate_knowledge_candidate("user-key", 42, &candidate).is_none());
     }
 
     #[test]

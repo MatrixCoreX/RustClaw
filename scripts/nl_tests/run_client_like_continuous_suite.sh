@@ -20,6 +20,7 @@ LOG_ROOT="${ROOT_DIR}/scripts/nl_suite_logs/client_like_continuous"
 PROMPT_REPLY_ONLY=1
 QUALITY_GUARD=0
 CASE_FILE_VALUE=""
+CASE_JSONL_VALUE=""
 CASE_LIMIT_VALUE=""
 CASE_START_VALUE="${CASE_START:-1}"
 RUN_BUILTIN_SMOKE=1
@@ -50,6 +51,7 @@ Options:
   --poll-seconds N           poll interval seconds. Default: 1
   --log-root PATH            log output root
   --case-file PATH           append prompts from a case file into the same client-like conversation
+  --case-jsonl PATH          append prompts from JSONL rows with name/tags/prompt/expect fields
   --full-nl                  shorthand for --case-file scripts/nl_tests/cases/nl_cases_full.txt
   --case-limit N             max appended cases from --case-file/--full-nl
   --case-start N             start from the Nth appended case. Use with --skip-smoke and the same
@@ -119,6 +121,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --case-file)
       CASE_FILE_VALUE="${2:-}"
+      shift 2
+      ;;
+    --case-jsonl)
+      CASE_JSONL_VALUE="${2:-}"
       shift 2
       ;;
     --full-nl)
@@ -854,6 +860,7 @@ PY
       echo "[TURN ${turn}] messages=${messages}"
     fi
   fi
+  print_turn_metrics "$out_file" "$turn"
 
   if [[ "$status" != "succeeded" ]]; then
     echo "Turn ${turn} did not succeed: status=${status} error=${error}" >&2
@@ -932,15 +939,15 @@ for raw in case_file.read_text(encoding="utf-8").splitlines():
     line = raw.strip()
     if not line or line.startswith("#"):
         continue
-    parts = line.split("|", 4)
+    parts = line.split("|", 3)
     if len(parts) < 4:
         continue
-    suite, name, tags, prompt = parts[:4]
+    suite, name, tags, prompt = parts
     expect = ""
-    if len(parts) >= 5:
-        extra = parts[4].strip()
-        if extra.startswith("expect="):
-            expect = extra[len("expect="):]
+    expect_marker = "|expect="
+    if expect_marker in prompt:
+        prompt, expect = prompt.rsplit(expect_marker, 1)
+        expect = expect.strip()
     seen += 1
     if seen < start:
         continue
@@ -955,6 +962,76 @@ for raw in case_file.read_text(encoding="utf-8").splitlines():
     ]))
     if limit and emitted >= limit:
         break
+PY
+}
+
+load_case_rows_jsonl() {
+  local case_jsonl="$1"
+  local case_limit="$2"
+  local case_start="$3"
+  python3 - "$case_jsonl" "$case_limit" "$case_start" <<'PY'
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+
+case_file = Path(sys.argv[1])
+limit_raw = sys.argv[2].strip()
+start_raw = sys.argv[3].strip()
+limit = int(limit_raw) if limit_raw else 0
+start = int(start_raw) if start_raw else 1
+if start < 1:
+    raise SystemExit(f"case_start must be >= 1, got {start}")
+seen = 0
+emitted = 0
+row_sep = "\x1f"
+
+def group_key_for_name(name: str) -> str:
+    base = name.strip() or "unnamed_case"
+    stripped = re.sub(r"_turn[0-9]+$", "", base) or base
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", stripped).strip("-")[:72]
+    digest = hashlib.sha1(stripped.encode("utf-8")).hexdigest()[:12]
+    return f"{safe or 'case'}-{digest}"
+
+for lineno, raw in enumerate(case_file.read_text(encoding="utf-8").splitlines(), 1):
+    line = raw.strip()
+    if not line or line.startswith("#"):
+        continue
+    row = json.loads(line)
+    prompt = str(row.get("prompt") or "").strip()
+    if not prompt:
+        raise SystemExit(f"{case_file}:{lineno}: JSONL row missing prompt")
+    suite = str(row.get("suite") or "jsonl")
+    name = str(row.get("name") or f"case_{seen + 1}")
+    tags = row.get("tags") or ""
+    if isinstance(tags, list):
+        tags = ",".join(str(item) for item in tags)
+    else:
+        tags = str(tags)
+    expect = row.get("expect") or ""
+    seen += 1
+    if seen < start:
+        continue
+    emitted += 1
+    print(row_sep.join([
+        str(seen),
+        group_key_for_name(name),
+        name.replace("\t", " ").replace(row_sep, " "),
+        tags.replace("\t", " ").replace(row_sep, " "),
+        json.dumps(prompt, ensure_ascii=False),
+        json.dumps(str(expect), ensure_ascii=False),
+    ]))
+    if limit and emitted >= limit:
+        break
+PY
+}
+
+json_decode_arg() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+print(json.loads(sys.argv[1]), end="")
 PY
 }
 
@@ -1135,6 +1212,150 @@ else:
 PY
 }
 
+print_turn_metrics() {
+  local out_file="$1"
+  local turn="$2"
+  python3 - "$out_file" "$turn" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+turn = sys.argv[2]
+
+def result_json_from_response(obj):
+    data = obj.get("data") or {}
+    result = data.get("result_json") or {}
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except Exception:
+            result = {}
+    return result if isinstance(result, dict) else {}
+
+try:
+    obj = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    print(f"[TURN {turn}] metrics unavailable=parse_error")
+    raise SystemExit(0)
+
+result = result_json_from_response(obj)
+journal = result.get("task_journal") or {}
+summary = journal.get("summary") or {}
+metrics = summary.get("task_metrics") or {}
+by_prompt = metrics.get("by_prompt") or {}
+prompt_parts = []
+if isinstance(by_prompt, dict):
+    for label, bucket in sorted(by_prompt.items()):
+        if not isinstance(bucket, dict):
+            continue
+        count = int(bucket.get("count") or 0)
+        elapsed = int(bucket.get("elapsed_ms") or 0)
+        trunc = int(bucket.get("prompt_truncation_count") or 0)
+        prompt_parts.append(f"{label}:{count}/{elapsed}ms/trunc={trunc}")
+
+llm_calls = metrics.get("llm_calls_per_task")
+llm_elapsed = metrics.get("llm_elapsed_ms_per_task")
+prompt_truncations = metrics.get("prompt_truncation_count")
+round_count = summary.get("round_count")
+step_count = summary.get("step_count")
+final_status = summary.get("final_status") or ""
+prompt_text = ",".join(prompt_parts) if prompt_parts else "none"
+print(
+    f"[TURN {turn}] metrics "
+    f"llm_calls={llm_calls if llm_calls is not None else 'n/a'} "
+    f"llm_elapsed_ms={llm_elapsed if llm_elapsed is not None else 'n/a'} "
+    f"rounds={round_count if round_count is not None else 'n/a'} "
+    f"steps={step_count if step_count is not None else 'n/a'} "
+    f"prompt_truncations={prompt_truncations if prompt_truncations is not None else 'n/a'} "
+    f"final_status={final_status or 'n/a'} "
+    f"by_prompt={prompt_text}"
+)
+PY
+}
+
+print_llm_metrics_report() {
+  local run_dir="$1"
+  python3 - "$run_dir" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+run_dir = Path(sys.argv[1])
+total_calls = 0
+total_elapsed = 0
+total_rounds = 0
+total_steps = 0
+total_truncations = 0
+turns_with_metrics = 0
+max_calls = None
+max_elapsed = None
+slow_files = []
+
+def result_json_from_response(obj):
+    data = obj.get("data") or {}
+    result = data.get("result_json") or {}
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except Exception:
+            result = {}
+    return result if isinstance(result, dict) else {}
+
+for path in sorted(run_dir.glob("turn*.json")):
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    result = result_json_from_response(obj)
+    journal = result.get("task_journal") or {}
+    summary = journal.get("summary") or {}
+    metrics = summary.get("task_metrics") or {}
+    if not isinstance(metrics, dict) or not metrics:
+        continue
+    calls = metrics.get("llm_calls_per_task")
+    elapsed = metrics.get("llm_elapsed_ms_per_task")
+    rounds = summary.get("round_count")
+    steps = summary.get("step_count")
+    truncations = metrics.get("prompt_truncation_count")
+    if calls is None and elapsed is None and rounds is None and steps is None:
+        continue
+    turns_with_metrics += 1
+    calls_i = int(calls or 0)
+    elapsed_i = int(elapsed or 0)
+    rounds_i = int(rounds or 0)
+    steps_i = int(steps or 0)
+    trunc_i = int(truncations or 0)
+    total_calls += calls_i
+    total_elapsed += elapsed_i
+    total_rounds += rounds_i
+    total_steps += steps_i
+    total_truncations += trunc_i
+    if max_calls is None or calls_i > max_calls[1]:
+        max_calls = (path.name, calls_i)
+    if max_elapsed is None or elapsed_i > max_elapsed[1]:
+        max_elapsed = (path.name, elapsed_i)
+    if calls_i >= 5 or elapsed_i >= 60000 or rounds_i >= 2:
+        slow_files.append(f"{path.name}:calls={calls_i},elapsed_ms={elapsed_i},rounds={rounds_i}")
+
+if turns_with_metrics <= 0:
+    print("LLM_METRICS unavailable")
+else:
+    slow_text = ",".join(slow_files[:10])
+    if len(slow_files) > 10:
+        slow_text += f",...(+{len(slow_files) - 10})"
+    print(
+        "LLM_METRICS "
+        f"turns={turns_with_metrics} total_calls={total_calls} total_elapsed_ms={total_elapsed} "
+        f"avg_calls={total_calls / turns_with_metrics:.2f} avg_elapsed_ms={total_elapsed / turns_with_metrics:.0f} "
+        f"total_rounds={total_rounds} total_steps={total_steps} prompt_truncations={total_truncations} "
+        f"max_calls={max_calls[0]}:{max_calls[1]} "
+        f"max_elapsed={max_elapsed[0]}:{max_elapsed[1]} "
+        f"heavy_turns={slow_text or 'none'}"
+    )
+PY
+}
+
 resolve_admin_key
 
 if [[ -z "${EXTERNAL_USER_ID_VALUE:-}" ]]; then
@@ -1152,12 +1373,29 @@ USER_KEY="$USER_KEY_VALUE"
 MAX_WAIT_SECONDS="$WAIT_SECONDS_VALUE"
 POLL_INTERVAL_SECONDS="$POLL_SECONDS_VALUE"
 DB_PATH_VALUE="$(resolve_db_path)"
+if [[ -n "${CASE_FILE_VALUE:-}" && -n "${CASE_JSONL_VALUE:-}" ]]; then
+  echo "Use only one of --case-file or --case-jsonl." >&2
+  exit 2
+fi
+
 if [[ -n "${CASE_FILE_VALUE:-}" ]]; then
   if [[ ! -f "$CASE_FILE_VALUE" ]]; then
     echo "Case file not found: $CASE_FILE_VALUE" >&2
     exit 2
   fi
   CASE_FILE_VALUE="$(python3 - "$CASE_FILE_VALUE" <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).resolve())
+PY
+  )"
+fi
+if [[ -n "${CASE_JSONL_VALUE:-}" ]]; then
+  if [[ ! -f "$CASE_JSONL_VALUE" ]]; then
+    echo "Case JSONL not found: $CASE_JSONL_VALUE" >&2
+    exit 2
+  fi
+  CASE_JSONL_VALUE="$(python3 - "$CASE_JSONL_VALUE" <<'PY'
 from pathlib import Path
 import sys
 print(Path(sys.argv[1]).resolve())
@@ -1185,6 +1423,7 @@ echo "external_chat_id=${EXTERNAL_CHAT_ID_VALUE}"
 echo "test_id=${TEST_ID}"
 echo "log_dir=${RUN_DIR}"
 echo "case_file=${CASE_FILE_VALUE:-<none>}"
+echo "case_jsonl=${CASE_JSONL_VALUE:-<none>}"
 echo "case_limit=${CASE_LIMIT_VALUE:-<none>}"
 echo "case_start=${CASE_START_VALUE:-1}"
 echo "case_group_isolation=${CASE_GROUP_ISOLATION}"
@@ -1226,9 +1465,20 @@ if [[ "$RUN_BUILTIN_SMOKE" -eq 1 ]]; then
   done
 fi
 
-if [[ -n "${CASE_FILE_VALUE:-}" ]]; then
+if [[ -n "${CASE_FILE_VALUE:-}" || -n "${CASE_JSONL_VALUE:-}" ]]; then
+  if [[ -n "${CASE_JSONL_VALUE:-}" ]]; then
+    case_row_loader=(load_case_rows_jsonl "$CASE_JSONL_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE")
+    resume_case_arg="--case-jsonl ${CASE_JSONL_VALUE}"
+  else
+    case_row_loader=(load_case_rows "$CASE_FILE_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE")
+    resume_case_arg="--case-file ${CASE_FILE_VALUE}"
+  fi
   while IFS=$'\x1f' read -r case_index case_group_key case_name case_tags case_prompt case_expect; do
     [[ -n "${case_index:-}" ]] || continue
+    if [[ -n "${CASE_JSONL_VALUE:-}" ]]; then
+      case_prompt="$(json_decode_arg "$case_prompt")"
+      case_expect="$(json_decode_arg "$case_expect")"
+    fi
     turn=$((turn + 1))
     case_external_chat_id="$EXTERNAL_CHAT_ID_VALUE"
     if [[ "$CASE_GROUP_ISOLATION" -eq 1 ]]; then
@@ -1244,14 +1494,14 @@ if [[ -n "${CASE_FILE_VALUE:-}" ]]; then
       if [[ "$CASE_GROUP_ISOLATION" -eq 0 ]]; then
         shared_chat_arg=" --shared-case-chat"
       fi
-      echo "RESUME_HINT bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file ${CASE_FILE_VALUE} --case-start ${case_index} --skip-smoke --external-user-id ${EXTERNAL_USER_ID_VALUE} --external-chat-id ${EXTERNAL_CHAT_ID_VALUE} --prompt-reply-only${quality_guard_arg}${shared_chat_arg}" >&2
+      echo "RESUME_HINT bash scripts/nl_tests/run_client_like_continuous_suite.sh ${resume_case_arg} --case-start ${case_index} --skip-smoke --external-user-id ${EXTERNAL_USER_ID_VALUE} --external-chat-id ${EXTERNAL_CHAT_ID_VALUE} --prompt-reply-only${quality_guard_arg}${shared_chat_arg}" >&2
       exit 1
     fi
-  done < <(load_case_rows "$CASE_FILE_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE")
+  done < <("${case_row_loader[@]}")
 fi
 
 if [[ "$turn" -eq 0 ]]; then
-  echo "No turns were run. Remove --skip-smoke or pass --case-file/--full-nl." >&2
+  echo "No turns were run. Remove --skip-smoke or pass --case-file/--case-jsonl/--full-nl." >&2
   exit 2
 fi
 
@@ -1263,5 +1513,6 @@ fi
 
 python3 "${ROOT_DIR}/scripts/nl_tests/tag_run_outcomes.py" "$RUN_DIR"
 print_prompt_budget_report "$RUN_DIR"
+print_llm_metrics_report "$RUN_DIR"
 
 echo "CLIENT_LIKE_CONTINUOUS_SUITE_OK turns=${turn} log_dir=${RUN_DIR}"

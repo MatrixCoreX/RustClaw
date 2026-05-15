@@ -1,6 +1,6 @@
 use crate::{
-    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, RouteResult, RoutedMode,
+    ActFinalizeStyle, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputSemanticKind, RouteResult,
 };
 use std::path::Path;
 
@@ -32,13 +32,12 @@ pub(crate) struct PostRoutePolicyResult {
     pub(crate) clarify_reason_kind: ClarifyReasonKind,
 }
 
-pub(crate) fn enforce_content_evidence_execution_mode(
-    mode: RoutedMode,
+pub(crate) fn content_evidence_execution_finalize_style(
     contract: &IntentOutputContract,
     needs_clarify: bool,
-) -> RoutedMode {
-    if needs_clarify || !mode.eq(&RoutedMode::Chat) || !contract.requires_content_evidence {
-        return mode;
+) -> Option<ActFinalizeStyle> {
+    if needs_clarify || !contract.requires_content_evidence {
+        return None;
     }
     if matches!(contract.locator_kind, OutputLocatorKind::None)
         && !contract.delivery_required
@@ -47,15 +46,15 @@ pub(crate) fn enforce_content_evidence_execution_mode(
             OutputResponseShape::Scalar | OutputResponseShape::FileToken
         )
     {
-        return mode;
+        return None;
     }
     if matches!(
         contract.response_shape,
         OutputResponseShape::Scalar | OutputResponseShape::FileToken
     ) {
-        RoutedMode::Act
+        Some(ActFinalizeStyle::Plain)
     } else {
-        RoutedMode::ChatAct
+        Some(ActFinalizeStyle::ChatWrapped)
     }
 }
 
@@ -110,7 +109,7 @@ fn path_is_existing_directory(path: &str) -> bool {
     !trimmed.is_empty() && Path::new(trimmed).is_dir()
 }
 
-fn should_force_content_evidence_for_path_bound_chat_act(
+fn should_force_content_evidence_for_path_bound_chat_wrapped_execution(
     route_result: &RouteResult,
     direct_locator_path: Option<&str>,
 ) -> bool {
@@ -224,7 +223,7 @@ pub(crate) fn apply_post_route_policy(
         execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
     }
 
-    if should_force_content_evidence_for_path_bound_chat_act(
+    if should_force_content_evidence_for_path_bound_chat_wrapped_execution(
         &execution_route_result,
         auto_locator_path.as_deref(),
     ) {
@@ -239,16 +238,15 @@ pub(crate) fn apply_post_route_policy(
     {
         execution_route_result.needs_clarify = false;
         if execution_route_result.is_clarify_gate() || execution_route_result.is_chat_gate() {
-            execution_route_result.set_routed_mode(
-                if matches!(
-                    execution_route_result.output_contract.response_shape,
-                    OutputResponseShape::Scalar | OutputResponseShape::FileToken
-                ) {
-                    RoutedMode::Act
-                } else {
-                    RoutedMode::ChatAct
-                },
-            );
+            let finalize = if matches!(
+                execution_route_result.output_contract.response_shape,
+                OutputResponseShape::Scalar | OutputResponseShape::FileToken
+            ) {
+                ActFinalizeStyle::Plain
+            } else {
+                ActFinalizeStyle::ChatWrapped
+            };
+            execution_route_result.set_planner_execute_finalize(finalize);
         }
     }
 
@@ -258,7 +256,7 @@ pub(crate) fn apply_post_route_policy(
             OutputLocatorKind::Path | OutputLocatorKind::Filename
         );
     let force_clarify = execution_route_result.is_clarify_gate()
-        || (execution_route_result.needs_clarify && !auto_locator_resolved_direct)
+        || execution_route_result.needs_clarify
         || missing_locator_for_path_scoped_content
         || fuzzy_locator_requires_clarify;
     if force_clarify {
@@ -317,8 +315,7 @@ mod tests {
 
     fn route_result() -> RouteResult {
         RouteResult {
-            routed_mode: RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "test".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
@@ -352,20 +349,20 @@ mod tests {
             route_result(),
             LocatorResolution::Fuzzy(vec!["/tmp/a".to_string(), "/tmp/b".to_string()]),
         );
-        assert!(matches!(
-            result.execution_route_result.routed_mode,
-            RoutedMode::AskClarify
-        ));
+        assert_eq!(
+            result.execution_route_result.ask_mode,
+            crate::AskMode::clarify()
+        );
         assert_eq!(result.fuzzy_locator_suggestions.len(), 2);
     }
 
     #[test]
     fn missing_locator_still_forces_clarify() {
         let result = apply_post_route_policy(route_result(), LocatorResolution::None);
-        assert!(matches!(
-            result.execution_route_result.routed_mode,
-            RoutedMode::AskClarify
-        ));
+        assert_eq!(
+            result.execution_route_result.ask_mode,
+            crate::AskMode::clarify()
+        );
         assert!(result.missing_locator_for_path_scoped_content);
     }
 
@@ -385,10 +382,10 @@ mod tests {
 
         let result = apply_post_route_policy(route, LocatorResolution::None);
 
-        assert!(matches!(
-            result.execution_route_result.routed_mode,
-            RoutedMode::Act
-        ));
+        assert_eq!(
+            result.execution_route_result.ask_mode,
+            crate::AskMode::planner_execute_plain()
+        );
         assert!(!result.execution_route_result.needs_clarify);
         assert!(!result.missing_locator_for_path_scoped_content);
     }
@@ -409,10 +406,10 @@ mod tests {
 
         let result = apply_post_route_policy(route, LocatorResolution::None);
 
-        assert!(matches!(
-            result.execution_route_result.routed_mode,
-            RoutedMode::Act
-        ));
+        assert_eq!(
+            result.execution_route_result.ask_mode,
+            crate::AskMode::planner_execute_plain()
+        );
         assert!(!result.execution_route_result.needs_clarify);
         assert!(!result.missing_locator_for_path_scoped_content);
     }
@@ -425,10 +422,10 @@ mod tests {
             route,
             LocatorResolution::Direct("/tmp/workspace".to_string()),
         );
-        assert!(!matches!(
-            result.execution_route_result.routed_mode,
-            RoutedMode::AskClarify
-        ));
+        assert_ne!(
+            result.execution_route_result.ask_mode,
+            crate::AskMode::clarify()
+        );
         assert!(!result.missing_locator_for_path_scoped_content);
         assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/workspace"));
     }
@@ -436,17 +433,16 @@ mod tests {
     #[test]
     fn service_status_locator_hint_does_not_force_path_clarify() {
         let mut route = route_result();
-        route.routed_mode = RoutedMode::ChatAct;
-        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::ChatAct);
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
         route.output_contract.locator_hint = "telegramd".to_string();
         let result = apply_post_route_policy(route, LocatorResolution::None);
-        assert!(matches!(
-            result.execution_route_result.routed_mode,
-            RoutedMode::ChatAct
-        ));
+        assert_eq!(
+            result.execution_route_result.ask_mode,
+            crate::AskMode::planner_execute_chat_wrapped()
+        );
         assert!(!result.execution_route_result.needs_clarify);
         assert!(!result.missing_locator_for_path_scoped_content);
     }
@@ -464,8 +460,8 @@ mod tests {
         };
 
         assert_eq!(
-            enforce_content_evidence_execution_mode(RoutedMode::Chat, &contract, false),
-            RoutedMode::Chat
+            content_evidence_execution_finalize_style(&contract, false),
+            None
         );
     }
 
@@ -482,25 +478,24 @@ mod tests {
         };
 
         assert_eq!(
-            enforce_content_evidence_execution_mode(RoutedMode::Chat, &contract, false),
-            RoutedMode::Chat
+            content_evidence_execution_finalize_style(&contract, false),
+            None
         );
     }
 
     #[test]
     fn filename_scope_with_direct_auto_locator_does_not_override_clarify() {
         let mut route = route_result();
-        route.routed_mode = RoutedMode::AskClarify;
         route.needs_clarify = true;
         route.output_contract.locator_kind = OutputLocatorKind::Filename;
         let result = apply_post_route_policy(
             route,
             LocatorResolution::Direct("/tmp/README.md".to_string()),
         );
-        assert!(matches!(
-            result.execution_route_result.routed_mode,
-            RoutedMode::AskClarify
-        ));
+        assert_eq!(
+            result.execution_route_result.ask_mode,
+            crate::AskMode::clarify()
+        );
         assert!(result.execution_route_result.needs_clarify);
         assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/README.md"));
     }
@@ -508,8 +503,7 @@ mod tests {
     #[test]
     fn current_workspace_auto_locator_does_not_override_clarify() {
         let mut route = route_result();
-        route.routed_mode = RoutedMode::AskClarify;
-        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::AskClarify);
+        route.ask_mode = crate::AskMode::clarify();
         route.needs_clarify = true;
         route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
@@ -517,10 +511,10 @@ mod tests {
             route,
             LocatorResolution::Direct("/tmp/workspace".to_string()),
         );
-        assert!(matches!(
-            result.execution_route_result.routed_mode,
-            RoutedMode::AskClarify
-        ));
+        assert_eq!(
+            result.execution_route_result.ask_mode,
+            crate::AskMode::clarify()
+        );
         assert!(result.execution_route_result.needs_clarify);
         assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/workspace"));
     }
@@ -528,7 +522,6 @@ mod tests {
     #[test]
     fn inherited_operation_with_direct_locator_no_longer_rescues_from_second_clarify() {
         let mut route = route_result();
-        route.routed_mode = RoutedMode::AskClarify;
         route.needs_clarify = true;
         route.output_contract.locator_kind = OutputLocatorKind::None;
         route.output_contract.requires_content_evidence = false;
@@ -536,10 +529,10 @@ mod tests {
             route,
             LocatorResolution::Direct("/tmp/document".to_string()),
         );
-        assert!(matches!(
-            result.execution_route_result.routed_mode,
-            RoutedMode::AskClarify
-        ));
+        assert_eq!(
+            result.execution_route_result.ask_mode,
+            crate::AskMode::clarify()
+        );
         assert!(result.execution_route_result.needs_clarify);
         assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/document"));
     }
@@ -547,46 +540,35 @@ mod tests {
     #[test]
     fn explicit_relative_path_without_locator_hint_does_not_rescue_clarify_back_to_execution() {
         let mut route = route_result();
-        route.routed_mode = RoutedMode::AskClarify;
         route.needs_clarify = true;
         route.output_contract.requires_content_evidence = true;
         route.output_contract.response_shape = OutputResponseShape::Free;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
         let result = apply_post_route_policy(route, LocatorResolution::None);
         assert!(result.execution_route_result.needs_clarify);
-        assert!(matches!(
-            result.execution_route_result.routed_mode,
-            RoutedMode::AskClarify
-        ));
         assert_eq!(
             result.execution_route_result.ask_mode,
-            crate::AskMode::from_routed_mode(RoutedMode::AskClarify)
+            crate::AskMode::clarify()
         );
     }
 
     #[test]
     fn explicit_relative_path_followup_without_locator_hint_stays_clarify() {
         let mut route = route_result();
-        route.routed_mode = RoutedMode::AskClarify;
         route.needs_clarify = true;
         route.output_contract.response_shape = OutputResponseShape::Scalar;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
         let result = apply_post_route_policy(route, LocatorResolution::None);
         assert!(result.execution_route_result.needs_clarify);
-        assert!(matches!(
-            result.execution_route_result.routed_mode,
-            RoutedMode::AskClarify
-        ));
         assert_eq!(
             result.execution_route_result.ask_mode,
-            crate::AskMode::from_routed_mode(RoutedMode::AskClarify)
+            crate::AskMode::clarify()
         );
     }
 
     #[test]
-    fn inherited_operation_without_prior_clarify_stays_in_ask_clarify() {
+    fn inherited_operation_without_prior_clarify_stays_in_clarify() {
         let mut route = route_result();
-        route.routed_mode = RoutedMode::AskClarify;
         route.needs_clarify = true;
         route.output_contract.locator_kind = OutputLocatorKind::None;
         route.output_contract.requires_content_evidence = false;
@@ -595,10 +577,10 @@ mod tests {
             LocatorResolution::Direct("/tmp/restart_clawd_latest.sh".to_string()),
         );
         assert!(result.execution_route_result.needs_clarify);
-        assert!(matches!(
-            result.execution_route_result.routed_mode,
-            RoutedMode::AskClarify
-        ));
+        assert_eq!(
+            result.execution_route_result.ask_mode,
+            crate::AskMode::clarify()
+        );
     }
 
     #[test]
@@ -641,11 +623,12 @@ mod tests {
     }
 
     #[test]
-    fn directory_like_chat_act_request_requires_content_evidence_without_forcing_semantic_kind() {
+    fn directory_like_chat_wrapped_execution_requires_content_evidence_without_forcing_semantic_kind(
+    ) {
         let mut route = route_result();
         route.resolved_intent =
             "列出 docs 目录最近修改的两个文件，再判断这些是干什么的".to_string();
-        route.set_routed_mode(RoutedMode::ChatAct);
+        route.set_planner_execute_finalize(ActFinalizeStyle::ChatWrapped);
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.requires_content_evidence = false;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -674,10 +657,10 @@ mod tests {
     }
 
     #[test]
-    fn generic_directory_chat_act_request_no_longer_defaults_to_directory_purpose_summary() {
+    fn generic_directory_chat_wrapped_execution_no_longer_defaults_to_directory_purpose_summary() {
         let mut route = route_result();
         route.resolved_intent = "看看 docs 目录".to_string();
-        route.set_routed_mode(RoutedMode::ChatAct);
+        route.set_planner_execute_finalize(ActFinalizeStyle::ChatWrapped);
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.requires_content_evidence = false;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -708,7 +691,6 @@ mod tests {
     #[test]
     fn act_directory_listing_does_not_default_to_directory_purpose_summary() {
         let mut route = route_result();
-        route.routed_mode = RoutedMode::Act;
         route.output_contract.response_shape = OutputResponseShape::Free;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
         route.output_contract.locator_hint = "document".to_string();
@@ -861,8 +843,7 @@ mod tests {
     #[test]
     fn scalar_path_only_output_without_input_locator_can_execute() {
         let mut route = route_result();
-        route.routed_mode = RoutedMode::Act;
-        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::Act);
+        route.ask_mode = crate::AskMode::planner_execute_plain();
         route.resolved_intent = "执行 which bash，只输出 bash 的路径".to_string();
         route.output_contract.response_shape = OutputResponseShape::Scalar;
         route.output_contract.requires_content_evidence = true;
@@ -877,10 +858,10 @@ mod tests {
             result.execution_route_result.output_contract.semantic_kind,
             OutputSemanticKind::ScalarPathOnly
         );
-        assert!(matches!(
-            result.execution_route_result.routed_mode,
-            RoutedMode::Act
-        ));
+        assert_eq!(
+            result.execution_route_result.ask_mode,
+            crate::AskMode::planner_execute_plain()
+        );
     }
 
     #[test]
@@ -917,8 +898,7 @@ mod tests {
     #[test]
     fn one_sentence_command_plus_explanation_clears_raw_command_output() {
         let mut route = route_result();
-        route.routed_mode = RoutedMode::ChatAct;
-        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::ChatAct);
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         route.resolved_intent =
             "执行 pwd 命令获取当前工作目录路径，然后用一句话简要解释这个路径大概是什么（只输出一句话）"
                 .to_string();
@@ -937,8 +917,7 @@ mod tests {
     #[test]
     fn direct_scalar_command_result_keeps_raw_command_output() {
         let mut route = route_result();
-        route.routed_mode = RoutedMode::Act;
-        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::Act);
+        route.ask_mode = crate::AskMode::planner_execute_plain();
         route.resolved_intent = "执行 pwd，只输出当前路径，不要解释".to_string();
         route.output_contract.response_shape = OutputResponseShape::Scalar;
         route.output_contract.requires_content_evidence = true;
@@ -954,8 +933,7 @@ mod tests {
     #[test]
     fn brief_command_explanation_no_longer_uses_surface_shape_to_clear_raw_output() {
         let mut route = route_result();
-        route.routed_mode = RoutedMode::ChatAct;
-        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::ChatAct);
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         route.resolved_intent = "run pwd, then briefly explain what this path is".to_string();
         route.output_contract.response_shape = OutputResponseShape::Free;
         route.output_contract.requires_content_evidence = true;

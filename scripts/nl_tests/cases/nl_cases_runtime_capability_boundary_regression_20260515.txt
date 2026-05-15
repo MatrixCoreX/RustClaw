@@ -1,0 +1,23 @@
+# Focused regression set for runtime capability boundary convergence.
+# Run with:
+# bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-file scripts/nl_tests/cases/nl_cases_runtime_capability_boundary_regression_20260515.txt --quality-guard --prompt-reply-only
+capability_boundary_regression|direct_intro_cn|direct,cn|你好，用一句话说明 RustClaw 适合帮我做什么
+capability_boundary_regression|direct_translate_en|direct,en|Translate this sentence to English: 服务已经恢复
+capability_boundary_regression|direct_transform_json_cn|direct,cn|把这个 JSON 数组按 score 从高到低排序，只输出 name 顺序：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+capability_boundary_regression|clarify_delete_that_file_cn|clarify,high-risk,cn|删除那个文件
+capability_boundary_regression|clarify_delete_a_file_cn|clarify,high-risk,cn|帮我删除一个文件
+capability_boundary_regression|observe_pwd_scalar_cn|act,observe,system,scalar,cn|只输出当前工作目录的绝对路径，不要解释
+capability_boundary_regression|observe_uname_scalar_cn|act,observe,system,scalar,cn|只输出当前系统内核名称，不要解释
+capability_boundary_regression|fs_list_prompts_cn|act,observe,fs,list,cn|列出 prompts 目录前 5 个直接子项名称，不要超过 5 个
+capability_boundary_regression|fs_read_release_head_cn|act,observe,fs,summary,cn|读取 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md 前 5 行，然后用一句话概括
+capability_boundary_regression|fs_json_package_name_en|act,observe,fs,json,en|Read scripts/nl_tests/fixtures/device_local/package.json and output only the value of the name field.
+capability_boundary_regression|fs_grep_app_log_cn|act,observe,fs,grep,cn|在 scripts/nl_tests/fixtures/device_local/logs/app.log 里搜索 ERROR，列出匹配行
+capability_boundary_regression|fs_count_docs_cn|act,observe,fs,count,cn|数一下 scripts/nl_tests/fixtures/device_local/docs 目录有多少个直接子项，只输出数字
+capability_boundary_regression|fs_missing_file_cn|act,observe,fs,not-found,cn|检查 scripts/nl_tests/fixtures/device_local/docs/not_exists_capability_boundary_20260515.md 是否存在，不存在就明确说不存在并给出路径
+capability_boundary_regression|config_read_vendor_cn|act,observe,config,cn|读取 configs/config.toml 里当前选用的大模型 vendor，只输出字段和值
+capability_boundary_regression|config_validate_cn|act,observe,config,validate,cn|验证 configs/config.toml 是否是有效 TOML，只用一句话说明结果
+capability_boundary_regression|db_table_names_cn|act,observe,database,cn|看看 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里面有哪些表，只列表名
+capability_boundary_regression|archive_list_zip_cn|act,observe,archive,cn|查看 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 里面有哪些文件，只列文件名
+capability_boundary_regression|mutate_make_dir_run_cn|act,mutate,fs,cn|在 run/nl_eval_tmp/capability_boundary_dir_20260515 创建目录，然后确认它存在
+capability_boundary_regression|mutate_write_file_run_cn|act,mutate,fs,cn|在 run/nl_eval_tmp/capability_boundary_note_20260515.txt 写入 capability-boundary-ok，然后读回确认内容
+capability_boundary_regression|run_cmd_pipeline_fallback_cn|act,observe,system,run-cmd,cn|运行命令 `printf rustclaw | wc -c`，只输出数字

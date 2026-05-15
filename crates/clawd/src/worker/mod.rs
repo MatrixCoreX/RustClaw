@@ -265,6 +265,7 @@ pub(crate) async fn process_ask_task(
         turn_analysis: prepared_flow.turn_analysis.clone(),
         context_bundle_summary: Some(prepared_flow.context_bundle_summary.clone()),
         auto_locator_path: prepared_flow.auto_locator_path.clone(),
+        has_authoritative_deictic_anchor: prepared_flow.has_authoritative_deictic_anchor,
         fuzzy_locator_suggestions: prepared_flow.fuzzy_locator_suggestions.clone(),
         original_user_request: Some(prompt.clone()),
         // Execution-time context should prefer the resolved prompt that already incorporates

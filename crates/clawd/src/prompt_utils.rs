@@ -434,6 +434,7 @@ fn canonicalize_plan_action_step_value(value: Value) -> (Value, bool) {
         "think" => &["type", "content"],
         "call_skill" => &["type", "skill", "args"],
         "call_tool" => &["type", "tool", "args"],
+        "call_capability" => &["type", "capability", "args"],
         "synthesize_answer" => &["type", "evidence_refs"],
         "respond" => &["type", "content"],
         _ => return (Value::Object(map), false),
@@ -857,7 +858,7 @@ fn canonicalize_contract_repair_judge_object(
         "apply",
         "reason",
         "confidence",
-        "mode",
+        "decision",
         "needs_clarify",
         "clarify_question",
         "resolved_user_intent",
@@ -1260,12 +1261,14 @@ fn is_agent_action_candidate(candidate: &str) -> bool {
         return v.get("type").is_some()
             || v.get("action").is_some()
             || v.get("tool").is_some()
-            || v.get("skill").is_some();
+            || v.get("skill").is_some()
+            || v.get("capability").is_some();
     }
     candidate.contains("\"type\"")
         || candidate.contains("\"action\"")
         || candidate.contains("\"tool\"")
         || candidate.contains("\"skill\"")
+        || candidate.contains("\"capability\"")
 }
 
 fn repair_invalid_json_escapes(raw: &str) -> String {
@@ -1467,7 +1470,7 @@ fn parse_json_with_repair<T: DeserializeOwned>(raw: &str) -> Option<T> {
         })
         // §F3-a：补齐截断 JSON 末尾未闭合的 `{`/`[`。
         // adv12 复现：MiniMax 偶发把 envelope 末尾 `}` 漏掉 + 把废弃字段误嵌入
-        // `execution_recipe` 内部，导致 normalizer 解析失败 → 走 ask_clarify 兜底，
+        // `execution_recipe` 内部，导致 normalizer 解析失败 → 走 clarify 兜底，
         // 永远到不了 planner。补齐括号后 serde 用 `#[serde(default)]` 拿到字段的
         // 默认值，路由路径恢复。
         .or_else(|| {
@@ -1551,6 +1554,14 @@ fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
         return value;
     };
     let Some(raw_type) = obj.get("type").and_then(|v| v.as_str()) else {
+        if let Some(capability) = obj.get("capability").and_then(|v| v.as_str()) {
+            let args = obj.get("args").cloned().unwrap_or_else(|| json!({}));
+            return json!({
+                "type": "call_capability",
+                "capability": capability.trim(),
+                "args": args,
+            });
+        }
         if let Some(skill) = obj.get("skill").and_then(|v| v.as_str()) {
             let normalized_skill = state.resolve_canonical_skill_name(skill.trim());
             if state.is_builtin_skill(&normalized_skill) {
@@ -1610,8 +1621,18 @@ fn normalize_agent_action_shape(value: Value, state: &AppState) -> Value {
     let step_type = raw_type.trim().to_ascii_lowercase();
     if matches!(
         step_type.as_str(),
-        "think" | "call_tool" | "call_skill" | "respond"
+        "think" | "call_tool" | "call_skill" | "call_capability" | "respond"
     ) {
+        if step_type == "call_capability" {
+            if let Some(capability) = obj.get("capability").and_then(|v| v.as_str()) {
+                let args = obj.get("args").cloned().unwrap_or_else(|| json!({}));
+                return json!({
+                    "type": "call_capability",
+                    "capability": capability.trim(),
+                    "args": args,
+                });
+            }
+        }
         if step_type == "call_tool" {
             if let Some(tool) = obj.get("tool").and_then(|v| v.as_str()) {
                 let normalized_tool = state.resolve_canonical_skill_name(tool.trim());
@@ -1912,7 +1933,10 @@ fn collect_bare_action_args(obj: &serde_json::Map<String, Value>) -> Value {
         .cloned()
         .unwrap_or_default();
     for (key, value) in obj {
-        if matches!(key.as_str(), "type" | "args" | "tool" | "skill") {
+        if matches!(
+            key.as_str(),
+            "type" | "args" | "tool" | "skill" | "capability"
+        ) {
             continue;
         }
         args.insert(key.clone(), value.clone());
@@ -1933,18 +1957,18 @@ mod tests {
     use serde_json::{json, Value};
 
     #[test]
-    fn validate_against_schema_rejects_unknown_intent_mode() {
+    fn validate_against_schema_rejects_unknown_intent_decision() {
         let raw = r#"{
             "resolved_user_intent":"check logs",
-            "mode":"oops_status",
+            "decision":"oops_status",
             "needs_clarify":false,
             "reason":"r",
             "confidence":0.9
         }"#;
         let err =
             super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
-                .expect_err("unknown mode should fail schema validation");
-        assert!(err.to_string().contains("$.mode"));
+                .expect_err("unknown decision should fail schema validation");
+        assert!(err.to_string().contains("$.decision"));
         assert!(err.to_string().contains("oops_status"));
     }
 
@@ -2055,7 +2079,6 @@ mod tests {
             "reason": "Fresh system state observation is required.",
             "confidence": 0.94,
             "decision": "planner_execute",
-            "mode": "act",
             "output_contract": {
                 "response_shape": "free",
                 "requires_content_evidence": true,
@@ -2094,7 +2117,6 @@ mod tests {
                 .and_then(|v| v.as_bool()),
             Some(true)
         );
-        assert!(validated.value.get("mode").is_none());
         assert!(validated.value.get("execution_recipe").is_none());
         assert!(validated
             .value
@@ -2183,7 +2205,7 @@ mod tests {
     fn validate_against_schema_drops_execution_recipe_stray_fields() {
         let raw = r#"{
             "resolved_user_intent":"列出 document 目录下前 5 个文件名",
-            "mode":"act",
+            "decision":"planner_execute",
             "output_contract":{
                 "response_shape":"free",
                 "requires_content_evidence":true,
@@ -2205,7 +2227,7 @@ mod tests {
         }"#;
         let validated =
             super::validate_against_schema::<Value>(raw, super::PromptSchemaId::IntentNormalizer)
-                .expect("legacy execution_recipe stray fields should be dropped");
+                .expect("model-noise execution_recipe stray fields should be dropped");
         assert!(validated.schema_normalized);
         assert!(validated
             .value
@@ -2220,7 +2242,7 @@ mod tests {
             "apply": true,
             "reason": "semantic repair",
             "confidence": 0.92,
-            "mode": "act",
+            "decision":"planner_execute",
             "needs_clarify": false,
             "clarify_question": "",
             "resolved_user_intent": "find README candidates",
@@ -2287,7 +2309,7 @@ mod tests {
     fn validate_against_schema_repairs_execution_recipe_locator_hint() {
         let raw = r#"{
             "resolved_user_intent":"列出 document 目录下前 5 个文件名",
-            "mode":"act",
+            "decision":"planner_execute",
             "needs_clarify":false,
             "reason":"r",
             "confidence":0.95,
@@ -2327,7 +2349,7 @@ mod tests {
     fn validate_against_schema_repairs_execution_recipe_self_extension() {
         let raw = r#"{
             "resolved_user_intent":"检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径",
-            "mode":"act",
+            "decision":"planner_execute",
             "needs_clarify":false,
             "reason":"r",
             "confidence":0.95,
@@ -2368,7 +2390,7 @@ mod tests {
     fn validate_against_schema_repairs_execution_recipe_reason() {
         let raw = r#"{
             "resolved_user_intent":"列出 logs 目录下前 5 个文件名（按顺序编号）",
-            "mode":"act",
+            "decision":"planner_execute",
             "needs_clarify":false,
             "reason":"r",
             "confidence":0.92,
@@ -2409,7 +2431,7 @@ mod tests {
     fn validate_against_schema_repairs_execution_recipe_qualifier() {
         let raw = r#"{
             "resolved_user_intent":"执行基础健康检查，只列最重要的结论",
-            "mode":"act",
+            "decision":"planner_execute",
             "needs_clarify":false,
             "reason":"r",
             "confidence":0.92,
@@ -2449,7 +2471,7 @@ mod tests {
     fn validate_against_schema_repairs_malformed_execution_recipe_boundary_field() {
         let raw = r#"{
             "resolved_user_intent":"查看当前 git 分支名称，只输出分支名",
-            "mode":"act",
+            "decision":"planner_execute",
             "needs_clarify":false,
             "reason":"r",
             "confidence":0.95,
@@ -2524,7 +2546,7 @@ mod tests {
 
     #[test]
     fn parse_llm_json_raw_or_any_with_repair_dedupes_nested_duplicate_keys() {
-        let raw = r#"{"mode":"chat_act","execution_recipe":{"kind":"none","profile":"ops_service","target_scope":"system","target_scope":"system"}}"#;
+        let raw = r#"{"decision":"planner_execute","execution_recipe":{"kind":"none","profile":"ops_service","target_scope":"system","target_scope":"system"}}"#;
         let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
             .expect("nested duplicate keys should be repaired");
         assert_eq!(
@@ -2534,8 +2556,8 @@ mod tests {
             Some("system")
         );
         assert_eq!(
-            parsed.get("mode").and_then(|v| v.as_str()),
-            Some("chat_act")
+            parsed.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
         );
     }
 
@@ -2575,15 +2597,15 @@ mod tests {
         // 注意：原始 JSON 末尾少了 envelope 自己的最后一个 `}`，
         // 且废弃字段错误地嵌入 `execution_recipe`。repair 后应能解析并保留
         // envelope 顶层字段。
-        let raw = r#"{"resolved_user_intent":"x","resume_behavior":"none","schedule_kind":"none","schedule_intent":null,"wants_file_delivery":false,"should_refresh_long_term_memory":false,"agent_display_name_hint":"","needs_clarify":false,"clarify_question":"","reason":"r","confidence":0.95,"mode":"act","output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":false,"locator_kind":"filename","delivery_intent":"none","semantic_kind":"existence_with_path","locator_hint":"AGENTS.md","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"current_repo","unknown_extra_text":"","unknown_extra_score":0.0}"#;
+        let raw = r#"{"resolved_user_intent":"x","resume_behavior":"none","schedule_kind":"none","schedule_intent":null,"wants_file_delivery":false,"should_refresh_long_term_memory":false,"agent_display_name_hint":"","needs_clarify":false,"clarify_question":"","reason":"r","confidence":0.95,"decision":"planner_execute","output_contract":{"response_shape":"free","requires_content_evidence":false,"delivery_required":false,"locator_kind":"filename","delivery_intent":"none","semantic_kind":"existence_with_path","locator_hint":"AGENTS.md","self_extension":{"mode":"none","trigger":"none","execute_now":false}},"execution_recipe":{"kind":"none","profile":"none","target_scope":"current_repo","unknown_extra_text":"","unknown_extra_score":0.0}"#;
         // 直接 from_str 必失败：少最后一个 `}`。
         assert!(serde_json::from_str::<serde_json::Value>(raw).is_err());
         let parsed = super::parse_llm_json_raw_or_any_with_repair::<serde_json::Value>(raw)
             .expect("balance pass should recover truncated MiniMax envelope");
         assert_eq!(
-            parsed.get("mode").and_then(|v| v.as_str()),
-            Some("act"),
-            "envelope mode field must survive repair"
+            parsed.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute"),
+            "envelope decision field must survive repair"
         );
         assert_eq!(
             parsed.get("needs_clarify").and_then(|v| v.as_bool()),
@@ -2600,25 +2622,28 @@ mod tests {
 
     #[test]
     fn parse_llm_json_raw_or_any_with_repair_keeps_valid_json() {
-        let raw = r#"{"mode":"chat","confidence":0.9}"#;
+        let raw = r#"{"decision":"direct_answer","confidence":0.9}"#;
         let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
             .expect("valid json should parse");
         assert_eq!(
             parsed
-                .get("mode")
+                .get("decision")
                 .and_then(|v| v.as_str())
                 .unwrap_or_default(),
-            "chat"
+            "direct_answer"
         );
     }
 
     #[test]
     fn parse_llm_json_raw_or_any_with_repair_removes_stray_quote_after_bool() {
-        let raw = r#"{"mode":"act","needs_clarify":false","confidence":0.9}"#;
+        let raw = r#"{"decision":"planner_execute","needs_clarify":false","confidence":0.9}"#;
         assert!(serde_json::from_str::<Value>(raw).is_err());
         let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)
             .expect("stray quote after primitive should repair");
-        assert_eq!(parsed.get("mode").and_then(|v| v.as_str()), Some("act"));
+        assert_eq!(
+            parsed.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
         assert_eq!(
             parsed.get("needs_clarify").and_then(|v| v.as_bool()),
             Some(false)
@@ -2635,7 +2660,7 @@ mod tests {
             r#"{"a":1,"a":2,"a":3,"a":4}"#,
             r#"{"a":{"b":1,"b":2},"a":{"b":3,"b":4}}"#,
             r#"[{"x":1,"x":2},{"x":3,"x":4}]"#,
-            r#"{"mode":"chat_act","execution_recipe":{"kind":"none","profile":"ops_service","target_scope":"system","target_scope":"system"}}"#,
+            r#"{"decision":"planner_execute","execution_recipe":{"kind":"none","profile":"ops_service","target_scope":"system","target_scope":"system"}}"#,
             r#"{"a":[1,2,3],"a":[4,5,6]}"#,
             r#"{}"#,
             r#"[]"#,
@@ -2706,7 +2731,7 @@ mod tests {
             r#"{"contract":"loose","contract":{"shape":"strict"}}"#,
             // realistic minimax normalizer payload: duplicate target_scope inside
             // execution_recipe nested in IntentNormalizerOut-style envelope.
-            r#"{"resolved_user_intent":"check service","mode":"chat_act","needs_clarify":false,"reason":"r","confidence":0.8,"execution_recipe":{"kind":"ops_closed_loop","profile":"ops_service","target_scope":"system","target_scope":"system"}}"#,
+            r#"{"resolved_user_intent":"check service","decision":"planner_execute","needs_clarify":false,"reason":"r","confidence":0.8,"execution_recipe":{"kind":"ops_closed_loop","profile":"ops_service","target_scope":"system","target_scope":"system"}}"#,
         ];
         for raw in corpus {
             let parsed = super::parse_llm_json_raw_or_any_with_repair::<Value>(raw)

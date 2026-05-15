@@ -7,7 +7,7 @@
   "additionalProperties": true,
   "required": [
     "resolved_user_intent",
-    "mode",
+    "decision",
     "needs_clarify",
     "reason",
     "confidence",
@@ -65,14 +65,9 @@
     },
     "decision": {
       "type": "string",
-      "description": "Primary first-layer decision. This is the semantic gate; `mode` remains a legacy compatibility/finalization hint.",
+      "description": "Primary first-layer decision and the only semantic routing gate.",
       "enum": ["clarify", "direct_answer", "planner_execute", ""],
       "default": ""
-    },
-    "mode": {
-      "type": "string",
-      "description": "Legacy terminal routed mode / execution finalization hint. `parse_mode_text` accepts canonical enum tokens after schema repair.",
-      "enum": ["chat", "act", "chat_act", "ask_clarify"]
     },
     "schedule_intent": {
       "description": "Optional structured schedule output. Schema deferred; parsed by claw-core schedule_intent decoder.",
@@ -130,6 +125,13 @@
             "folder_names",
             "folder_names_only",
             "folders_only",
+            "directory_entry_groups",
+            "directory_file_groups",
+            "file_directory_groups",
+            "entry_kind_groups",
+            "entries_by_kind",
+            "grouped_entries",
+            "grouped_entry_names",
             "file_paths",
             "file_paths_only",
             "path_list",

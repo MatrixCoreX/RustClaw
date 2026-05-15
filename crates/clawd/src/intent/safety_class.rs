@@ -99,14 +99,13 @@ mod tests {
             ExecutionRecipeKind, ExecutionRecipeProfile, ExecutionRecipeSpec,
             ExecutionRecipeTargetScope,
         },
-        AskMode, IntentOutputContract, RiskCeiling, RouteResult, RoutedMode, ScheduleKind,
+        AskMode, IntentOutputContract, RiskCeiling, RouteResult, ScheduleKind,
         SelfExtensionContract, SelfExtensionMode, SelfExtensionTrigger,
     };
 
-    fn base_route(mode: RoutedMode) -> RouteResult {
+    fn base_route(ask_mode: AskMode) -> RouteResult {
         RouteResult {
-            routed_mode: mode,
-            ask_mode: AskMode::from_routed_mode(mode),
+            ask_mode,
             resolved_intent: String::new(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -126,14 +125,14 @@ mod tests {
 
     #[test]
     fn chat_route_is_low_risk() {
-        let route = base_route(RoutedMode::Chat);
+        let route = base_route(crate::AskMode::direct_answer());
         let out = classify_route_risk_ceiling(&route, None);
         assert_eq!(out.risk_ceiling, RiskCeiling::Low);
     }
 
     #[test]
     fn current_repo_code_change_is_medium_risk() {
-        let route = base_route(RoutedMode::Act);
+        let route = base_route(crate::AskMode::planner_execute_plain());
         let recipe = ExecutionRecipeSpec {
             kind: ExecutionRecipeKind::OpsClosedLoop,
             profile: ExecutionRecipeProfile::CodeChange,
@@ -148,7 +147,7 @@ mod tests {
 
     #[test]
     fn system_ops_is_high_risk() {
-        let route = base_route(RoutedMode::Act);
+        let route = base_route(crate::AskMode::planner_execute_plain());
         let recipe = ExecutionRecipeSpec {
             kind: ExecutionRecipeKind::OpsClosedLoop,
             profile: ExecutionRecipeProfile::OpsService,
@@ -163,7 +162,7 @@ mod tests {
 
     #[test]
     fn self_extension_is_high_risk() {
-        let mut route = base_route(RoutedMode::Act);
+        let mut route = base_route(crate::AskMode::planner_execute_plain());
         route.output_contract.self_extension = SelfExtensionContract {
             mode: SelfExtensionMode::PermanentExtension,
             trigger: SelfExtensionTrigger::ExplicitUserRequest,
@@ -175,7 +174,7 @@ mod tests {
 
     #[test]
     fn read_only_locator_route_is_low_risk() {
-        let mut route = base_route(RoutedMode::Act);
+        let mut route = base_route(crate::AskMode::planner_execute_plain());
         route.output_contract.requires_content_evidence = true;
         route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
         let out = classify_route_risk_ceiling(&route, None);
@@ -184,8 +183,8 @@ mod tests {
 
     #[test]
     fn resume_execution_shortcut_is_still_execute_risk() {
-        let mut route = base_route(RoutedMode::Chat);
-        route.ask_mode = AskMode::from_legacy(RoutedMode::Chat, false, true);
+        let mut route = base_route(crate::AskMode::direct_answer());
+        route.ask_mode = AskMode::direct_answer().with_resume_overrides(false, true);
         let out = classify_route_risk_ceiling(&route, None);
         assert_eq!(out.risk_ceiling, RiskCeiling::Medium);
         assert_eq!(out.reason, "action_route_without_recipe");

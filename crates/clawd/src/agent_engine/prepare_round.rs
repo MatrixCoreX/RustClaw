@@ -50,18 +50,8 @@ fn verifier_gate_default_response(
         .map(|issue| crate::truncate_for_log(&issue.detail))
         .or_else(|| verify_result.blocked_reason.clone())
         .unwrap_or_else(|| "plan failed verification".to_string());
-    let needs_confirmation = verify_result.issues.iter().any(|issue| {
-        matches!(
-            issue.kind,
-            crate::verifier::VerifyIssueKind::ConfirmationRequired
-        )
-    });
-    let needs_clarify = verify_result.issues.iter().any(|issue| {
-        matches!(
-            issue.kind,
-            crate::verifier::VerifyIssueKind::RouteClarifyRequired
-        )
-    });
+    let needs_confirmation = verifier_gate_needs_confirmation(verify_result);
+    let needs_clarify = verifier_gate_needs_clarification(verify_result);
     if needs_confirmation {
         crate::bilingual_t_with_default_vars(
             state,
@@ -111,18 +101,8 @@ async fn build_verifier_gate_response(
                 .map(crate::truncate_for_agent_trace)
         })
         .unwrap_or_else(|| "verification did not provide a detailed reason".to_string());
-    let needs_confirmation = verify_result.issues.iter().any(|issue| {
-        matches!(
-            issue.kind,
-            crate::verifier::VerifyIssueKind::ConfirmationRequired
-        )
-    });
-    let needs_clarify = verify_result.issues.iter().any(|issue| {
-        matches!(
-            issue.kind,
-            crate::verifier::VerifyIssueKind::RouteClarifyRequired
-        )
-    });
+    let needs_confirmation = verifier_gate_needs_confirmation(verify_result);
+    let needs_clarify = verifier_gate_needs_clarification(verify_result);
     let (reason_code, missing_slots, response_shape, fallback_source) = if needs_confirmation {
         (
             "execution_confirmation_required",
@@ -133,7 +113,7 @@ async fn build_verifier_gate_response(
     } else if needs_clarify {
         (
             "execution_clarification_required",
-            vec!["execution_target_or_boundary".to_string()],
+            verifier_gate_missing_slots(verify_result),
             "one_short_clarification",
             crate::fallback::ClarifyFallbackSource::VerifyRejected,
         )
@@ -179,6 +159,54 @@ async fn build_verifier_gate_response(
         &fallback_text,
     )
     .await
+}
+
+fn verifier_gate_needs_confirmation(verify_result: &crate::verifier::VerifyResult) -> bool {
+    verify_result.issues.iter().any(|issue| {
+        matches!(
+            issue.kind,
+            crate::verifier::VerifyIssueKind::ConfirmationRequired
+        )
+    })
+}
+
+fn verifier_gate_needs_clarification(verify_result: &crate::verifier::VerifyResult) -> bool {
+    verify_result.issues.iter().any(|issue| {
+        matches!(
+            issue.kind,
+            crate::verifier::VerifyIssueKind::RouteClarifyRequired
+                | crate::verifier::VerifyIssueKind::MissingRequiredArg
+        )
+    })
+}
+
+fn verifier_gate_missing_slots(verify_result: &crate::verifier::VerifyResult) -> Vec<String> {
+    let mut slots = Vec::new();
+    for issue in &verify_result.issues {
+        let slot = match issue.kind {
+            crate::verifier::VerifyIssueKind::RouteClarifyRequired => {
+                "execution_target_or_boundary"
+            }
+            crate::verifier::VerifyIssueKind::MissingRequiredArg => "required_execution_argument",
+            _ => continue,
+        };
+        if !slots.iter().any(|existing| existing == slot) {
+            slots.push(slot.to_string());
+        }
+    }
+    if slots.is_empty() {
+        slots.push("execution_target_or_boundary".to_string());
+    }
+    slots
+}
+
+fn verifier_gate_should_stop_round(verify_result: &crate::verifier::VerifyResult) -> bool {
+    if matches!(verify_result.mode, crate::verifier::VerifyMode::Enforce)
+        && (!verify_result.approved || verify_result.needs_confirmation)
+    {
+        return true;
+    }
+    verifier_gate_needs_clarification(verify_result)
 }
 
 pub(super) async fn prepare_round_actions(
@@ -238,7 +266,7 @@ pub(super) async fn prepare_round_actions(
         verify_mode,
     );
     info!(
-        "verifier_result task_id={} round={} mode={:?} approved={} needs_confirmation={} issue_count={} blocked_reason={} shadow_blocked_reason={}",
+        "verifier_result task_id={} round={} verifier_mode={:?} approved={} needs_confirmation={} issue_count={} blocked_reason={} shadow_blocked_reason={}",
         task.task_id,
         loop_state.round_no,
         verify_result.mode,
@@ -280,9 +308,7 @@ pub(super) async fn prepare_round_actions(
         loop_state.round_no,
         journal.to_log_json()
     );
-    let actions = if matches!(verify_result.mode, crate::verifier::VerifyMode::Enforce)
-        && (!verify_result.approved || verify_result.needs_confirmation)
-    {
+    let actions = if verifier_gate_should_stop_round(&verify_result) {
         let content = build_verifier_gate_response(
             state,
             task,
@@ -337,4 +363,73 @@ pub(super) fn push_round_trace(
             plan_result: Some(prepared_round.plan_result.clone()),
             verify_result: Some(build_round_verify_summary(&prepared_round.verify_result)),
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        verifier_gate_missing_slots, verifier_gate_needs_clarification,
+        verifier_gate_should_stop_round,
+    };
+
+    fn verify_result_with_issue(
+        mode: crate::verifier::VerifyMode,
+        kind: crate::verifier::VerifyIssueKind,
+    ) -> crate::verifier::VerifyResult {
+        crate::verifier::VerifyResult {
+            mode,
+            approved: matches!(mode, crate::verifier::VerifyMode::ObserveOnly),
+            blocked_reason: None,
+            shadow_blocked_reason: Some(kind.as_str().to_string()),
+            approved_steps: Vec::new(),
+            needs_confirmation: false,
+            rewritten_steps: Vec::new(),
+            issues: vec![crate::verifier::VerifyIssue {
+                step_id: "step_1".to_string(),
+                kind,
+                detail: format!("test issue {}", kind.as_str()),
+            }],
+        }
+    }
+
+    #[test]
+    fn missing_required_arg_forces_clarification_even_in_observe_mode() {
+        let verify_result = verify_result_with_issue(
+            crate::verifier::VerifyMode::ObserveOnly,
+            crate::verifier::VerifyIssueKind::MissingRequiredArg,
+        );
+
+        assert!(verifier_gate_needs_clarification(&verify_result));
+        assert!(verifier_gate_should_stop_round(&verify_result));
+        assert_eq!(
+            verifier_gate_missing_slots(&verify_result),
+            vec!["required_execution_argument".to_string()]
+        );
+    }
+
+    #[test]
+    fn route_clarify_issue_forces_clarification_even_in_observe_mode() {
+        let verify_result = verify_result_with_issue(
+            crate::verifier::VerifyMode::ObserveOnly,
+            crate::verifier::VerifyIssueKind::RouteClarifyRequired,
+        );
+
+        assert!(verifier_gate_needs_clarification(&verify_result));
+        assert!(verifier_gate_should_stop_round(&verify_result));
+        assert_eq!(
+            verifier_gate_missing_slots(&verify_result),
+            vec!["execution_target_or_boundary".to_string()]
+        );
+    }
+
+    #[test]
+    fn capability_unavailable_does_not_force_clarify_in_observe_mode() {
+        let verify_result = verify_result_with_issue(
+            crate::verifier::VerifyMode::ObserveOnly,
+            crate::verifier::VerifyIssueKind::CapabilityUnavailable,
+        );
+
+        assert!(!verifier_gate_needs_clarification(&verify_result));
+        assert!(!verifier_gate_should_stop_round(&verify_result));
+    }
 }

@@ -11,7 +11,7 @@ use super::{
     AgentRunContext, AppState, ClaimedTask, LoopState, RespondActionOutcome, SkillActionOutcome,
     WriteFileEffectivePath, PROGRESS_ARGS_SUMMARY_MAX_LEN,
 };
-use crate::AgentAction;
+use crate::{AgentAction, OutputResponseShape};
 
 pub(super) fn apply_skill_action_outcome(
     loop_state: &mut LoopState,
@@ -86,6 +86,27 @@ fn synthesize_route_allows_direct_fallback(agent_run_context: Option<&AgentRunCo
             | crate::OutputResponseShape::Strict
             | crate::OutputResponseShape::FileToken
     ) || route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+}
+
+fn synthesize_direct_observed_fallback_answer(
+    state: &AppState,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
+        loop_state,
+        state,
+        agent_run_context,
+    )
+    .or_else(|| {
+        crate::agent_engine::observed_output::extract_direct_scalar_from_generic_output_i18n(
+            loop_state,
+            state,
+            agent_run_context,
+        )
+    })
+    .map(|answer| answer.trim().to_string())
+    .filter(|answer| !answer.is_empty())
 }
 
 fn deterministic_observed_execution_status_answer(
@@ -600,8 +621,9 @@ mod tests {
     use super::{
         classify_skill_failure_recovery, deterministic_observed_execution_status_answer,
         strip_internal_execution_args, synthesize_answer_allows_direct_fallback,
-        synthesize_failure_observed_facts, synthesize_failure_should_replan,
-        synthesize_route_allows_direct_fallback,
+        synthesize_direct_observed_fallback_answer, synthesize_failure_observed_facts,
+        synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
+        unresolved_file_token_delivery_artifact,
     };
     use crate::agent_engine::{AgentRunContext, LoopState};
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
@@ -726,6 +748,19 @@ mod tests {
         strip_internal_execution_args(&mut args);
 
         assert_eq!(args, serde_json::json!({"command": "echo visible"}));
+    }
+
+    #[test]
+    fn invalid_file_delivery_token_detects_embedded_runtime_observation() {
+        let candidate = r#"FILE:/tmp/docs/{"action":"inventory_dir","counts":{"files":2},"names":["a.txt","b.txt"]}"#;
+
+        assert!(unresolved_file_token_delivery_artifact(candidate));
+        assert!(!unresolved_file_token_delivery_artifact(
+            "FILE:/tmp/docs/a.txt"
+        ));
+        assert!(!unresolved_file_token_delivery_artifact(
+            "请查看 /tmp/docs/a.txt"
+        ));
     }
 
     #[test]
@@ -1347,10 +1382,56 @@ mod tests {
     }
 
     #[test]
+    fn synthesize_direct_fallback_uses_scalar_path_observation() {
+        let state = test_state_with_registry();
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"path_batch_facts","facts":[{"path":".","resolved_path":"/home/guagua/rustclaw","exists":true}]}"#,
+        ));
+        let route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: "current workspace path".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "scalar path".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::Scalar,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let ctx = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+
+        let answer = synthesize_direct_observed_fallback_answer(&state, &loop_state, Some(&ctx))
+            .expect("scalar path fallback");
+
+        assert_eq!(answer, "/home/guagua/rustclaw");
+    }
+
+    #[test]
     fn synthesize_route_allows_direct_fallback_for_plain_act_observed_read() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "读 README.md 前 2 行".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1387,8 +1468,7 @@ mod tests {
     #[test]
     fn synthesize_route_allows_direct_fallback_for_structured_listing_contract() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "List files from a known directory.".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1425,8 +1505,7 @@ mod tests {
     #[test]
     fn synthesize_route_uses_llm_for_chat_wrapped_unclassified_delivery() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "Run a command, then produce a short final reply based on the result."
                 .to_string(),
             needs_clarify: false,
@@ -1464,8 +1543,7 @@ mod tests {
     #[test]
     fn synthesize_route_uses_llm_for_strict_raw_output_contract() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "Run a command and return its raw output.".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1547,6 +1625,45 @@ fn should_publish_respond_message(loop_state: &LoopState, text: &str) -> bool {
     true
 }
 
+fn route_requires_file_token_delivery(agent_run_context: Option<&AgentRunContext>) -> bool {
+    agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .map(|route| {
+            route.output_contract.delivery_required
+                || matches!(
+                    route.output_contract.response_shape,
+                    OutputResponseShape::FileToken
+                )
+        })
+        .unwrap_or(false)
+}
+
+fn file_token_payload_contains_runtime_artifact(payload: &str) -> bool {
+    let payload = payload.trim();
+    if payload.is_empty() {
+        return true;
+    }
+    if Path::new(payload).is_file() {
+        return false;
+    }
+    payload.contains("{{")
+        || payload.contains("}}")
+        || payload.contains('\n')
+        || payload.starts_with('{')
+        || payload.starts_with('[')
+        || payload.contains("\"action\"")
+        || payload.contains("\"counts\"")
+        || payload.contains("\"names\"")
+        || payload.contains("\"results\"")
+}
+
+fn unresolved_file_token_delivery_artifact(text: &str) -> bool {
+    let Some((_kind, payload)) = crate::finalize::parse_delivery_file_token(text.trim()) else {
+        return false;
+    };
+    file_token_payload_contains_runtime_artifact(payload)
+}
+
 pub(super) fn handle_respond_action(
     state: &AppState,
     task: &ClaimedTask,
@@ -1558,6 +1675,7 @@ pub(super) fn handle_respond_action(
     step_in_round: usize,
     fingerprint: &str,
     content: &str,
+    agent_run_context: Option<&AgentRunContext>,
 ) -> RespondActionOutcome {
     let text = rewrite_response_with_written_aliases(
         &resolve_arg_string(content, loop_state).trim().to_string(),
@@ -1565,6 +1683,65 @@ pub(super) fn handle_respond_action(
     )
     .trim()
     .to_string();
+
+    if route_requires_file_token_delivery(agent_run_context)
+        && unresolved_file_token_delivery_artifact(&text)
+    {
+        let error = "invalid file delivery token: runtime observation was embedded into FILE path";
+        loop_state.has_recoverable_failure_context = true;
+        super::attempt_ledger::record_attempt_with_retry_instruction(
+            loop_state,
+            "respond",
+            &format!("content={}", crate::truncate_for_agent_trace(&text)),
+            crate::executor::StepExecutionStatus::Error,
+            &text,
+            Some("invalid_delivery_token"),
+            error,
+            Some(
+                "Use the already observed structured output to select a concrete existing file path, or run one bounded command/tool that directly returns that selected path. Then respond with exactly FILE:<path>; do not put {{last_output}} or a structured object inside FILE:.",
+            ),
+        );
+        crate::append_subtask_result(
+            &mut loop_state.subtask_results,
+            global_step,
+            "respond",
+            false,
+            error,
+        );
+        append_progress_hint(
+            state,
+            task,
+            &mut loop_state.progress_messages,
+            encode_progress_i18n("telegram.progress.retry_replan", &[]),
+        );
+        loop_state
+            .executed_step_results
+            .push(crate::executor::StepExecutionResult {
+                step_id: format!("step_{}", global_step),
+                skill: "respond".to_string(),
+                status: crate::executor::StepExecutionStatus::Error,
+                output: None,
+                error: Some(error.to_string()),
+                started_at: 0,
+                finished_at: 0,
+            });
+        loop_state.history_compact.push(format!(
+            "round={} step={} respond invalid_delivery_token",
+            loop_state.round_no, step_in_round
+        ));
+        info!(
+            "respond_invalid_delivery_token_replan task_id={} round={} step={} text={}",
+            task.task_id,
+            loop_state.round_no,
+            step_in_round,
+            crate::truncate_for_log(&text)
+        );
+        return RespondActionOutcome {
+            ended_with_user_visible_output: false,
+            stop_signal: Some("recoverable_failure_continue_round".to_string()),
+            should_stop: true,
+        };
+    }
 
     let has_remaining_actions = has_remaining_action_after(actions, idx, policy.max_steps);
     let publish_respond = should_publish_respond_message(loop_state, &text);
@@ -1979,12 +2156,7 @@ pub(super) async fn handle_synthesize_answer_action(
                 && synthesize_route_allows_direct_fallback(agent_run_context);
             if allow_direct_fallback {
                 if let Some(answer) =
-                    crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
-                        loop_state,
-                        state,
-                        agent_run_context,
-                    )
-                    .filter(|answer| !answer.trim().is_empty())
+                    synthesize_direct_observed_fallback_answer(state, loop_state, agent_run_context)
                 {
                     return Ok(answer);
                 }
@@ -2005,12 +2177,7 @@ pub(super) async fn handle_synthesize_answer_action(
             }
             if !allow_direct_fallback && !requires_synthesized_delivery {
                 if let Some(answer) =
-                    crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
-                        loop_state,
-                        state,
-                        agent_run_context,
-                    )
-                    .filter(|answer| !answer.trim().is_empty())
+                    synthesize_direct_observed_fallback_answer(state, loop_state, agent_run_context)
                 {
                     return Ok(answer);
                 }
@@ -2203,6 +2370,9 @@ pub(super) async fn dispatch_round_action(
             )
             .await
         }
+        AgentAction::CallCapability { capability, .. } => Err(format!(
+            "unsupported capability `{capability}` was not resolved before execution"
+        )),
         AgentAction::SynthesizeAnswer { evidence_refs } => {
             handle_synthesize_answer_action(
                 state,
@@ -2231,6 +2401,7 @@ pub(super) async fn dispatch_round_action(
                 step_in_round,
                 fingerprint,
                 content,
+                agent_run_context,
             );
             Ok(apply_respond_action_outcome(
                 loop_state,

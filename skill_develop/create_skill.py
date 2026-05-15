@@ -334,7 +334,7 @@ def main() -> int:
         print(f"[update] {path.relative_to(REPO_ROOT)}")
 
     print("[next] 运行 python3 scripts/sync_skill_docs.py")
-    print("[next] 补充 prompts/layers/overlays/agent_tool_spec.md 的技能契约")
+    print("[next] 如需 planner 常规自然语言调用，在 configs/skills_registry.toml 补 planner_capabilities")
     print(f"[next] 运行 cargo check -p clawd -p skill-runner -p {skill_name.replace('_', '-')}-skill")
     return 0
 

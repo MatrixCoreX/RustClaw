@@ -87,38 +87,66 @@ fn normalize_alias_target(raw_target: &str) -> Option<String> {
 fn parse_session_alias_bindings_from_state_patch(
     state_patch: Option<&Value>,
 ) -> Vec<SessionAliasBinding> {
-    let Some(alias_bindings) = state_patch
-        .and_then(|value| value.get("alias_bindings"))
-        .and_then(|value| value.as_array())
-    else {
+    let Some(state_patch) = state_patch else {
         return Vec::new();
     };
     let now_ts = crate::now_ts_u64();
     let mut out = Vec::new();
-    for item in alias_bindings {
-        let Some(alias) = item
-            .get("alias")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
+    if let Some(alias_bindings) = state_patch
+        .get("alias_bindings")
+        .and_then(|value| value.as_array())
+    {
+        for item in alias_bindings {
+            let Some(alias) = item
+                .get("alias")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            let Some(target) = item
+                .get("target")
+                .and_then(|value| value.as_str())
+                .and_then(normalize_alias_target)
+            else {
+                continue;
+            };
+            if out
+                .iter()
+                .any(|existing: &SessionAliasBinding| existing.alias.eq_ignore_ascii_case(alias))
+            {
+                continue;
+            }
+            out.push(SessionAliasBinding {
+                alias: alias.to_string(),
+                target,
+                updated_at_ts: now_ts,
+            });
+            if out.len() >= MAX_SESSION_ALIAS_BINDINGS {
+                return out;
+            }
+        }
+    }
+    let Some(obj) = state_patch.as_object() else {
+        return out;
+    };
+    for (key, value) in obj {
+        let Some(alias) = compatibility_alias_key(key) else {
             continue;
         };
-        let Some(target) = item
-            .get("target")
-            .and_then(|value| value.as_str())
-            .and_then(normalize_alias_target)
+        let Some(target) = compatibility_alias_target(value).and_then(normalize_alias_target)
         else {
             continue;
         };
         if out
             .iter()
-            .any(|existing: &SessionAliasBinding| existing.alias.eq_ignore_ascii_case(alias))
+            .any(|existing: &SessionAliasBinding| existing.alias.eq_ignore_ascii_case(&alias))
         {
             continue;
         }
         out.push(SessionAliasBinding {
-            alias: alias.to_string(),
+            alias,
             target,
             updated_at_ts: now_ts,
         });
@@ -127,6 +155,26 @@ fn parse_session_alias_bindings_from_state_patch(
         }
     }
     out
+}
+
+fn compatibility_alias_key(key: &str) -> Option<String> {
+    let trimmed = key.trim();
+    let alias = trimmed
+        .strip_suffix("_alias")
+        .or_else(|| trimmed.strip_suffix("Alias"))?
+        .trim_matches(|ch: char| ch == '_' || ch == '-' || ch.is_whitespace())
+        .trim();
+    (!alias.is_empty()).then(|| alias.to_string())
+}
+
+fn compatibility_alias_target(value: &Value) -> Option<&str> {
+    if let Some(target) = value.as_str() {
+        return Some(target);
+    }
+    value
+        .as_object()
+        .and_then(|obj| obj.get("target").or_else(|| obj.get("path")))
+        .and_then(Value::as_str)
 }
 
 fn merge_alias_bindings(
@@ -151,6 +199,108 @@ fn merge_alias_bindings(
         alias_bindings = alias_bindings.split_off(start);
     }
     alias_bindings
+}
+
+fn merge_alias_bindings_for_turn(
+    prior_state: Option<&ConversationState>,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    resolved_prompt_for_execution: &str,
+) -> Vec<SessionAliasBinding> {
+    let mut alias_bindings = merge_alias_bindings(prior_state, turn_analysis);
+    let Some(binding) =
+        structural_alias_binding_from_prompt(prompt, route_result, resolved_prompt_for_execution)
+    else {
+        return alias_bindings;
+    };
+    alias_bindings.retain(|existing| existing.alias != binding.alias);
+    alias_bindings.push(binding);
+    if alias_bindings.len() > MAX_SESSION_ALIAS_BINDINGS {
+        let start = alias_bindings.len() - MAX_SESSION_ALIAS_BINDINGS;
+        alias_bindings = alias_bindings.split_off(start);
+    }
+    alias_bindings
+}
+
+pub(crate) fn structural_alias_binding_from_prompt(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    resolved_prompt_for_execution: &str,
+) -> Option<SessionAliasBinding> {
+    if !route_result.is_chat_gate() || route_result.output_contract.requires_content_evidence {
+        return None;
+    }
+    let alias = single_structural_quoted_alias(prompt)?;
+    let target = single_structural_locator_target([
+        prompt,
+        resolved_prompt_for_execution,
+        route_result.resolved_intent.as_str(),
+        route_result.output_contract.locator_hint.as_str(),
+    ])?;
+    Some(SessionAliasBinding {
+        alias,
+        target,
+        updated_at_ts: crate::now_ts_u64(),
+    })
+}
+
+fn single_structural_quoted_alias(text: &str) -> Option<String> {
+    let mut candidates = Vec::new();
+    for (open, close) in [('“', '”'), ('"', '"'), ('\'', '\''), ('`', '`')] {
+        let mut inside = false;
+        let mut start = 0usize;
+        for (idx, ch) in text.char_indices() {
+            if !inside && ch == open {
+                inside = true;
+                start = idx + ch.len_utf8();
+                continue;
+            }
+            if inside && ch == close {
+                if let Some(candidate) = text
+                    .get(start..idx)
+                    .map(str::trim)
+                    .filter(|candidate| structural_alias_candidate_is_safe(candidate))
+                {
+                    candidates.push(candidate.to_string());
+                }
+                inside = false;
+            }
+        }
+    }
+    candidates.sort();
+    candidates.dedup();
+    (candidates.len() == 1).then(|| candidates.remove(0))
+}
+
+fn structural_alias_candidate_is_safe(candidate: &str) -> bool {
+    let char_count = candidate.chars().count();
+    if !(1..=80).contains(&char_count) {
+        return false;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(candidate);
+    !surface.has_concrete_locator_hint()
+        && crate::intent::locator_extractor::extract_explicit_locator_for_fallback(candidate)
+            .is_none()
+}
+
+fn single_structural_locator_target<'a>(
+    sources: impl IntoIterator<Item = &'a str>,
+) -> Option<String> {
+    let mut targets = Vec::new();
+    for source in sources {
+        let Some(target) =
+            crate::intent::locator_extractor::extract_explicit_locator_for_fallback(source)
+                .map(|locator| locator.locator_hint)
+                .and_then(|target| normalize_alias_target(&target))
+        else {
+            continue;
+        };
+        if !targets.iter().any(|existing| existing == &target) {
+            targets.push(target);
+        }
+    }
+    (targets.len() == 1).then(|| targets.remove(0))
 }
 
 fn next_last_primary_task_prompt(
@@ -871,7 +1021,13 @@ pub(crate) fn update_active_session_from_ask_outcome(
             active_followup_task_id,
             active_clarify_task_id,
             active_observed_facts_task_id,
-            alias_bindings: merge_alias_bindings(prior_state.as_ref(), turn_analysis),
+            alias_bindings: merge_alias_bindings_for_turn(
+                prior_state.as_ref(),
+                turn_analysis,
+                prompt,
+                route_result,
+                resolved_prompt_for_execution,
+            ),
             last_primary_task_prompt: next_last_primary_task_prompt(
                 prior_state.as_ref(),
                 route_result,
@@ -1070,13 +1226,9 @@ mod tests {
         assert!(snapshot.active_observed_facts.is_none());
     }
 
-    fn route_result_for_test(
-        routed_mode: crate::RoutedMode,
-        needs_clarify: bool,
-    ) -> crate::RouteResult {
+    fn route_result_for_test(ask_mode: crate::AskMode, needs_clarify: bool) -> crate::RouteResult {
         crate::RouteResult {
-            routed_mode,
-            ask_mode: crate::AskMode::from_routed_mode(routed_mode),
+            ask_mode,
             resolved_intent: String::new(),
             needs_clarify,
             clarify_question: String::new(),
@@ -1136,7 +1288,7 @@ mod tests {
 
     #[test]
     fn plain_chat_without_task_turn_does_not_promote_primary_task() {
-        let route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
         let promoted = next_last_primary_task_prompt(
             None,
             &route_result,
@@ -1162,7 +1314,7 @@ mod tests {
 
     #[test]
     fn standalone_task_request_preserves_existing_primary_task() {
-        let route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
         let turn_analysis = crate::intent_router::TurnAnalysis {
             turn_type: Some(crate::intent_router::TurnType::TaskRequest),
             target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
@@ -1198,7 +1350,7 @@ mod tests {
 
     #[test]
     fn standalone_new_deliverable_replaces_existing_primary_task() {
-        let route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
         let turn_analysis = crate::intent_router::TurnAnalysis {
             turn_type: Some(crate::intent_router::TurnType::TaskRequest),
             target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
@@ -1245,7 +1397,7 @@ mod tests {
 
     #[test]
     fn standalone_task_request_without_prior_can_start_primary_task() {
-        let route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
         let turn_analysis = crate::intent_router::TurnAnalysis {
             turn_type: Some(crate::intent_router::TurnType::TaskRequest),
             target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
@@ -1276,7 +1428,7 @@ mod tests {
 
     #[test]
     fn standalone_preference_or_memory_turn_clears_prior_primary_task() {
-        let mut route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let mut route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
         route_result.should_refresh_long_term_memory = true;
         route_result.agent_display_name_hint = "巡检爪".to_string();
         let turn_analysis = crate::intent_router::TurnAnalysis {
@@ -1316,7 +1468,7 @@ mod tests {
 
     #[test]
     fn memory_grounded_comparison_chat_becomes_latest_primary_task() {
-        let mut route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let mut route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
         route_result.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
         let prior_state = ConversationState {
             last_primary_task_prompt: Some(
@@ -1367,7 +1519,7 @@ mod tests {
 
     #[test]
     fn standalone_answer_candidate_request_without_prior_does_not_start_primary_task() {
-        let mut route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let mut route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
         route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
         let turn_analysis = crate::intent_router::TurnAnalysis {
             turn_type: Some(crate::intent_router::TurnType::TaskRequest),
@@ -1400,7 +1552,7 @@ mod tests {
 
     #[test]
     fn standalone_scalar_chat_request_without_answer_marker_does_not_start_primary_task() {
-        let mut route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let mut route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
         route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
         let turn_analysis = crate::intent_router::TurnAnalysis {
             turn_type: Some(crate::intent_router::TurnType::TaskRequest),
@@ -1433,7 +1585,8 @@ mod tests {
 
     #[test]
     fn evidence_backed_standalone_task_replaces_prior_scalar_primary_task() {
-        let mut route_result = route_result_for_test(crate::RoutedMode::ChatAct, false);
+        let mut route_result =
+            route_result_for_test(crate::AskMode::planner_execute_chat_wrapped(), false);
         route_result.output_contract.requires_content_evidence = true;
         route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
         let turn_analysis = crate::intent_router::TurnAnalysis {
@@ -1476,7 +1629,8 @@ mod tests {
 
     #[test]
     fn unannotated_evidence_backed_deliverable_starts_primary_task() {
-        let mut route_result = route_result_for_test(crate::RoutedMode::ChatAct, false);
+        let mut route_result =
+            route_result_for_test(crate::AskMode::planner_execute_chat_wrapped(), false);
         route_result.output_contract.requires_content_evidence = true;
         route_result.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
 
@@ -1508,7 +1662,7 @@ mod tests {
 
     #[test]
     fn unannotated_structured_listing_replaces_prior_primary_task() {
-        let route_result = route_result_for_test(crate::RoutedMode::Act, false);
+        let route_result = route_result_for_test(crate::AskMode::planner_execute_plain(), false);
         let mut journal = crate::task_journal::TaskJournal::new("list");
         journal
             .step_results
@@ -1561,7 +1715,8 @@ mod tests {
 
     #[test]
     fn unannotated_scalar_evidence_result_does_not_start_primary_task() {
-        let mut route_result = route_result_for_test(crate::RoutedMode::ChatAct, false);
+        let mut route_result =
+            route_result_for_test(crate::AskMode::planner_execute_chat_wrapped(), false);
         route_result.output_contract.requires_content_evidence = true;
         route_result.output_contract.response_shape = crate::OutputResponseShape::Scalar;
         route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
@@ -1588,7 +1743,7 @@ mod tests {
 
     #[test]
     fn task_append_persists_compact_primary_without_runtime_envelope() {
-        let route_result = route_result_for_test(crate::RoutedMode::Chat, false);
+        let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
         let prior_state = ConversationState {
             last_primary_task_prompt: Some("帮我写个方案".to_string()),
             ..ConversationState::default()
@@ -1766,6 +1921,46 @@ mod tests {
     }
 
     #[test]
+    fn merge_alias_bindings_accepts_alias_key_compatibility_patch() {
+        let turn_analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+            target_task_policy: None,
+            should_interrupt_active_run: false,
+            state_patch: Some(json!({
+                "that_file_alias": "/tmp/device/README.md",
+                "currentFolderAlias": {"target": "/tmp/device/docs"}
+            })),
+            attachment_processing_required: false,
+        };
+
+        let merged = super::merge_alias_bindings(None, Some(&turn_analysis));
+
+        assert_eq!(merged.len(), 2);
+        assert!(merged.iter().any(
+            |binding| binding.alias == "that_file" && binding.target == "/tmp/device/README.md"
+        ));
+        assert!(merged.iter().any(
+            |binding| binding.alias == "currentFolder" && binding.target == "/tmp/device/docs"
+        ));
+    }
+
+    #[test]
+    fn structural_prompt_alias_binding_uses_quote_and_single_locator() {
+        let mut route = route_result_for_test(crate::AskMode::direct_answer(), false);
+        route.risk_ceiling = crate::RiskCeiling::Low;
+
+        let binding = super::structural_alias_binding_from_prompt(
+            "先记一下，后面我说“那个文件”就是 /tmp/device/README.md",
+            &route,
+            "remember that quoted alias maps to /tmp/device/README.md",
+        )
+        .expect("binding");
+
+        assert_eq!(binding.alias, "那个文件");
+        assert_eq!(binding.target, "/tmp/device/README.md");
+    }
+
+    #[test]
     fn merge_alias_bindings_ignores_prompt_text_without_structured_patch() {
         let prior = ConversationState {
             alias_bindings: vec![SessionAliasBinding {
@@ -1818,24 +2013,10 @@ mod tests {
 
     #[test]
     fn clarify_task_request_persists_primary_prompt_for_followups() {
-        let route_result = crate::RouteResult {
-            routed_mode: crate::RoutedMode::AskClarify,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
-            resolved_intent: "帮我写个方案".to_string(),
-            needs_clarify: true,
-            clarify_question: "请补充主题".to_string(),
-            route_reason: "clarify".to_string(),
-            route_confidence: Some(0.8),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract::default(),
-        };
+        let mut route_result = route_result_for_test(crate::AskMode::clarify(), true);
+        route_result.resolved_intent = "帮我写个方案".to_string();
+        route_result.clarify_question = "请补充主题".to_string();
+        route_result.route_reason = "clarify".to_string();
         let persisted = next_last_primary_task_prompt(
             None,
             &route_result,
@@ -1854,24 +2035,10 @@ mod tests {
 
     #[test]
     fn clarify_task_prompt_without_turn_analysis_is_preserved_when_not_locator_driven() {
-        let route_result = crate::RouteResult {
-            routed_mode: crate::RoutedMode::AskClarify,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
-            resolved_intent: "Help me write a proposal".to_string(),
-            needs_clarify: true,
-            clarify_question: "What is the topic and audience?".to_string(),
-            route_reason: "missing_task_slots".to_string(),
-            route_confidence: Some(0.8),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract::default(),
-        };
+        let mut route_result = route_result_for_test(crate::AskMode::clarify(), true);
+        route_result.resolved_intent = "Help me write a proposal".to_string();
+        route_result.clarify_question = "What is the topic and audience?".to_string();
+        route_result.route_reason = "missing_task_slots".to_string();
         let persisted = next_last_primary_task_prompt(
             None,
             &route_result,

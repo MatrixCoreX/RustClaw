@@ -68,10 +68,6 @@ fn first_path_like_token(text: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn nonempty_line_count(text: &str) -> usize {
-    text.lines().filter(|line| !line.trim().is_empty()).count()
-}
-
 /// existence_with_path 的正/否、路径是否必须出现，都是语义判断。
 /// 不再用本地 yes/no 词表或描述词硬裁决；prompt/composer 负责按 contract 输出。
 fn verify_existence_with_path(
@@ -110,7 +106,7 @@ fn verify_scalar_path_only(contract: &IntentOutputContract, text: &str) -> Outpu
 }
 
 /// scalar_count：回答里至少要有一个整数字面（或纯数字 candidate）。
-/// 多行文本且只有一个整数 → Reshape 取该整数；完全无整数 → Reject。
+/// 候选文本中只有一个唯一整数值 → Reshape 取该整数；完全无整数 → Reject。
 fn verify_scalar_count(contract: &IntentOutputContract, text: &str) -> OutputContractVerdict {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -133,9 +129,9 @@ fn verify_scalar_count(contract: &IntentOutputContract, text: &str) -> OutputCon
     if trimmed == first_int {
         return OutputContractVerdict::Pass;
     }
-    if nonempty_line_count(trimmed) >= 2 && integers.len() == 1 {
+    if integers.iter().all(|candidate| *candidate == first_int) {
         return OutputContractVerdict::Reshape {
-            reason: "scalar_count: extracted sole integer from multi-line candidate".to_string(),
+            reason: "scalar_count: extracted only unique integer from candidate".to_string(),
             reshaped: first_int.to_string(),
         };
     }
@@ -332,6 +328,21 @@ mod tests {
         let v = verify_output_contract(&contract, candidate, "?");
         match v {
             OutputContractVerdict::Reshape { reshaped, .. } => assert_eq!(reshaped, "5"),
+            other => panic!("expected Reshape extracting int, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reshape_scalar_count_extracts_sole_int_from_single_line_candidate() {
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Scalar,
+            semantic_kind: OutputSemanticKind::ScalarCount,
+            ..IntentOutputContract::default()
+        };
+        let v = verify_output_contract(&contract, "3，当前范围内共有 3 个项目。", "?");
+        match v {
+            OutputContractVerdict::Reshape { reshaped, .. } => assert_eq!(reshaped, "3"),
             other => panic!("expected Reshape extracting int, got: {other:?}"),
         }
     }

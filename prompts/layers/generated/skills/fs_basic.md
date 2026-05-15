@@ -31,7 +31,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 | `list_dir` | `path` | no | string(path) | `.` | Directory to list. |
 | `list_dir` | `files_only` / `dirs_only` | no | bool | `false` | Narrow inventory to files or directories. |
 | `list_dir` | `include_hidden` | no | bool | `false` | Include dot-prefixed entries. |
-| `list_dir` | `names_only` | no | bool | `false` | Return only entry names when names are sufficient. |
+| `list_dir` | `names_only` | no | bool | `false` | Return only entry names when names are sufficient; runtime also exposes `names_by_kind` for grouped file/directory answers. |
 | `list_dir` | `sort_by` | no | string | `name` | `name|mtime_desc|mtime_asc|size_desc|size_asc`. |
 | `list_dir` | `ext_filter` | no | string/string[] | - | Extension filter for files. |
 | `list_dir` | `max_entries` | no | integer | impl default | Output cap. |
@@ -59,6 +59,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 - Unknown candidate discovery: use `find_entries`, not guessed reads.
 - Directories containing matching files: use `find_entries` to discover candidate files, then synthesize unique parent directories from returned paths.
 - Directory inventory: use `list_dir`, not `grep_text`.
+- Grouped file-vs-directory inventory: use `list_dir` and preserve kind metadata (`entries` or `names_by_kind`); do not answer from a flat untyped name list when the contract is grouped.
 - Directory counts: use `count_entries`, not `run_cmd` pipelines, unless shell behavior itself is the task.
 - Raw file excerpts: use `read_text_range`; semantic document understanding belongs to `doc_parse`.
 - Shell semantics, pipelines, or platform-specific commands belong to `run_cmd`.

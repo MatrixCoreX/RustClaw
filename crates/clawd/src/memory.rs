@@ -82,6 +82,11 @@ pub(crate) fn retrieval_kind_is_knowledge_doc_bucket(memory_kind: &str) -> bool 
     memory_kind == RETRIEVAL_KIND_KNOWLEDGE_DOC
 }
 
+pub(crate) fn fact_uses_cross_turn_deictic_locator(text: &str) -> bool {
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(text);
+    surface.has_deictic_reference() && surface.has_concrete_locator_hint()
+}
+
 pub(crate) fn retrieval_source_ref_for_memory(memory_id: i64) -> String {
     memory_id.to_string()
 }
@@ -1050,9 +1055,8 @@ fn extract_result_text_for_recent_turns(value: &Value) -> Option<String> {
 fn classify_assistant_context_reply_kind(
     parsed_result: Option<&Value>,
     assistant_text: &str,
-    // §7.2: 旧 `provider_unavailable_text: &str` 改为 `is_fallback` 闭包，调用方注入
-    // `crate::fallback::is_known_clarify_fallback_text(state, _)` 后，新 7 个 source
-    // 文案与老 super-fallback 都能被识别为 ProviderUnavailablePlaceholder。
+    // The caller owns localized fallback detection. This function only reads
+    // structured task metadata to avoid phrase-based language branching here.
     is_fallback: impl Fn(&str) -> bool,
 ) -> AssistantContextReplyKind {
     if is_fallback(assistant_text) {
@@ -1073,20 +1077,12 @@ fn classify_assistant_context_reply_kind(
         .and_then(|value| value.get("route_gate_kind"))
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let routed_mode = summary
-        .and_then(|value| value.get("route_result"))
-        .and_then(|value| value.get("routed_mode"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
     let needs_clarify = summary
         .and_then(|value| value.get("route_result"))
         .and_then(|value| value.get("needs_clarify"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    if route_gate_kind.eq_ignore_ascii_case("clarify")
-        || routed_mode.eq_ignore_ascii_case("AskClarify")
-        || needs_clarify
-    {
+    if route_gate_kind.eq_ignore_ascii_case("clarify") || needs_clarify {
         return AssistantContextReplyKind::ClarifyPlaceholder;
     }
     AssistantContextReplyKind::Normal
@@ -2146,15 +2142,13 @@ mod tests {
                     "final_status": "clarify",
                     "route_result": {
                         "route_gate_kind": "clarify",
-                        "routed_mode": "AskClarify",
                         "needs_clarify": true
                     }
                 }
             }
         });
-        // §7.2: helper 由"`provider_unavailable_text: &str`"改为"`is_fallback` 闭包"。
-        // 测试这里给一个把任意文本都判定为 false 的闭包 —— 让 routing summary 字段
-        // 决定走 ClarifyPlaceholder。
+        // Keep phrase-based fallback matching out of this path; structured
+        // routing metadata should be enough to identify a clarify placeholder.
         let never_fallback = |_: &str| false;
         assert_eq!(
             classify_assistant_context_reply_kind(

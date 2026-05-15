@@ -222,7 +222,7 @@ fn route_result_json(route: &crate::RouteResult) -> Value {
     json!({
         "route_gate_kind": route.gate_kind().as_str(),
         "first_layer_decision": route.first_layer_decision().as_str(),
-        "routed_mode": route.routed_mode.as_str(),
+        "route_label": route.derived_route_label(),
         "needs_clarify": route.needs_clarify,
         "should_refresh_long_term_memory": route.should_refresh_long_term_memory,
         "agent_display_name_hint": route.agent_display_name_hint,
@@ -278,6 +278,7 @@ fn requested_capability_from_raw_step(step: &Value) -> Option<RequestedPlanCapab
     let capability = match action_type {
         "call_tool" => string_field(step, &["tool", "skill", "name"]),
         "call_skill" => string_field(step, &["skill", "tool", "name"]),
+        "call_capability" => string_field(step, &["capability", "name"]),
         "respond" | "synthesize_answer" | "think" => Some(action_type),
         _ => {
             if let Some(tool) = string_field(step, &["tool"]) {
@@ -286,6 +287,9 @@ fn requested_capability_from_raw_step(step: &Value) -> Option<RequestedPlanCapab
             } else if let Some(skill) = string_field(step, &["skill"]) {
                 action_type = "call_skill";
                 Some(skill)
+            } else if let Some(capability) = string_field(step, &["capability"]) {
+                action_type = "call_capability";
+                Some(capability)
             } else {
                 Some(action_type)
             }
@@ -806,8 +810,7 @@ mod tests {
     fn summary_json_includes_finalizer_and_task_metrics() {
         let mut journal = TaskJournal::for_task("task-1", "ask", "总结 README");
         journal.record_route_result(&crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "不要用现有技能，先规划一个新能力".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),

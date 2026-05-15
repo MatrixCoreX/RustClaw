@@ -265,6 +265,37 @@ fn optional_file_patterns_from_args(obj: &serde_json::Map<String, Value>) -> Vec
     .collect::<Vec<_>>()
 }
 
+fn grep_text_name_fallback_matches(
+    workspace_root: &Path,
+    search_root: &Path,
+    query: &str,
+    scan_limits: ScanLimits,
+    max_results: usize,
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let patterns = expand_name_pattern(query)
+        .into_iter()
+        .filter(|pattern| !pattern.is_empty())
+        .collect::<Vec<_>>();
+    if patterns.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let mut results = Vec::new();
+    walk_collect_nodes(search_root, scan_limits, &mut |p| {
+        let name = p
+            .file_name()
+            .map(|s| normalize_locator_text(&s.to_string_lossy()))
+            .unwrap_or_default();
+        if patterns
+            .iter()
+            .any(|pattern_norm| path_name_matches_pattern(p, &name, pattern_norm))
+        {
+            results.push(to_rel(workspace_root, p));
+        }
+        results.len() >= max_results
+    })?;
+    Ok((patterns, results))
+}
+
 fn bool_arg(obj: &serde_json::Map<String, Value>, key: &str) -> bool {
     obj.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
@@ -514,6 +545,17 @@ fn execute(args: Value) -> Result<Value, String> {
                 }
                 matches.len() >= max_results
             })?;
+            let (name_patterns, name_results) = if results.is_empty() {
+                grep_text_name_fallback_matches(
+                    &root,
+                    &search_root,
+                    query,
+                    scan_limits,
+                    max_results,
+                )?
+            } else {
+                (Vec::new(), Vec::new())
+            };
             Ok(json!({
                 "action": "grep_text",
                 "root": to_rel(&root, &search_root),
@@ -523,6 +565,9 @@ fn execute(args: Value) -> Result<Value, String> {
                 "match_count": matches.len(),
                 "results": results,
                 "matches": matches,
+                "name_patterns": name_patterns,
+                "name_count": name_results.len(),
+                "name_results": name_results,
             }))
         }
         "find_images" | "images" | "image_search" => {
@@ -1106,6 +1151,36 @@ mod tests {
             .is_some_and(|patterns| patterns
                 .iter()
                 .any(|item| item.as_str() == Some("prompt_utils.rs"))));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn grep_text_surfaces_name_matches_when_content_has_no_hits() {
+        let root = unique_temp_dir("grep-text-name-fallback");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::write(root.join("my_abcd.txt"), "content without target\n").expect("write target");
+        std::fs::write(root.join("other.txt"), "content without target\n").expect("write other");
+
+        let out = execute(json!({
+            "action": "grep_text",
+            "query": "abcd",
+            "root": root.to_string_lossy().to_string(),
+            "max_depth": 1,
+            "max_results": 10
+        }))
+        .expect("grep_text succeeds");
+
+        assert_eq!(out.get("count").and_then(Value::as_u64), Some(0));
+        assert_eq!(out.get("match_count").and_then(Value::as_u64), Some(0));
+        assert_eq!(out.get("name_count").and_then(Value::as_u64), Some(1));
+        let name_results = out
+            .get("name_results")
+            .and_then(Value::as_array)
+            .expect("name_results array");
+        assert!(name_results
+            .iter()
+            .any(|v| v.as_str().is_some_and(|path| path.ends_with("my_abcd.txt"))));
 
         let _ = std::fs::remove_dir_all(root);
     }

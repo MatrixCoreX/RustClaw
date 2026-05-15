@@ -417,10 +417,13 @@ if model_io_path.exists():
         if str(row.get('task_id') or '') == task_id:
             model_rows.append(row)
 
-route_chat = any('routed_mode=Chat' in line for line in clawd_lines)
-route_act = any('routed_mode=Act' in line for line in clawd_lines)
-route_chat_act = any('routed_mode=ChatAct' in line for line in clawd_lines)
-route_clarify = any('routed_mode=AskClarify' in line for line in clawd_lines)
+route_chat = any(re.search(r'derived_route_label=Chat\b', line) for line in clawd_lines)
+route_act = any(re.search(r'derived_route_label=Act\b', line) for line in clawd_lines)
+route_chat_act = any(re.search(r'derived_route_label=ChatAct\b', line) for line in clawd_lines)
+route_clarify = any(
+    re.search(r'first_layer_decision=clarify\b|derived_route_label=AskClarify\b', line)
+    for line in clawd_lines
+)
 has_exec = any('executor_step_execute' in line for line in clawd_lines)
 has_write_file = any('tool=write_file' in line for line in clawd_lines) or bool(re.search(r'written \d+ bytes to ', combined_trace, re.I))
 used_crypto = any('tool=crypto' in line for line in clawd_lines) or bool(re.search(r'\btrade_preview\b|\btrade_submit\b|BTCUSDT|ETHUSDT|SMA|USDT|CoinDesk|CoinTelegraph|order_id|positions?|open orders?|cancel', combined_trace, re.I))

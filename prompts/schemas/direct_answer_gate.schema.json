@@ -77,6 +77,7 @@
             "hidden_entries_check",
             "file_names",
             "directory_names",
+            "directory_entry_groups",
             "file_paths",
             "directory_purpose_summary",
             "content_excerpt_summary",
