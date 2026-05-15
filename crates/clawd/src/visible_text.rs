@@ -6,11 +6,117 @@ const REDACTED: &str = "[REDACTED]";
 
 pub(crate) fn sanitize_user_visible_text(text: &str) -> String {
     let stripped = strip_ansi_sequences(text);
+    let stripped = compact_internal_json_log_lines(&stripped);
     let stripped = replace_structured_skill_error_payloads(&stripped);
     let redacted = redact_sensitive_url_params(&stripped);
     let redacted = redact_sensitive_key_value_pairs(&redacted);
     let redacted = redact_sensitive_json_string_fields(&redacted);
     redact_authorization_values(&redacted)
+}
+
+fn compact_internal_json_log_lines(text: &str) -> String {
+    let mut changed = false;
+    let lines = text
+        .lines()
+        .map(|line| {
+            if let Some(compacted) = compact_internal_json_log_line(line) {
+                changed = true;
+                compacted
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>();
+    if !changed {
+        text.to_string()
+    } else {
+        lines.join("\n")
+    }
+}
+
+fn compact_internal_json_log_line(line: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(line.trim()).ok()?;
+    let serde_json::Value::Object(obj) = value else {
+        return None;
+    };
+    const INTERNAL_BULKY_FIELDS: &[&str] = &[
+        "prompt",
+        "raw_prompt",
+        "system_prompt",
+        "raw_response",
+        "request_payload",
+        "messages",
+    ];
+    let omitted_fields = INTERNAL_BULKY_FIELDS
+        .iter()
+        .copied()
+        .filter(|key| obj.contains_key(*key))
+        .collect::<Vec<_>>();
+    if omitted_fields.is_empty() {
+        return None;
+    }
+
+    let mut compact = serde_json::Map::new();
+    for key in [
+        "ts",
+        "status",
+        "vendor",
+        "provider",
+        "provider_type",
+        "model",
+        "model_kind",
+        "mode",
+        "task_id",
+        "call_id",
+        "prompt_hash",
+        "prompt_source",
+        "sanitized",
+    ] {
+        if let Some(value) = obj.get(key) {
+            compact.insert(key.to_string(), value.clone());
+        }
+    }
+    if let Some(error) = obj.get("error").filter(|value| !value.is_null()) {
+        compact.insert("error".to_string(), error.clone());
+    }
+    if let Some(usage) = obj.get("usage").filter(|value| value.is_object()) {
+        compact.insert("usage".to_string(), usage.clone());
+    }
+    for (source_key, target_key) in [
+        ("clean_response", "clean_response_preview"),
+        ("response", "response_preview"),
+    ] {
+        if let Some(value) = obj
+            .get(source_key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            compact.insert(
+                target_key.to_string(),
+                serde_json::Value::String(truncate_chars(value, 800)),
+            );
+        }
+    }
+    compact.insert(
+        "omitted_fields".to_string(),
+        serde_json::Value::Array(
+            omitted_fields
+                .iter()
+                .map(|field| serde_json::Value::String((*field).to_string()))
+                .collect(),
+        ),
+    );
+    serde_json::to_string(&serde_json::Value::Object(compact)).ok()
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut out = text.chars().take(max_chars).collect::<String>();
+    out.push_str("...[truncated]");
+    out
 }
 
 fn replace_structured_skill_error_payloads(text: &str) -> String {
@@ -285,5 +391,19 @@ mod tests {
         assert_eq!(sanitized, "执行失败：skill execution failed");
         assert!(!sanitized.contains("__RC_SKILL_ERROR__"));
         assert!(!sanitized.contains("archive_basic"));
+    }
+
+    #[test]
+    fn compacts_internal_model_io_json_lines() {
+        let raw = r#"{"task_id":"task-1","vendor":"minimax","model":"MiniMax-M2.7","status":"ok","prompt":"SECRET_PROMPT_SHOULD_NOT_SHOW","raw_response":"RAW_RESPONSE_SHOULD_NOT_SHOW","request_payload":{"messages":[{"role":"user","content":"PAYLOAD_SHOULD_NOT_SHOW"}]},"response":"{\"steps\":[]}","usage":{"total_tokens":12}}"#;
+
+        let sanitized = sanitize_user_visible_text(raw);
+
+        assert!(sanitized.contains("task-1"));
+        assert!(sanitized.contains("omitted_fields"));
+        assert!(sanitized.contains("response_preview"));
+        assert!(!sanitized.contains("SECRET_PROMPT_SHOULD_NOT_SHOW"));
+        assert!(!sanitized.contains("RAW_RESPONSE_SHOULD_NOT_SHOW"));
+        assert!(!sanitized.contains("PAYLOAD_SHOULD_NOT_SHOW"));
     }
 }

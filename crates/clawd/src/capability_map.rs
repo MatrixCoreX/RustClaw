@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{skill_availability, AppState, ClaimedTask};
 use claw_core::skill_registry::{
-    Capability, OutputKind, PlannerCapabilityKind, SkillRegistryEntry,
+    Capability, OutputKind, PlannerCapabilityKind, PlannerCapabilityMapping, SkillRegistryEntry,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -155,10 +155,33 @@ fn legacy_domain_from_skill_name(skill: &str) -> Option<CapabilityDomain> {
     }
 }
 
+fn planner_capability_hint(mapping: &PlannerCapabilityMapping) -> String {
+    let mut parts = Vec::new();
+    if let Some(action) = mapping.action.as_deref() {
+        parts.push(format!("action={action}"));
+    }
+    if let Some(effect) = mapping.effect {
+        parts.push(format!("effect={}", effect.as_token()));
+    }
+    if !mapping.required.is_empty() {
+        parts.push(format!("required={}", mapping.required.join("|")));
+    }
+    if mapping.preferred {
+        parts.push("preferred=true".to_string());
+    }
+    if parts.is_empty() {
+        mapping.name.clone()
+    } else {
+        format!("{}({})", mapping.name, parts.join(","))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claw_core::skill_registry::SkillsRegistry;
+    use claw_core::skill_registry::{
+        PlannerCapabilityEffect, PlannerCapabilityMapping, SkillsRegistry,
+    };
 
     fn registry_entry_from(toml: &str, name: &str) -> SkillRegistryEntry {
         let path = std::env::temp_dir().join(format!("capability_map_{name}.toml"));
@@ -203,6 +226,23 @@ capabilities = ["fs.read"]
         assert_eq!(
             infer_domain_from_registry_entry(&entry),
             Some(CapabilityDomain::Filesystem)
+        );
+    }
+
+    #[test]
+    fn planner_capability_hint_includes_structured_contract() {
+        let hint = planner_capability_hint(&PlannerCapabilityMapping {
+            name: "filesystem.list_entries".to_string(),
+            action: Some("list_dir".to_string()),
+            effect: Some(PlannerCapabilityEffect::Observe),
+            required: vec!["path".to_string()],
+            optional: vec!["names_only".to_string()],
+            risk_level: None,
+            preferred: true,
+        });
+        assert_eq!(
+            hint,
+            "filesystem.list_entries(action=list_dir,effect=observe,required=path,preferred=true)"
         );
     }
 }
@@ -312,6 +352,12 @@ pub(crate) fn build_capability_map_for_task(state: &AppState, task: &ClaimedTask
                 .map(|capability| capability.as_token())
                 .take(8)
                 .collect::<Vec<_>>();
+            let planner_capability_tokens = entry
+                .planner_capabilities
+                .iter()
+                .map(planner_capability_hint)
+                .take(12)
+                .collect::<Vec<_>>();
             let supported_os = entry
                 .supported_os
                 .iter()
@@ -347,6 +393,7 @@ pub(crate) fn build_capability_map_for_task(state: &AppState, task: &ClaimedTask
                 && description.is_none()
                 && semantic_tags.is_empty()
                 && validation_actions.is_empty()
+                && planner_capability_tokens.is_empty()
                 && capability_tokens.is_empty()
                 && supported_os.is_empty()
                 && required_bins.is_empty()
@@ -374,6 +421,12 @@ pub(crate) fn build_capability_map_for_task(state: &AppState, task: &ClaimedTask
                 parts.push(format!(
                     "validation_actions: {}",
                     validation_actions.join(", ")
+                ));
+            }
+            if !planner_capability_tokens.is_empty() {
+                parts.push(format!(
+                    "planner_capabilities: {}",
+                    planner_capability_tokens.join("; ")
                 ));
             }
             if let Some(retryable) = entry.retryable {

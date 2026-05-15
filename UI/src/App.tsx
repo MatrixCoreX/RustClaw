@@ -5,12 +5,18 @@ import {
   Check,
   ChevronDown,
   Copy,
+  Cpu,
   Database,
   FileText,
+  Fingerprint,
+  KeyRound,
   LayoutDashboard,
   Loader2,
   MessageCircle,
+  Network,
   RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
   Sparkles,
   SquareTerminal,
   Server,
@@ -162,6 +168,7 @@ interface SkillListItem {
   required_bins?: string[] | null;
   optional_bins?: string[] | null;
   platform_notes?: string[] | null;
+  planner_capabilities?: string[] | null;
   capabilities?: string[] | null;
 }
 
@@ -241,6 +248,58 @@ interface LlmTestResponse {
   provider_type: string;
   message: string;
   response_text?: string;
+}
+
+interface NniDeviceMeta {
+  slot?: number | null;
+  i2c_bus?: number | null;
+  i2c_baud?: number | null;
+  i2c_address?: string | null;
+  lib_path?: string | null;
+}
+
+interface NniDeviceStatusResponse {
+  nni_available: boolean;
+  helper_available: boolean;
+  signature_chip_present: boolean;
+  status: string;
+  message: string;
+  next_step?: string | null;
+  helper_path?: string | null;
+  supported_actions?: string[];
+  pubkey?: string | null;
+  pubkey_preview?: string | null;
+  pubkey_fingerprint?: string | null;
+  meta?: NniDeviceMeta | null;
+  error?: string | null;
+}
+
+interface NniDevicePayload {
+  ok?: boolean;
+  action?: string;
+  pubkey?: string;
+  timestamp?: number;
+  signature?: string;
+  device_cert_hex?: string;
+  device_cert_hex_size?: number;
+  signer_cert_hex?: string;
+  signer_cert_hex_size?: number;
+  root_cert_hex?: string;
+  root_cert_hex_size?: number;
+  slot?: number;
+  i2c_bus?: number;
+  i2c_baud?: number;
+  i2c_address?: string;
+  lib_path?: string;
+  [key: string]: unknown;
+}
+
+interface NniDeviceActionResponse {
+  action: string;
+  signature_chip_present: boolean;
+  message: string;
+  payload?: NniDevicePayload;
+  meta?: NniDeviceMeta | null;
 }
 
 interface WechatConfigResponse {
@@ -413,8 +472,8 @@ interface ServiceActionNotice {
 }
 
 type ChannelName = "telegram" | "whatsapp" | "ui" | "wechat" | "feishu" | "lark";
-type ConsolePage = "dashboard" | "chat" | "services" | "channels" | "models" | "skills" | "logs" | "tasks";
-const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "services", "channels", "models", "skills", "logs", "tasks"];
+type ConsolePage = "dashboard" | "chat" | "nni" | "services" | "channels" | "models" | "skills" | "logs" | "tasks";
+const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "nni", "services", "channels", "models", "skills", "logs", "tasks"];
 
 const UI_HIDDEN_SKILLS = new Set<string>(["chat"]);
 /** 基本技能（与后端 base_skill_names 一致），API 未返回时用此兜底 */
@@ -634,6 +693,29 @@ function extractTaskText(result: TaskQueryResponse): string {
   return JSON.stringify(result.result_json ?? null, null, 2);
 }
 
+function shortenHex(value?: string | null, head = 16, tail = 16): string {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return "--";
+  if (trimmed.length <= head + tail + 3) return trimmed;
+  return `${trimmed.slice(0, head)}...${trimmed.slice(-tail)}`;
+}
+
+function nniPayloadHexField(payload?: NniDevicePayload | null): { label: string; value: string; size?: number } | null {
+  if (!payload) return null;
+  if (payload.signature) return { label: "signature", value: payload.signature };
+  if (payload.pubkey) return { label: "pubkey", value: payload.pubkey };
+  if (payload.device_cert_hex) {
+    return { label: "device_cert_hex", value: payload.device_cert_hex, size: payload.device_cert_hex_size };
+  }
+  if (payload.signer_cert_hex) {
+    return { label: "signer_cert_hex", value: payload.signer_cert_hex, size: payload.signer_cert_hex_size };
+  }
+  if (payload.root_cert_hex) {
+    return { label: "root_cert_hex", value: payload.root_cert_hex, size: payload.root_cert_hex_size };
+  }
+  return null;
+}
+
 export default function App() {
   const [lang, setLang] = useState<"zh" | "en">(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.lang);
@@ -728,6 +810,14 @@ export default function App() {
   const [llmTestLoading, setLlmTestLoading] = useState(false);
   const [llmTestMessage, setLlmTestMessage] = useState<string | null>(null);
   const [llmTestError, setLlmTestError] = useState<string | null>(null);
+  const [nniStatus, setNniStatus] = useState<NniDeviceStatusResponse | null>(null);
+  const [nniStatusLoading, setNniStatusLoading] = useState(false);
+  const [nniStatusError, setNniStatusError] = useState<string | null>(null);
+  const [nniActionLoading, setNniActionLoading] = useState<string | null>(null);
+  const [nniActionResult, setNniActionResult] = useState<NniDeviceActionResponse | null>(null);
+  const [nniActionError, setNniActionError] = useState<string | null>(null);
+  const [nniActionMessage, setNniActionMessage] = useState<string | null>(null);
+  const [nniJoined, setNniJoined] = useState(false);
   const [multimodalConfigData, setMultimodalConfigData] = useState<ModelConfigResponse | null>(null);
   const [multimodalConfigLoading, setMultimodalConfigLoading] = useState(false);
   const [multimodalConfigError, setMultimodalConfigError] = useState<string | null>(null);
@@ -1977,6 +2067,109 @@ export default function App() {
     }
   };
 
+  const fetchNniDeviceStatus = async (silent = false) => {
+    if (!silent) {
+      setNniStatusLoading(true);
+      setNniStatusError(null);
+    }
+    try {
+      const res = await apiFetch(`/v1/nni/device/status`);
+      const body = (await res.json()) as ApiResponse<NniDeviceStatusResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `NNI 状态获取失败 (${res.status})`);
+      }
+      setNniStatus(body.data);
+      setNniStatusError(null);
+      if (!body.data.signature_chip_present) {
+        setNniJoined(false);
+      }
+      return body.data;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setNniStatusError(message);
+      return null;
+    } finally {
+      if (!silent) {
+        setNniStatusLoading(false);
+      }
+    }
+  };
+
+  const runNniDeviceAction = async (action: string, options?: { joinAfterSign?: boolean }) => {
+    setNniActionLoading(action);
+    setNniActionError(null);
+    setNniActionMessage(null);
+    try {
+      const res = await apiFetch(`/v1/nni/device/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const body = (await res.json()) as ApiResponse<NniDeviceActionResponse>;
+      if (!res.ok || !body.ok || !body.data) {
+        const actionData = body.data;
+        if (actionData?.signature_chip_present === false) {
+          setNniStatus((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  signature_chip_present: false,
+                  status: "signature_chip_missing",
+                  message: t(
+                    "未检测到设备签名芯片。此设备仍可使用 RustClaw，NNI 的设备签名能力暂不可用。",
+                    "No device signature chip was detected. RustClaw can still run, but NNI device signing is unavailable.",
+                  ),
+                }
+              : prev,
+          );
+        }
+        throw new Error(body.error || `NNI 操作失败 (${res.status})`);
+      }
+      setNniActionResult(body.data);
+      setNniActionMessage(body.data.message || t("NNI 操作已完成。", "NNI action completed."));
+      if (options?.joinAfterSign) {
+        setNniJoined(true);
+      }
+      if (body.data.payload?.pubkey) {
+        setNniStatus((prev) =>
+          prev
+            ? {
+                ...prev,
+                signature_chip_present: true,
+                status: "ready",
+                pubkey: body.data.payload?.pubkey,
+                pubkey_preview: shortenHex(body.data.payload?.pubkey, 12, 12),
+              }
+            : prev,
+        );
+      }
+      return body.data;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "未知错误";
+      setNniActionError(message);
+      setNniJoined(false);
+      return null;
+    } finally {
+      setNniActionLoading(null);
+    }
+  };
+
+  const joinNni = async () => {
+    const status = nniStatus ?? (await fetchNniDeviceStatus(false));
+    if (!status?.signature_chip_present) {
+      setNniActionError(
+        status?.message ||
+          t(
+            "未检测到设备签名芯片，暂时不能加入需要设备签名的 NNI。",
+            "No device signature chip was detected, so this device cannot join signed NNI yet.",
+          ),
+      );
+      setNniJoined(false);
+      return;
+    }
+    await runNniDeviceAction("sign_timestamp", { joinAfterSign: true });
+  };
+
   const scrollToSkillRow = (skillName: string) => {
     window.setTimeout(() => {
       const row = document.getElementById(`skill-row-${skillName}`);
@@ -3023,6 +3216,13 @@ export default function App() {
 
   useEffect(() => {
     if (!uiAuthReady) return;
+    if (currentPage !== "nni") return;
+    void fetchNniDeviceStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, apiBase, uiAuthReady]);
+
+  useEffect(() => {
+    if (!uiAuthReady) return;
     if (currentPage !== "logs") return;
     void fetchLatestLog();
     const timer = window.setInterval(() => {
@@ -3672,6 +3872,28 @@ export default function App() {
         return capability.startsWith("secrets.") ? t("需要密钥", "Needs secret") : capability;
     }
   };
+  const formatCapabilityToken = (token: string) =>
+    token
+      .split(".")
+      .map((part) => part.replace(/_/g, " "))
+      .join(" / ");
+  const skillPlannerCapabilityLabel = (capability: string) => {
+    const [domain, ...rest] = capability.split(".");
+    const action = rest.join(".");
+    const readable = formatCapabilityToken(action || capability);
+    switch (domain) {
+      case "filesystem":
+        return t(`文件：${readable}`, `Files: ${readable}`);
+      case "config":
+        return t(`配置：${readable}`, `Config: ${readable}`);
+      case "system":
+        return t(`系统：${readable}`, `System: ${readable}`);
+      case "database":
+        return t(`数据库：${readable}`, `Database: ${readable}`);
+      default:
+        return formatCapabilityToken(capability);
+    }
+  };
   const skillRuntimeIssue = (item?: SkillListItem) => {
     if (!item || item.runtime_available !== false) return null;
     if (item.unsupported_os?.length) {
@@ -3719,6 +3941,20 @@ export default function App() {
       return next;
     });
   };
+  const nniActionLabel = (action: string) => {
+    const labels: Record<string, string> = {
+      pubkey: t("读取 slot 0 公钥", "Read Slot 0 public key"),
+      sign_timestamp: t("生成时间戳签名", "Sign current timestamp"),
+      tng_device_pubkey: t("读取 TNG 设备公钥", "Read TNG device public key"),
+      tng_device_cert: t("读取设备证书", "Read device certificate"),
+      tng_signer_cert: t("读取 signer 证书", "Read signer certificate"),
+      tng_root_cert: t("读取根证书", "Read root certificate"),
+    };
+    return labels[action] || action;
+  };
+  const nniChipPresent = nniStatus?.signature_chip_present === true;
+  const nniChipMissing = nniStatus?.signature_chip_present === false;
+  const nniPrimaryHex = nniPayloadHexField(nniActionResult?.payload);
   const pageMeta = useMemo(
     () => ({
       dashboard: {
@@ -3728,6 +3964,10 @@ export default function App() {
       chat: {
         title: t("对话交互", "Chat Interaction"),
         desc: t("在这里发一条最简单的测试消息，确认模型和已接入通信方式已经真正可用。", "Send a simple test message here to confirm the model and connected communication methods really work."),
+      },
+      nni: {
+        title: t("NNI", "NNI"),
+        desc: t("查看 Network Native Intelligence 状态，处理设备公钥、时间戳签名和 TNG 证书链。", "Check Network Native Intelligence status and manage device public keys, timestamp signatures, and the TNG certificate chain."),
       },
       services: {
         title: t("通信接入", "Communication Setup"),
@@ -3769,6 +4009,12 @@ export default function App() {
         label: t("对话测试", "Chat"),
         hint: t("试消息", "test reply"),
         icon: <MessageCircle className="h-4 w-4" />,
+      },
+      {
+        id: "nni" as const,
+        label: "NNI",
+        hint: t("设备签名", "device sign"),
+        icon: <Network className="h-4 w-4" />,
       },
       {
         id: "channels" as const,
@@ -4713,6 +4959,291 @@ export default function App() {
                 </p>
               ) : null}
             </section>
+          ) : null}
+
+          {currentPage === "nni" ? (
+            <div className="space-y-4">
+              <section className="theme-panel p-5 sm:p-6">
+                <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="max-w-3xl">
+                    <p className="theme-kicker text-[10px] uppercase tracking-[0.35em]">Network Native Intelligence</p>
+                    <h3 className="mt-2 flex items-center gap-2 text-xl font-semibold tracking-tight sm:text-2xl">
+                      <Network className="h-6 w-6 theme-icon-accent" />
+                      <span>{t("NNI 分布式模型", "NNI Distributed Model")}</span>
+                    </h3>
+                    <p className="mt-3 text-sm leading-7 text-white/70">
+                      {t(
+                        "这里管理 Pi App 里的 NNI 入口和设备签名能力。普通设备可以只查看状态；带安全芯片的设备可以读取公钥、生成时间戳签名，并查看 TNG 证书链。",
+                        "This page manages the NNI entry from the Pi App and device signing. Regular devices can simply check status; devices with a secure chip can read the public key, create timestamp signatures, and inspect the TNG certificate chain.",
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void fetchNniDeviceStatus()}
+                      disabled={nniStatusLoading}
+                      className="theme-secondary-btn px-3 py-2 text-sm"
+                    >
+                      {nniStatusLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      {t("刷新状态", "Refresh status")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => (nniJoined ? setNniJoined(false) : void joinNni())}
+                      disabled={Boolean(nniActionLoading) || nniStatusLoading || nniChipMissing}
+                      className={nniJoined ? "theme-secondary-btn px-3 py-2 text-sm" : "theme-accent-btn px-3 py-2 text-sm"}
+                      title={
+                        nniChipMissing
+                          ? t("当前设备缺少签名芯片，不能加入需要设备签名的 NNI。", "This device has no signature chip, so it cannot join signed NNI.")
+                          : undefined
+                      }
+                    >
+                      {nniActionLoading === "sign_timestamp" ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                      {nniJoined ? t("停止", "Stop") : t("加入", "Join")}
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              {nniStatusError ? (
+                <p className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                  {nniStatusError}
+                </p>
+              ) : null}
+
+              <section className="grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+                <div className="theme-panel-soft p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">{t("设备状态", "Device status")}</p>
+                      <h4 className="mt-2 text-lg font-semibold">{t("设备签名芯片", "Device signature chip")}</h4>
+                    </div>
+                    <span
+                      className={
+                        nniStatusLoading
+                          ? "setup-status"
+                          : nniStatus == null
+                            ? "setup-status setup-status-todo"
+                            : nniChipPresent
+                            ? "setup-status setup-status-done"
+                            : "setup-status setup-status-attention"
+                      }
+                    >
+                      {nniStatusLoading ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          {t("检测中", "Checking")}
+                        </>
+                      ) : nniChipPresent ? (
+                        <>
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                          {t("可用", "Ready")}
+                        </>
+                      ) : nniStatus == null ? (
+                        t("未检测", "Not checked")
+                      ) : (
+                        <>
+                          <ShieldAlert className="h-3.5 w-3.5" />
+                          {t("缺失签名芯片", "Signature chip missing")}
+                        </>
+                      )}
+                    </span>
+                  </div>
+
+                  <div
+                    className={
+                      nniChipPresent
+                        ? "mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-3 text-sm text-emerald-100"
+                        : "mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-100"
+                    }
+                  >
+                    <p className="font-medium">
+                      {nniStatus?.message ||
+                        (nniStatusLoading
+                          ? t("正在读取签名芯片状态。", "Reading signature chip status.")
+                          : t("还没有读取状态。点击刷新状态开始检测。", "Status has not been loaded yet. Click Refresh status to check."))}
+                    </p>
+                    {nniStatus?.next_step ? <p className="mt-1 text-sm opacity-80">{nniStatus.next_step}</p> : null}
+                    {nniStatus?.error ? <p className="mt-2 break-words font-mono text-xs opacity-75">{nniStatus.error}</p> : null}
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-3">
+                      <p className="text-[11px] tracking-[0.14em] text-white/45">slot</p>
+                      <p className="mt-2 text-sm font-semibold text-white/90">{nniStatus?.meta?.slot ?? "--"}</p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-3">
+                      <p className="text-[11px] tracking-[0.14em] text-white/45">I2C</p>
+                      <p className="mt-2 text-sm font-semibold text-white/90">
+                        {nniStatus?.meta?.i2c_address || "--"}
+                        {nniStatus?.meta?.i2c_bus != null ? ` / bus ${nniStatus?.meta?.i2c_bus}` : ""}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-3 sm:col-span-2">
+                      <p className="text-[11px] tracking-[0.14em] text-white/45">{t("公钥指纹", "Public key fingerprint")}</p>
+                      <p className="mt-2 break-all font-mono text-sm font-semibold text-white/90">
+                        {nniStatus?.pubkey_fingerprint || nniStatus?.pubkey_preview || "--"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="theme-panel-soft p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="theme-kicker text-[10px] uppercase tracking-[0.28em]">{t("加入状态", "Join state")}</p>
+                      <h4 className="mt-2 text-lg font-semibold">{t("NNI 运行入口", "NNI runtime entry")}</h4>
+                    </div>
+                    <span className={nniJoined ? "setup-status setup-status-done" : "setup-status setup-status-todo"}>
+                      {nniJoined ? t("已加入", "Joined") : t("未加入", "Not joined")}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 min-h-[180px] rounded-2xl border border-white/10 bg-black/20 p-4">
+                    <div className="grid h-full min-h-[148px] grid-cols-6 gap-2 sm:grid-cols-8">
+                      {Array.from({ length: 32 }).map((_, index) => (
+                        <div
+                          key={index}
+                          className={`rounded-lg border ${
+                            nniJoined
+                              ? "border-emerald-400/30 bg-emerald-400/15"
+                              : "border-white/10 bg-white/5"
+                          }`}
+                          style={{
+                            opacity: nniJoined ? 0.38 + ((index % 6) * 0.1) : 0.75,
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <p className="mt-4 text-sm leading-7 text-white/65">
+                    {nniChipMissing
+                      ? t(
+                          "当前设备缺少签名芯片，因此不会显示为已加入。你仍可以继续使用 RustClaw 的其它功能。",
+                          "This device has no signature chip, so it will not be marked as joined. Other RustClaw features remain available.",
+                        )
+                      : nniJoined
+                        ? t("时间戳签名已生成，本页将该设备标记为已加入。", "A timestamp signature was generated, so this page marks the device as joined.")
+                        : t("点击加入会读取设备状态并生成一次当前时间戳签名。", "Click Join to read device status and generate one signature for the current timestamp.")}
+                  </p>
+                </div>
+              </section>
+
+              <section className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+                <div className="theme-panel-soft p-5">
+                  <div className="flex items-start gap-3">
+                    <Fingerprint className="mt-0.5 h-5 w-5 shrink-0 theme-icon-soft" />
+                    <div>
+                      <h4 className="text-lg font-semibold">{t("设备签名操作", "Device signing actions")}</h4>
+                      <p className="mt-2 text-sm leading-7 text-white/65">
+                        {t(
+                          "这些操作对应 Pi App 已预埋的 helper：slot 0 公钥、时间戳签名、TNG 设备公钥和证书链。",
+                          "These actions map to the helper already built into the Pi App: Slot 0 public key, timestamp signing, TNG device public key, and certificate chain.",
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-2">
+                    {["pubkey", "sign_timestamp", "tng_device_pubkey", "tng_device_cert", "tng_signer_cert", "tng_root_cert"].map((action) => (
+                      <button
+                        key={action}
+                        type="button"
+                        onClick={() => void runNniDeviceAction(action)}
+                        disabled={Boolean(nniActionLoading) || nniStatusLoading || nniChipMissing}
+                        className="theme-topbar-btn justify-between px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                        title={
+                          nniChipMissing
+                            ? t("当前设备缺少签名芯片，不能执行该操作。", "This device has no signature chip, so this action cannot run.")
+                            : undefined
+                        }
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          {nniActionLoading === action ? <Loader2 className="h-4 w-4 animate-spin" /> : <Cpu className="h-4 w-4" />}
+                          {nniActionLabel(action)}
+                        </span>
+                        <span className="font-mono text-xs text-white/45">{action}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="theme-panel-soft p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h4 className="text-lg font-semibold">{t("最近一次结果", "Latest result")}</h4>
+                      <p className="mt-2 text-sm text-white/60">
+                        {nniActionResult
+                          ? nniActionLabel(nniActionResult.action)
+                          : t("执行一个设备签名操作后，这里会显示返回值。", "Run a device signing action to show its result here.")}
+                      </p>
+                    </div>
+                    {nniPrimaryHex ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void writeTextToClipboard(nniPrimaryHex.value)
+                            .then(() => setNniActionMessage(t("已复制结果。", "Result copied.")))
+                            .catch((err) => setNniActionError(err instanceof Error ? err.message : "复制失败"));
+                        }}
+                        className="theme-secondary-btn px-3 py-2 text-xs"
+                      >
+                        <Copy className="h-4 w-4" />
+                        {t("复制", "Copy")}
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {nniActionMessage ? (
+                    <p className="mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">
+                      {nniActionMessage}
+                    </p>
+                  ) : null}
+                  {nniActionError ? (
+                    <p className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-100">
+                      {nniActionError}
+                    </p>
+                  ) : null}
+
+                  {nniPrimaryHex ? (
+                    <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-white/75">{nniPrimaryHex.label}</p>
+                        {nniPrimaryHex.size != null ? (
+                          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] text-white/55">
+                            {nniPrimaryHex.size} bytes
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-3 break-all font-mono text-xs leading-6 text-white/75">
+                        {shortenHex(nniPrimaryHex.value, 48, 48)}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {nniActionResult?.payload?.timestamp ? (
+                    <div className="mt-3 rounded-xl border border-white/10 bg-black/20 px-3 py-3">
+                      <p className="text-[11px] tracking-[0.14em] text-white/45">{t("签名时间", "Signed timestamp")}</p>
+                      <p className="mt-2 font-mono text-sm text-white/85">{nniActionResult.payload.timestamp}</p>
+                    </div>
+                  ) : null}
+
+                  {nniActionResult ? (
+                    <details className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+                      <summary className="cursor-pointer text-sm font-medium text-white/75">
+                        {t("查看原始 JSON", "View raw JSON")}
+                      </summary>
+                      <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/30 p-3 text-xs leading-5 text-white/65">
+                        {JSON.stringify(nniActionResult.payload ?? nniActionResult, null, 2)}
+                      </pre>
+                    </details>
+                  ) : null}
+                </div>
+              </section>
+            </div>
           ) : null}
 
           {currentPage === "services" ? (
@@ -5848,6 +6379,7 @@ export default function App() {
                   const renderSkillRow = (name: string) => {
                     const skillItem = skillItemsByName.get(name);
                     const runtimeIssue = skillRuntimeIssue(skillItem);
+                    const visiblePlannerCapabilities = (skillItem?.planner_capabilities ?? []).slice(0, 3);
                     const visibleCapabilities = (skillItem?.capabilities ?? []).slice(0, 3);
                     const configuredEnabled = configuredEnabledSkills.has(name);
                     const persistedSwitchValue = skillsConfigData?.skill_switches?.[name];
@@ -5895,8 +6427,16 @@ export default function App() {
                                 {t("会改变状态", "Changes state")}
                               </span>
                             ) : null}
+                            {visiblePlannerCapabilities.map((capability) => (
+                              <span
+                                key={`planner-${capability}`}
+                                className="rounded border border-cyan-500/20 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] text-cyan-100"
+                              >
+                                {skillPlannerCapabilityLabel(capability)}
+                              </span>
+                            ))}
                             {visibleCapabilities.map((capability) => (
-                              <span key={capability} className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-white/45">
+                              <span key={`runtime-${capability}`} className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] text-white/45">
                                 {skillCapabilityLabel(capability)}
                               </span>
                             ))}

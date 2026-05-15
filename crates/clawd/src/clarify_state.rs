@@ -358,8 +358,7 @@ mod tests {
     #[test]
     fn derive_locator_clarify_state_from_semantic_clarify() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::AskClarify,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
+            ask_mode: crate::AskMode::clarify(),
             resolved_intent: "看一下那个日志最后 5 行".to_string(),
             needs_clarify: true,
             clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
@@ -401,8 +400,7 @@ mod tests {
     #[test]
     fn derive_locator_clarify_state_preserves_non_free_output_shape() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::AskClarify,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
+            ask_mode: crate::AskMode::clarify(),
             resolved_intent: "看一下那个日志".to_string(),
             needs_clarify: true,
             clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
@@ -507,8 +505,7 @@ mod tests {
     #[test]
     fn derive_clarify_state_seeds_candidate_targets_from_prior_session() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::AskClarify,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::AskClarify),
+            ask_mode: crate::AskMode::clarify(),
             resolved_intent: "把那个文件发给我".to_string(),
             needs_clarify: true,
             clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),

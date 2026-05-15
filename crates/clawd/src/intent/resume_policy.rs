@@ -218,8 +218,7 @@ mod tests {
     #[test]
     fn runtime_resume_binding_is_disabled_when_normalizer_rejects_resume() {
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "list current workspace".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
@@ -255,8 +254,7 @@ mod tests {
             "resume_steps": ["step-a"]
         });
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "continue".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
@@ -302,8 +300,7 @@ mod tests {
             "resume_steps": ["step-a"]
         });
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "continue".to_string(),
             needs_clarify: false,
             route_reason: String::new(),

@@ -7,7 +7,7 @@ use super::{trim_path_token, DirectoryLookupInput, FileDeliveryLocatorInput};
 // Pure locator parsing helpers shared by directory lookup and file delivery.
 // Production callers must start from a structured locator hint or current-workspace
 // contract. Whole-request parsing is kept behind test-only helpers to avoid
-// reintroducing a semantic fast path after the normalizer/planner.
+// reintroducing a local semantic router after the normalizer/planner.
 #[cfg(test)]
 pub(super) fn parse_directory_lookup_input_for_tests(text: &str) -> Option<DirectoryLookupInput> {
     let trimmed = text.trim();

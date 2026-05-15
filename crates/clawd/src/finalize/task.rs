@@ -663,6 +663,12 @@ fn should_use_answer_route_result(
     answer_route: &crate::RouteResult,
     answer_journal: &crate::task_journal::TaskJournal,
 ) -> bool {
+    let answer_is_clarify = answer_journal.final_status.is_some_and(|status| {
+        matches!(status, crate::task_journal::TaskJournalFinalStatus::Clarify)
+    });
+    if answer_is_clarify && answer_route.is_clarify_gate() && !initial.is_clarify_gate() {
+        return true;
+    }
     let answer_has_execution_trace = !answer_journal.rounds.is_empty()
         || !answer_journal.step_results.is_empty()
         || answer_journal.plan_result.is_some()
@@ -1067,10 +1073,9 @@ mod tests {
 
     use serde_json::json;
 
-    fn route_result(mode: crate::RoutedMode) -> crate::RouteResult {
+    fn route_result(ask_mode: crate::AskMode) -> crate::RouteResult {
         crate::RouteResult {
-            routed_mode: mode,
-            ask_mode: crate::AskMode::from_routed_mode(mode),
+            ask_mode,
             resolved_intent: "test".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1192,8 +1197,8 @@ mod tests {
 
     #[test]
     fn answer_route_result_overrides_initial_chat_when_execution_trace_exists() {
-        let initial = route_result(crate::RoutedMode::Chat);
-        let answer_route = route_result(crate::RoutedMode::ChatAct);
+        let initial = route_result(crate::AskMode::direct_answer());
+        let answer_route = route_result(crate::AskMode::planner_execute_chat_wrapped());
         let mut answer_journal =
             crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
         answer_journal.record_plan_result(&crate::PlanResult {
@@ -1215,11 +1220,31 @@ mod tests {
 
     #[test]
     fn answer_route_result_does_not_override_chat_without_execution_trace() {
-        let initial = route_result(crate::RoutedMode::Chat);
-        let answer_route = route_result(crate::RoutedMode::ChatAct);
+        let initial = route_result(crate::AskMode::direct_answer());
+        let answer_route = route_result(crate::AskMode::planner_execute_chat_wrapped());
         let answer_journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
 
         assert!(!should_use_answer_route_result(
+            &initial,
+            &answer_route,
+            &answer_journal
+        ));
+    }
+
+    #[test]
+    fn answer_route_result_overrides_initial_chat_for_clarify_journal() {
+        let initial = route_result(crate::AskMode::direct_answer());
+        let mut answer_route = route_result(crate::AskMode::clarify());
+        answer_route.needs_clarify = true;
+        answer_route.clarify_question = "Which file should I send?".to_string();
+        answer_route.wants_file_delivery = true;
+        answer_route.output_contract.delivery_required = true;
+        answer_route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        let mut answer_journal =
+            crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+        answer_journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Clarify);
+
+        assert!(should_use_answer_route_result(
             &initial,
             &answer_route,
             &answer_journal
@@ -1262,8 +1287,7 @@ mod tests {
         )
         .with_task_journal(journal);
         let route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "send definitely_missing_named_file_rustclaw_001.txt".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1308,8 +1332,7 @@ mod tests {
         )
         .with_task_journal(journal);
         let mut route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: String::new(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1336,8 +1359,7 @@ mod tests {
     #[test]
     fn resume_failure_missing_file_delivery_is_success_result() {
         let mut route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: String::new(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1373,8 +1395,7 @@ mod tests {
     #[test]
     fn resume_failure_structured_service_status_is_success_result() {
         let mut route = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: String::new(),
             needs_clarify: false,
             clarify_question: String::new(),

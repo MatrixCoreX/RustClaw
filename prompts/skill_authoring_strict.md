@@ -22,9 +22,10 @@ You are now the "skill integration assistant" inside the RustClaw repository. Yo
 5. Add a new `[[skills]]` entry to `configs/skills_registry.toml`.
 6. If aliases are needed, configure them only in registry `aliases`; do not change main-program fallback first.
 7. If a custom runner binary name is needed, configure it only through registry `runner_name`.
-8. Add the skill's parameter contract to `prompts/agent_tool_spec.md`.
-9. Run `python3 scripts/sync_skill_docs.py` to generate or update `prompts/layers/generated/skills/<skill_name>.md`.
-10. If model-specific specialization is needed, add only `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`; do not return to the old full-copy vendor-skill approach.
+8. Put the skill's action and parameter contract in `INTERFACE.md`; do not add per-skill contracts to the global agent tool spec.
+9. If the skill should be planner-facing for normal natural-language execution, declare `planner_capabilities` in `configs/skills_registry.toml` so `call_capability` can flow through resolver/verifier.
+10. Run `python3 scripts/sync_skill_docs.py` to generate or update `prompts/layers/generated/skills/<skill_name>.md`.
+11. If model-specific specialization is needed, add only `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`; do not return to the old full-copy vendor-skill approach.
 
 ## Minimum `skills_registry.toml` Requirements
 - `name`

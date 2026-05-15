@@ -94,6 +94,10 @@ pub(crate) enum AgentAction {
         skill: String,
         args: Value,
     },
+    CallCapability {
+        capability: String,
+        args: Value,
+    },
     SynthesizeAnswer {
         #[serde(default)]
         evidence_refs: Vec<String>,
@@ -101,14 +105,6 @@ pub(crate) enum AgentAction {
     Respond {
         content: String,
     },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RoutedMode {
-    Chat,
-    Act,
-    ChatAct,
-    AskClarify,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,17 +145,6 @@ impl RouteGateKind {
             Self::Chat => "chat",
             Self::Clarify => "clarify",
             Self::Execute => "execute",
-        }
-    }
-}
-
-impl RoutedMode {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Chat => "Chat",
-            Self::Act => "Act",
-            Self::ChatAct => "ChatAct",
-            Self::AskClarify => "AskClarify",
         }
     }
 }

@@ -244,41 +244,6 @@ impl UserResponseContract {
         }
     }
 
-    pub(crate) fn missing_file_delivery(
-        original_user_request: &str,
-        resolved_user_intent: &str,
-        locator_hint: Option<&str>,
-        language_hint: &str,
-    ) -> Self {
-        let mut observed_facts = vec![
-            "file_delivery_required: true".to_string(),
-            "fs_search_action: find_name".to_string(),
-            "matched_files_count: 0".to_string(),
-        ];
-        if let Some(locator) = locator_hint
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            observed_facts.push(format!("locator_hint: {locator}"));
-        }
-        Self {
-            kind: UserResponseKind::ToolFailure,
-            reason_code: "missing_file_delivery_not_found".to_string(),
-            missing_slots: Vec::new(),
-            observed_facts,
-            policy_boundary: vec![
-                "Do not claim a file was found or delivered.".to_string(),
-                "Do not invent alternative file paths or similar filenames.".to_string(),
-                "Explain that the requested file delivery target was not found and give one concise recovery option."
-                    .to_string(),
-            ],
-            original_user_request: original_user_request.trim().to_string(),
-            resolved_user_intent: resolved_user_intent.trim().to_string(),
-            response_shape: "brief_failure_with_next_step".to_string(),
-            language_hint: language_hint.trim().to_string(),
-        }
-    }
-
     pub(crate) fn to_prompt_context_block(&self) -> String {
         let value = json!({
             "kind": self.kind.as_str(),
@@ -296,16 +261,31 @@ impl UserResponseContract {
     }
 }
 
-pub(crate) fn missing_file_delivery_default_text_for_language(
+pub(crate) fn missing_file_delivery_response_text_for_language(
     state: &AppState,
     language_hint: &str,
+    locator_hint: Option<&str>,
 ) -> String {
+    let prefer_english = fallback_prefers_english_for_language_hint(state, language_hint);
+    if let Some(locator) = locator_hint
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return crate::app_helpers::bilingual_t_with_default_vars(
+            state,
+            "clawd.msg.delivery.file_not_found_path_next_step",
+            "未找到文件：{path}，所以无法发送。请确认完整路径或上传该文件。",
+            "File not found: {path}, so I cannot send it. Please confirm the full path or upload the file.",
+            prefer_english,
+            &[("path", locator)],
+        );
+    }
     crate::app_helpers::bilingual_t_with_default(
         state,
-        "clawd.msg.delivery.rule3_file_not_found",
-        "未找到该文件。",
-        "File not found.",
-        fallback_prefers_english_for_language_hint(state, language_hint),
+        "clawd.msg.delivery.file_not_found_next_step",
+        "未找到该文件。请确认完整路径或上传该文件。",
+        "File not found. Please confirm the full path or upload the file.",
+        prefer_english,
     )
 }
 
@@ -317,21 +297,8 @@ pub(crate) async fn compose_missing_file_delivery_response(
     locator_hint: Option<&str>,
     language_hint: &str,
 ) -> String {
-    let default_text = missing_file_delivery_default_text_for_language(state, language_hint);
-    let contract = UserResponseContract::missing_file_delivery(
-        original_user_request,
-        resolved_user_intent,
-        locator_hint,
-        language_hint,
-    );
-    compose_user_response_from_contract_with_default(
-        state,
-        task,
-        &contract,
-        ClarifyFallbackSource::ExecutionFailedPartial,
-        &default_text,
-    )
-    .await
+    let _ = (task, original_user_request, resolved_user_intent);
+    missing_file_delivery_response_text_for_language(state, language_hint, locator_hint)
 }
 
 pub(crate) async fn compose_user_response_from_contract(
@@ -970,18 +937,24 @@ mod tests {
     }
 
     #[test]
-    fn missing_file_delivery_default_follows_language_hint_before_config_locale() {
+    fn missing_file_delivery_response_text_keeps_locator_hint() {
         let state = test_state("en-US", "en-US");
-        assert_eq!(
-            missing_file_delivery_default_text_for_language(&state, "zh-CN"),
-            "未找到该文件。"
+        let text = missing_file_delivery_response_text_for_language(
+            &state,
+            "zh-CN",
+            Some("definitely_missing_named_file.txt"),
         );
+        assert!(text.contains("definitely_missing_named_file.txt"));
+        assert!(text.contains("未找到"));
 
         let state = test_state("zh-CN", "zh-CN");
-        assert_eq!(
-            missing_file_delivery_default_text_for_language(&state, "en"),
-            "File not found."
+        let text = missing_file_delivery_response_text_for_language(
+            &state,
+            "en",
+            Some("/tmp/definitely-missing.txt"),
         );
+        assert!(text.contains("/tmp/definitely-missing.txt"));
+        assert!(text.contains("File not found"));
     }
 
     /// 7 source 的 metric label / i18n key 互不冲突。
@@ -1220,22 +1193,6 @@ mod tests {
         assert!(block.contains("required_success_marker: OK"));
         assert!(block.contains("brief_failure_with_next_step"));
         assert!(block.contains("Do not mark the run as successful."));
-    }
-
-    #[test]
-    fn user_response_contract_renders_missing_file_delivery_context() {
-        let contract = UserResponseContract::missing_file_delivery(
-            "把 definitely_missing.txt 发给我",
-            "Deliver definitely_missing.txt",
-            Some("definitely_missing.txt"),
-            "zh-CN",
-        );
-        let block = contract.to_prompt_context_block();
-        assert!(block.contains("\"kind\": \"tool_failure\""));
-        assert!(block.contains("\"reason_code\": \"missing_file_delivery_not_found\""));
-        assert!(block.contains("matched_files_count: 0"));
-        assert!(block.contains("locator_hint: definitely_missing.txt"));
-        assert!(block.contains("Do not claim a file was found or delivered."));
     }
 
     #[test]

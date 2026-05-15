@@ -357,10 +357,13 @@ if log_path.exists():
     log_text = log_path.read_text(encoding="utf-8", errors="replace")
 lines = [line for line in log_text.splitlines() if task_id in line]
 
-route_chat = any("routed_mode=Chat" in line for line in lines)
-route_act = any("routed_mode=Act" in line for line in lines)
-route_chat_act = any("routed_mode=ChatAct" in line for line in lines)
-route_clarify = any("routed_mode=AskClarify" in line for line in lines)
+route_chat = any(re.search(r"derived_route_label=Chat\b", line) for line in lines)
+route_act = any(re.search(r"derived_route_label=Act\b", line) for line in lines)
+route_chat_act = any(re.search(r"derived_route_label=ChatAct\b", line) for line in lines)
+route_clarify = any(
+    re.search(r"first_layer_decision=clarify\b|derived_route_label=AskClarify\b", line)
+    for line in lines
+)
 has_exec = any("executor_step_execute" in line for line in lines)
 has_route_fallback = any("route_request_mode llm failed" in line or "route_request_mode parse failed" in line for line in lines)
 

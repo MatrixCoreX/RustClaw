@@ -11,7 +11,7 @@ ATTRIBUTION_LABELS = {
     "normalizer",
     "route_miss",
     "planner",
-    "fast_path_bypass",
+    "planner_bypass_without_evidence",
     "plan_missing_target",
     "skill_schema",
     "skill_output",
@@ -160,7 +160,7 @@ def classify(obj: dict) -> tuple[str, str]:
     if status != "succeeded" and route:
         if not plan_steps and str(route.get("route_gate_kind") or "").lower() in {"execute", "planner_execute"}:
             if not steps and final_answer:
-                return "fast_path_bypass", "execute route produced a final answer without planner/tool evidence"
+                return "planner_bypass_without_evidence", "execute route produced a final answer without planner/tool evidence"
             return "planner", "execute route produced no executable plan"
         if route.get("needs_clarify") is True:
             return "normalizer", "route requested clarification"

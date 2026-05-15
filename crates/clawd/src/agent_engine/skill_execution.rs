@@ -181,6 +181,61 @@ fn unresolved_runtime_template_argument_error(
     ))
 }
 
+fn is_path_like_arg_key(key: &str) -> bool {
+    let key = key.trim();
+    matches!(
+        key,
+        "path" | "db_path" | "root" | "cwd" | "directory" | "dir"
+    ) || key.ends_with("_path")
+        || key.ends_with("_root")
+}
+
+fn looks_like_structured_runtime_observation(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(Value::Object(_)) | Ok(Value::Array(_)) => true,
+        _ => false,
+    }
+}
+
+fn contains_structured_observation_in_path_arg(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => map.iter().any(|(key, value)| {
+            if is_path_like_arg_key(key) {
+                return value
+                    .as_str()
+                    .is_some_and(looks_like_structured_runtime_observation);
+            }
+            contains_structured_observation_in_path_arg(value)
+        }),
+        Value::Array(items) => items
+            .iter()
+            .any(contains_structured_observation_in_path_arg),
+        _ => false,
+    }
+}
+
+fn structured_observation_path_argument_error(
+    normalized_skill: &str,
+    exec_args: &Value,
+) -> Option<String> {
+    if !contains_structured_observation_in_path_arg(exec_args) {
+        return None;
+    }
+    Some(crate::skills::structured_skill_error_from_parts(
+        normalized_skill,
+        "invalid_args",
+        "path argument contains a structured observation instead of one concrete path; select a single path from observed fields or ask for clarification when multiple candidates exist",
+        None,
+        Some(json!({
+            "reason": "structured_observation_embedded_in_path_arg",
+        })),
+    ))
+}
+
 fn handle_preflight_argument_failure(
     state: &AppState,
     task: &ClaimedTask,
@@ -1206,6 +1261,19 @@ pub(super) async fn execute_prepared_skill_action(
             action_trace_kind,
         ));
     }
+    if let Some(err) = structured_observation_path_argument_error(normalized_skill, &exec_args) {
+        return Ok(handle_preflight_argument_failure(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            normalized_skill,
+            classification_args,
+            &err,
+            action_trace_kind,
+        ));
+    }
     info!(
         "{} executor_step_execute task_id={} round={} step={} type={} skill={} args={}",
         crate::highlight_tag("skill"),
@@ -1344,7 +1412,8 @@ mod tests {
     use super::{
         build_auto_sudo_retry_args, contains_unresolved_runtime_template_arg,
         handle_skill_step_failure, handle_skill_step_success, skill_extra_requests_user_input,
-        unresolved_runtime_template_argument_error, AgentLoopGuardPolicy, LoopState,
+        structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
+        AgentLoopGuardPolicy, LoopState,
     };
     use crate::{
         AgentRuntimeConfig, AppState, ClaimedTask, SkillViewsSnapshot, ToolsPolicy,
@@ -1487,6 +1556,38 @@ mod tests {
             !parsed.error_text.contains("{{"),
             "user-facing error text must not leak unresolved templates"
         );
+    }
+
+    #[test]
+    fn structured_runtime_observation_path_arg_is_rejected_structurally() {
+        let args = serde_json::json!({
+            "action": "schema_version",
+            "db_path": r#"{"action":"find_ext","count":5,"results":["data/app.db","data/claw.db"]}"#,
+        });
+
+        let err = structured_observation_path_argument_error("db_basic", &args)
+            .expect("structured observation in path should be rejected");
+        let parsed = crate::skills::parse_structured_skill_error(&err)
+            .expect("preflight error should be structured");
+        assert_eq!(parsed.error_kind, "invalid_args");
+        assert_eq!(
+            parsed
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("reason"))
+                .and_then(|value| value.as_str()),
+            Some("structured_observation_embedded_in_path_arg")
+        );
+    }
+
+    #[test]
+    fn scalar_json_like_filename_path_arg_is_not_rejected() {
+        let args = serde_json::json!({
+            "action": "read_text_range",
+            "path": "docs/{draft}.md",
+        });
+
+        assert!(structured_observation_path_argument_error("fs_basic", &args).is_none());
     }
 
     #[test]

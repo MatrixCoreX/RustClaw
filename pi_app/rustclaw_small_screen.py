@@ -257,12 +257,12 @@ def _extract_log_detail(line):
         model = _shorten_model_name(skill_llm.group(3), limit=18)
         prompt_part = f" p={prompt}" if prompt else ""
         return f"call {skill_name} {model}{prompt_part} {status}"
-    routed = re.search(r"route_request_mode llm .* mode=(ChatAct|AskClarify|Chat|Act)", line)
-    if routed:
-        return f"route {routed.group(1)} {status}"
-    mode = re.search(r"routed_mode=(ChatAct|AskClarify|Chat|Act)\b", line)
-    if mode:
-        return f"route {mode.group(1)} {status}"
+    decision = re.search(r"first_layer_decision=(clarify|direct_answer|planner_execute)\b", line)
+    if decision:
+        return f"route {decision.group(1)} {status}"
+    label = re.search(r"derived_route_label=(ChatAct|AskClarify|Chat|Act)\b", line)
+    if label:
+        return f"route {label.group(1)} {status}"
     tool = re.search(r"type=call_tool tool=([A-Za-z0-9_./:-]+)", line)
     if tool:
         return f"tool {tool.group(1)} {status}"
@@ -289,7 +289,7 @@ def _collect_clawd_log_items(raw_text, lang="CN", limit=8):
             item = "ERROR"
         elif any(key in lower for key in ("prompt_invocation", "prompt_debug", "llm_call", "[llm]", "[prompt]")):
             item = "LLM"
-        elif any(key in lower for key in ("routed_mode", "resolve_user_request", "context_resolver", "[routing]")):
+        elif any(key in lower for key in ("first_layer_decision", "derived_route_label", "resolve_user_request", "context_resolver", "[routing]")):
             item = "ROUTING"
         elif any(key in lower for key in ("type=call_skill", "skill=", "[skill]", "[skill_llm]")):
             item = "SKILL"

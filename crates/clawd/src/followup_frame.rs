@@ -927,10 +927,7 @@ mod tests {
         FollowupFrame, FollowupOpKind, FollowupSliceKind, FollowupSliceSpec,
         FollowupUnresolvedSlot,
     };
-    use crate::{
-        runtime::AppState, AskMode, IntentOutputContract, OutputLocatorKind, RouteResult,
-        RoutedMode,
-    };
+    use crate::{runtime::AppState, IntentOutputContract, OutputLocatorKind, RouteResult};
 
     #[test]
     fn locator_reply_resolved_intent_uses_persisted_request() {
@@ -1123,8 +1120,7 @@ mod tests {
                 ..Default::default()
             });
         let route_result = RouteResult {
-            routed_mode: RoutedMode::Act,
-            ask_mode: AskMode::from_routed_mode(RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "看一下那个 model io log 最后 4 行，再一句话说有什么现象".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1192,8 +1188,7 @@ mod tests {
         };
         let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
         let route_result = RouteResult {
-            routed_mode: RoutedMode::Act,
-            ask_mode: AskMode::from_routed_mode(RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "列出 logs 目录下前 5 个文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1273,8 +1268,7 @@ mod tests {
                 ..Default::default()
             });
         let route_result = RouteResult {
-            routed_mode: RoutedMode::Act,
-            ask_mode: AskMode::from_routed_mode(RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "列出 logs 目录下前 5 个文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1372,8 +1366,7 @@ mod tests {
                 ..Default::default()
             });
         let route_result = RouteResult {
-            routed_mode: RoutedMode::Act,
-            ask_mode: AskMode::from_routed_mode(RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "List first 5 filenames in logs directory".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1462,8 +1455,7 @@ mod tests {
         };
         persist_frame(&state, &task, &prior_frame).expect("seed prior frame");
         let route_result = RouteResult {
-            routed_mode: RoutedMode::Chat,
-            ask_mode: AskMode::from_routed_mode(RoutedMode::Chat),
+            ask_mode: crate::AskMode::direct_answer(),
             resolved_intent: "plain acknowledgement".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1549,8 +1541,7 @@ mod tests {
                 ..Default::default()
             });
         let route_result = RouteResult {
-            routed_mode: RoutedMode::Act,
-            ask_mode: AskMode::from_routed_mode(RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "看第二个最后 2 行".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1624,8 +1615,7 @@ mod tests {
         persist_frame(&state, &task, &prior_frame).expect("persist prior frame");
         let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
         let route_result = RouteResult {
-            routed_mode: RoutedMode::Act,
-            ask_mode: AskMode::from_routed_mode(RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "把第二个发给我".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1699,8 +1689,7 @@ mod tests {
         persist_frame(&state, &task, &prior_frame).expect("persist prior frame");
         let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
         let route_result = RouteResult {
-            routed_mode: RoutedMode::Act,
-            ask_mode: AskMode::from_routed_mode(RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "把第二个发给我".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -1761,8 +1750,7 @@ mod tests {
         };
         let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
         let route_result = RouteResult {
-            routed_mode: RoutedMode::AskClarify,
-            ask_mode: AskMode::from_routed_mode(RoutedMode::AskClarify),
+            ask_mode: crate::AskMode::clarify(),
             resolved_intent: "看一下那个 README 开头，然后一句话总结".to_string(),
             needs_clarify: true,
             clarify_question: "请提供具体文件路径".to_string(),
@@ -1820,8 +1808,7 @@ mod tests {
         };
         let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
         let route_result = RouteResult {
-            routed_mode: RoutedMode::Act,
-            ask_mode: AskMode::from_routed_mode(RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "看一下那个模型日志最后 5 行".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),

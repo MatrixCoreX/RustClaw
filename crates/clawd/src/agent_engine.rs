@@ -25,9 +25,6 @@ use self::execution_loop::execute_actions_once;
 use self::loop_control::run_agent_with_loop;
 use self::prepare_round::{prepare_round_actions, push_round_trace};
 
-// Phase 3.3 Stage 2.3：loop_finalize.rs 已物理搬移到 `crate::finalize::loop_reply`。
-// observed_output 暴露 synthesize_answer_from_observed_output 给 finalize facade。
-pub(crate) use self::observed_output::synthesize_answer_from_observed_output;
 use self::skill_execution::execute_prepared_skill_action;
 pub(crate) use self::support::append_delivery_message;
 use self::support::{
@@ -157,6 +154,39 @@ fn first_non_heading_line(text: &str) -> Option<String> {
         })
 }
 
+fn quick_index_planner_capabilities(manifest: &claw_core::skill_registry::SkillManifest) -> String {
+    let tokens = manifest
+        .planner_capabilities
+        .iter()
+        .take(6)
+        .map(|capability| {
+            let name = capability.name.trim();
+            let mut attrs = Vec::new();
+            if let Some(action) = capability.action.as_deref() {
+                if !action.trim().is_empty() {
+                    attrs.push(format!("action={}", action.trim()));
+                }
+            }
+            if let Some(effect) = capability.effect {
+                attrs.push(format!("effect={}", effect.as_token()));
+            }
+            if !capability.required.is_empty() {
+                attrs.push(format!("required={}", capability.required.join("|")));
+            }
+            if attrs.is_empty() {
+                name.to_string()
+            } else {
+                format!("{name}({})", attrs.join(","))
+            }
+        })
+        .collect::<Vec<_>>();
+    if tokens.is_empty() {
+        String::new()
+    } else {
+        format!("; planner_capabilities: {}", tokens.join("; "))
+    }
+}
+
 /// 首轮路由提示：给 LLM 一份“技能速览”，降低误判成纯 chat 的概率。
 fn build_skill_quick_index_text(state: &AppState, task: &ClaimedTask) -> String {
     let enabled = state.planner_available_skills_for_task(task);
@@ -177,8 +207,9 @@ fn build_skill_quick_index_text(state: &AppState, task: &ClaimedTask) -> String 
             };
         if let Some(manifest) = state.skill_manifest(skill) {
             lines.push(format!(
-                "- {skill}: {summary}; planner_kind: {}",
-                manifest.planner_kind.as_token()
+                "- {skill}: {summary}; planner_kind: {}{}",
+                manifest.planner_kind.as_token(),
+                quick_index_planner_capabilities(&manifest)
             ));
         } else {
             lines.push(format!("- {skill}: {summary}"));
@@ -399,6 +430,7 @@ pub(crate) struct AgentRunContext {
     pub(crate) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
     pub(crate) context_bundle_summary: Option<String>,
     pub(crate) auto_locator_path: Option<String>,
+    pub(crate) has_authoritative_deictic_anchor: bool,
     pub(crate) fuzzy_locator_suggestions: Vec<String>,
     pub(crate) original_user_request: Option<String>,
     pub(crate) user_request: Option<String>,
@@ -681,6 +713,7 @@ fn plan_step_label(action: &AgentAction) -> String {
         // LEGACY: CallTool shown as skill for unified capability view.
         AgentAction::CallTool { tool, .. } => format!("skill:{tool}"),
         AgentAction::CallSkill { skill, .. } => format!("skill:{skill}"),
+        AgentAction::CallCapability { capability, .. } => format!("capability:{capability}"),
         AgentAction::SynthesizeAnswer { evidence_refs } => {
             if evidence_refs.is_empty() {
                 "synthesize_answer".to_string()
@@ -906,6 +939,7 @@ fn confirmation_remaining_step_labels(steps: &[crate::PlanStep]) -> Vec<String> 
         .map(|step| match step.action_type.as_str() {
             "respond" => "respond".to_string(),
             "think" => "think".to_string(),
+            "call_capability" => format!("capability({})", step.skill),
             "call_tool" => format!("tool({})", step.skill),
             _ => format!("skill({})", step.skill),
         })
@@ -1011,7 +1045,68 @@ pub(crate) async fn run_agent_with_tools(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use claw_core::skill_registry::{
+        Capability, OutputKind, PlannerCapabilityEffect, PlannerCapabilityKind,
+        PlannerCapabilityMapping, SkillKind, SkillManifest,
+    };
     use serde_json::json;
+    use std::collections::BTreeMap;
+
+    fn test_skill_manifest(planner_capabilities: Vec<PlannerCapabilityMapping>) -> SkillManifest {
+        SkillManifest {
+            name: "fs_basic".to_string(),
+            kind: SkillKind::Builtin,
+            planner_kind: PlannerCapabilityKind::Tool,
+            output_kind: OutputKind::Text,
+            description: None,
+            semantic_tags: Vec::new(),
+            preferred_over_run_cmd: true,
+            validation_actions: Vec::new(),
+            prompt_file: None,
+            input_schema: None,
+            output_schema: None,
+            runtime_skill: None,
+            runtime_action: None,
+            runtime_default_args: None,
+            runtime_rewrite_arg_keys: Vec::new(),
+            runtime_rewrite_semantic_kinds: Vec::new(),
+            risk_level: None,
+            auto_invocable: None,
+            requires_confirmation: None,
+            side_effect: None,
+            confirmation_exempt_when: Vec::<BTreeMap<String, serde_json::Value>>::new(),
+            timeout_seconds: None,
+            retryable: None,
+            group: None,
+            primary_fallback_role: None,
+            supported_os: Vec::new(),
+            required_bins: Vec::new(),
+            optional_bins: Vec::new(),
+            platform_notes: Vec::new(),
+            planner_capabilities,
+            capabilities: vec![Capability::FsRead],
+        }
+    }
+
+    #[test]
+    fn quick_index_includes_planner_capability_metadata() {
+        let manifest = test_skill_manifest(vec![PlannerCapabilityMapping {
+            name: "filesystem.list_entries".to_string(),
+            action: Some("list_dir".to_string()),
+            effect: Some(PlannerCapabilityEffect::Observe),
+            required: vec!["path".to_string()],
+            optional: vec!["limit".to_string()],
+            risk_level: None,
+            preferred: true,
+        }]);
+
+        let text = quick_index_planner_capabilities(&manifest);
+
+        assert!(text.contains("planner_capabilities: filesystem.list_entries"));
+        assert!(text.contains("action=list_dir"));
+        assert!(text.contains("effect=observe"));
+        assert!(text.contains("required=path"));
+    }
 
     // --- build_safe_skill_args_summary: progress hint args must be whitelisted and safe ---
     #[test]
@@ -1473,7 +1568,7 @@ mod tests {
         assert!(!crate::finalize::observed_read_path_matches_request(
             ws,
             user_text,
-            Some("/home/guagua/git_upload/README.md")
+            Some("/home/guagua/rustclaw/README.md")
         ));
     }
 }

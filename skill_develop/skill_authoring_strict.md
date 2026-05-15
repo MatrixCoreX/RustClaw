@@ -25,9 +25,10 @@
 7. 如需自定义 runner 二进制名，只在 registry 中配置 `runner_name`。
 8. 如需调用文本 LLM，在 registry 声明 `capabilities = ["llm"]`；默认走系统 `[llm].selected_vendor` / `selected_model`，不要为每个文本 skill 预设独立模型。
 9. 如确实需要某个 skill 固定走独立文本模型，只在该 skill 的专用配置文件里提供注释态覆盖项（例如 `llm_vendor` / `llm_model`），默认保持注释。
-10. 在 `prompts/layers/overlays/agent_tool_spec.md` 中补充该技能的参数契约。
-11. 运行 `python3 scripts/sync_skill_docs.py`，生成或更新 `prompts/layers/generated/skills/<skill_name>.md`。
-12. 如需模型特化，只新增 `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`，不要再维护旧的 vendor skill 全量副本。
+10. 技能 action 与参数契约写在 `INTERFACE.md`；不要为了单个普通 skill 修改全局 `prompts/layers/overlays/agent_tool_spec.md`。
+11. 如果该 skill 需要进入 planner 常规自然语言执行流，在 `configs/skills_registry.toml` 声明 `planner_capabilities`，让 `call_capability` 通过 resolver/verifier 接入。
+12. 运行 `python3 scripts/sync_skill_docs.py`，生成或更新 `prompts/layers/generated/skills/<skill_name>.md`。
+13. 如需模型特化，只新增 `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`，不要再维护旧的 vendor skill 全量副本。
 
 ## 外部提交技能必须完成的接入项
 0. 适用于用户上传、外部目录提交，或不希望把新能力放进 `crates/skills` 的场景。
@@ -78,7 +79,7 @@
 
 ## prompt 相关约定
 - 生成型 canonical skill prompt 位于 `prompts/layers/generated/skills/<skill_name>.md`
-- 规划器/工具总约束位于 `prompts/layers/overlays/agent_tool_spec.md`
+- 规划器/工具总约束位于 `prompts/layers/overlays/agent_tool_spec.md`，只放通用协议，不放单个普通 skill 的参数契约
 - 如需模型特化，只补 `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`
 - 不要再假设存在旧路径 `prompts/agent_tool_spec.md`
 

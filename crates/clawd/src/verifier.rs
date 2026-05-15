@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
+use std::path::{Component, Path};
 
-use claw_core::skill_registry::PrimaryFallbackRole;
+use claw_core::skill_registry::{PrimaryFallbackRole, SkillRiskLevel};
 
 use crate::{AppState, ClaimedTask, PlanResult, PlanStep};
 
@@ -29,10 +30,13 @@ impl VerifyMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VerifyIssueKind {
     SkillNotVisible,
+    CapabilityUnavailable,
     MissingRequiredArg,
+    DefaultCreationTargetApplied,
     UnresolvedTemplateArg,
     InvalidDependsOn,
     ConfirmationRequired,
+    RiskBudgetExceeded,
     PrimaryFallbackConflict,
     RouteClarifyRequired,
     RecipeInspectBeforeMutateRequired,
@@ -50,10 +54,13 @@ impl VerifyIssueKind {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::SkillNotVisible => "SkillNotVisible",
+            Self::CapabilityUnavailable => "CapabilityUnavailable",
             Self::MissingRequiredArg => "MissingRequiredArg",
+            Self::DefaultCreationTargetApplied => "DefaultCreationTargetApplied",
             Self::UnresolvedTemplateArg => "UnresolvedTemplateArg",
             Self::InvalidDependsOn => "InvalidDependsOn",
             Self::ConfirmationRequired => "ConfirmationRequired",
+            Self::RiskBudgetExceeded => "RiskBudgetExceeded",
             Self::PrimaryFallbackConflict => "PrimaryFallbackConflict",
             Self::RouteClarifyRequired => "RouteClarifyRequired",
             Self::RecipeInspectBeforeMutateRequired => "RecipeInspectBeforeMutateRequired",
@@ -109,6 +116,236 @@ fn is_confirmation_like_skill(skill: &str) -> bool {
     )
 }
 
+fn stable_task_suffix(task: &ClaimedTask) -> String {
+    let suffix: String = task
+        .task_id
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .take(8)
+        .collect();
+    if suffix.is_empty() {
+        "task".to_string()
+    } else {
+        suffix.to_ascii_lowercase()
+    }
+}
+
+fn value_as_non_empty_str<'a>(
+    obj: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Option<&'a str> {
+    obj.get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn default_make_dir_path(state: &AppState, task: &ClaimedTask) -> String {
+    state
+        .skill_rt
+        .workspace_root
+        .join(format!("rustclaw-created-dir-{}", stable_task_suffix(task)))
+        .to_string_lossy()
+        .to_string()
+}
+
+fn default_write_file_path(state: &AppState) -> String {
+    crate::ensure_default_file_path(&state.skill_rt.workspace_root, "")
+}
+
+fn path_has_parent_dir(path: &Path) -> bool {
+    path.components()
+        .any(|component| matches!(component, Component::ParentDir))
+}
+
+fn anchor_creation_path_to_workspace(state: &AppState, path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let candidate = Path::new(trimmed);
+    if candidate.is_absolute() {
+        return Some(trimmed.to_string());
+    }
+    if path_has_parent_dir(candidate) {
+        return Some(trimmed.to_string());
+    }
+    Some(
+        state
+            .skill_rt
+            .workspace_root
+            .join(candidate)
+            .to_string_lossy()
+            .to_string(),
+    )
+}
+
+fn path_is_safe_workspace_creation_target(
+    state: &AppState,
+    path: &str,
+    allow_existing_dir: bool,
+) -> bool {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let candidate = Path::new(trimmed);
+    if path_has_parent_dir(candidate) {
+        return false;
+    }
+    let resolved = if candidate.is_absolute() {
+        if !candidate.starts_with(&state.skill_rt.workspace_root) {
+            return false;
+        }
+        candidate.to_path_buf()
+    } else {
+        state.skill_rt.workspace_root.join(candidate)
+    };
+    if allow_existing_dir && resolved.is_dir() {
+        return true;
+    }
+    !resolved.exists()
+}
+
+fn set_or_anchor_creation_path(
+    state: &AppState,
+    step_id: &str,
+    normalized_skill: &str,
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    default_path: String,
+    issues: &mut Vec<VerifyIssue>,
+) -> bool {
+    let Some(path) = value_as_non_empty_str(obj, "path") else {
+        obj.insert(
+            "path".to_string(),
+            serde_json::Value::String(default_path.clone()),
+        );
+        issues.push(VerifyIssue {
+            step_id: step_id.to_string(),
+            kind: VerifyIssueKind::DefaultCreationTargetApplied,
+            detail: format!(
+                "skill `{normalized_skill}` missing creation target; defaulted path to `{default_path}`"
+            ),
+        });
+        return true;
+    };
+    let Some(anchored) = anchor_creation_path_to_workspace(state, path) else {
+        return false;
+    };
+    if anchored == path {
+        return false;
+    }
+    obj.insert(
+        "path".to_string(),
+        serde_json::Value::String(anchored.clone()),
+    );
+    issues.push(VerifyIssue {
+        step_id: step_id.to_string(),
+        kind: VerifyIssueKind::DefaultCreationTargetApplied,
+        detail: format!(
+            "skill `{normalized_skill}` relative creation target anchored to `{anchored}`"
+        ),
+    });
+    true
+}
+
+fn apply_default_creation_target_to_step(
+    state: &AppState,
+    task: &ClaimedTask,
+    step: &mut PlanStep,
+    normalized_skill: &str,
+    issues: &mut Vec<VerifyIssue>,
+) -> bool {
+    if !matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
+        return false;
+    }
+    let Some(obj) = step.args.as_object_mut() else {
+        return false;
+    };
+    match normalized_skill {
+        "make_dir" => set_or_anchor_creation_path(
+            state,
+            &step.step_id,
+            normalized_skill,
+            obj,
+            default_make_dir_path(state, task),
+            issues,
+        ),
+        "write_file" => set_or_anchor_creation_path(
+            state,
+            &step.step_id,
+            normalized_skill,
+            obj,
+            default_write_file_path(state),
+            issues,
+        ),
+        "fs_basic" => match obj
+            .get("action")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+        {
+            Some("make_dir") => set_or_anchor_creation_path(
+                state,
+                &step.step_id,
+                normalized_skill,
+                obj,
+                default_make_dir_path(state, task),
+                issues,
+            ),
+            Some("write_text") => set_or_anchor_creation_path(
+                state,
+                &step.step_id,
+                normalized_skill,
+                obj,
+                default_write_file_path(state),
+                issues,
+            ),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn apply_default_creation_targets(
+    state: &AppState,
+    task: &ClaimedTask,
+    plan_result: &mut PlanResult,
+    issues: &mut Vec<VerifyIssue>,
+) {
+    for step in &mut plan_result.steps {
+        let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
+        apply_default_creation_target_to_step(state, task, step, &normalized_skill, issues);
+    }
+}
+
+fn safe_autonomous_creation_step(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &serde_json::Value,
+) -> bool {
+    let Some(obj) = args.as_object() else {
+        return false;
+    };
+    match normalized_skill {
+        "make_dir" => value_as_non_empty_str(obj, "path")
+            .is_some_and(|path| path_is_safe_workspace_creation_target(state, path, true)),
+        "write_file" => value_as_non_empty_str(obj, "path")
+            .is_some_and(|path| path_is_safe_workspace_creation_target(state, path, false)),
+        "fs_basic" => match obj
+            .get("action")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+        {
+            Some("make_dir") => value_as_non_empty_str(obj, "path")
+                .is_some_and(|path| path_is_safe_workspace_creation_target(state, path, true)),
+            Some("write_text") => value_as_non_empty_str(obj, "path")
+                .is_some_and(|path| path_is_safe_workspace_creation_target(state, path, false)),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 fn route_has_confirmation_resume(route_result: Option<&crate::RouteResult>) -> bool {
     route_result
         .map(|route| matches!(route.resume_behavior, crate::ResumeBehavior::ResumeExecute))
@@ -131,6 +368,126 @@ fn manifest_required_args(state: &AppState, normalized_skill: &str) -> Vec<Strin
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn normalize_schema_token(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if matches!(ch, '-' | ' ' | '.') {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect()
+}
+
+fn action_scoped_required_args(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &serde_json::Value,
+) -> Vec<String> {
+    let Some(action) = args
+        .as_object()
+        .and_then(|obj| obj.get("action"))
+        .and_then(|value| value.as_str())
+        .map(normalize_schema_token)
+        .filter(|value| !value.is_empty())
+    else {
+        return Vec::new();
+    };
+    state
+        .skill_manifest(normalized_skill)
+        .and_then(|manifest| {
+            manifest
+                .planner_capabilities
+                .into_iter()
+                .find(|mapping| mapping.action.as_deref() == Some(action.as_str()))
+                .map(|mapping| mapping.required)
+        })
+        .unwrap_or_default()
+}
+
+fn action_scoped_risk_level(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &serde_json::Value,
+) -> Option<SkillRiskLevel> {
+    let action = args
+        .as_object()
+        .and_then(|obj| obj.get("action"))
+        .and_then(|value| value.as_str())
+        .map(normalize_schema_token)
+        .filter(|value| !value.is_empty())?;
+    state.skill_manifest(normalized_skill).and_then(|manifest| {
+        manifest
+            .planner_capabilities
+            .into_iter()
+            .find(|mapping| mapping.action.as_deref() == Some(action.as_str()))
+            .and_then(|mapping| mapping.risk_level)
+    })
+}
+
+fn effective_step_risk_level(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &serde_json::Value,
+) -> SkillRiskLevel {
+    if let Some(risk) = action_scoped_risk_level(state, normalized_skill, args) {
+        return risk;
+    }
+    if let Some(risk) = state
+        .skill_manifest(normalized_skill)
+        .and_then(|manifest| manifest.risk_level)
+    {
+        return risk;
+    }
+    let effect =
+        crate::execution_recipe::classify_skill_action_effect(state, normalized_skill, args);
+    if effect.mutates {
+        SkillRiskLevel::High
+    } else {
+        SkillRiskLevel::Low
+    }
+}
+
+fn risk_exceeds_ceiling(risk: SkillRiskLevel, risk_ceiling: crate::RiskCeiling) -> bool {
+    let risk_rank = match risk {
+        SkillRiskLevel::Unknown => 0,
+        SkillRiskLevel::Low => 1,
+        SkillRiskLevel::Medium => 2,
+        SkillRiskLevel::High => 3,
+    };
+    let ceiling_rank = match risk_ceiling {
+        crate::RiskCeiling::Unknown | crate::RiskCeiling::High => return false,
+        crate::RiskCeiling::Low => 1,
+        crate::RiskCeiling::Medium => 2,
+    };
+    risk_rank > ceiling_rank
+}
+
+fn arg_value_is_present(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => false,
+        serde_json::Value::String(value) => !value.trim().is_empty(),
+        serde_json::Value::Array(values) => values.iter().any(arg_value_is_present),
+        serde_json::Value::Object(values) => !values.is_empty(),
+        serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
+    }
+}
+
+fn required_arg_satisfied(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    required: &str,
+) -> bool {
+    required
+        .split('|')
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .any(|key| obj.get(key).is_some_and(arg_value_is_present))
 }
 
 fn push_group_conflict_issues(
@@ -233,7 +590,7 @@ fn verify_step_args(
     let has_unresolved_template = value_contains_unresolved_template(&step.args, template_scope);
     let manifest_required = manifest_required_args(state, normalized_skill);
     let fallback_required = required_args_for_skill(normalized_skill);
-    let required: Vec<String> = if manifest_required.is_empty() {
+    let mut required: Vec<String> = if manifest_required.is_empty() {
         fallback_required
             .iter()
             .map(|key| (*key).to_string())
@@ -241,6 +598,11 @@ fn verify_step_args(
     } else {
         manifest_required
     };
+    for key in action_scoped_required_args(state, normalized_skill, &step.args) {
+        if !required.iter().any(|existing| existing == &key) {
+            required.push(key);
+        }
+    }
     if has_unresolved_template {
         issues.push(VerifyIssue {
             step_id: step.step_id.clone(),
@@ -262,13 +624,7 @@ fn verify_step_args(
         return;
     };
     for key in &required {
-        let missing = obj
-            .get(key)
-            .map(|v| {
-                (v.is_string() && v.as_str().map(str::trim).unwrap_or("").is_empty()) || v.is_null()
-            })
-            .unwrap_or(true);
-        if missing {
+        if !required_arg_satisfied(obj, key) {
             issues.push(VerifyIssue {
                 step_id: step.step_id.clone(),
                 kind: VerifyIssueKind::MissingRequiredArg,
@@ -376,10 +732,12 @@ fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
     matches!(
         kind,
         VerifyIssueKind::SkillNotVisible
+            | VerifyIssueKind::CapabilityUnavailable
             | VerifyIssueKind::MissingRequiredArg
             | VerifyIssueKind::UnresolvedTemplateArg
             | VerifyIssueKind::InvalidDependsOn
             | VerifyIssueKind::PrimaryFallbackConflict
+            | VerifyIssueKind::RiskBudgetExceeded
             | VerifyIssueKind::RouteClarifyRequired
             | VerifyIssueKind::RecipeInspectBeforeMutateRequired
             | VerifyIssueKind::RecipeValidationAfterMutateRequired
@@ -666,33 +1024,52 @@ fn unresolved_template_response_step(request_text: Option<&str>) -> PlanStep {
     }
 }
 
+fn unresolved_capability_response_step(request_text: Option<&str>, capability: &str) -> PlanStep {
+    let content = if request_prefers_english(request_text) {
+        format!("I cannot execute this yet because the runtime capability is not available: `{capability}`.")
+    } else {
+        format!("暂时无法执行：运行时能力未解析或不可用：`{capability}`。")
+    };
+    PlanStep {
+        step_id: "verify_unresolved_capability_response".to_string(),
+        action_type: "respond".to_string(),
+        skill: "respond".to_string(),
+        args: serde_json::json!({ "content": content }),
+        depends_on: Vec::new(),
+        why: "unresolved runtime capability before execution".to_string(),
+    }
+}
+
 pub(crate) fn verify_plan(
     state: &AppState,
     task: &ClaimedTask,
     input: VerifyInput<'_>,
     mode: VerifyMode,
 ) -> VerifyResult {
+    let mut effective_plan_result = input.plan_result.clone();
+    let mut issues = Vec::new();
+    apply_default_creation_targets(state, task, &mut effective_plan_result, &mut issues);
+
     let route_requires_clarify_before_tools = input
         .route_result
         .map(|route| route.needs_clarify)
         .unwrap_or(false)
-        && input
-            .plan_result
-            .steps
-            .iter()
-            .any(|step| matches!(step.action_type.as_str(), "call_skill" | "call_tool"));
+        && input.plan_result.steps.iter().any(|step| {
+            matches!(
+                step.action_type.as_str(),
+                "call_skill" | "call_tool" | "call_capability"
+            )
+        });
     let visible_skills: HashSet<String> = state
         .planner_available_skills_for_task(task)
         .into_iter()
         .collect();
-    let all_step_ids: HashSet<String> = input
-        .plan_result
+    let all_step_ids: HashSet<String> = effective_plan_result
         .steps
         .iter()
         .map(|step| step.step_id.clone())
         .collect();
     let confirmation_already_granted = route_has_confirmation_resume(input.route_result);
-    let mut issues = Vec::new();
     let mut needs_confirmation = false;
     if route_requires_clarify_before_tools {
         issues.push(VerifyIssue {
@@ -706,8 +1083,17 @@ pub(crate) fn verify_plan(
     }
 
     let mut template_scope = TemplatePlaceholderScope::default();
-    for (idx, step) in input.plan_result.steps.iter().enumerate() {
-        if matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
+    for (idx, step) in effective_plan_result.steps.iter().enumerate() {
+        if step.action_type == "call_capability" {
+            issues.push(VerifyIssue {
+                step_id: step.step_id.clone(),
+                kind: VerifyIssueKind::CapabilityUnavailable,
+                detail: format!(
+                    "capability `{}` was not resolved to an executable tool or skill",
+                    step.skill
+                ),
+            });
+        } else if matches!(step.action_type.as_str(), "call_skill" | "call_tool") {
             let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
             if !visible_skills.contains(&normalized_skill) {
                 issues.push(VerifyIssue {
@@ -717,7 +1103,24 @@ pub(crate) fn verify_plan(
                 });
             }
             verify_step_args(state, step, &normalized_skill, &template_scope, &mut issues);
+            let safe_autonomous_creation =
+                safe_autonomous_creation_step(state, &normalized_skill, &step.args);
+            let step_risk = effective_step_risk_level(state, &normalized_skill, &step.args);
+            if input
+                .route_result
+                .is_some_and(|route| risk_exceeds_ceiling(step_risk, route.risk_ceiling))
+            {
+                issues.push(VerifyIssue {
+                    step_id: step.step_id.clone(),
+                    kind: VerifyIssueKind::RiskBudgetExceeded,
+                    detail: format!(
+                        "skill `{normalized_skill}` action risk `{:?}` exceeds route risk ceiling",
+                        step_risk
+                    ),
+                });
+            }
             if !confirmation_already_granted
+                && !safe_autonomous_creation
                 && (state.skill_invocation_requires_confirmation_policy(
                     &normalized_skill,
                     Some(&step.args),
@@ -746,10 +1149,10 @@ pub(crate) fn verify_plan(
         }
     }
 
-    verify_primary_fallback_conflicts(state, input.plan_result, &mut issues);
+    verify_primary_fallback_conflicts(state, &effective_plan_result, &mut issues);
     verify_execution_recipe(
         state,
-        input.plan_result,
+        &effective_plan_result,
         input.execution_recipe,
         &mut issues,
     );
@@ -762,18 +1165,31 @@ pub(crate) fn verify_plan(
     };
 
     let approved = blocked_reason.is_none();
-    let approved_steps = input.plan_result.steps.clone();
+    let approved_steps = effective_plan_result.steps.clone();
     let rewritten_steps = if issues
         .iter()
         .any(|issue| matches!(issue.kind, VerifyIssueKind::UnresolvedTemplateArg))
     {
         vec![unresolved_template_response_step(input.request_text)]
+    } else if let Some(issue) = issues
+        .iter()
+        .find(|issue| matches!(issue.kind, VerifyIssueKind::CapabilityUnavailable))
+    {
+        let capability = issue
+            .detail
+            .split('`')
+            .nth(1)
+            .unwrap_or("unknown capability");
+        vec![unresolved_capability_response_step(
+            input.request_text,
+            capability,
+        )]
     } else {
         rewrite_execution_recipe_steps(
             state,
             input.route_result,
             input.request_text,
-            input.plan_result,
+            &effective_plan_result,
             input.execution_recipe,
         )
     };
@@ -803,7 +1219,7 @@ mod tests {
     use super::{verify_plan, VerifyInput, VerifyIssueKind, VerifyMode};
     use crate::{
         AgentRuntimeConfig, AppState, ClaimedTask, PlanKind, PlanResult, PlanStep, RouteResult,
-        RoutedMode, ScheduleKind, SkillViewsSnapshot, ToolsPolicy,
+        ScheduleKind, SkillViewsSnapshot, ToolsPolicy,
     };
 
     fn test_registry() -> SkillsRegistry {
@@ -843,6 +1259,39 @@ output_kind = "text"
 side_effect = true
 auto_invocable = true
 input_schema = { type = "object", required = ["path", "content"], properties = { path = { type = "string" }, content = { type = "string" } } }
+
+[[skills]]
+name = "make_dir"
+enabled = true
+kind = "builtin"
+output_kind = "text"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
+
+[[skills]]
+name = "remove_file"
+enabled = true
+kind = "builtin"
+output_kind = "text"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
+
+[[skills]]
+name = "fs_basic"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+output_kind = "text"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string" }, path = { type = "string" }, paths = { type = "array", items = { type = "string" } } } }
+planner_capabilities = [
+  { name = "filesystem.stat_paths", action = "stat_paths", effect = "observe", required = ["path|paths"] },
+  { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"] },
+  { name = "filesystem.remove_path", action = "remove_path", effect = "mutate", required = ["path"], risk_level = "high" },
+]
 
 [[skills]]
 name = "primary_reader"
@@ -894,6 +1343,8 @@ primary_fallback_role = "primary"
                 "run_cmd",
                 "list_dir",
                 "write_file",
+                "make_dir",
+                "fs_basic",
                 "primary_reader",
                 "fallback_reader",
                 "photo_organize",
@@ -947,15 +1398,21 @@ primary_fallback_role = "primary"
     }
 
     fn route_result(needs_clarify: bool) -> RouteResult {
+        route_result_with_risk(needs_clarify, crate::RiskCeiling::Unknown)
+    }
+
+    fn route_result_with_risk(
+        needs_clarify: bool,
+        risk_ceiling: crate::RiskCeiling,
+    ) -> RouteResult {
         RouteResult {
-            routed_mode: RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "test".to_string(),
             needs_clarify,
             route_reason: "test".to_string(),
             route_confidence: Some(0.9),
             visible_skill_candidates: vec!["read_file".to_string()],
-            risk_ceiling: crate::RiskCeiling::Unknown,
+            risk_ceiling,
             resume_behavior: crate::ResumeBehavior::None,
             schedule_kind: ScheduleKind::None,
             clarify_question: String::new(),
@@ -1055,6 +1512,78 @@ primary_fallback_role = "primary"
     }
 
     #[test]
+    fn observe_mode_rewrites_unresolved_call_capability_to_response() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(false)),
+                request_text: Some("帮我查一下"),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_capability".to_string(),
+                    skill: "unknown.example".to_string(),
+                    args: json!({}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::ObserveOnly,
+        );
+
+        assert!(result.approved);
+        assert!(result.shadow_blocked_reason.is_some());
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::CapabilityUnavailable)));
+        assert_eq!(result.rewritten_steps.len(), 1);
+        assert_eq!(result.rewritten_steps[0].action_type, "respond");
+        assert!(result.rewritten_steps[0]
+            .args
+            .get("content")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .contains("unknown.example"));
+    }
+
+    #[test]
+    fn enforce_mode_blocks_unresolved_call_capability() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(false)),
+                request_text: None,
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_capability".to_string(),
+                    skill: "unknown.example".to_string(),
+                    args: json!({}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+
+        assert!(!result.approved);
+        assert!(result.blocked_reason.is_some());
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::CapabilityUnavailable)));
+    }
+
+    #[test]
     fn observe_mode_allows_prior_output_template_in_later_args() {
         let state = test_state();
         let task = test_task();
@@ -1134,6 +1663,126 @@ primary_fallback_role = "primary"
             .as_deref()
             .unwrap_or_default()
             .contains("missing required arg"));
+    }
+
+    #[test]
+    fn enforce_mode_blocks_action_scoped_required_arg() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(false)),
+                request_text: None,
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "fs_basic".to_string(),
+                    args: json!({"action": "read_text_range"}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+        assert!(!result.approved);
+        assert!(result.issues.iter().any(|issue| matches!(
+            issue.kind,
+            VerifyIssueKind::MissingRequiredArg
+        ) && issue.detail.contains("`path`")));
+    }
+
+    #[test]
+    fn enforce_mode_accepts_action_scoped_alternative_arg() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(false)),
+                request_text: None,
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "fs_basic".to_string(),
+                    args: json!({"action": "stat_paths", "path": "README.md"}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+        assert!(result.approved, "issues: {:?}", result.issues);
+        assert!(!result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::MissingRequiredArg)));
+    }
+
+    #[test]
+    fn enforce_mode_blocks_mutation_above_low_risk_ceiling() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+                request_text: None,
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "write_file".to_string(),
+                    args: json!({"path": "out.txt", "content": "hello"}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+        assert!(!result.approved);
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::RiskBudgetExceeded)));
+    }
+
+    #[test]
+    fn enforce_mode_allows_low_risk_action_under_low_risk_ceiling() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+                request_text: None,
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "fs_basic".to_string(),
+                    args: json!({"action": "stat_paths", "paths": ["README.md"]}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+        assert!(result.approved, "issues: {:?}", result.issues);
+        assert!(!result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::RiskBudgetExceeded)));
     }
 
     #[test]
@@ -1265,6 +1914,195 @@ primary_fallback_role = "primary"
         assert!(result.approved);
         assert!(!result.needs_confirmation);
         assert!(!result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+    }
+
+    #[test]
+    fn safe_make_dir_missing_path_defaults_under_workspace_without_confirmation() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(false)),
+                request_text: Some("帮我创建一个文件夹"),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "make_dir".to_string(),
+                    args: json!({}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+
+        assert!(result.approved);
+        assert!(!result.needs_confirmation);
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::DefaultCreationTargetApplied)));
+        assert!(!result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::MissingRequiredArg)));
+        let path = result.approved_steps[0]
+            .args
+            .get("path")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        assert!(path.starts_with(state.skill_rt.workspace_root.to_string_lossy().as_ref()));
+        assert!(path.contains("rustclaw-created-dir-taskveri"));
+    }
+
+    #[test]
+    fn safe_write_file_relative_path_anchors_under_workspace_without_confirmation() {
+        let state = test_state();
+        let task = test_task();
+        let filename = format!("rustclaw-autonomy-{}.txt", uuid::Uuid::new_v4());
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(false)),
+                request_text: Some("把结果写到文件"),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "write_file".to_string(),
+                    args: json!({ "path": filename, "content": "ok" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+
+        assert!(result.approved);
+        assert!(!result.needs_confirmation);
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::DefaultCreationTargetApplied)));
+        assert!(!result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+        let path = result.approved_steps[0]
+            .args
+            .get("path")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        assert!(path.starts_with(state.skill_rt.workspace_root.to_string_lossy().as_ref()));
+        assert!(path.ends_with(".txt"));
+    }
+
+    #[test]
+    fn dangerous_remove_file_missing_path_blocks_without_default_target() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(false)),
+                request_text: Some("delete it"),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "remove_file".to_string(),
+                    args: json!({}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+
+        assert!(!result.approved);
+        assert!(!result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::DefaultCreationTargetApplied)));
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::MissingRequiredArg)));
+    }
+
+    #[test]
+    fn dangerous_fs_basic_remove_path_missing_path_blocks_without_default_target() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(false)),
+                request_text: Some("remove that path"),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "fs_basic".to_string(),
+                    args: json!({ "action": "remove_path" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+
+        assert!(!result.approved);
+        assert!(!result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::DefaultCreationTargetApplied)));
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::MissingRequiredArg)));
+    }
+
+    #[test]
+    fn destructive_run_cmd_requires_confirmation_without_resume() {
+        let state = test_state();
+        let task = test_task();
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route_result(false)),
+                request_text: Some("remove temp files"),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({ "command": "rm -rf /tmp/rustclaw-verifier-test" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+
+        assert!(result.approved);
+        assert!(result.needs_confirmation);
+        assert!(result
             .issues
             .iter()
             .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));

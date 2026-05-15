@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub(crate) struct VirtualToolRewrite {
@@ -207,6 +208,7 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
                 &["name", "keyword", "query", "filename"],
             );
             move_value_alias_if_missing(&mut obj, "ext", &["extension", "ext_filter"]);
+            demote_existing_directory_pattern_to_root(&mut obj);
             let has_pattern = has_non_empty_arg(&obj, "pattern");
             let has_ext = has_non_empty_arg(&obj, "ext");
             if !has_pattern && !has_ext {
@@ -497,6 +499,33 @@ fn has_non_empty_arg(obj: &serde_json::Map<String, Value>, key: &str) -> bool {
 
 fn has_any_non_empty_arg(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> bool {
     keys.iter().any(|key| has_non_empty_arg(obj, key))
+}
+
+fn demote_existing_directory_pattern_to_root(obj: &mut serde_json::Map<String, Value>) -> bool {
+    let root_is_default = obj
+        .get("root")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(|value| value.is_empty() || value == ".")
+        .unwrap_or(true);
+    if !root_is_default {
+        return false;
+    }
+    let Some(pattern) = obj
+        .get("pattern")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    let path = Path::new(pattern);
+    if !path.is_dir() || path.components().count() <= 1 {
+        return false;
+    }
+    obj.insert("root".to_string(), Value::String(pattern.to_string()));
+    obj.remove("pattern");
+    true
 }
 
 fn drop_redundant_grep_filename_filters(obj: &mut serde_json::Map<String, Value>) -> bool {
@@ -801,6 +830,43 @@ mod tests {
                 .and_then(|v| v.as_bool()),
             Some(true)
         );
+    }
+
+    #[test]
+    fn fs_basic_find_entries_existing_directory_pattern_degrades_to_listing() {
+        let dir = std::env::temp_dir().join(format!(
+            "rustclaw-fs-basic-pattern-dir-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp directory");
+        let args = json!({
+            "action": "find_entries",
+            "root": ".",
+            "pattern": dir.to_string_lossy(),
+            "target_kind": "file"
+        });
+        let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+            .unwrap()
+            .expect("rewrite");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(rewrite.runtime_tool, "system_basic");
+        assert_eq!(
+            rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+            Some("inventory_dir")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("path").and_then(|v| v.as_str()),
+            dir.to_str()
+        );
+        assert_eq!(
+            rewrite
+                .runtime_args
+                .get("files_only")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert!(rewrite.runtime_args.get("pattern").is_none());
     }
 
     #[test]

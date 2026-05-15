@@ -22,11 +22,10 @@ Hard rules:
 6. Never invent paths, filenames, tools, commands, or facts that are not supported by the user request or provided fields.
 7. The output must be normalized canonical JSON, not explanatory prose.
 
-Canonical mode:
-- `chat`: no fresh tool/workspace/system evidence required.
-- `act`: fresh observation/execution is required and final answer is mostly direct result.
-- `chat_act`: fresh observation/execution is required and final answer also needs synthesis/explanation.
-- `ask_clarify`: a required target/scope is missing.
+Canonical first-layer decision:
+- `direct_answer`: no fresh tool/workspace/system evidence required.
+- `planner_execute`: fresh observation/execution, tool/skill use, mutation, validation, or generated artifact handling is required.
+- `clarify`: a required target/scope is missing.
 
 Canonical output contract:
 - `response_shape`: `free`, `one_sentence`, `strict`, `scalar`, or `file_token`.
@@ -35,6 +34,8 @@ Canonical output contract:
 - `locator_kind`: `none`, `path`, `current_workspace`, `url`, or `filename`.
 - `delivery_intent`: `none`, `file_single`, `directory_lookup`, or `directory_batch_files`.
 - `semantic_kind`: one of the schema enum values. Use `none` when no enum fits.
+- Use `semantic_kind="directory_entry_groups"` when the repaired contract must preserve both files and directories as separate groups from one directory inventory. Use `file_names` only for an ungrouped names-only list.
+- Use `semantic_kind="scalar_count"` when the current request asks for the number/count of directory children, entries, files, folders, matches, or other countable items. Do not repair a count request to `file_names` or `directory_entry_groups` unless the requested final answer also asks to list/group the entries.
 - `locator_hint`: the concrete path/name/scope only when supported by the request or malformed fields.
 - `self_extension`: keep `{"mode":"none","trigger":"none","execute_now":false}` unless the user explicitly asks RustClaw to modify itself.
 
@@ -53,7 +54,7 @@ Repair report:
 source: __CONTRACT_REPAIR_SOURCE__
 detail: __CONTRACT_REPAIR_DETAIL__
 
-`semantic_suspect` means the JSON parsed, but the route shape conflicts with its own structured contract, for example `mode=chat` with content evidence, delivery, locator, or observable semantic fields. Judge by the full request and schema fields; do not invent execution intent.
+`semantic_suspect` means the JSON parsed, but the route shape conflicts with its own structured contract, for example `decision=direct_answer` with content evidence, delivery, locator, or observable semantic fields. Judge by the full request and schema fields; do not invent execution intent.
 
 Additional structural context:
 __CONTRACT_REPAIR_CONTEXT__
@@ -62,7 +63,7 @@ When the additional context reports `answer_candidate_memory_only_binding`, do n
 - If the request asks to set/update memory, do not reuse an older memory-only `answer_candidate`; keep the answer as an acknowledgement or clear it.
 - If the request asks for an immediately recent/current-turn value, require the candidate to be bound in recent turns, recent assistant replies, or recent execution context; if only long-term memory supports it, repair to one concise clarification.
 - If the request asks for older/stored/long-term memory, a memory-only candidate may be valid.
-- If uncertain, prefer `ask_clarify` over returning a possibly stale scalar.
+- If uncertain, prefer `decision="clarify"` over returning a possibly stale scalar.
 
 Raw normalizer output:
 __RAW_NORMALIZER_OUTPUT__
@@ -74,7 +75,7 @@ Pure chat with command-like label:
   "apply": false,
   "reason": "pure_chat_label_not_execution",
   "confidence": 0.95,
-  "mode": "chat",
+  "decision": "direct_answer",
   "needs_clarify": false,
   "clarify_question": "",
   "resolved_user_intent": "The user only wants a chat acknowledgement.",
@@ -97,7 +98,7 @@ Malformed file-listing recipe for a real listing request:
   "apply": true,
   "reason": "malformed_contract_semantically_requires_directory_listing",
   "confidence": 0.9,
-  "mode": "act",
+  "decision": "planner_execute",
   "needs_clarify": false,
   "clarify_question": "",
   "resolved_user_intent": "List file names under the requested directory without reading file contents.",
@@ -119,7 +120,9 @@ Malformed file-listing recipe for a real listing request:
 ### zh-CN
 - 中文里的“不要执行命令”“只是标签”“不是命令”通常是强约束；如果正向交付物只是聊天回复，应保持 `apply=false`。
 - 中文请求若语义上要求查看本地目录、文件、系统状态、命令输出或技能结果，应通过语义判断修为可执行 contract，而不是根据固定中文词表触发。
-- 对中文省略主语、路径或对象的情况要保守；缺少必要目标时用 `ask_clarify` 或保持 `apply=false`，不要猜路径。
+- 对中文省略主语、路径或对象的情况要保守；缺少必要目标时用 `decision="clarify"` 或保持 `apply=false`，不要猜路径。
+- 中文语义如果是在问目录/文件/匹配项“数量、多少个、几个”，修复后的 `semantic_kind` 应是 `scalar_count`；只有同时要求列出名称或分组时，才使用列表类语义。
 ### en
 - Treat quoted command-like strings as labels/examples unless the user semantically asks to run or observe them.
 - For English filesystem or system observation requests, repair only when the requested evidence source and final answer shape are clear.
+- For "how many", "count", or "number of" filesystem entries/matches, repair to `scalar_count`; use list semantics only when the requested final answer includes listing or grouping.

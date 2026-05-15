@@ -55,6 +55,7 @@ fn repeated_successful_action_is_allowed_for_active_recipe(
     let (skill_name, args) = match action {
         AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
         AgentAction::CallTool { tool, args } => (tool.as_str(), args),
+        AgentAction::CallCapability { .. } => return false,
         AgentAction::SynthesizeAnswer { .. } => return false,
         AgentAction::Respond { .. } | AgentAction::Think { .. } => return false,
     };
@@ -328,6 +329,64 @@ mod tests {
                 1,
             ),
             None
+        );
+    }
+
+    #[test]
+    fn repeat_guard_blocks_identical_non_respond_after_limit() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let task = crate::ClaimedTask {
+            task_id: "task-repeat-run-cmd".to_string(),
+            user_id: 1,
+            chat_id: 2,
+            user_key: None,
+            channel: "telegram".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".to_string(),
+            payload_json: "{}".to_string(),
+        };
+        let mut loop_state = super::LoopState::new(2);
+        let action = crate::AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: serde_json::json!({"command": "pwd"}),
+        };
+        let fingerprint = "skill:run_cmd:{\"command\":\"pwd\"}".to_string();
+        let policy = super::AgentLoopGuardPolicy {
+            max_steps: 8,
+            max_rounds: 2,
+            recoverable_failure_extra_rounds: 0,
+            repeat_action_limit: 1,
+            no_progress_limit: 1,
+            multi_round_enabled: true,
+            answer_verifier_retry_limit: 1,
+            ops_closed_loop: Default::default(),
+        };
+
+        assert_eq!(
+            check_repeat_action_guard(
+                &state,
+                &task,
+                &mut loop_state,
+                &policy,
+                &action,
+                &fingerprint,
+                1,
+            ),
+            None
+        );
+        assert_eq!(
+            check_repeat_action_guard(
+                &state,
+                &task,
+                &mut loop_state,
+                &policy,
+                &action,
+                &fingerprint,
+                2,
+            )
+            .as_deref(),
+            Some("repeat_action_limit")
         );
     }
 }

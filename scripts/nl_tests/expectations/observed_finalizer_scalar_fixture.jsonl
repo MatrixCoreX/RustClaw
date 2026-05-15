@@ -1,0 +1,1 @@
+{"case": 1, "status": "succeeded", "first_layer": "planner_execute", "routed_mode": "Act", "route_gate": "execute", "executed_any": ["run_cmd"], "verifier_approved": true, "final_shape": "path", "finalizer_stage": "observed_generic", "finalizer_fallback": "raw_text", "finalizer_grounded_ok": true, "finalizer_used_evidence_ids_min": 1, "final_contains": ["/home/guagua/rustclaw"]}

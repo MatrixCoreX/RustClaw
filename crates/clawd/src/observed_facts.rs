@@ -352,8 +352,7 @@ mod tests {
 
     fn dummy_route_result() -> crate::RouteResult {
         crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: String::new(),
             needs_clarify: false,
             clarify_question: String::new(),

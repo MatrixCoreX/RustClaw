@@ -354,8 +354,7 @@ fn current_turn_request_text<'a>(
 }
 
 fn route_requests_scalar_count(route: &crate::RouteResult) -> bool {
-    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-        && route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
+    route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
 }
 
 fn route_requests_scalar_existence(route: &crate::RouteResult) -> bool {
@@ -507,6 +506,7 @@ fn route_allows_raw_listing_direct_answer(route: Option<&crate::RouteResult>) ->
             route.output_contract.semantic_kind,
             crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames
+                | crate::OutputSemanticKind::DirectoryEntryGroups
                 | crate::OutputSemanticKind::FilePaths
         )
     })
@@ -931,6 +931,7 @@ fn sqlite_table_observed_output_kind(
 }
 
 fn db_basic_tables_summary_candidate(
+    state: Option<&AppState>,
     route: &crate::RouteResult,
     body: &str,
     prefer_english: bool,
@@ -939,19 +940,13 @@ fn db_basic_tables_summary_candidate(
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     let table_names = db_basic_table_names(&value)?;
     if table_names.is_empty() {
-        return Some(
-            if observed_kind == SqliteTableObservedOutputKind::NamesOnly {
-                if prefer_english {
-                    "This SQLite file currently has no tables.".to_string()
-                } else {
-                    "这个 sqlite 文件里目前没有任何表。".to_string()
-                }
-            } else if prefer_english {
-                "This SQLite file currently has no tables.".to_string()
-            } else {
-                "这个 sqlite 文件里目前没有任何表。".to_string()
-            },
-        );
+        return Some(observed_t(
+            state,
+            "clawd.msg.sqlite_no_tables",
+            "这个 SQLite 文件里目前没有任何表。",
+            "This SQLite file currently has no tables.",
+            prefer_english,
+        ));
     }
     if observed_kind == SqliteTableObservedOutputKind::NamesOnly {
         return Some(table_names.join("\n"));
@@ -1134,12 +1129,20 @@ fn system_basic_structured_doc_observed_body(skill: &str, body: &str) -> Option<
     match value.get("action").and_then(|v| v.as_str()) {
         Some("extract_field") => {
             let field_path = value
-                .get("field_path")
+                .get("resolved_field_path")
                 .and_then(|v| v.as_str())
                 .map(str::trim)
                 .filter(|v| !v.is_empty())
+                .or_else(|| {
+                    value
+                        .get("field_path")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())
+                })
                 .unwrap_or("requested field");
             Some(structured_field_display_line(
+                None,
                 field_path,
                 value.get("value").unwrap_or(&serde_json::Value::Null),
                 value.get("value_text").and_then(|v| v.as_str()),
@@ -1151,6 +1154,7 @@ fn system_basic_structured_doc_observed_body(skill: &str, body: &str) -> Option<
             ))
         }
         Some("extract_fields") => extract_fields_direct_answer_candidate(
+            None,
             &value,
             Some(crate::OutputResponseShape::Free),
             true,
@@ -1181,7 +1185,80 @@ fn inventory_dir_names(value: &serde_json::Value) -> Option<Vec<String>> {
         .filter(|items| !items.is_empty())
 }
 
-fn inventory_dir_direct_answer_candidate(value: &serde_json::Value) -> Option<String> {
+fn inventory_dir_names_by_kind(value: &serde_json::Value, kind: &str) -> Vec<String> {
+    value
+        .get("names_by_kind")
+        .and_then(|v| v.get(kind))
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn inventory_dir_grouped_names_candidate(
+    state: Option<&AppState>,
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<String> {
+    let files = inventory_dir_names_by_kind(value, "files");
+    let dirs = inventory_dir_names_by_kind(value, "dirs");
+    let other = inventory_dir_names_by_kind(value, "other");
+    if files.is_empty() && dirs.is_empty() && other.is_empty() {
+        return None;
+    }
+    let mut lines = Vec::new();
+    let mut push_group = |title: &str, items: Vec<String>| {
+        if items.is_empty() {
+            return;
+        }
+        lines.push(format!("{title}:"));
+        lines.extend(items.into_iter().map(|name| format!("- {name}")));
+    };
+    let dirs_title = observed_t(
+        state,
+        "clawd.msg.directory_group_dirs",
+        "目录",
+        "Directories",
+        prefer_english,
+    );
+    let files_title = observed_t(
+        state,
+        "clawd.msg.directory_group_files",
+        "文件",
+        "Files",
+        prefer_english,
+    );
+    let other_title = observed_t(
+        state,
+        "clawd.msg.directory_group_other",
+        "其它",
+        "Other",
+        prefer_english,
+    );
+    push_group(&dirs_title, dirs);
+    push_group(&files_title, files);
+    push_group(&other_title, other);
+    normalized_listing_text(&lines.join("\n"))
+}
+
+fn inventory_dir_direct_answer_candidate(
+    state: Option<&AppState>,
+    route: Option<&crate::RouteResult>,
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<String> {
+    if route.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryEntryGroups
+    }) {
+        return inventory_dir_grouped_names_candidate(state, value, prefer_english);
+    }
     if value
         .get("names_only")
         .and_then(|v| v.as_bool())
@@ -1461,44 +1538,44 @@ fn count_inventory_direct_answer_candidate(
     prefer_english: bool,
 ) -> Option<String> {
     let (count, count_key) = count_inventory_count_value(value)?;
+    let has_component_breakdown = count_inventory_breakdown_value(value).is_some();
     if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
-        if count_key == "total" && count_inventory_breakdown_value(value).is_some() {
-            return None;
-        }
         return Some(count);
     }
-    if count_key == "total" {
-        if count_inventory_breakdown_value(value).is_some() {
-            return None;
-        }
+    if response_shape.is_none() && count_key == "total" && has_component_breakdown {
+        return None;
     }
-    let noun = match (prefer_english, count_key) {
-        (true, "files") => "regular files",
-        (true, "dirs") => "directories",
-        (true, _) => "items",
-        (false, "files") => "普通文件",
-        (false, "dirs") => "目录",
-        (false, _) => "项目",
+    let noun = match count_key {
+        "files" => observed_t(
+            state,
+            "clawd.msg.count_inventory_noun_files",
+            "普通文件",
+            "regular files",
+            prefer_english,
+        ),
+        "dirs" => observed_t(
+            state,
+            "clawd.msg.count_inventory_noun_dirs",
+            "目录",
+            "directories",
+            prefer_english,
+        ),
+        _ => observed_t(
+            state,
+            "clawd.msg.count_inventory_noun_items",
+            "项目",
+            "items",
+            prefer_english,
+        ),
     };
-    let default = if prefer_english {
-        format!("{count}: there are {count} {noun} in the requested scope.")
-    } else {
-        format!("{count}，当前范围内共有 {count} 个{noun}。")
-    };
-    Some(
-        state
-            .map(|state| {
-                observed_t_with_vars(
-                    Some(state),
-                    "clawd.msg.count_inventory_direct_answer",
-                    &default,
-                    &default,
-                    prefer_english,
-                    &[("count", &count), ("noun", noun)],
-                )
-            })
-            .unwrap_or(default),
-    )
+    Some(observed_t_with_vars(
+        state,
+        "clawd.msg.count_inventory_direct_answer",
+        "{count}，当前范围内共有 {count} 个{noun}。",
+        "{count}: there are {count} {noun} in the requested scope.",
+        prefer_english,
+        &[("count", &count), ("noun", &noun)],
+    ))
 }
 
 fn plan_requests_count_inventory_file_dir_breakdown(loop_state: &LoopState) -> bool {
@@ -1620,6 +1697,7 @@ fn run_cmd_semantic_listing_text_candidate(
         route.output_contract.semantic_kind,
         crate::OutputSemanticKind::DirectoryNames
             | crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryEntryGroups
             | crate::OutputSemanticKind::FilePaths
     ) {
         return None;
@@ -2145,6 +2223,31 @@ fn fs_search_grep_text_results(
     Some((matches, match_count, query))
 }
 
+fn fs_search_grep_text_name_results(value: &serde_json::Value) -> Option<(Vec<String>, usize)> {
+    let action = value.get("action").and_then(|v| v.as_str())?;
+    if !action.eq_ignore_ascii_case("grep_text") {
+        return None;
+    }
+    let results = value
+        .get("name_results")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let count = value
+        .get("name_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(results.len() as u64) as usize;
+    Some((results, count))
+}
+
 fn fs_search_grep_text_observed_candidate(value: &serde_json::Value) -> Option<String> {
     let (matches, match_count, query) = fs_search_grep_text_results(value)?;
     let file_count = value
@@ -2163,11 +2266,22 @@ fn fs_search_grep_text_observed_candidate(value: &serde_json::Value) -> Option<S
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let (name_results, name_count) =
+        fs_search_grep_text_name_results(value).unwrap_or((Vec::new(), 0));
     let mut lines = vec![format!(
         "grep_text query={query} file_count={file_count} match_count={match_count}"
     )];
     if !patterns.is_empty() {
         lines.push(format!("file_patterns={}", patterns.join(", ")));
+    }
+    if name_count > 0 && !name_results.is_empty() {
+        lines.push(format!("name_count={name_count}"));
+        lines.extend(
+            name_results
+                .into_iter()
+                .take(16)
+                .map(|path| format!("name_match path={path}")),
+        );
     }
     if matches.is_empty() {
         lines.push("matches: none".to_string());
@@ -2400,16 +2514,20 @@ fn fs_search_direct_answer_candidate(
         value,
         prefer_english,
         allow_multi_result_list,
+        prefer_path_only,
     ) {
         return Some(answer);
     }
     if let Some((results, count, ext)) = fs_search_find_ext_results(value) {
         if count == 0 || results.is_empty() {
-            return Some(if prefer_english {
-                format!("No .{ext} files found.")
-            } else {
-                format!("没有找到 .{ext} 文件")
-            });
+            return Some(observed_t_with_vars(
+                state,
+                "clawd.msg.fs_search_no_ext_match",
+                "没有找到 .{ext} 文件",
+                "No .{ext} files found.",
+                prefer_english,
+                &[("ext", &ext)],
+            ));
         }
         return Some(results.join("\n"));
     }
@@ -2466,9 +2584,24 @@ fn fs_search_grep_text_direct_answer_candidate(
     value: &serde_json::Value,
     prefer_english: bool,
     allow_multi_result_list: bool,
+    prefer_path_only: bool,
 ) -> Option<String> {
     let (matches, match_count, _query) = fs_search_grep_text_results(value)?;
     if match_count == 0 || matches.is_empty() {
+        if let Some((name_results, name_count)) = fs_search_grep_text_name_results(value) {
+            if name_count > 0 && !name_results.is_empty() {
+                if name_results.len() == 1 {
+                    return name_results.into_iter().next();
+                }
+                return allow_multi_result_list.then(|| {
+                    name_results
+                        .into_iter()
+                        .take(3)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                });
+            }
+        }
         return Some(observed_t(
             state,
             "clawd.msg.fs_search_no_match",
@@ -2476,6 +2609,22 @@ fn fs_search_grep_text_direct_answer_candidate(
             "No matches found.",
             prefer_english,
         ));
+    }
+    if allow_multi_result_list && !prefer_path_only {
+        return Some(
+            matches
+                .into_iter()
+                .take(16)
+                .map(|(_, line, text)| {
+                    if line > 0 {
+                        format!("{line}: {text}")
+                    } else {
+                        text
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
     }
     let mut paths = Vec::new();
     for (path, _, _) in matches {
@@ -2840,7 +2989,11 @@ fn structured_scalar_candidate(
                     .get("excerpt")
                     .and_then(|v| v.as_str())
                     .and_then(|excerpt| {
-                        normalize_read_range_excerpt_for_direct_answer(excerpt, prefer_english)
+                        normalize_read_range_excerpt_for_direct_answer(
+                            state,
+                            excerpt,
+                            prefer_english,
+                        )
                     })
             }),
         "inventory_dir" => {
@@ -2875,11 +3028,28 @@ fn structured_scalar_candidate(
             }
         }
         "extract_field" => {
+            if route.is_some_and(|route| {
+                route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+            }) {
+                return None;
+            }
             if value
                 .get("exists")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false)
             {
+                if route.is_some() && extract_field_has_non_exact_resolution(&value) {
+                    if let Some(field_path) = json_trimmed_str(&value, "resolved_field_path") {
+                        return Some(structured_field_display_line(
+                            state,
+                            field_path,
+                            value.get("value").unwrap_or(&serde_json::Value::Null),
+                            value.get("value_text").and_then(|v| v.as_str()),
+                            true,
+                            prefer_english,
+                        ));
+                    }
+                }
                 let text = value
                     .get("value_text")
                     .and_then(|v| v.as_str())
@@ -2992,6 +3162,7 @@ fn git_basic_scalar_candidate(route: Option<&crate::RouteResult>, body: &str) ->
 }
 
 fn structured_field_display_line(
+    state: Option<&AppState>,
     field_path: &str,
     value: &serde_json::Value,
     value_text: Option<&str>,
@@ -2999,11 +3170,14 @@ fn structured_field_display_line(
     prefer_english: bool,
 ) -> String {
     if !exists {
-        return if prefer_english {
-            format!("{field_path}: <missing>")
-        } else {
-            format!("{field_path}: 不存在")
-        };
+        return observed_t_with_vars(
+            state,
+            "clawd.msg.structured_field_missing_display",
+            "{field_path}: 不存在",
+            "{field_path}: <missing>",
+            prefer_english,
+            &[("field_path", field_path)],
+        );
     }
     let rendered = value_text
         .map(str::trim)
@@ -3016,7 +3190,32 @@ fn structured_field_display_line(
     format!("{field_path}: {rendered}")
 }
 
+fn json_trimmed_str<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    value
+        .get(key)
+        .and_then(|item| item.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+}
+
+fn extract_field_has_non_exact_resolution(value: &serde_json::Value) -> bool {
+    let Some(resolved) = json_trimmed_str(value, "resolved_field_path") else {
+        return false;
+    };
+    let Some(requested) = json_trimmed_str(value, "field_path") else {
+        return false;
+    };
+    if resolved.eq_ignore_ascii_case(requested) {
+        return false;
+    }
+    !matches!(
+        json_trimmed_str(value, "match_strategy"),
+        Some("exact_path")
+    )
+}
+
 fn extract_fields_direct_answer_candidate(
+    state: Option<&AppState>,
     value: &serde_json::Value,
     response_shape: Option<crate::OutputResponseShape>,
     prefer_english: bool,
@@ -3031,11 +3230,17 @@ fn extract_fields_direct_answer_candidate(
     let lines = results
         .iter()
         .filter_map(|item| {
-            let field_path = item.get("field_path")?.as_str()?.trim();
+            let field_path = item
+                .get("resolved_field_path")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .or_else(|| item.get("field_path")?.as_str().map(str::trim))?;
             if field_path.is_empty() {
                 return None;
             }
             Some(structured_field_display_line(
+                state,
                 field_path,
                 item.get("value").unwrap_or(&serde_json::Value::Null),
                 item.get("value_text").and_then(|v| v.as_str()),
@@ -3056,6 +3261,54 @@ fn extract_fields_direct_answer_candidate(
         return Some(format!("{}.", lines.join("; ")));
     }
     Some(lines.join("\n"))
+}
+
+fn extract_field_direct_answer_candidate(
+    state: Option<&AppState>,
+    value: &serde_json::Value,
+    response_shape: Option<crate::OutputResponseShape>,
+    prefer_english: bool,
+) -> Option<String> {
+    if value.get("action").and_then(|v| v.as_str()) != Some("extract_field") {
+        return None;
+    }
+    if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
+        return None;
+    }
+    let field_path = value
+        .get("resolved_field_path")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            value
+                .get("field_path")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })?;
+    let exists = value
+        .get("exists")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !exists {
+        return Some(observed_t_with_vars(
+            state,
+            "clawd.msg.extract_field_missing",
+            "未找到 {field_path} 字段",
+            "field not found: {field_path}",
+            prefer_english,
+            &[("field_path", field_path)],
+        ));
+    }
+    Some(structured_field_display_line(
+        state,
+        field_path,
+        value.get("value").unwrap_or(&serde_json::Value::Null),
+        value.get("value_text").and_then(|v| v.as_str()),
+        exists,
+        prefer_english,
+    ))
 }
 
 fn structured_keys_direct_answer_candidate(
@@ -3172,6 +3425,7 @@ fn structured_keys_direct_answer_candidate(
 }
 
 fn validate_structured_direct_answer_candidate(
+    state: Option<&AppState>,
     value: &serde_json::Value,
     prefer_english: bool,
 ) -> Option<String> {
@@ -3186,11 +3440,14 @@ fn validate_structured_direct_answer_candidate(
         .filter(|v| !v.is_empty())
         .unwrap_or("structured");
     if valid {
-        return Some(if prefer_english {
-            format!("pass: {format} parsed successfully")
-        } else {
-            format!("通过：{format} 解析成功")
-        });
+        return Some(observed_t_with_vars(
+            state,
+            "clawd.msg.validate_structured_pass",
+            "通过：{format} 解析成功",
+            "pass: {format} parsed successfully",
+            prefer_english,
+            &[("format", format)],
+        ));
     }
     let reason = value
         .get("error_text")
@@ -3198,11 +3455,14 @@ fn validate_structured_direct_answer_candidate(
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .unwrap_or("parse failed");
-    Some(if prefer_english {
-        format!("fail: {reason}")
-    } else {
-        format!("失败：{reason}")
-    })
+    Some(observed_t_with_vars(
+        state,
+        "clawd.msg.validate_structured_fail",
+        "失败：{reason}",
+        "fail: {reason}",
+        prefer_english,
+        &[("reason", reason)],
+    ))
 }
 
 fn normalize_read_range_excerpt(excerpt: &str) -> Option<String> {
@@ -3228,6 +3488,7 @@ fn normalize_read_range_excerpt(excerpt: &str) -> Option<String> {
 }
 
 fn normalize_read_range_excerpt_for_direct_answer(
+    state: Option<&AppState>,
     excerpt: &str,
     prefer_english: bool,
 ) -> Option<String> {
@@ -3249,21 +3510,17 @@ fn normalize_read_range_excerpt_for_direct_answer(
         return None;
     }
     if lines.iter().any(|line| line.is_empty()) {
-        let blank = if prefer_english {
-            "(blank line)"
-        } else {
-            "（空行）"
-        };
+        let blank = observed_t(
+            state,
+            "clawd.msg.read_range_blank_line",
+            "（空行）",
+            "(blank line)",
+            prefer_english,
+        );
         return Some(
             lines
                 .into_iter()
-                .map(|line| {
-                    if line.is_empty() {
-                        blank.to_string()
-                    } else {
-                        line
-                    }
-                })
+                .map(|line| if line.is_empty() { blank.clone() } else { line })
                 .collect::<Vec<_>>()
                 .join("\n"),
         );
@@ -3289,7 +3546,9 @@ pub(crate) fn tail_read_range_direct_answer_candidate(
     value
         .get("excerpt")
         .and_then(|v| v.as_str())
-        .and_then(|excerpt| normalize_read_range_excerpt_for_direct_answer(excerpt, prefer_english))
+        .and_then(|excerpt| {
+            normalize_read_range_excerpt_for_direct_answer(None, excerpt, prefer_english)
+        })
 }
 
 fn compare_paths_observed_candidate(body: &str) -> Option<String> {
@@ -3561,6 +3820,7 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
                 match value.get("action").and_then(|v| v.as_str()) {
                     Some("inventory_dir") => return inventory_dir_observed_candidate(&value),
                     Some("read_range") => return read_range_observed_candidate(&value),
+                    Some("count_inventory") => return count_inventory_observed_candidate(&value),
                     _ => {}
                 }
             }
@@ -3898,6 +4158,7 @@ fn extract_direct_answer_from_generic_output_impl(
                 }
                 "db_basic" => route.and_then(|route| {
                     db_basic_tables_summary_candidate(
+                        state,
                         route,
                         &observed_output.body,
                         prefers_english_free_text,
@@ -3944,6 +4205,7 @@ fn extract_direct_answer_from_generic_output_impl(
                             .and_then(|v| v.as_str())
                             .and_then(|excerpt| {
                                 normalize_read_range_excerpt_for_direct_answer(
+                                    state,
                                     excerpt,
                                     prefers_english_free_text,
                                 )
@@ -3952,7 +4214,12 @@ fn extract_direct_answer_from_generic_output_impl(
                         && is_plain_act
                         && allow_raw_listing_direct_answer
                     {
-                        inventory_dir_direct_answer_candidate(&value)
+                        inventory_dir_direct_answer_candidate(
+                            state,
+                            route,
+                            &value,
+                            prefers_english_free_text,
+                        )
                     } else if action == Some("count_inventory") {
                         count_inventory_direct_answer_candidate(
                             state,
@@ -3960,8 +4227,16 @@ fn extract_direct_answer_from_generic_output_impl(
                             response_shape,
                             prefers_english_free_text,
                         )
+                    } else if action == Some("extract_field") {
+                        extract_field_direct_answer_candidate(
+                            state,
+                            &value,
+                            response_shape,
+                            prefers_english_free_text,
+                        )
                     } else if action == Some("extract_fields") {
                         extract_fields_direct_answer_candidate(
+                            state,
                             &value,
                             response_shape,
                             prefers_english_free_text,
@@ -3975,6 +4250,7 @@ fn extract_direct_answer_from_generic_output_impl(
                         )
                     } else if action == Some("validate_structured") {
                         validate_structured_direct_answer_candidate(
+                            state,
                             &value,
                             prefers_english_free_text,
                         )
@@ -4129,7 +4405,7 @@ fn route_allows_read_range_direct_passthrough(
     if route.ask_mode.is_plain_act() {
         return true;
     }
-    matches!(route.routed_mode, crate::RoutedMode::ChatAct)
+    route.ask_mode.finalize_chat_wrapped()
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && matches!(
@@ -4408,7 +4684,8 @@ fn observed_contract_json(agent_run_context: Option<&AgentRunContext>) -> String
     };
     let direct_observation_passthrough_allowed = !route_requires_synthesized_delivery(route);
     serde_json::json!({
-        "routed_mode": route.routed_mode.as_str(),
+        "ask_mode": route.ask_mode.as_str(),
+        "derived_route_label": route.derived_route_label(),
         "response_shape": route.output_contract.response_shape.as_str(),
         "exact_sentence_count": route.output_contract.exact_sentence_count,
         "requires_content_evidence": route.output_contract.requires_content_evidence,
@@ -4432,13 +4709,13 @@ fn resolved_user_intent(agent_run_context: Option<&AgentRunContext>, user_text: 
         .to_string()
 }
 
-pub(crate) async fn synthesize_answer_from_observed_output(
+pub(crate) async fn try_synthesize_answer_from_observed_output(
     state: &AppState,
     task: &ClaimedTask,
     user_text: &str,
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
-) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+) -> Result<Option<(String, crate::task_journal::TaskJournalFinalizerSummary)>, String> {
     // §3.3 Stage 3.2 invariant：observed-tier LLM 兜底属于 finalize 子层，
     // 进入时 ask_state 必须是 Executing 或 Finalizing。Executing 是因为
     // 该兜底由 finalize_loop_reply 里调用、ask_state 还没 transition 到
@@ -4461,7 +4738,7 @@ pub(crate) async fn synthesize_answer_from_observed_output(
         observed_entries = cross_turn_observed_output_entries(loop_state, agent_run_context);
     }
     if observed_entries.is_empty() {
-        return None;
+        return Ok(None);
     }
     let observed_block = observed_entries.join("\n\n");
     let resolved_intent = resolved_user_intent(agent_run_context, user_text);
@@ -4481,7 +4758,7 @@ pub(crate) async fn synthesize_answer_from_observed_output(
                     task.task_id,
                     err
                 );
-                return None;
+                return Err(format!("observed answer fallback prompt missing: {err}"));
             }
         };
     let response_style_hint = observed_response_style_hint(agent_run_context);
@@ -4513,7 +4790,7 @@ pub(crate) async fn synthesize_answer_from_observed_output(
     let llm_out =
         llm_gateway::run_with_fallback_with_prompt_source(state, task, &prompt, &prompt_source)
             .await
-            .ok()?;
+            .map_err(|err| format!("observed answer fallback LLM failed: {err}"))?;
     let llm_out_for_parse = strip_bare_json_language_prefix(&llm_out);
     let parsed = match crate::prompt_utils::validate_against_schema::<ObservedAnswerFallbackOut>(
         llm_out_for_parse,
@@ -4539,7 +4816,7 @@ pub(crate) async fn synthesize_answer_from_observed_output(
         }
     }
     .or_else(|| {
-            // F14: minimax 等 vendor 偶发不遵守 prompt 的 "Output JSON only" 契约，
+            // F14: some providers occasionally violate the "Output JSON only" contract,
             // 直接吐 markdown 文本（常见表现：被多步 read 喂饱后给一段中文综述但没包成
             // JSON envelope）。原先 ObservedAnswerFallbackOut 解析失败 → 整个 fallback
             // 返回 None → finalize 落到 clarify_question_fallback，把已经合成好的真实
@@ -4560,16 +4837,19 @@ pub(crate) async fn synthesize_answer_from_observed_output(
             if trimmed.starts_with('{') || trimmed.starts_with('[') {
                 return None;
             }
-            Some(ObservedAnswerFallbackOut {
-                answer: trimmed.to_string(),
-                qualified: true,
-                needs_clarify: false,
-                is_meta_instruction: false,
-                publishable: true,
-                confidence: 0.7,
-                _reason: String::from("non_json_text_fallback"),
-            })
-        })?;
+        Some(ObservedAnswerFallbackOut {
+            answer: trimmed.to_string(),
+            qualified: true,
+            needs_clarify: false,
+            is_meta_instruction: false,
+            publishable: true,
+            confidence: 0.7,
+            _reason: String::from("non_json_text_fallback"),
+        })
+    });
+    let Some(parsed) = parsed else {
+        return Ok(None);
+    };
     let mut answer = parsed.answer.trim().to_string();
     if let Some(unwrapped) = extract_answer_from_finalizer_envelope_text(&answer) {
         answer = unwrapped;
@@ -4597,11 +4877,14 @@ pub(crate) async fn synthesize_answer_from_observed_output(
             task.task_id,
             crate::truncate_for_log(&diagnostic)
         );
-        answer = if request_language_hint.starts_with("en") {
-            format!("Unable to produce a reliable count: {diagnostic}")
-        } else {
-            format!("无法可靠统计：{diagnostic}")
-        };
+        answer = observed_t_with_vars(
+            Some(state),
+            "clawd.msg.scalar_count_unreliable",
+            "无法可靠统计：{diagnostic}",
+            "Unable to produce a reliable count: {diagnostic}",
+            request_language_hint.starts_with("en"),
+            &[("diagnostic", &diagnostic)],
+        );
     }
     let direct_passthrough_disallowed = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
@@ -4637,7 +4920,7 @@ pub(crate) async fn synthesize_answer_from_observed_output(
         && !parsed.needs_clarify
         && !direct_passthrough_disallowed
         && (parsed.qualified || semantically_publishable);
-    Some((
+    Ok(Some((
         answer,
         crate::task_journal::TaskJournalFinalizerSummary {
             stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
@@ -4657,7 +4940,35 @@ pub(crate) async fn synthesize_answer_from_observed_output(
             evidence_quotes_count: 0,
             ..Default::default()
         },
-    ))
+    )))
+}
+
+pub(crate) async fn synthesize_answer_from_observed_output(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    match try_synthesize_answer_from_observed_output(
+        state,
+        task,
+        user_text,
+        loop_state,
+        agent_run_context,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            tracing::warn!(
+                "observed_answer_fallback unavailable task_id={} err={}",
+                task.task_id,
+                err
+            );
+            None
+        }
+    }
 }
 
 pub(crate) fn normalized_observed_listing(observed: &str) -> Option<String> {
@@ -4674,9 +4985,9 @@ mod tests {
         extract_direct_answer_from_generic_output, extract_direct_scalar_from_generic_output,
         extract_direct_scalar_from_generic_output_i18n,
         extract_direct_scalar_from_generic_output_with_locator_hint,
-        has_observed_answer_candidates, normalize_system_basic_match_path,
-        normalized_observed_listing, observed_contract_json, observed_output_entries,
-        observed_request_language_hint, observed_response_style_hint,
+        has_observed_answer_candidates, inventory_dir_direct_answer_candidate,
+        normalize_system_basic_match_path, normalized_observed_listing, observed_contract_json,
+        observed_output_entries, observed_request_language_hint, observed_response_style_hint,
         recent_generated_output_from_user_request,
         replace_internal_missing_sentinel_with_structured_observation,
         route_observation_facts_entry, route_requires_synthesized_delivery,
@@ -4754,8 +5065,7 @@ mod tests {
 
     fn chat_wrapped_unclassified_route(response_shape: OutputResponseShape) -> RouteResult {
         RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "Run an observation, then produce the requested final wording."
                 .to_string(),
             needs_clarify: false,
@@ -4876,8 +5186,7 @@ mod tests {
             "exit=0\n09342a6a fix: expose nl execution and locator flows\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "查看当前工作区最近一次 git 提交的标题，并简短告诉我。".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -4964,6 +5273,29 @@ mod tests {
     }
 
     #[test]
+    fn direct_scalar_preserves_resolved_extract_field_label_for_non_exact_match() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"model.vendor","resolved_field_path":"llm.selected_vendor","match_strategy":"missing_parent_leaf_key_suffix","value_text":"minimax","value":"minimax","value_type":"string"}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint = "configs/config.toml".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("llm.selected_vendor: minimax")
+        );
+    }
+
+    #[test]
     fn direct_answer_reads_config_basic_extract_field_value() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -4982,7 +5314,7 @@ mod tests {
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
-            Some("tool")
+            Some("run_cmd.planner_kind: tool")
         );
         assert!(has_observed_answer_candidates(&loop_state));
     }
@@ -5027,8 +5359,7 @@ mod tests {
             r#"{"action":"extract_field","path":"crates/clawd/Cargo.toml","resolved_path":"/tmp/crates/clawd/Cargo.toml","field_path":"package.name","exists":true,"value_type":"string","value_text":"clawd","value":"clawd"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent:
                 "UI/package.json 里的 name 和 crates/clawd/Cargo.toml 里的 package.name 一样吗？只回答一样或不一样"
                     .to_string(),
@@ -5080,8 +5411,7 @@ mod tests {
             r#"{"action":"extract_field","field_path":"crate_name","exists":true,"value_text":"rustclaw","value":"rustclaw","value_type":"string"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "Are those two names the same? Answer same or different".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -5136,8 +5466,7 @@ version.workspace = true
 "#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent:
                 "读取 UI/package.json 里的 name 字段，再读取 crates/clawd/Cargo.toml 里的 package.name 字段，最后用一行输出：前者、后者、一样或不一样"
                     .to_string(),
@@ -5230,8 +5559,7 @@ version.workspace = true
             r#"{"action":"extract_field","exists":false,"field_path":"name","value_text":"","value":null,"value_type":"null"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "Read the name field from package.json and output only its value."
                 .to_string(),
             needs_clarify: false,
@@ -5310,7 +5638,7 @@ version.workspace = true
     }
 
     #[test]
-    fn direct_count_inventory_defers_multidimensional_total_to_finalizer() {
+    fn direct_count_inventory_uses_total_when_response_contract_is_known() {
         let value = serde_json::json!({
             "action": "count_inventory",
             "counts": {"total": 66, "files": 40, "dirs": 26},
@@ -5318,21 +5646,55 @@ version.workspace = true
             "recursive": false
         });
 
-        assert!(super::count_inventory_direct_answer_candidate(
-            None,
-            &value,
-            Some(OutputResponseShape::Scalar),
-            false,
-        )
-        .is_none());
+        assert!(
+            super::count_inventory_direct_answer_candidate(None, &value, None, false,).is_none()
+        );
 
-        assert!(super::count_inventory_direct_answer_candidate(
+        assert_eq!(
+            super::count_inventory_direct_answer_candidate(
+                None,
+                &value,
+                Some(OutputResponseShape::Scalar),
+                false,
+            )
+            .as_deref(),
+            Some("66")
+        );
+
+        let one_sentence = super::count_inventory_direct_answer_candidate(
             None,
             &value,
             Some(OutputResponseShape::OneSentence),
             false,
         )
-        .is_none());
+        .expect("one-sentence count answer");
+        assert!(one_sentence.contains("66"));
+    }
+
+    #[test]
+    fn inventory_dir_grouped_contract_uses_names_by_kind() {
+        let value = serde_json::json!({
+            "action": "inventory_dir",
+            "names_only": true,
+            "names": ["Cargo.toml", "src", "README.md"],
+            "names_by_kind": {
+                "files": ["Cargo.toml", "README.md"],
+                "dirs": ["src"],
+                "other": []
+            },
+            "counts": {"files": 2, "dirs": 1, "total": 3}
+        });
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
+
+        let answer = inventory_dir_direct_answer_candidate(None, Some(&route), &value, false)
+            .expect("grouped inventory answer");
+
+        assert!(answer.contains("目录:"));
+        assert!(answer.contains("- src"));
+        assert!(answer.contains("文件:"));
+        assert!(answer.contains("- Cargo.toml"));
+        assert!(answer.contains("- README.md"));
     }
 
     #[test]
@@ -5344,8 +5706,7 @@ version.workspace = true
             r#"{"action":"count_inventory","counts":{"total":53,"files":53,"dirs":0},"kind_filter":"file","path":".","recursive":false}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "数一下当前目录一级有多少个普通文件，只告诉我数字和一句解释"
                 .to_string(),
             needs_clarify: false,
@@ -5466,8 +5827,7 @@ version.workspace = true
             r#"{"action":"find_name","pattern":"plan","count":8,"results":["crates/clawd/src/agent_engine/planning.rs","docs/planning_deterministic_guardrails_audit.md","plan/agent_intelligence_architecture_plan_20260511_已完成.md","plan/builtin_skill_capability_governance_plan_20260510.md","plan/codex_style_agent_architecture_refactor_plan_20260511.md","plan/execution_intent_routing_repair_plan_20260509_已完成.md","plan/llm_first_agent_convergence_plan_20260511.md","prompts/layers/overlays/plan_repair_prompt.md"],"root":""}"#,
         ));
         let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-        route.routed_mode = crate::RoutedMode::Act;
-        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::Act);
+        route.ask_mode = crate::AskMode::planner_execute_plain();
         route.resolved_intent = "Read plan/definitely_missing_20260511.md; if missing, search the plan directory for md files related to execution_intent and return only found paths.".to_string();
         route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -5493,8 +5853,7 @@ version.workspace = true
             r#"{"action":"find_name","pattern":"README","count":5,"results":["README.md","README.zh-CN.md","UI/README.md","data/vendor/whisper.cpp/examples/whisper.android.java/README_files","data/vendor/whisper.cpp/README.md"],"root":""}"#,
         ));
         let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-        route.routed_mode = crate::RoutedMode::Act;
-        route.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::Act);
+        route.ask_mode = crate::AskMode::planner_execute_plain();
         route.resolved_intent =
             "Find files named README under the current repo. If there are multiple candidates, list candidates instead of choosing one."
                 .to_string();
@@ -5570,6 +5929,26 @@ version.workspace = true
         let value = serde_json::json!({
             "action": "grep_text",
             "query": "FirstLayerDecision",
+            "count": 1,
+            "match_count": 2,
+            "matches": [
+                {"path": "README.md", "line": 45, "text": "FirstLayerDecision"},
+                {"path": "README.md", "line": 95, "text": "FirstLayerDecision"}
+            ]
+        });
+
+        assert_eq!(
+            super::fs_search_direct_answer_candidate(None, &value, None, false, false, false)
+                .as_deref(),
+            Some("README.md")
+        );
+    }
+
+    #[test]
+    fn fs_search_grep_text_direct_answer_preserves_path_answer_when_requested() {
+        let value = serde_json::json!({
+            "action": "grep_text",
+            "query": "FirstLayerDecision",
             "count": 4,
             "match_count": 5,
             "matches": [
@@ -5582,9 +5961,56 @@ version.workspace = true
         });
 
         assert_eq!(
-            super::fs_search_direct_answer_candidate(None, &value, None, false, true, false)
+            super::fs_search_direct_answer_candidate(None, &value, None, false, true, true)
                 .as_deref(),
             Some("README.md\ncrates/clawd/src/ask_flow.rs\ncrates/clawd/src/intent_router.rs")
+        );
+    }
+
+    #[test]
+    fn fs_search_grep_text_direct_answer_returns_matching_lines_when_listing_allowed() {
+        let value = serde_json::json!({
+            "action": "grep_text",
+            "query": "ERROR",
+            "count": 1,
+            "match_count": 1,
+            "matches": [
+                {
+                    "path": "logs/app.log",
+                    "line": 16,
+                    "text": "2026-04-01 10:08:44 ERROR provider timeout while fetching external metadata"
+                }
+            ]
+        });
+
+        assert_eq!(
+            super::fs_search_direct_answer_candidate(None, &value, None, false, true, false)
+                .as_deref(),
+            Some("16: 2026-04-01 10:08:44 ERROR provider timeout while fetching external metadata")
+        );
+    }
+
+    #[test]
+    fn fs_search_grep_text_direct_answer_uses_name_matches_when_content_empty() {
+        let value = serde_json::json!({
+            "action": "grep_text",
+            "query": "abcd",
+            "count": 0,
+            "match_count": 0,
+            "matches": [],
+            "name_count": 4,
+            "name_results": [
+                "abcd_report.md",
+                "my_abcd.txt",
+                "x_abcd_log.txt",
+                "zz_abcd_backup.log"
+            ]
+        });
+
+        assert_eq!(
+            super::fs_search_direct_answer_candidate(None, &value, None, false, true, false)
+                .as_deref(),
+            Some("abcd_report.md\nmy_abcd.txt\nx_abcd_log.txt")
         );
     }
 
@@ -5624,6 +6050,18 @@ version.workspace = true
     }
 
     #[test]
+    fn fs_search_grep_text_observed_body_keeps_name_match_fallback() {
+        let body = r#"{"action":"grep_text","query":"abcd","count":0,"match_count":0,"matches":[],"name_count":1,"name_results":["my_abcd.txt"]}"#;
+        let observed = super::structured_observed_body("fs_search", body)
+            .expect("grep_text should compact name fallback evidence");
+
+        assert!(observed.contains("grep_text query=abcd"));
+        assert!(observed.contains("name_count=1"));
+        assert!(observed.contains("name_match path=my_abcd.txt"));
+        assert!(observed.contains("matches: none"));
+    }
+
+    #[test]
     fn fs_search_find_ext_directory_contract_returns_parent_dirs() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -5632,8 +6070,7 @@ version.workspace = true
             r#"{"action":"find_ext","ext":"sh","count":4,"results":["system_report.sh","scripts/run.sh","scripts/dev/check.sh","component_start/start-clawd.sh"],"root":""}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "list directories containing sh files".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -5712,8 +6149,7 @@ version.workspace = true
             r#"{"action":"find_name","count":1,"results":["scripts/nl_tests/fixtures/locator_smart/stem_unique/ABCD.txt"],"root":"scripts/nl_tests/fixtures/locator_smart/stem_unique"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "在目标目录里找 abcd，只输出路径".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -5769,8 +6205,15 @@ version.workspace = true
             None
         );
         assert_eq!(
-            super::fs_search_direct_answer_candidate(None, &value, Some("abcd"), false, true, false)
-                .as_deref(),
+            super::fs_search_direct_answer_candidate(
+                None,
+                &value,
+                Some("abcd"),
+                false,
+                true,
+                false
+            )
+            .as_deref(),
             Some(
                 "scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/my_abcd.txt\nscripts/nl_tests/fixtures/locator_smart/fuzzy_top3/x_abcd_log.txt"
             )
@@ -5840,8 +6283,7 @@ version.workspace = true
     #[test]
     fn observed_contract_json_includes_semantic_kind_and_locator_hint() {
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "读一下 README.md 开头，然后用一句话总结".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -5893,8 +6335,7 @@ version.workspace = true
     #[test]
     fn observed_response_style_hint_reflects_output_contract_shape() {
         let mut route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "读一下 README.md 开头，然后用一句话总结".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6017,8 +6458,7 @@ version.workspace = true
     #[test]
     fn route_observation_facts_pin_resolved_path_for_existence_summary() {
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "check service file and explain purpose".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6062,12 +6502,18 @@ version.workspace = true
             OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
             &[
                 ("__USER_REQUEST__", "读一下 README 开头，然后用一句话总结"),
-                ("__RESOLVED_USER_INTENT__", "读一下 README 开头，然后用一句话总结"),
+                (
+                    "__RESOLVED_USER_INTENT__",
+                    "读一下 README 开头，然后用一句话总结",
+                ),
                 (
                     "__OUTPUT_CONTRACT__",
                     r#"{"response_shape":"one_sentence","semantic_kind":"content_excerpt_summary"}"#,
                 ),
-                ("__OBSERVED_OUTPUTS__", "### step_1 skill(read_file)\n# RustClaw"),
+                (
+                    "__OBSERVED_OUTPUTS__",
+                    "### step_1 skill(read_file)\n# RustClaw",
+                ),
                 ("__CONFIG_RESPONSE_LANGUAGE__", "zh-CN"),
                 ("__REQUEST_LANGUAGE_HINT__", "mixed"),
                 (
@@ -6099,8 +6545,7 @@ version.workspace = true
             r#"{"action":"read_range","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","excerpt":"12|# timeout note\n13|task_timeout_seconds = 3600\n14|# end"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "读取 /tmp/config.toml 最后 3 行，然后用一句话总结".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6145,8 +6590,7 @@ version.workspace = true
             "RustClaw is deployed locally and keeps task state in sqlite.",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "看一下 /tmp/README.txt，然后用一句话总结".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6192,8 +6636,7 @@ version.workspace = true
             r##"{"text":"# RustClaw\n\n<img src=\"./RustClaw.png\" width=\"420\" />\n\nRustClaw is a local Rust agent runtime centered on clawd and designed for multi-channel task execution.\n\n## Overview\nMore text."}"##,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "读取 README.md 并总结一行".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6241,8 +6684,7 @@ version.workspace = true
             r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|<img src=\"./RustClaw.png\" width=\"420\" />\n4|"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "先读一下 README.md 前 4 行".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6294,8 +6736,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "system_basic", &skill_output));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "看日志最后 1 行".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6359,8 +6800,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_2", "fs_basic", &skill_output));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "查看 logs 目录下第二个文件（clawd.log）的最后2行内容".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6406,7 +6846,8 @@ version.workspace = true
     }
 
     #[test]
-    fn direct_answer_passthroughs_chat_act_path_read_range_when_no_transform_is_requested() {
+    fn direct_answer_passthroughs_chat_wrapped_execution_path_read_range_when_no_transform_is_requested(
+    ) {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -6414,8 +6855,7 @@ version.workspace = true
             r#"{"action":"read_range","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","excerpt":"1|[app]\n2|name = \"fixture\"\n3|mode = \"test\""}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "用户提供了文件路径 /tmp/config.toml，但未说明要对该文件执行什么操作"
                 .to_string(),
             needs_clarify: false,
@@ -6463,8 +6903,7 @@ version.workspace = true
             r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|A tool runtime\n4|"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "先读一下 README.md 前 4 行，再用三句话总结".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6511,8 +6950,7 @@ version.workspace = true
             r#"{"action":"read_range","path":"/tmp/rustclaw.service","resolved_path":"/tmp/rustclaw.service","excerpt":"1|[Unit]\n2|Description=RustClaw Service\n3|[Service]\n4|ExecStart=/bin/bash start-all-bin.sh"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "检查 rustclaw.service 是否存在，若存在返回路径并解释用途".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6560,8 +6998,7 @@ version.workspace = true
             r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|A tool runtime\n4|"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "先读一下 README.md 前 4 行".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6609,8 +7046,7 @@ version.workspace = true
             r#"{"action":"structured_keys","path":"/tmp/package.json","resolved_path":"/tmp/package.json","field_path":"scripts","exists":true,"container_type":"object","count":3,"keys":["build","dev","lint"]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "读 /tmp/package.json，告诉我 scripts 字段下都有哪些子键".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6656,8 +7092,7 @@ version.workspace = true
             r#"{"action":"structured_keys","path":"/tmp/package.json","resolved_path":"/tmp/package.json","field_path":"scripts","exists":true,"container_type":"object","count":3,"keys":["build","dev","lint"]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "读 /tmp/package.json，用一句话告诉我 scripts 字段下有哪些子键"
                 .to_string(),
             needs_clarify: false,
@@ -6703,8 +7138,7 @@ version.workspace = true
             r#"{"action":"extract_fields","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","count":2,"results":[{"field_path":"database.sqlite_path","exists":true,"value_type":"string","value_text":"data/rustclaw.db","value":"data/rustclaw.db"},{"field_path":"tools.allow_sudo","exists":true,"value_type":"bool","value_text":"true","value":true}]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent:
                 "读取 /tmp/config.toml 里的 database.sqlite_path 和 tools.allow_sudo，告诉我两个字段的值"
                     .to_string(),
@@ -6753,8 +7187,7 @@ version.workspace = true
             r#"{"action":"inventory_dir","path":"/tmp/logs","resolved_path":"/tmp/logs","names_only":true,"names":["act_plan.log","clawd.log","feishud.log"]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "列出 logs 目录下前 5 个文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6800,8 +7233,7 @@ version.workspace = true
             r#"{"action":"inventory_dir","path":"/tmp/document","resolved_path":"/tmp/document","files_only":true,"names_only":true,"names":["a.txt","b.md","c.png"]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "List file names from a known directory.".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6847,8 +7279,7 @@ version.workspace = true
             r#"{"action":"inventory_dir","path":"/tmp/logs","resolved_path":"/tmp/logs","names_only":false,"entries":[{"name":"act_plan.log","kind":"file","size_bytes":2467002},{"name":"clawd.run.log","kind":"file","size_bytes":397321},{"name":"clawd.log","kind":"file","size_bytes":2035}],"names":["act_plan.log","clawd.run.log","clawd.log"]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "列出 logs 目录下最大的 3 个文件，输出文件名和大小".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6894,8 +7325,7 @@ version.workspace = true
             r#"{"action":"inventory_dir","path":"/tmp/logs","resolved_path":"/tmp/logs","names_only":true,"names":["a","b","c","d"]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "列出 logs 目录下前 2 个文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -6941,12 +7371,11 @@ version.workspace = true
             r#"{"action":"inventory_dir","path":"/tmp/logs","resolved_path":"/tmp/logs","names_only":true,"names":["a","b","c","d"]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "列出 logs 目录下的文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "normalizer:chat_act".to_string(),
+            route_reason: "normalizer:planner_execute_chat_wrapped".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -6987,8 +7416,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "list_dir", "a\nb\nc\n"));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "列出 logs 目录下的文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -7035,8 +7463,7 @@ version.workspace = true
             "README.txt\nnotes.md\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "列出 archive 目录下有什么".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -7085,8 +7512,7 @@ version.workspace = true
             "document 目录下有 alpha.md 和 beta.md。",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "列出 document 目录下有哪些文件，只输出文件名列表".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -7131,8 +7557,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "list_dir", "a\nb\nc\nd\n"));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "列出 logs 目录下前 2 个文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -7178,8 +7603,7 @@ version.workspace = true
             ".git\nREADME.md\n.env\nsrc\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "检查当前目录是否存在隐藏文件，然后用一句话解释隐藏文件的常见用途"
                 .to_string(),
             needs_clarify: false,
@@ -7225,8 +7649,7 @@ version.workspace = true
             ".git\nREADME.md\n.env\nsrc\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子"
                 .to_string(),
             needs_clarify: false,
@@ -7273,8 +7696,7 @@ version.workspace = true
             ".\n..\n.codex\n.git/\n.gitignore\nREADME.md\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子"
                 .to_string(),
             needs_clarify: false,
@@ -7320,8 +7742,7 @@ version.workspace = true
             ".cargo/\nREADME.md\n.dockerignore\n.env.example\nsrc\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子"
                 .to_string(),
             needs_clarify: false,
@@ -7367,8 +7788,7 @@ version.workspace = true
             r#"{"action":"inventory_dir","path":"/tmp/workspace","resolved_path":"/tmp/workspace","names_only":true,"include_hidden":true,"names":[".cargo",".dockerignore",".env.example","README.md","src"]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "检查当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子"
                 .to_string(),
             needs_clarify: false,
@@ -7414,8 +7834,7 @@ version.workspace = true
             r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"rustclaw.service","resolved_path":"/tmp/rustclaw-workspace/rustclaw.service","size_bytes":1190},"path":"/tmp/rustclaw-workspace/rustclaw.service"}],"include_missing":true}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"
                 .to_string(),
             needs_clarify: false,
@@ -7462,8 +7881,7 @@ version.workspace = true
             r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"configs/config.toml","resolved_path":"/tmp/repo/configs/config.toml","size_bytes":1190},"path":"/tmp/repo/configs/config.toml"}],"include_missing":true}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "检查 configs/config.toml 是否存在，只回答有或没有".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -7509,8 +7927,7 @@ version.workspace = true
             r#"{"action":"path_batch_facts","count":1,"fields":["exists","size"],"facts":[{"exists":true,"fact":{"kind":"file","path":"data/rustclaw.db","resolved_path":"/tmp/repo/data/rustclaw.db","size_bytes":55226368},"path":"/tmp/repo/data/rustclaw.db"}],"include_missing":true}"#,
         ));
         let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
-        route_result.routed_mode = crate::RoutedMode::Act;
-        route_result.ask_mode = crate::AskMode::from_routed_mode(crate::RoutedMode::Act);
+        route_result.ask_mode = crate::AskMode::planner_execute_plain();
         route_result.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
         route_result.output_contract.locator_kind = OutputLocatorKind::Path;
         route_result.output_contract.locator_hint = "data/rustclaw.db".to_string();
@@ -7535,8 +7952,7 @@ version.workspace = true
             r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":false,"path":"/tmp/missing.txt","error":"not found"}],"include_missing":true}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "检查文件 /tmp/missing.txt 是否存在，如果不存在，简短说明原因。"
                 .to_string(),
             needs_clarify: false,
@@ -7599,8 +8015,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "run_cmd", "yes\n"));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"
                 .to_string(),
             needs_clarify: false,
@@ -7663,8 +8078,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "run_cmd", "exists\n"));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"
                 .to_string(),
             needs_clarify: false,
@@ -7727,8 +8141,7 @@ version.workspace = true
             r#"{"action":"find_name","count":1,"results":["rustclaw.service"],"root":""}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"
                 .to_string(),
             needs_clarify: false,
@@ -7778,8 +8191,7 @@ version.workspace = true
             "base_skill_response_contract.md\nskill_integration_guide.md\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
                 .to_string(),
             needs_clarify: false,
@@ -7825,8 +8237,7 @@ version.workspace = true
             r#"{"action":"inventory_dir","path":"/tmp/docs","resolved_path":"/tmp/docs","names_only":true,"names":["base_skill_response_contract.md","skill_integration_guide.md"]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
                 .to_string(),
             needs_clarify: false,
@@ -7877,8 +8288,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "run_cmd", "a.md\nb.md\n"));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
                 .to_string(),
             needs_clarify: false,
@@ -7925,8 +8335,7 @@ version.workspace = true
             r#"{"action":"inventory_dir","path":"/tmp/docs","resolved_path":"/tmp/docs","names_only":true,"names":["release_checklist.md","operator-guide.md","rollout-summary.pdf"]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "列出 docs 目录下的文件，再用一句话解释这些文档大概是干什么的"
                 .to_string(),
             needs_clarify: false,
@@ -7972,8 +8381,7 @@ version.workspace = true
             "total 151792\n-rw-r--r--@ 1 testuser staff 76509771 Apr 12 16:30 model_io.log\n-rw-r--r--@ 1 testuser staff 906739 Apr 12 16:30 act_plan.log\n-rw-r--r--@ 1 testuser staff 191187 Apr 12 15:48 service_ops.log\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent:
                 "列出 logs 目录最近修改的 3 个文件，再告诉我这更像是测试日志还是正式产物"
                     .to_string(),
@@ -8020,8 +8428,7 @@ version.workspace = true
             r#"{"action":"info","hostname":"rustclaw-test-host.local","os":"macos","arch":"x86_64","cwd":"/tmp/rustclaw-workspace"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent:
                 "show me the basic machine info here like hostname and system, keep it brief"
                     .to_string(),
@@ -8068,8 +8475,7 @@ version.workspace = true
             "exit=0\nupdating: tmp/rustclaw-workspace/scripts/skill_calls/\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent:
                 "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功"
                     .to_string(),
@@ -8120,8 +8526,7 @@ version.workspace = true
             r#"{"action":"pack","format":"zip","source":"/tmp/rustclaw-workspace/scripts/skill_calls","archive":"/tmp/rustclaw-workspace/tmp/nl_archive_case.zip","output":"exit=0\nupdating: skill_calls/\n"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent:
                 "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，然后告诉我是否成功"
                     .to_string(),
@@ -8172,8 +8577,7 @@ version.workspace = true
             r#"{"hostname":"rustclaw-test-host.local","os":"macos","arch":"x86_64","cwd":"/tmp/rustclaw-workspace"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent:
                 "show me the basic machine info here like hostname and system, keep it brief"
                     .to_string(),
@@ -8220,8 +8624,7 @@ version.workspace = true
             r#"{"action":"info","hostname":"ThinkPad-X1","os":"linux","arch":"x86_64","cwd":"/home/guagua/rustclaw"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent:
                 "show me the basic machine info here like hostname and system, keep it brief"
                     .to_string(),
@@ -8268,8 +8671,7 @@ version.workspace = true
             r#"{"action":"info","hostname":"ThinkPad-X1","os":"linux","arch":"x86_64","cwd":"/home/guagua/rustclaw","workspace_root":"/home/guagua/rustclaw"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "获取当前工作目录的绝对路径".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -8326,8 +8728,7 @@ version.workspace = true
         loop_state.last_written_file_path =
             Some("/home/guagua/rustclaw/document/pwd_line.txt".to_string());
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "create the file and send me the file path only".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -8374,8 +8775,7 @@ version.workspace = true
             "Cargo.toml\ncrates/\nUI/\nconfigs/\nREADME.md\nREADME.zh-CN.md\nprompts/\nrustclaw.service\ncomponent_start/start-telegramd.sh\ncomponent_start/start-wechatd.sh\ncomponent_start/start-whatsappd.sh\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "用非技术用户能听懂的话，简短解释这个仓库主要是干什么的".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -8439,8 +8839,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "list_dir", "Report.MD\n"));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "去 case_only 找 report.md，只输出路径".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -8505,8 +8904,7 @@ version.workspace = true
             ),
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "去 case_only 找 report.md，只输出路径".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -8588,8 +8986,7 @@ version.workspace = true
             r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/case_only/Report.MD","resolved_path":"/tmp/case_only/Report.MD","size_bytes":33},"path":"/tmp/case_only/report.md","resolved_from_case_insensitive":true}],"include_missing":true}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "去 case_only 目录里找 report.md，只输出路径".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -8636,8 +9033,7 @@ version.workspace = true
             r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"scripts/nl_tests/fixtures/locator_smart/case_only/Report.MD","resolved_path":"/tmp/case_only/Report.MD","size_bytes":33},"path":"/tmp/case_only/Report.MD"}],"include_missing":true}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "去 case_only 目录里找 report.md，只输出路径".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -8695,8 +9091,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "list_dir", "a\nb\nc\n"));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "数一下 scripts 目录直接有多少个子项".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -8742,8 +9137,7 @@ version.workspace = true
             r#"{"action":"inventory_dir","path":"scripts","resolved_path":"/tmp/scripts","names_only":true,"names":["a","b","c"],"counts":{"total":3}}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "数一下 scripts 目录直接子项有多少个，只输出数字".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -8781,6 +9175,52 @@ version.workspace = true
     }
 
     #[test]
+    fn direct_count_uses_inventory_dir_total_for_non_scalar_shape() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"inventory_dir","path":"document","resolved_path":"/tmp/document","names_only":true,"names":["a","b","c","d"],"counts":{"total":4,"files":4,"dirs":0},"recursive":false}"#,
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: "再数一下 document 目录直接有多少个子项".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "scalar count with free-form response shape".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::ScalarCount,
+                locator_hint: "document".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("4")
+        );
+    }
+
+    #[test]
     fn direct_scalar_path_lists_inventory_dir_candidates_without_choosing_first() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -8789,8 +9229,7 @@ version.workspace = true
             r#"{"action":"inventory_dir","path":"/tmp/stem_multi","resolved_path":"/tmp/stem_multi","names_only":true,"names":["abcd.cpp","abcd.txt"],"counts":{"total":2}}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "find matching paths".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -8837,8 +9276,7 @@ version.workspace = true
             r#"{"action":"inventory_dir","path":".","resolved_path":"/tmp/workspace","include_hidden":true,"names_only":true,"names":[".git",".env","README.md"],"counts":{"total":3,"hidden":2}}"#,
         ));
         let route_result = crate::RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "数一下当前目录里以点开头的隐藏文件有几个，只输出数字".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -8884,8 +9322,7 @@ version.workspace = true
             "package_manager=brew",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "看看当前机器识别到的包管理器，再一句话说最可能日常会用哪个"
                 .to_string(),
             needs_clarify: false,
@@ -8932,8 +9369,7 @@ version.workspace = true
             "package_manager=brew",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "只输出当前机器识别到的包管理器名称".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -8979,14 +9415,13 @@ version.workspace = true
             r#"{"columns":["name"],"rows":[]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent:
                 "看看 data/db-basic-contract.sqlite 里有哪些表，再一句话说这更像业务库还是测试库"
                     .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "normalizer:chat_act".to_string(),
+            route_reason: "normalizer:planner_execute_chat_wrapped".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -9027,14 +9462,13 @@ version.workspace = true
             r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent:
                 "看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里有哪些表，只输出表名"
                     .to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "normalizer:chat_act".to_string(),
+            route_reason: "normalizer:planner_execute_chat_wrapped".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -9077,8 +9511,7 @@ version.workspace = true
             r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent:
                 "看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里有哪些表，只输出表名"
                     .to_string(),
@@ -9210,12 +9643,11 @@ version.workspace = true
             r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "列一下 data/app.sqlite 里有哪些表".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
-            route_reason: "normalizer:chat_act".to_string(),
+            route_reason: "normalizer:planner_execute_chat_wrapped".to_string(),
             route_confidence: None,
             visible_skill_candidates: Vec::new(),
             risk_ceiling: RiskCeiling::Unknown,
@@ -9257,8 +9689,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_2", "list_dir", "a\nb\nc\n"));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "上一个和上上个哪个更多，只回答目录名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -9304,8 +9735,7 @@ version.workspace = true
             r#"{"action":"compare_paths","left":{"path":"Cargo.toml","resolved_path":"/tmp/Cargo.toml","kind":"file","size_bytes":123},"right":{"path":"Cargo.lock","resolved_path":"/tmp/Cargo.lock","kind":"file","size_bytes":456},"comparison":{"same_kind":true,"same_name":false,"same_size":false,"size_delta_bytes":-333,"left_newer":null,"same_content":false}}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因"
                 .to_string(),
             needs_clarify: false,
@@ -9349,8 +9779,7 @@ version.workspace = true
     #[test]
     fn quantity_comparison_does_not_force_direct_scalar_observed_answer() {
         let route = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "比较 Cargo.toml 和 Cargo.lock 哪个更大".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -9390,8 +9819,7 @@ version.workspace = true
             "exit=0\n## main...origin/main\n M Cargo.toml\n?? new_file.txt\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "检查当前仓库是否存在未提交的改动，用一句话返回结果".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -9446,8 +9874,7 @@ version.workspace = true
             "exit=0\n09342a6a fix: expose nl execution and locator flows\n336e8d92 docs: update planner-first architecture diagrams\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "Write a short release note for RustClaw.".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -9493,8 +9920,7 @@ version.workspace = true
             "exit=0\n09342a6a fix: expose nl execution and locator flows\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "return the latest git commit subject only".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -9538,8 +9964,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "git_basic", "exit=0\n"));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "看看这个仓库现在有没有未提交改动，用一句话告诉我".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -9584,8 +10009,7 @@ version.workspace = true
             " M Cargo.toml\n?? new_file.txt\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "看看这个仓库现在有没有未提交改动，用一句话告诉我".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -9635,8 +10059,7 @@ version.workspace = true
             "act_plan.log\nclawd.log\nfeishud.log\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "列出 logs 目录下前 5 个文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -9684,8 +10107,7 @@ version.workspace = true
             ".\n./scripts\n./scripts/nl_tests\n./crates/skills/browser_web/node_modules/playwright-core/bin\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent:
                 "查找当前工作目录中哪些文件夹存放了 .sh 脚本文件，列出这些文件夹的名称".to_string(),
             needs_clarify: false,
@@ -9738,8 +10160,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "run_cmd", "a\nb\nc\nd\n"));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "列出 logs 目录下前 2 个文件名".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -9797,8 +10218,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "run_cmd", "EXISTS\n"));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"
                 .to_string(),
             needs_clarify: false,
@@ -9845,8 +10265,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "run_cmd", "NOT_FOUND\n"));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径"
                 .to_string(),
             needs_clarify: false,
@@ -9892,8 +10311,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "health_check", body));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "做一次 health check".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -9937,8 +10355,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "health_check", body));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent:
                 "对系统做一次基础健康检查，只总结操作系统信息，RustClaw 自身不展开总结，仅返回其关键字段"
                     .to_string(),
@@ -9984,8 +10401,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "health_check", body));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "run health_check and return the raw output".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -10036,8 +10452,7 @@ version.workspace = true
             r#"{"action":"info","os":"macos","hostname":"example"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "Run a basic health check. Summarize only the host operating system, and for RustClaw itself just list the key fields.".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -10082,8 +10497,7 @@ version.workspace = true
             r#"{"clawd_process_count":1,"telegramd_process_count":0,"clawd_health_port_open":true,"clawd_log":{"exists":true,"keyword_error_count":0},"telegramd_log":{"exists":false}}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "帮我做一次基础健康检查，只列最重要的结论".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -10128,8 +10542,7 @@ version.workspace = true
             r#"{"clawd_process_count":0,"telegramd_process_count":1,"clawd_health_port_open":false,"clawd_log":{"exists":true,"keyword_error_count":3},"telegramd_log":{"exists":true,"keyword_error_count":0}}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent:
                 "run a basic health check here and summarize only the most important findings"
                     .to_string(),
@@ -10176,8 +10589,7 @@ version.workspace = true
             r#"{"clawd_process_count":1,"telegramd_process_count":0,"clawd_health_port_open":true,"clawd_log":{"exists":true,"keyword_error_count":0},"telegramd_log":{"exists":false}}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "帮我做一次基础健康检查，只列最重要的结论".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -10222,8 +10634,7 @@ version.workspace = true
             r#"{"clawd_process_count":1,"telegramd_process_count":0,"clawd_health_port_open":true,"clawd_log":{"exists":true,"keyword_error_count":0},"telegramd_log":{"exists":false}}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "帮我做一次基础健康检查，只列最重要的结论".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -10272,8 +10683,7 @@ version.workspace = true
             r#"{"clawd_process_count":12,"telegramd_process_count":0,"clawd_health_port_open":false,"clawd_log":{"exists":false},"telegramd_log":{"exists":false},"system_health":{"os_family":"macos","warnings":[]}}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent:
                 "做一次基础健康检查，只返回操作系统层面的关键字段，不要包含 RustClaw 自身的状态摘要"
                     .to_string(),
@@ -10324,8 +10734,7 @@ version.workspace = true
             r#"{"clawd_process_count":1,"telegramd_process_count":1,"clawd_health_port_open":true,"clawd_log":{"exists":true,"keyword_error_count":0},"telegramd_log":{"exists":true,"keyword_error_count":0},"system_health":{"os_family":"linux","warnings":["disk_root_low"]}}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent:
                 "run a basic health check here and summarize only the most important findings"
                     .to_string(),
@@ -10376,8 +10785,7 @@ version.workspace = true
             "exit=0\nCOMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nclawd 4498 testuser 12u IPv4 0x0 0t0 TCP *:8787 (LISTEN)\nnginx 51129 testuser 6u IPv4 0x0 0t0 TCP *:80 (LISTEN)\nss-local 424 testuser 6u IPv4 0x0 0t0 TCP 127.0.0.1:1086 (LISTEN)\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "看看这台机器现在有哪些端口在监听，然后挑最值得注意的几个简单说一下"
                 .to_string(),
             needs_clarify: false,
@@ -10423,8 +10831,7 @@ version.workspace = true
             "status=200\n{\"ok\":true}\n",
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果"
                 .to_string(),
             needs_clarify: false,
@@ -10469,8 +10876,7 @@ version.workspace = true
             .executed_step_results
             .push(ok_step("step_1", "http_basic", body));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::Act,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::Act),
+            ask_mode: crate::AskMode::planner_execute_plain(),
             resolved_intent: "请求接口并返回原始结果".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -10516,8 +10922,7 @@ version.workspace = true
             r#"{"status":"ok","service_name":"telegramd","manager_type":"rustclaw","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=stopped","post_state":"telegramd=stopped","verified":true,"key_evidence":["telegramd process_count=0 memory_rss_bytes=Some(0)"],"failure_reason":"","next_step":"","summary":"Status: telegramd=stopped"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "帮我检查 telegramd 现在是不是在运行，顺手简短解释状态".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
@@ -10563,8 +10968,7 @@ version.workspace = true
             r#"{"status":"ok","service_name":"telegramd","manager_type":"rustclaw","requested_action":"status","executed_actions":["status"],"pre_state":"telegramd=running","post_state":"telegramd=running","verified":true,"key_evidence":["telegramd process_count=1 memory_rss_bytes=Some(1024)"],"failure_reason":"","next_step":"","summary":"Status: telegramd=running"}"#,
         ));
         let route_result = RouteResult {
-            routed_mode: crate::RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(crate::RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent:
                 "check whether telegramd is running right now and briefly explain the status"
                     .to_string(),
@@ -10599,7 +11003,9 @@ version.workspace = true
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
-            Some("telegramd is running: rustclaw reports `telegramd=running` and verification passed.")
+            Some(
+                "telegramd is running: rustclaw reports `telegramd=running` and verification passed."
+            )
         );
     }
 

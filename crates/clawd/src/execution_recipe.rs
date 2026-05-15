@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use claw_core::skill_registry::PlannerCapabilityEffect;
 use serde_json::Value;
 
 use crate::AppState;
@@ -315,6 +316,16 @@ impl ActionEffect {
             mutates: false,
             validates: true,
         }
+    }
+}
+
+fn planner_capability_effect_to_action_effect(effect: PlannerCapabilityEffect) -> ActionEffect {
+    match effect {
+        PlannerCapabilityEffect::Observe => ActionEffect::observe(),
+        PlannerCapabilityEffect::Mutate | PlannerCapabilityEffect::External => {
+            ActionEffect::mutate()
+        }
+        PlannerCapabilityEffect::Validate => ActionEffect::validate(),
     }
 }
 
@@ -975,6 +986,39 @@ pub(crate) fn classify_skill_action_effect(
     args: &Value,
 ) -> ActionEffect {
     let normalized_skill = state.resolve_canonical_skill_name(skill_name);
+    if let Some(effect) = args
+        .get("action")
+        .and_then(|value| value.as_str())
+        .map(|value| {
+            value
+                .trim()
+                .to_ascii_lowercase()
+                .chars()
+                .map(|ch| {
+                    if matches!(ch, '-' | ' ' | '.') {
+                        '_'
+                    } else {
+                        ch
+                    }
+                })
+                .collect::<String>()
+        })
+        .filter(|action| !action.is_empty())
+        .and_then(|action| {
+            state
+                .skill_manifest(&normalized_skill)
+                .and_then(|manifest| {
+                    manifest
+                        .planner_capabilities
+                        .into_iter()
+                        .find(|mapping| mapping.action.as_deref() == Some(action.as_str()))
+                        .and_then(|mapping| mapping.effect)
+                })
+        })
+        .map(planner_capability_effect_to_action_effect)
+    {
+        return effect;
+    }
     let effect = match normalized_skill.as_str() {
         "read_file" | "list_dir" | "fs_search" | "git_basic" | "db_basic" | "process_basic"
         | "log_analyze" => ActionEffect::observe(),
@@ -1609,6 +1653,7 @@ mod tests {
     };
     use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID};
     use claw_core::config::{AgentConfig, ToolsConfig};
+    use claw_core::skill_registry::SkillsRegistry;
     use serde_json::json;
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, RwLock};
@@ -1641,6 +1686,24 @@ mod tests {
             reload_ctx: crate::ReloadContext::default(),
             ask_states: crate::AskStateRegistry::default(),
         }
+    }
+
+    fn test_state_with_registry(toml: &str, skills: &[&str]) -> AppState {
+        let path = std::env::temp_dir().join(format!(
+            "execution_recipe_registry_{}_{}_{}.toml",
+            std::process::id(),
+            crate::now_ts_u64(),
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, toml).expect("write registry");
+        let registry = Arc::new(SkillsRegistry::load_from_path(&path).expect("load registry"));
+        let _ = std::fs::remove_file(path);
+        let mut state = test_state();
+        state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+            registry: Some(registry),
+            skills_list: Arc::new(skills.iter().map(|skill| (*skill).to_string()).collect()),
+        })));
+        state
     }
 
     #[test]
@@ -1677,6 +1740,47 @@ mod tests {
         assert!(overlay.contains("target_scope=greenfield"));
         assert!(overlay.contains("reusable skill/extension"));
         assert!(overlay.contains("minimal new files or scaffold"));
+    }
+
+    #[test]
+    fn classify_skill_action_effect_prefers_registry_planner_effect() {
+        let state = test_state_with_registry(
+            r#"
+[[skills]]
+name = "fs_basic"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+planner_capabilities = [
+  { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe" },
+  { name = "filesystem.write_file", action = "write_text", effect = "mutate" },
+  { name = "config.validate", action = "validate", effect = "validate" },
+]
+"#,
+            &["fs_basic"],
+        );
+        let observe = classify_skill_action_effect(
+            &state,
+            "fs_basic",
+            &json!({"action": "read_text_range", "path": "README.md"}),
+        );
+        assert!(observe.observes);
+        assert!(!observe.mutates);
+        assert!(!observe.validates);
+
+        let mutate = classify_skill_action_effect(
+            &state,
+            "fs_basic",
+            &json!({"action": "write_text", "path": "out.txt", "content": "hello"}),
+        );
+        assert!(mutate.mutates);
+        assert!(!mutate.validates);
+
+        let validate =
+            classify_skill_action_effect(&state, "fs_basic", &json!({"action": "validate"}));
+        assert!(validate.observes);
+        assert!(!validate.mutates);
+        assert!(validate.validates);
     }
 
     #[test]

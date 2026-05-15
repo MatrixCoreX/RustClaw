@@ -7,6 +7,7 @@ All natural-language test scripts are centralized in this directory.
 Primary entry point:
 
 - `bash scripts/nl_tests/run_suite.sh --list`
+- `bash scripts/nl_tests/run_suite.sh runtime_capability_boundary`
 - `bash scripts/nl_tests/run_suite.sh manual`
 - `bash scripts/nl_tests/run_suite.sh compound_single`
 - `bash scripts/nl_tests/run_suite.sh task_updates`
@@ -55,6 +56,30 @@ Client-like continuous regression:
 - Run the full safe aggregate when provider capacity is available:
   `bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt --prompt-reply-only --quality-guard`
 - Resume after a provider interruption by reusing the printed `RESUME_HINT`.
+- Summarize a finished client-like run with the full execution flow:
+  `python3 scripts/nl_tests/summarize_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --limit 20`
+  This prints each case prompt, first-layer route, planner steps, verifier result, executed tool/skill evidence, LLM metrics, and final reply so regression review does not rely on a bare OK/fail line.
+- Generate or check a lightweight offline regression baseline:
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --write-baseline /tmp/rustclaw-client-like-baseline.jsonl`
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --expectations scripts/nl_tests/expectations/<name>.jsonl`
+  Expectation rows can assert route, planner capability/tool targets, executed tool/skill, verifier approval, finalizer stage/fallback/grounding, final text substrings, and final answer shape without making a new LLM request.
+- Extract exact replay prompts and expectations from a finished or interrupted client-like run:
+  `python3 scripts/nl_tests/extract_client_like_replay.py scripts/nl_suite_logs/client_like_continuous/<run_id> --case-jsonl /tmp/rustclaw-replay.jsonl --expectations /tmp/rustclaw-replay.expectations.jsonl`
+  `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-jsonl /tmp/rustclaw-replay.jsonl --quality-guard --prompt-reply-only`
+- Focused runtime capability boundary smoke:
+  `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-file scripts/nl_tests/cases/nl_cases_runtime_capability_boundary_smoke_20260515.txt --quality-guard`
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --expectations scripts/nl_tests/expectations/runtime_capability_boundary_smoke_20260515.jsonl`
+- Focused runtime capability boundary regression:
+  `bash scripts/nl_tests/run_runtime_capability_boundary_regression.sh`
+  `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-file scripts/nl_tests/cases/nl_cases_runtime_capability_boundary_regression_20260515.txt --quality-guard --prompt-reply-only`
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --expectations scripts/nl_tests/expectations/runtime_capability_boundary_regression_20260515.jsonl`
+  The dedicated wrapper runs the fixed 20-case set, prints the full flow
+  summary, and evaluates the source-controlled expectations. Use it first after
+  changing prompt, registry, resolver, verifier, or observed finalizer logic.
+- Offline observed-finalizer fixture smoke:
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/observed_finalizer_scalar --expectations scripts/nl_tests/expectations/observed_finalizer_scalar_fixture.jsonl`
+- Offline verifier issue fixture smoke:
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/verifier_issue_missing_arg --expectations scripts/nl_tests/expectations/verifier_issue_missing_arg_fixture.jsonl`
 
 Self-extension regressions:
 
@@ -118,6 +143,7 @@ Notes for `ops_http_repair`:
 - `bash scripts/regression_ops_http_repair_nl_flows.sh`
 - `bash scripts/regression_ops_closed_loop.sh`
 - `bash scripts/regression_long_tail_nl_flows.sh`
+- `bash scripts/nl_tests/run_runtime_capability_boundary_regression.sh`
 
 ## Cases
 

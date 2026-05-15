@@ -9,7 +9,7 @@
     "apply",
     "reason",
     "confidence",
-    "mode",
+    "decision",
     "needs_clarify",
     "clarify_question",
     "resolved_user_intent",
@@ -29,9 +29,9 @@
       "minimum": 0.0,
       "maximum": 1.0
     },
-    "mode": {
+    "decision": {
       "type": "string",
-      "enum": ["chat", "act", "chat_act", "ask_clarify"]
+      "enum": ["clarify", "direct_answer", "planner_execute"]
     },
     "needs_clarify": {
       "type": "boolean"
@@ -87,6 +87,7 @@
             "hidden_entries_check",
             "file_names",
             "directory_names",
+            "directory_entry_groups",
             "file_paths",
             "directory_purpose_summary",
             "content_excerpt_summary",

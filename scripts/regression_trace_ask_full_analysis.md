@@ -56,9 +56,9 @@
 
 ## 4. 路由与执行概况（从 TRACE/LLM 归纳）
 
-- **Chat**: 纯聊天（冷笑话、天气等）→ `routed_mode=Chat`，无 executor_step。
-- **Act**: 隐藏文件、数文件、ls/df 等 → `routed_mode=Act`，有 `executor_step_execute` + `executor_result_ok`。
-- **ChatAct**: 先执行再总结/写诗/播报 → `routed_mode=ChatAct`，先工具再 chat 技能。
+- **DirectAnswer**: 纯聊天（冷笑话、天气等）→ `first_layer_decision=direct_answer`，无 executor_step。
+- **PlannerExecute / plain**: 隐藏文件、数文件、ls/df 等 → `first_layer_decision=planner_execute` 且 `derived_route_label=Act`，有 `executor_step_execute` + `executor_result_ok`。
+- **PlannerExecute / chat-wrapped**: 先执行再总结/写诗/播报 → `first_layer_decision=planner_execute` 且 `derived_route_label=ChatAct`，先工具再聊天包装。
 - **Resume**: 「继续」/“continue” 等正确触发 `decision=resume`、`bind_resume_context=true`，并执行剩余步骤或给出总结（如 AFTER_BREAK_67890、AFTER_CHANGE_OLD_EN、AFTER_PATCHED_STEP 等）。
 
 中英文、同义表达（继续/接着/Go on/pick up from there 等）的 follow-up 用例均按预期完成。

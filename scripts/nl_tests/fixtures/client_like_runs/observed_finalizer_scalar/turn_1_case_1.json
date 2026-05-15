@@ -1,0 +1,68 @@
+{
+  "ok": true,
+  "data": {
+    "task_id": "fixture-observed-finalizer-scalar",
+    "status": "succeeded",
+    "result_json": {
+      "text": "/home/guagua/rustclaw",
+      "messages": [
+        "/home/guagua/rustclaw"
+      ],
+      "task_journal": {
+        "summary": {
+          "input_text": "只输出当前工作目录的绝对路径，不要解释",
+          "final_answer": "/home/guagua/rustclaw",
+          "final_status": "success",
+          "route_result": {
+            "first_layer_decision": "planner_execute",
+            "routed_mode": "Act",
+            "route_gate_kind": "execute"
+          },
+          "finalizer_summary": {
+            "stage": "observed_generic",
+            "fallback": "raw_text",
+            "grounded_ok": true,
+            "used_evidence_ids_count": 1
+          },
+          "task_metrics": {
+            "llm_calls_per_task": 2,
+            "llm_elapsed_ms_per_task": 100,
+            "prompt_truncation_count": 0
+          }
+        },
+        "trace": {
+          "rounds": [
+            {
+              "round_no": 1,
+              "plan_result": {
+                "steps": [
+                  {
+                    "step_id": "step_1",
+                    "action_type": "call_skill",
+                    "skill": "run_cmd"
+                  }
+                ]
+              },
+              "verify_result": {
+                "approved": true,
+                "mode": "ObserveOnly",
+                "issues": []
+              }
+            }
+          ],
+          "step_results": [
+            {
+              "step_id": "step_1",
+              "requested_action_type": "call_skill",
+              "requested_capability": "run_cmd",
+              "executed_skill": "run_cmd",
+              "status": "ok",
+              "output_excerpt": "/home/guagua/rustclaw"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "error": null
+}

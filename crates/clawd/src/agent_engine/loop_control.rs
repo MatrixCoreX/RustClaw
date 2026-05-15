@@ -45,7 +45,9 @@ fn has_discussion_followup_action(actions: &[AgentAction]) -> bool {
     actions.iter().any(|action| match action {
         AgentAction::Respond { .. } | AgentAction::SynthesizeAnswer { .. } => true,
         AgentAction::Think { .. } => false,
-        AgentAction::CallSkill { .. } | AgentAction::CallTool { .. } => false,
+        AgentAction::CallSkill { .. }
+        | AgentAction::CallTool { .. }
+        | AgentAction::CallCapability { .. } => false,
     })
 }
 
@@ -74,6 +76,7 @@ fn action_reads_text_content(action: &AgentAction) -> bool {
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
             (skill.as_str(), args)
         }
+        AgentAction::CallCapability { .. } => return false,
         AgentAction::SynthesizeAnswer { .. }
         | AgentAction::Respond { .. }
         | AgentAction::Think { .. } => return false,
@@ -178,13 +181,6 @@ fn should_stop_for_observed_finalize(
     {
         return false;
     }
-    if route_result.output_contract.response_shape != crate::OutputResponseShape::Scalar
-        && loop_state.round_no < loop_state.max_rounds
-        && latest_path_batch_facts_all_missing(loop_state)
-        && !has_discussion_followup_action(actions)
-    {
-        return false;
-    }
     let required_success_marker = requested_success_marker(agent_run_context);
     let has_direct_observed_answer =
         super::observed_output::extract_direct_answer_from_generic_output(
@@ -198,6 +194,13 @@ fn should_stop_for_observed_finalize(
         return required_success_marker.is_none_or(|marker| {
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
         });
+    }
+    if route_result.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        && loop_state.round_no < loop_state.max_rounds
+        && latest_path_batch_facts_all_missing(loop_state)
+        && !has_discussion_followup_action(actions)
+    {
+        return false;
     }
     if has_direct_observed_answer
         && route_result.output_contract.response_shape != crate::OutputResponseShape::Scalar
@@ -418,7 +421,9 @@ fn initial_execution_recipe_spec(
     let _ = (goal, user_text);
     warn!(
         "execution_recipe_no_hint_bypass_local_detector route_available={} user_request_available={}",
-        agent_run_context.and_then(|ctx| ctx.route_result.as_ref()).is_some(),
+        agent_run_context
+            .and_then(|ctx| ctx.route_result.as_ref())
+            .is_some(),
         agent_run_context
             .and_then(|ctx| ctx.user_request.as_deref())
             .is_some_and(|text| !text.trim().is_empty())
@@ -526,6 +531,10 @@ pub(super) async fn run_agent_with_loop(
                 crate::truncate_for_log(&verifier.answer_incomplete_reason)
             );
             if try_recover_log_analyze_answer_verifier_gap(user_text, &mut reply) {
+                return Ok(reply);
+            }
+            if try_recover_structured_count_answer_verifier_gap(route_result, user_text, &mut reply)
+            {
                 return Ok(reply);
             }
             if try_recover_structured_search_answer_verifier_gap(user_text, &mut reply) {
@@ -758,6 +767,16 @@ struct StructuredSearchFinding {
     results: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StructuredCountFinding {
+    path: Option<String>,
+    total: u64,
+    files: Option<u64>,
+    dirs: Option<u64>,
+    hidden: Option<u64>,
+    recursive: Option<bool>,
+}
+
 fn try_recover_log_analyze_answer_verifier_gap(user_text: &str, reply: &mut AskReply) -> bool {
     let findings = observed_log_analyze_findings(reply);
     if findings.is_empty() {
@@ -784,6 +803,44 @@ fn try_recover_log_analyze_answer_verifier_gap(user_text: &str, reply: &mut AskR
     info!(
         "answer_verifier_retry_exhausted_recovered_with_log_analyze_summary findings={}",
         findings.len()
+    );
+    true
+}
+
+fn try_recover_structured_count_answer_verifier_gap(
+    route_result: Option<&crate::RouteResult>,
+    user_text: &str,
+    reply: &mut AskReply,
+) -> bool {
+    if !route_result.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
+    }) {
+        return false;
+    }
+    let Some(finding) = observed_structured_count_findings(reply).into_iter().next() else {
+        return false;
+    };
+    let answer = deterministic_structured_count_summary_text(user_text, &finding);
+    let mut messages = reply
+        .messages
+        .iter()
+        .filter(|message| crate::finalize::is_execution_summary_message(message))
+        .cloned()
+        .collect::<Vec<_>>();
+    messages.push(answer.clone());
+    if let Some(journal) = reply.task_journal.as_mut() {
+        journal.answer_verifier_summary = None;
+        journal.record_final_answer(&answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    }
+    reply.text = answer;
+    reply.messages = messages;
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    reply.is_llm_reply = false;
+    info!(
+        "answer_verifier_retry_exhausted_recovered_with_structured_count total={}",
+        finding.total
     );
     true
 }
@@ -839,8 +896,7 @@ fn try_recover_structured_search_answer_verifier_gap(
     reply.is_llm_reply = false;
     info!(
         "answer_verifier_retry_exhausted_recovered_with_structured_search_results action={} count={}",
-        finding.action,
-        finding.count
+        finding.action, finding.count
     );
     true
 }
@@ -882,6 +938,29 @@ fn observed_log_analyze_findings(reply: &AskReply) -> Vec<LogAnalyzeFinding> {
     findings
 }
 
+fn observed_structured_count_findings(reply: &AskReply) -> Vec<StructuredCountFinding> {
+    let mut findings = Vec::new();
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return findings;
+    };
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            continue;
+        }
+        if !matches!(step.skill.as_str(), "fs_basic" | "system_basic") {
+            continue;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        let Some(finding) = parse_structured_count_finding(output) else {
+            continue;
+        };
+        findings.push(finding);
+    }
+    findings
+}
+
 fn observed_structured_search_findings(reply: &AskReply) -> Vec<StructuredSearchFinding> {
     let mut findings = Vec::new();
     let Some(journal) = reply.task_journal.as_ref() else {
@@ -906,6 +985,36 @@ fn observed_structured_search_findings(reply: &AskReply) -> Vec<StructuredSearch
         findings.push(finding);
     }
     findings
+}
+
+fn parse_structured_count_finding(output: &str) -> Option<StructuredCountFinding> {
+    let value =
+        crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<serde_json::Value>(output)?;
+    let action = value
+        .get("action")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_ascii_lowercase();
+    if !matches!(action.as_str(), "count_inventory" | "inventory_dir") {
+        return None;
+    }
+    let counts = value.get("counts")?;
+    let total = counts.get("total").and_then(|value| value.as_u64())?;
+    Some(StructuredCountFinding {
+        path: value
+            .get("path")
+            .or_else(|| value.get("resolved_path"))
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string),
+        total,
+        files: counts.get("files").and_then(|value| value.as_u64()),
+        dirs: counts.get("dirs").and_then(|value| value.as_u64()),
+        hidden: counts.get("hidden").and_then(|value| value.as_u64()),
+        recursive: value.get("recursive").and_then(|value| value.as_bool()),
+    })
 }
 
 fn parse_structured_search_finding(output: &str) -> Option<StructuredSearchFinding> {
@@ -1196,6 +1305,57 @@ fn deterministic_structured_search_summary_text(
     lines.join("\n")
 }
 
+fn deterministic_structured_count_summary_text(
+    user_text: &str,
+    finding: &StructuredCountFinding,
+) -> String {
+    let prefer_english = crate::language_policy::request_language_hint(user_text) == "en";
+    let scope = finding.path.as_deref().unwrap_or(if prefer_english {
+        "the requested scope"
+    } else {
+        "目标范围"
+    });
+    let direct = finding.recursive == Some(false);
+    match (
+        prefer_english,
+        direct,
+        finding.files,
+        finding.dirs,
+        finding.hidden,
+    ) {
+        (true, true, Some(files), Some(dirs), Some(hidden)) => format!(
+            "{scope} has {} direct entries: {files} files, {dirs} directories, {hidden} hidden.",
+            finding.total
+        ),
+        (true, true, Some(files), Some(dirs), None) => format!(
+            "{scope} has {} direct entries: {files} files and {dirs} directories.",
+            finding.total
+        ),
+        (true, _, Some(files), Some(dirs), _) => format!(
+            "{scope} has {} entries: {files} files and {dirs} directories.",
+            finding.total
+        ),
+        (true, true, _, _, _) => {
+            format!("{scope} has {} direct entries.", finding.total)
+        }
+        (true, _, _, _, _) => format!("{scope} has {} entries.", finding.total),
+        (false, true, Some(files), Some(dirs), Some(hidden)) => format!(
+            "{scope} 共有 {} 个直接子项：文件 {files} 个，目录 {dirs} 个，隐藏项 {hidden} 个。",
+            finding.total
+        ),
+        (false, true, Some(files), Some(dirs), None) => format!(
+            "{scope} 共有 {} 个直接子项：文件 {files} 个，目录 {dirs} 个。",
+            finding.total
+        ),
+        (false, _, Some(files), Some(dirs), _) => format!(
+            "{scope} 共有 {} 个子项：文件 {files} 个，目录 {dirs} 个。",
+            finding.total
+        ),
+        (false, true, _, _, _) => format!("{scope} 共有 {} 个直接子项。", finding.total),
+        (false, _, _, _, _) => format!("{scope} 共有 {} 个子项。", finding.total),
+    }
+}
+
 fn display_log_path(path: &str) -> &str {
     path.rsplit('/')
         .next()
@@ -1262,6 +1422,7 @@ mod tests {
         should_stop_for_observed_finalize,
         suppress_answer_verifier_retry_if_structurally_satisfied,
         try_recover_log_analyze_answer_verifier_gap,
+        try_recover_structured_count_answer_verifier_gap,
         try_recover_structured_search_answer_verifier_gap, AgentLoopGuardPolicy, RoundOutcome,
     };
     use crate::{
@@ -1273,14 +1434,13 @@ mod tests {
         executor::{StepExecutionResult, StepExecutionStatus},
         AgentAction, AskReply, ClaimedTask, IntentOutputContract, OutputDeliveryIntent,
         OutputLocatorKind, OutputResponseShape, OutputSemanticKind, ResumeBehavior, RiskCeiling,
-        RouteResult, RoutedMode, ScheduleKind,
+        RouteResult, ScheduleKind,
     };
     use serde_json::json;
 
     fn route_result(shape: OutputResponseShape) -> RouteResult {
         RouteResult {
-            routed_mode: RoutedMode::ChatAct,
-            ask_mode: crate::AskMode::from_routed_mode(RoutedMode::ChatAct),
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
             resolved_intent: "test".to_string(),
             needs_clarify: false,
             route_reason: String::new(),
@@ -1696,6 +1856,59 @@ mod tests {
     }
 
     #[test]
+    fn structured_count_verifier_exhaustion_recovers_with_count_inventory() {
+        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        journal.answer_verifier_summary =
+            Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+                pass: false,
+                missing_evidence_fields: vec!["count".to_string()],
+                answer_incomplete_reason:
+                    "answer asks to rerun instead of delivering observed count".to_string(),
+                should_retry: true,
+                retry_instruction: "use the observed counts.total field".to_string(),
+                confidence: 0.94,
+            });
+        journal.step_results.push(crate::task_journal::TaskJournalStepTrace {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output_excerpt: Some(
+                r#"{"action":"count_inventory","counts":{"dirs":6,"files":58,"hidden":0,"total":64},"path":"/repo/scripts","recursive":false}"#
+                    .to_string(),
+            ),
+            error_excerpt: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = route_result(OutputResponseShape::OneSentence);
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+        let mut reply = AskReply::non_llm("需要重新触发计数任务。".to_string())
+            .with_messages(vec![
+                "**执行过程**\n1. 调用工具 `fs_basic`。".to_string(),
+                "需要重新触发计数任务。".to_string(),
+            ])
+            .with_task_journal(journal);
+
+        assert!(try_recover_structured_count_answer_verifier_gap(
+            Some(&route),
+            "先数一下 scripts 目录直接有多少个子项",
+            &mut reply
+        ));
+
+        assert!(!reply.should_fail_task);
+        assert!(reply.text.contains("64"));
+        assert!(reply.text.contains("58"));
+        assert!(reply.text.contains("6"));
+        let journal = reply.task_journal.as_ref().expect("journal");
+        assert_eq!(
+            journal.final_status,
+            Some(crate::task_journal::TaskJournalFinalStatus::Success)
+        );
+        assert!(journal.answer_verifier_summary.is_none());
+    }
+
+    #[test]
     fn answer_verifier_exhaustion_marks_reply_failure() {
         let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
         journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
@@ -1914,8 +2127,7 @@ mod tests {
             r#"{"action":"inventory_dir","path":"/tmp/document","resolved_path":"/tmp/document","files_only":true,"names_only":true,"names":["a.txt","b.md","c.png"]}"#,
         ));
         let mut route = route_result(OutputResponseShape::Free);
-        route.routed_mode = RoutedMode::Act;
-        route.ask_mode = crate::AskMode::from_routed_mode(RoutedMode::Act);
+        route.ask_mode = crate::AskMode::planner_execute_plain();
         route.resolved_intent = "List file names from a known directory.".to_string();
         route.output_contract.locator_kind = OutputLocatorKind::Path;
         route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
@@ -1970,7 +2182,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_path_batch_facts_free_output_continues_for_possible_fallback() {
+    fn missing_path_batch_facts_existence_contract_stops_before_second_round() {
         let mut loop_state = LoopState::new(2);
         loop_state.round_no = 1;
         loop_state.has_tool_or_skill_output = true;
@@ -1985,6 +2197,37 @@ mod tests {
                 .to_string();
         route.output_contract.locator_kind = OutputLocatorKind::Path;
         route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_hint = "plan/missing.md".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({"action":"path_batch_facts","paths":["plan/missing.md"]}),
+        }];
+        assert!(should_stop_for_observed_finalize(
+            Some(&AgentRunContext {
+                route_result: Some(route),
+                ..Default::default()
+            }),
+            &loop_state,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn missing_path_batch_facts_content_contract_continues_for_possible_fallback() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.round_no = 1;
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"path":"plan/missing.md"}],"include_missing":true}"#,
+        ));
+        let mut route = route_result(OutputResponseShape::Free);
+        route.resolved_intent =
+            "Read plan/missing.md; if it is absent, search plan for related markdown files"
+                .to_string();
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
         route.output_contract.locator_hint = "plan/missing.md".to_string();
         let actions = vec![AgentAction::CallSkill {
             skill: "system_basic".to_string(),

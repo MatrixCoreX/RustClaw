@@ -12,7 +12,7 @@ use std::io::{BufRead, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio as StdProcessStdio};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
@@ -54,6 +54,7 @@ const FEISHU_BIND_SESSION_MAX_TTL_SECONDS: u64 = 1800;
 const FEISHU_OFFICIAL_ACCOUNTS_BASE_URL: &str = "https://accounts.feishu.cn";
 const WORKSPACE_UPDATE_TIMEOUT_SECONDS: u64 = 3600;
 const WORKSPACE_UPDATE_LOG_MAX_CHARS: usize = 12000;
+const NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS: u64 = 12;
 const FEISHU_CONFIG_TEMPLATE: &str = r#"# Feishu（中国站）应用机器人通道配置 - 与 lark.toml（国际版）独立，勿混用
 # 飞书中国站使用 open.feishu.cn；国际版 Lark 使用 open.larksuite.com，由 lark.toml 配置
 # 支持文本与入站媒体（图片/文件/音视频）落盘后再提交 clawd ask
@@ -737,6 +738,8 @@ pub(crate) fn build_ui_router() -> Router<AppState> {
         .route("/skills/uninstall", post(uninstall_external_skill))
         .route("/llm/config", get(get_llm_config).post(update_llm_config))
         .route("/llm/test", post(test_llm_config))
+        .route("/nni/device/status", get(nni_device_status))
+        .route("/nni/device/action", post(nni_device_action))
         .route("/logs/latest", get(logs_latest))
         .route("/debug/tasks/:task_id", get(task_debug_detail))
         .route("/debug/recent-robot-tasks", get(recent_robot_tasks))
@@ -817,6 +820,348 @@ struct InternalLlmTextResponse {
     prompt_source: String,
     model: String,
     provider: String,
+}
+
+#[derive(Debug)]
+struct NniSignatureHelperOutput {
+    ok: bool,
+    payload: Value,
+    error: Option<String>,
+    stderr_tail: String,
+    exit_code: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NniDeviceActionRequest {
+    action: String,
+    #[serde(default)]
+    timestamp: Option<i64>,
+}
+
+fn nni_supported_actions() -> Vec<&'static str> {
+    vec![
+        "pubkey",
+        "sign_timestamp",
+        "tng_device_pubkey",
+        "tng_device_cert",
+        "tng_signer_cert",
+        "tng_root_cert",
+    ]
+}
+
+fn nni_signature_helper_path(state: &AppState) -> PathBuf {
+    state
+        .skill_rt
+        .workspace_root
+        .join("pi_app")
+        .join("signature.py")
+}
+
+fn nni_signature_helper_python() -> String {
+    std::env::var("RUSTCLAW_CRYPTOAUTHLIB_PYTHON")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "python3".to_string())
+}
+
+fn nni_hex_fingerprint(hex: &str) -> Option<String> {
+    let normalized = hex.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    let keep = normalized.len().min(16);
+    Some(normalized[..keep].to_string())
+}
+
+fn nni_short_hex(hex: &str) -> Option<String> {
+    let normalized = hex.trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    if normalized.len() <= 24 {
+        return Some(normalized.to_string());
+    }
+    Some(format!(
+        "{}...{}",
+        &normalized[..12],
+        &normalized[normalized.len().saturating_sub(12)..]
+    ))
+}
+
+async fn run_nni_signature_helper(
+    state: &AppState,
+    args: &[String],
+) -> Result<NniSignatureHelperOutput, String> {
+    let script_path = nni_signature_helper_path(state);
+    if !script_path.is_file() {
+        return Err(format!(
+            "signature helper not found: {}",
+            script_path.display()
+        ));
+    }
+
+    let mut cmd = Command::new(nni_signature_helper_python());
+    cmd.arg(&script_path)
+        .args(args)
+        .current_dir(&state.skill_rt.workspace_root)
+        .env("PYTHONUNBUFFERED", "1")
+        .stdin(StdProcessStdio::null())
+        .stdout(StdProcessStdio::piped())
+        .stderr(StdProcessStdio::piped())
+        .kill_on_drop(true);
+
+    let output = match tokio::time::timeout(
+        Duration::from_secs(NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS),
+        cmd.output(),
+    )
+    .await
+    {
+        Ok(Ok(output)) => output,
+        Ok(Err(err)) => return Err(format!("failed to run signature helper: {err}")),
+        Err(_) => {
+            return Err(format!(
+                "signature helper timed out after {NNI_SIGNATURE_HELPER_TIMEOUT_SECONDS}s"
+            ));
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stdout.is_empty() {
+        return Err(if stderr.is_empty() {
+            "signature helper returned empty output".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    let payload: Value = serde_json::from_str(&stdout)
+        .map_err(|err| format!("signature helper returned non-json output: {err}: {stdout}"))?;
+    let ok = payload
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let error = payload
+        .get("error")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+
+    Ok(NniSignatureHelperOutput {
+        ok,
+        payload,
+        error,
+        stderr_tail: stderr,
+        exit_code: output.status.code(),
+    })
+}
+
+fn nni_helper_payload_meta(payload: &Value) -> Value {
+    json!({
+        "slot": payload.get("slot").cloned().unwrap_or(Value::Null),
+        "i2c_bus": payload.get("i2c_bus").cloned().unwrap_or(Value::Null),
+        "i2c_baud": payload.get("i2c_baud").cloned().unwrap_or(Value::Null),
+        "i2c_address": payload.get("i2c_address").cloned().unwrap_or(Value::Null),
+        "lib_path": payload.get("lib_path").cloned().unwrap_or(Value::Null),
+    })
+}
+
+async fn nni_device_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
+    }
+
+    let script_path = nni_signature_helper_path(&state);
+    let supported_actions = nni_supported_actions();
+    if !script_path.is_file() {
+        return (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({
+                    "nni_available": true,
+                    "helper_available": false,
+                    "signature_chip_present": false,
+                    "status": "helper_missing",
+                    "message": "设备签名 helper 未安装，无法检测签名芯片。",
+                    "next_step": "如果本设备需要 NNI 设备签名，请确认 pi_app/signature.py 已随 RustClaw 一起部署。",
+                    "helper_path": script_path.to_string_lossy(),
+                    "supported_actions": supported_actions,
+                })),
+                error: None,
+            }),
+        );
+    }
+
+    match run_nni_signature_helper(&state, &[String::from("pubkey")]).await {
+        Ok(output) if output.ok => {
+            let pubkey = output
+                .payload
+                .get("pubkey")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    ok: true,
+                    data: Some(json!({
+                        "nni_available": true,
+                        "helper_available": true,
+                        "signature_chip_present": true,
+                        "status": "ready",
+                        "message": "已检测到设备签名芯片，NNI 设备签名可用。",
+                        "helper_path": script_path.to_string_lossy(),
+                        "supported_actions": supported_actions,
+                        "pubkey": pubkey,
+                        "pubkey_preview": nni_short_hex(pubkey),
+                        "pubkey_fingerprint": nni_hex_fingerprint(pubkey),
+                        "meta": nni_helper_payload_meta(&output.payload),
+                        "exit_code": output.exit_code,
+                    })),
+                    error: None,
+                }),
+            )
+        }
+        Ok(output) => {
+            let reason = output
+                .error
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    (!output.stderr_tail.trim().is_empty()).then(|| output.stderr_tail.clone())
+                })
+                .unwrap_or_else(|| "signature chip unavailable".to_string());
+            (
+                StatusCode::OK,
+                Json(ApiResponse {
+                    ok: true,
+                    data: Some(json!({
+                        "nni_available": true,
+                        "helper_available": true,
+                        "signature_chip_present": false,
+                        "status": "signature_chip_missing",
+                        "message": "未检测到设备签名芯片。此设备仍可使用 RustClaw，NNI 的设备签名能力暂不可用。",
+                        "next_step": "如果这是无签名芯片设备，可以忽略本页签名操作；如果应当有芯片，请检查 I2C 接线、地址和 cryptoauthlib 环境。",
+                        "helper_path": script_path.to_string_lossy(),
+                        "supported_actions": supported_actions,
+                        "error": reason,
+                        "exit_code": output.exit_code,
+                    })),
+                    error: None,
+                }),
+            )
+        }
+        Err(err) => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({
+                    "nni_available": true,
+                    "helper_available": true,
+                    "signature_chip_present": false,
+                    "status": "signature_chip_missing",
+                    "message": "未检测到设备签名芯片。此设备仍可使用 RustClaw，NNI 的设备签名能力暂不可用。",
+                    "next_step": "如果这是无签名芯片设备，可以忽略本页签名操作；如果应当有芯片，请检查 I2C 接线、地址和 cryptoauthlib 环境。",
+                    "helper_path": script_path.to_string_lossy(),
+                    "supported_actions": supported_actions,
+                    "error": err,
+                })),
+                error: None,
+            }),
+        ),
+    }
+}
+
+async fn nni_device_action(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<NniDeviceActionRequest>,
+) -> (StatusCode, Json<ApiResponse<Value>>) {
+    if let Err((status, Json(resp))) = require_ui_identity(&state, &headers) {
+        return (
+            status,
+            Json(ApiResponse {
+                ok: resp.ok,
+                data: None,
+                error: resp.error,
+            }),
+        );
+    }
+
+    let action = req.action.trim().to_ascii_lowercase();
+    if !nni_supported_actions().contains(&action.as_str()) {
+        return api_error_value(
+            StatusCode::BAD_REQUEST,
+            format!("unsupported NNI action: {action}"),
+        );
+    }
+
+    let mut args = vec![action.clone()];
+    if action == "sign_timestamp" {
+        args.push(req.timestamp.unwrap_or_else(current_unix_ts).to_string());
+    }
+
+    match run_nni_signature_helper(&state, &args).await {
+        Ok(output) if output.ok => (
+            StatusCode::OK,
+            Json(ApiResponse {
+                ok: true,
+                data: Some(json!({
+                    "action": action,
+                    "signature_chip_present": true,
+                    "message": "NNI 设备签名操作完成。",
+                    "payload": output.payload,
+                    "meta": nni_helper_payload_meta(&output.payload),
+                    "exit_code": output.exit_code,
+                })),
+                error: None,
+            }),
+        ),
+        Ok(output) => {
+            let reason = output
+                .error
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| (!output.stderr_tail.trim().is_empty()).then_some(output.stderr_tail))
+                .unwrap_or_else(|| "signature chip unavailable".to_string());
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(ApiResponse {
+                    ok: false,
+                    data: Some(json!({
+                        "action": action,
+                        "signature_chip_present": false,
+                        "status": "signature_chip_missing",
+                        "message": "未检测到设备签名芯片，无法完成本次 NNI 签名操作。",
+                        "exit_code": output.exit_code,
+                    })),
+                    error: Some(reason),
+                }),
+            )
+        }
+        Err(err) => (
+            StatusCode::BAD_GATEWAY,
+            Json(ApiResponse {
+                ok: false,
+                data: Some(json!({
+                    "action": action,
+                    "signature_chip_present": false,
+                    "status": "signature_chip_missing",
+                    "message": "未检测到设备签名芯片，无法完成本次 NNI 签名操作。",
+                })),
+                error: Some(err),
+            }),
+        ),
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -3433,6 +3778,8 @@ struct SkillListItem {
     optional_bins: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     platform_notes: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    planner_capabilities: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     capabilities: Option<Vec<String>>,
 }
@@ -6150,6 +6497,16 @@ fn build_skill_list_item(state: &AppState, skill_name: &str) -> SkillListItem {
         platform_notes: registry_entry
             .as_ref()
             .map(|entry| entry.platform_notes.clone())
+            .filter(|items| !items.is_empty()),
+        planner_capabilities: registry_entry
+            .as_ref()
+            .map(|entry| {
+                entry
+                    .planner_capabilities
+                    .iter()
+                    .map(|capability| capability.name.clone())
+                    .collect::<Vec<_>>()
+            })
             .filter(|items| !items.is_empty()),
         capabilities: registry_entry
             .as_ref()

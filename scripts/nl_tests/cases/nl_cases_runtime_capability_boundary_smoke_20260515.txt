@@ -1,0 +1,8 @@
+# Focused smoke for runtime capability boundary convergence.
+# Run with:
+# bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-file scripts/nl_tests/cases/nl_cases_runtime_capability_boundary_smoke_20260515.txt --quality-guard
+capability_boundary|direct_intro|direct,cn|你好，请用一句话介绍一下你自己
+capability_boundary|cwd_path|act,system,scalar|只输出当前工作目录的绝对路径，不要解释
+capability_boundary|prompt_dir_names|act,fs,list|列出 prompts 目录前 5 个文件名，不要超过 5 个
+capability_boundary|readme_summary|act,fs,summary|扫一眼 README 前 20 行，再提炼成 3 句话
+capability_boundary|missing_file|act,fs,not_found|把 definitely_missing_named_file_route_cleanup_001.txt 发给我

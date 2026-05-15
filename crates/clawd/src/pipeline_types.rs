@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
-use crate::runtime::ask_mode::AskMode;
-use crate::runtime::types::{AgentAction, FirstLayerDecision, RoutedMode, ScheduleIntentOutput};
+use crate::runtime::ask_mode::{ActFinalizeStyle, AskMode};
+use crate::runtime::types::{AgentAction, FirstLayerDecision, ScheduleIntentOutput};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum OutputResponseShape {
@@ -76,6 +76,7 @@ pub(crate) enum OutputSemanticKind {
     HiddenEntriesCheck,
     FileNames,
     DirectoryNames,
+    DirectoryEntryGroups,
     FilePaths,
     DirectoryPurposeSummary,
     ContentExcerptSummary,
@@ -114,6 +115,7 @@ impl OutputSemanticKind {
             Self::HiddenEntriesCheck => "hidden_entries_check",
             Self::FileNames => "file_names",
             Self::DirectoryNames => "directory_names",
+            Self::DirectoryEntryGroups => "directory_entry_groups",
             Self::FilePaths => "file_paths",
             Self::DirectoryPurposeSummary => "directory_purpose_summary",
             Self::ContentExcerptSummary => "content_excerpt_summary",
@@ -252,10 +254,8 @@ impl RiskCeiling {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct RouteResult {
-    pub(crate) routed_mode: RoutedMode,
-    /// Phase 3.2 Stage B：与 `routed_mode` 双轨并存。
-    /// 此字段只反映 `RoutedMode` 维度的折叠，不携带 worker 层 resume flag；
-    /// resume 信息在 `worker::ask_prepare::PreparedAskRouting::ask_mode` 里合并。
+    /// Runtime mode derived from the first-layer decision. This is the semantic
+    /// authority; route labels for logs/journals are derived from this field.
     pub(crate) ask_mode: AskMode,
     pub(crate) resolved_intent: String,
     pub(crate) needs_clarify: bool,
@@ -274,20 +274,28 @@ pub(crate) struct RouteResult {
 }
 
 impl RouteResult {
-    pub(crate) fn set_routed_mode(&mut self, mode: RoutedMode) {
-        self.routed_mode = mode;
-        self.ask_mode = AskMode::from_routed_mode(mode);
-    }
-
     pub(crate) fn set_ask_mode(&mut self, ask_mode: AskMode) {
-        self.routed_mode = ask_mode.to_routed_mode();
         self.ask_mode = ask_mode;
     }
 
+    pub(crate) fn derived_route_label(&self) -> &'static str {
+        self.ask_mode.route_label()
+    }
+
     pub(crate) fn set_first_layer_decision(&mut self, decision: FirstLayerDecision) {
-        self.set_ask_mode(AskMode::from_first_layer_decision(
-            decision,
-            self.routed_mode,
+        let finalize = self
+            .ask_mode
+            .act_finalize_style()
+            .unwrap_or(ActFinalizeStyle::Plain);
+        self.set_ask_mode(AskMode::from_first_layer_decision_with_finalize(
+            decision, finalize,
+        ));
+    }
+
+    pub(crate) fn set_planner_execute_finalize(&mut self, finalize: ActFinalizeStyle) {
+        self.set_ask_mode(AskMode::from_first_layer_decision_with_finalize(
+            FirstLayerDecision::PlannerExecute,
+            finalize,
         ));
     }
 
@@ -363,6 +371,10 @@ impl PlanStep {
                 tool: self.skill.clone(),
                 args: self.args.clone(),
             }),
+            "call_capability" => Some(AgentAction::CallCapability {
+                capability: self.skill.clone(),
+                args: self.args.clone(),
+            }),
             "respond" => Some(AgentAction::Respond {
                 content: self
                     .args
@@ -405,6 +417,7 @@ impl PlanResult {
                 "respond" => "respond".to_string(),
                 "synthesize_answer" => "synthesize_answer".to_string(),
                 "think" => "think".to_string(),
+                "call_capability" => format!("capability({})", step.skill),
                 "call_tool" => format!("tool({})", step.skill),
                 _ => format!("skill({})", step.skill),
             })
@@ -431,6 +444,14 @@ pub(crate) fn plan_step_from_agent_action(
             step_id,
             action_type: "call_tool".to_string(),
             skill: tool.clone(),
+            args: args.clone(),
+            depends_on,
+            why,
+        },
+        AgentAction::CallCapability { capability, args } => PlanStep {
+            step_id,
+            action_type: "call_capability".to_string(),
+            skill: capability.clone(),
             args: args.clone(),
             depends_on,
             why,
@@ -466,14 +487,12 @@ pub(crate) fn plan_step_from_agent_action(
 mod tests {
     use super::{
         plan_step_from_agent_action, AgentAction, AskMode, FirstLayerDecision,
-        IntentOutputContract, PlanStep, ResumeBehavior, RiskCeiling, RouteResult, RoutedMode,
-        ScheduleKind,
+        IntentOutputContract, PlanStep, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
     };
     use serde_json::json;
 
-    fn route_result_with_modes(routed_mode: RoutedMode, ask_mode: AskMode) -> RouteResult {
+    fn route_result_with_mode(ask_mode: AskMode) -> RouteResult {
         RouteResult {
-            routed_mode,
             ask_mode,
             resolved_intent: String::new(),
             needs_clarify: false,
@@ -529,9 +548,42 @@ mod tests {
     }
 
     #[test]
-    fn route_result_gate_kind_uses_first_layer_decision_over_legacy_mode() {
-        let route =
-            route_result_with_modes(RoutedMode::Act, AskMode::from_routed_mode(RoutedMode::Chat));
+    fn plan_step_round_trips_call_capability() {
+        let step = PlanStep {
+            step_id: "step_1".to_string(),
+            action_type: "call_capability".to_string(),
+            skill: "filesystem.list_entries".to_string(),
+            args: json!({ "path": "." }),
+            depends_on: vec![],
+            why: "list workspace".to_string(),
+        };
+
+        let action = step
+            .to_agent_action()
+            .expect("call_capability step should parse");
+        assert!(matches!(
+            action,
+            AgentAction::CallCapability { capability, args }
+                if capability == "filesystem.list_entries" && args == json!({ "path": "." })
+        ));
+
+        let serialized = plan_step_from_agent_action(
+            &AgentAction::CallCapability {
+                capability: "system.run_command".to_string(),
+                args: json!({ "command": "pwd" }),
+            },
+            "step_2".to_string(),
+            vec!["step_1".to_string()],
+            "run command".to_string(),
+        );
+        assert_eq!(serialized.action_type, "call_capability");
+        assert_eq!(serialized.skill, "system.run_command");
+        assert_eq!(serialized.args, json!({ "command": "pwd" }));
+    }
+
+    #[test]
+    fn route_result_gate_kind_uses_first_layer_decision() {
+        let route = route_result_with_mode(crate::AskMode::direct_answer());
 
         assert_eq!(
             route.first_layer_decision(),
@@ -542,11 +594,8 @@ mod tests {
     }
 
     #[test]
-    fn route_result_set_first_layer_decision_keeps_legacy_fields_in_sync() {
-        let mut route = route_result_with_modes(
-            RoutedMode::Chat,
-            AskMode::from_routed_mode(RoutedMode::Chat),
-        );
+    fn route_result_set_first_layer_decision_updates_derived_label() {
+        let mut route = route_result_with_mode(crate::AskMode::direct_answer());
 
         route.set_first_layer_decision(FirstLayerDecision::PlannerExecute);
 
@@ -554,7 +603,7 @@ mod tests {
             route.first_layer_decision(),
             FirstLayerDecision::PlannerExecute
         );
-        assert_eq!(route.routed_mode, RoutedMode::Act);
+        assert_eq!(route.derived_route_label(), "Act");
         assert!(route.is_execute_gate());
     }
 }

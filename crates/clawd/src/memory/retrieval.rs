@@ -516,6 +516,7 @@ fn push_items_section(
     }
     let lines = items
         .iter()
+        .filter(|item| should_render_memory_item_in_section(title, item))
         .map(|item| {
             let sanitized = super::sanitize_memory_text_for_prompt(&item.text);
             match item.source_label.as_deref() {
@@ -531,7 +532,17 @@ fn push_items_section(
             }
         })
         .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return;
+    }
     sections.push((title, lines));
+}
+
+fn should_render_memory_item_in_section(title: &str, item: &RetrievedMemoryItem) -> bool {
+    if matches!(title, "STABLE_FACTS" | "RELEVANT_FACTS") {
+        return !crate::memory::fact_uses_cross_turn_deictic_locator(&item.text);
+    }
+    true
 }
 
 fn fetch_recent_candidates(
@@ -911,6 +922,24 @@ mod tests {
         assert!(block.contains("KNOWLEDGE_BASE_CONTEXT"));
         assert!(block.contains("[docs:README.md]"));
         assert!(block.contains("deployment steps live here"));
+    }
+
+    #[test]
+    fn stable_fact_rendering_skips_cross_turn_deictic_locator_mapping() {
+        let ctx = StructuredMemoryContext {
+            relevant_facts: vec![
+                item("那个日志指 /tmp/device/app.log\nReason: stale cross-turn alias"),
+                item("默认用中文回复\nReason: durable preference"),
+            ],
+            ..Default::default()
+        };
+
+        let block = build_structured_memory_context_block(&ctx, MemoryContextMode::Planner, 2000);
+
+        assert!(block.contains("STABLE_FACTS"));
+        assert!(block.contains("默认用中文回复"));
+        assert!(!block.contains("/tmp/device/app.log"));
+        assert!(!block.contains("那个日志"));
     }
 
     #[test]

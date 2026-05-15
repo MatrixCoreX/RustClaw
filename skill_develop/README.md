@@ -82,7 +82,7 @@ python3 skill_develop/create_skill.py report_writer --uses-llm
 2. 实现单行 JSON stdin/stdout 协议
 3. 补全 `INTERFACE.md`
 4. 运行 `python3 scripts/sync_skill_docs.py`
-5. 在 `prompts/layers/overlays/agent_tool_spec.md` 增加参数契约
+5. 如果该 skill 需要进入 planner 常规自然语言执行流，在 `configs/skills_registry.toml` 声明 `planner_capabilities`
 6. 如有 vendor 特化，再补 `prompts/layers/vendor_patches/<vendor>/skills/<skill_name>.md`
 7. 运行 `cargo check -p clawd -p skill-runner -p <new-skill-package>`
 
@@ -124,7 +124,7 @@ python3 skill_develop/create_skill.py --help
 - 外部技能验证/编译通过后，`register_external_skill(confirm=true)` 会自动写 `configs/config.toml` 的 `skill_switches.<skill_name>=true`
 - skill prompt 运行时组装方式：
   1. canonical body: `prompts/layers/generated/skills/<skill>.md`
-  2. planner/tool 约束叠加：`prompts/layers/overlays/agent_tool_spec.md`
+  2. planner/tool 全局约束叠加：`prompts/layers/overlays/agent_tool_spec.md`（只放通用协议，不为单个普通 skill 添加参数契约）
   3. optional vendor patch: `prompts/layers/vendor_patches/<vendor>/skills/<skill>.md`
 - `configs/skills_registry.toml` 中的 `prompt_file = "prompts/skills/<skill>.md"` 是逻辑路径；运行时实际主内容由 `scripts/sync_skill_docs.py` 维护的 `prompts/layers/generated/skills/<skill>.md` 提供
 - 技能输入协议虽然最少只要能正确处理 `request_id` 和 `args` 就能工作，但新技能脚手架与文档应按当前主协议显式包含：
