@@ -232,10 +232,7 @@ pub(crate) fn apply_post_route_policy(
             .requires_content_evidence = true;
     }
 
-    if auto_locator_resolved_direct
-        && path_scoped_content_request
-        && !execution_route_result.needs_clarify
-    {
+    if auto_locator_resolved_direct && path_scoped_content_request {
         execution_route_result.needs_clarify = false;
         if execution_route_result.is_clarify_gate() || execution_route_result.is_chat_gate() {
             let finalize = if matches!(
@@ -484,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn filename_scope_with_direct_auto_locator_does_not_override_clarify() {
+    fn filename_scope_with_direct_auto_locator_rescues_clarify() {
         let mut route = route_result();
         route.needs_clarify = true;
         route.output_contract.locator_kind = OutputLocatorKind::Filename;
@@ -494,14 +491,14 @@ mod tests {
         );
         assert_eq!(
             result.execution_route_result.ask_mode,
-            crate::AskMode::clarify()
+            crate::AskMode::planner_execute_plain()
         );
-        assert!(result.execution_route_result.needs_clarify);
+        assert!(!result.execution_route_result.needs_clarify);
         assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/README.md"));
     }
 
     #[test]
-    fn current_workspace_auto_locator_does_not_override_clarify() {
+    fn current_workspace_auto_locator_rescues_clarify() {
         let mut route = route_result();
         route.ask_mode = crate::AskMode::clarify();
         route.needs_clarify = true;
@@ -513,9 +510,9 @@ mod tests {
         );
         assert_eq!(
             result.execution_route_result.ask_mode,
-            crate::AskMode::clarify()
+            crate::AskMode::planner_execute_chat_wrapped()
         );
-        assert!(result.execution_route_result.needs_clarify);
+        assert!(!result.execution_route_result.needs_clarify);
         assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/workspace"));
     }
 

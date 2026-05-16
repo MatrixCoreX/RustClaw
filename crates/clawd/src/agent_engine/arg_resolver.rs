@@ -227,6 +227,23 @@ fn normalize_fs_search_arg_aliases(args: &mut Value) -> bool {
         .is_some_and(|action| action.eq_ignore_ascii_case("grep_text"))
     {
         changed |= move_string_alias_if_missing(obj, "query", &["pattern", "keyword", "text"]);
+    } else if obj
+        .get("action")
+        .and_then(|value| value.as_str())
+        .is_some_and(|action| action.eq_ignore_ascii_case("find_ext"))
+    {
+        changed |= move_value_alias_if_missing(
+            obj,
+            "ext",
+            &[
+                "extension",
+                "extensions",
+                "ext_filter",
+                "file_extension",
+                "file_extensions",
+            ],
+        );
+        changed |= move_string_alias_if_missing(obj, "pattern", &["name", "keyword", "query"]);
     }
     changed
 }
@@ -652,6 +669,28 @@ mod tests {
             args.get("root").and_then(|v| v.as_str()),
             Some("/tmp/stem_unique")
         );
+    }
+
+    #[test]
+    fn fs_search_find_ext_aliases_preserve_multi_extension_contract() {
+        let mut args = json!({
+            "action": "search_extension",
+            "extensions": ["md", "txt"],
+            "query": "log",
+            "directory": "/tmp/docs"
+        });
+
+        assert!(normalize_skill_arg_aliases("fs_search", &mut args));
+        assert_eq!(
+            args.get("action").and_then(|v| v.as_str()),
+            Some("find_ext")
+        );
+        assert_eq!(
+            args.get("ext").and_then(|v| v.as_array()).map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(args.get("pattern").and_then(|v| v.as_str()), Some("log"));
+        assert_eq!(args.get("root").and_then(|v| v.as_str()), Some("/tmp/docs"));
     }
 
     #[test]

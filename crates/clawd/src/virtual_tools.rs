@@ -205,9 +205,30 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             move_value_alias_if_missing(
                 &mut obj,
                 "pattern",
-                &["name", "keyword", "query", "filename"],
+                &[
+                    "name",
+                    "keyword",
+                    "query",
+                    "filename",
+                    "name_pattern",
+                    "basename_pattern",
+                    "filename_pattern",
+                    "glob",
+                    "include_pattern",
+                    "match_pattern",
+                ],
             );
-            move_value_alias_if_missing(&mut obj, "ext", &["extension", "ext_filter"]);
+            move_value_alias_if_missing(
+                &mut obj,
+                "ext",
+                &[
+                    "extension",
+                    "extensions",
+                    "ext_filter",
+                    "file_extension",
+                    "file_extensions",
+                ],
+            );
             demote_existing_directory_pattern_to_root(&mut obj);
             let has_pattern = has_non_empty_arg(&obj, "pattern");
             let has_ext = has_non_empty_arg(&obj, "ext");
@@ -758,6 +779,54 @@ mod tests {
             rewrite.runtime_args.get("ext").and_then(|v| v.as_str()),
             Some("sh")
         );
+    }
+
+    #[test]
+    fn fs_basic_find_entries_name_pattern_alias_rewrites_to_name_search() {
+        let args = json!({
+            "action": "find_entries",
+            "path": ".",
+            "name_pattern": "*log*.md",
+            "files_only": true,
+            "recursive": true
+        });
+        let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+            .unwrap()
+            .expect("rewrite");
+
+        assert_eq!(rewrite.runtime_tool, "fs_search");
+        assert_eq!(
+            rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+            Some("find_name")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("pattern").and_then(|v| v.as_str()),
+            Some("*log*.md")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("root").and_then(|v| v.as_str()),
+            Some(".")
+        );
+    }
+
+    #[test]
+    fn fs_basic_find_entries_extensions_alias_rewrites_to_ext_search() {
+        let args = json!({
+            "action": "find_entries",
+            "root": ".",
+            "extensions": ["md", "txt"],
+            "pattern": "log"
+        });
+        let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+            .unwrap()
+            .expect("rewrite");
+
+        assert_eq!(rewrite.runtime_tool, "fs_search");
+        assert_eq!(
+            rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+            Some("find_ext")
+        );
+        assert_eq!(rewrite.runtime_args.get("ext"), Some(&json!(["md", "txt"])));
     }
 
     #[test]

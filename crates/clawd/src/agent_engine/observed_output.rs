@@ -512,6 +512,42 @@ fn route_allows_raw_listing_direct_answer(route: Option<&crate::RouteResult>) ->
     })
 }
 
+fn route_allows_strict_plain_observation_passthrough(route: &crate::RouteResult) -> bool {
+    route.ask_mode.finalize_chat_wrapped()
+        && route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && route.output_contract.response_shape == crate::OutputResponseShape::Strict
+}
+
+fn strict_plain_observation_passthrough_candidate(body: &str) -> Option<String> {
+    let lines = body
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| *line != "exit=0")
+        .filter(|line| !is_ignorable_shell_warning(line))
+        .collect::<Vec<_>>();
+    if lines.is_empty()
+        || lines.len() > 80
+        || lines.iter().any(|line| {
+            looks_like_shell_long_listing_line(line)
+                || serde_json::from_str::<serde_json::Value>(line)
+                    .map(|value| value.is_object() || value.is_array())
+                    .unwrap_or(false)
+        })
+    {
+        return None;
+    }
+    let candidate = lines.join("\n");
+    if crate::finalize::looks_like_planner_artifact(&candidate)
+        || crate::finalize::looks_like_internal_trace_artifact(&candidate)
+    {
+        return None;
+    }
+    Some(candidate)
+}
+
 fn latest_list_dir_listing(loop_state: &LoopState) -> Option<String> {
     let idx = latest_successful_step_index(loop_state, |step| step.skill == "list_dir")?;
     let step = &loop_state.executed_step_results[idx];
@@ -857,6 +893,9 @@ fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> 
 }
 
 pub(crate) fn route_requires_synthesized_delivery(route: &crate::RouteResult) -> bool {
+    if route_allows_strict_plain_observation_passthrough(route) {
+        return false;
+    }
     route.ask_mode.finalize_chat_wrapped()
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
@@ -3301,10 +3340,17 @@ fn extract_field_direct_answer_candidate(
             &[("field_path", field_path)],
         ));
     }
+    let field_value = value.get("value").unwrap_or(&serde_json::Value::Null);
+    if matches!(
+        field_value,
+        serde_json::Value::Object(_) | serde_json::Value::Array(_)
+    ) {
+        return None;
+    }
     Some(structured_field_display_line(
         state,
         field_path,
-        value.get("value").unwrap_or(&serde_json::Value::Null),
+        field_value,
         value.get("value_text").and_then(|v| v.as_str()),
         exists,
         prefer_english,
@@ -4107,6 +4153,17 @@ fn extract_direct_answer_from_generic_output_impl(
                                     })
                             })
                             .flatten()
+                    })
+                    .or_else(|| {
+                        route
+                            .filter(|route| {
+                                route_allows_strict_plain_observation_passthrough(route)
+                            })
+                            .and_then(|_| {
+                                strict_plain_observation_passthrough_candidate(
+                                    &observed_output.body,
+                                )
+                            })
                     })
             } else {
                 None
@@ -5320,6 +5377,28 @@ mod tests {
     }
 
     #[test]
+    fn direct_answer_defers_container_extract_field_to_synthesis() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"scripts","value":{"build":"echo build","dev":"echo dev","lint":"echo lint"},"value_text":"{\"build\":\"echo build\",\"dev\":\"echo dev\",\"lint\":\"echo lint\"}","value_type":"object"}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint = "package.json".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .is_none()
+        );
+    }
+
+    #[test]
     fn direct_answer_formats_config_basic_validate_result_as_pass_fail() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -6409,7 +6488,7 @@ version.workspace = true
 
     #[test]
     fn chat_wrapped_unclassified_contract_requires_synthesized_delivery() {
-        let route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        let route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
         assert!(route_requires_synthesized_delivery(&route));
 
         let agent_run_context = AgentRunContext {
@@ -6420,6 +6499,32 @@ version.workspace = true
         assert!(contract.contains(r#""direct_observation_passthrough_allowed":false"#));
         assert!(observed_response_style_hint(Some(&agent_run_context))
             .contains("Do not answer by copying only the raw observed output"));
+    }
+
+    #[test]
+    fn strict_plain_observation_contract_allows_passthrough() {
+        let route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        assert!(!route_requires_synthesized_delivery(&route));
+
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "run_cmd",
+            "model_io.log.2026-05-14 215M\nmodel_io.log.2026-05-11 149M\n",
+        ));
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("strict plain observation passthrough");
+
+        assert_eq!(
+            answer,
+            "model_io.log.2026-05-14 215M\nmodel_io.log.2026-05-11 149M"
+        );
     }
 
     #[test]

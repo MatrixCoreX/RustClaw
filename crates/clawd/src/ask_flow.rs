@@ -630,6 +630,86 @@ fn promote_direct_answer_gate_to_planner(
     DirectAnswerPreflight::PlannerExecute(ctx.clone())
 }
 
+fn resolve_direct_answer_gate_contract_locator(
+    state: &AppState,
+    current_user_request: &str,
+    gate: &DirectAnswerGateOut,
+    contract: &crate::IntentOutputContract,
+) -> Option<String> {
+    if !matches!(
+        contract.locator_kind,
+        crate::OutputLocatorKind::Path
+            | crate::OutputLocatorKind::Filename
+            | crate::OutputLocatorKind::CurrentWorkspace
+    ) {
+        return None;
+    }
+    let hint = contract.locator_hint.trim();
+    if contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace && hint.is_empty() {
+        return None;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    if surface.has_deictic_reference()
+        && !surface.has_concrete_locator_hint()
+        && !surface.has_structured_target_refinement()
+        && !surface.has_delivery_token_reference()
+    {
+        let locator_kind = if contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace {
+            crate::OutputLocatorKind::Path
+        } else {
+            contract.locator_kind
+        };
+        return crate::worker::try_resolve_implicit_locator_path(
+            state,
+            current_user_request,
+            current_user_request,
+            locator_kind,
+            None,
+        )
+        .and_then(|resolution| match resolution {
+            crate::worker::LocatorAutoResolution::Direct(path) => Some(path),
+            crate::worker::LocatorAutoResolution::Fuzzy(_) => None,
+        });
+    }
+    let resolved = if hint.is_empty() {
+        gate.resolved_user_intent.trim()
+    } else {
+        hint
+    };
+    if resolved.is_empty() {
+        return None;
+    }
+    let locator_kind = if contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace {
+        crate::OutputLocatorKind::Path
+    } else {
+        contract.locator_kind
+    };
+    crate::worker::try_resolve_implicit_locator_path(
+        state,
+        current_user_request,
+        resolved,
+        locator_kind,
+        None,
+    )
+    .and_then(|resolution| match resolution {
+        crate::worker::LocatorAutoResolution::Direct(path) => Some(path),
+        crate::worker::LocatorAutoResolution::Fuzzy(_) => None,
+    })
+}
+
+fn bind_direct_answer_gate_contract_locator(
+    state: &AppState,
+    current_user_request: &str,
+    gate: &DirectAnswerGateOut,
+    contract: &mut crate::IntentOutputContract,
+) -> Option<String> {
+    let path =
+        resolve_direct_answer_gate_contract_locator(state, current_user_request, gate, contract)?;
+    contract.locator_kind = crate::OutputLocatorKind::Path;
+    contract.locator_hint = path.clone();
+    Some(path)
+}
+
 trait OutputContractFallbackShape {
     fn with_fallback_shape(self, fallback: &crate::IntentOutputContract) -> Self;
 }
@@ -713,9 +793,15 @@ fn apply_direct_answer_gate_outcome(
                 }
             }
             if output_contract_requires_planner_execution(&contract) {
+                let resolved_locator_path = bind_direct_answer_gate_contract_locator(
+                    state,
+                    current_user_request,
+                    &gate,
+                    &mut contract,
+                );
                 if direct_answer_gate_promotion_needs_unbound_deictic_clarify(
                     current_user_request,
-                    auto_locator_path,
+                    resolved_locator_path.as_deref().or(auto_locator_path),
                     has_authoritative_deictic_anchor,
                     &contract,
                 ) {
@@ -750,13 +836,19 @@ fn apply_direct_answer_gate_outcome(
         }
         DirectAnswerGateDecision::PlannerExecute => {
             let fallback_contract = route.output_contract.clone();
-            let contract = output_contract_from_direct_answer_gate(
+            let mut contract = output_contract_from_direct_answer_gate(
                 gate.output_contract.clone(),
                 &fallback_contract,
             );
+            let resolved_locator_path = bind_direct_answer_gate_contract_locator(
+                state,
+                current_user_request,
+                &gate,
+                &mut contract,
+            );
             if direct_answer_gate_promotion_needs_unbound_deictic_clarify(
                 current_user_request,
-                auto_locator_path,
+                resolved_locator_path.as_deref().or(auto_locator_path),
                 has_authoritative_deictic_anchor,
                 &contract,
             ) {
@@ -2093,6 +2185,69 @@ mod tests {
         assert!(route
             .route_reason
             .contains("direct_answer_gate_contract_execute"));
+    }
+
+    #[test]
+    fn direct_answer_gate_binds_resolvable_workspace_child_locator() {
+        let root = TempDirGuard::new("gate_workspace_child");
+        std::fs::create_dir_all(root.path.join("docs")).expect("create docs");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = root.path.clone();
+        state.skill_rt.default_locator_search_dir = root.path.clone();
+        let route = chat_route_for_gate();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut contract = gate_contract(true, "path", "content_excerpt_summary");
+        contract.locator_hint = "docs".to_string();
+        let gate = gate_out("planner_execute", contract);
+
+        let outcome =
+            apply_direct_answer_gate_outcome(&state, &mut ctx, "look at the docs folder", gate);
+
+        assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_execute_gate());
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+        );
+        assert_eq!(
+            route.output_contract.locator_hint,
+            root.path.join("docs").display().to_string()
+        );
+    }
+
+    #[test]
+    fn direct_answer_gate_binds_deictic_request_when_request_itself_resolves_target() {
+        let root = TempDirGuard::new("gate_deictic_workspace_child");
+        std::fs::create_dir_all(root.path.join("docs")).expect("create docs");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = root.path.clone();
+        state.skill_rt.default_locator_search_dir = root.path.clone();
+        let route = chat_route_for_gate();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut contract = gate_contract(true, "path", "content_excerpt_summary");
+        contract.locator_hint = "docs".to_string();
+        let gate = gate_out("planner_execute", contract);
+
+        let outcome = apply_direct_answer_gate_outcome(
+            &state,
+            &mut ctx,
+            "look at the docs folder and summarize it",
+            gate,
+        );
+
+        assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+        let route = ctx.route_result.expect("route");
+        assert_eq!(
+            route.output_contract.locator_hint,
+            root.path.join("docs").display().to_string()
+        );
     }
 
     #[test]
