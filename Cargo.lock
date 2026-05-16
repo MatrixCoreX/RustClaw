@@ -618,6 +618,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "config-edit-skill"
+version = "0.1.7"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+ "toml_edit",
+]
+
+[[package]]
 name = "config-guard-skill"
 version = "0.1.7"
 dependencies = [

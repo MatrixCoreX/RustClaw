@@ -1,0 +1,6 @@
+# Focused config_edit smoke cases.
+# These cases verify that planner-facing config mutations use config_edit.
+# The temp-config case requires a prepared copy at:
+#   run/nl_eval_tmp/config_edit_smoke/config.toml
+config_edit_smoke|plan_real_config_no_write_cn|act,config,mutate,tool:config_edit|只生成变更计划，不要实际修改：把 configs/config.toml 里的 skills.skill_switches.config_edit_nl_plan 设置为 true，然后告诉我会改什么并保留执行过程
+config_edit_smoke|apply_temp_config_cn|act,config,mutate,tool:config_edit|在 run/nl_eval_tmp/config_edit_smoke/config.toml 中，把 skills.skill_switches.config_edit_nl_smoke 设置为 true；执行前先生成变更计划，执行后验证 TOML 并读回这个字段，保留执行过程

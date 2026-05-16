@@ -347,6 +347,7 @@ skills_list = [
     "run_cmd",
     "fs_basic",
     "config_basic",
+    "config_edit",
     "read_file",
     "write_file",
     "list_dir",

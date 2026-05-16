@@ -939,6 +939,22 @@ fn skill_attempts_config_mutation(state: &AppState, skill_name: &str, args: &Val
                     .iter()
                     .any(|needle| action.contains(needle))
         }
+        "config_edit" => {
+            let action = args
+                .get("action")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase();
+            matches!(
+                action.as_str(),
+                "apply_config_change" | "apply_change" | "write_field" | "set_field"
+            ) && if args.get("path").and_then(|value| value.as_str()).is_none() {
+                true
+            } else {
+                args_path_targets_configs_dir(&state.skill_rt.workspace_root, args, "path", true)
+            }
+        }
         "extension_manager" => {
             let action = args
                 .get("action")

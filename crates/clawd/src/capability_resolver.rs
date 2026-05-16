@@ -71,6 +71,19 @@ fn resolve_static_capability_action_for_state(
         "config.list_keys" => Some(("config_basic", Some("list_keys"))),
         "config.validate" => Some(("config_basic", Some("validate"))),
         "config.guard_rustclaw_config" => Some(("config_basic", Some("guard_rustclaw_config"))),
+        "config.plan_change" | "config.plan_config_change" => {
+            Some(("config_edit", Some("plan_config_change")))
+        }
+        "config.apply_change"
+        | "config.apply_config_change"
+        | "config.write_field"
+        | "config.set_field" => Some(("config_edit", Some("apply_config_change"))),
+        "config.validate_after_change" => Some(("config_edit", Some("validate_config"))),
+        "config.guard_after_change" | "config.guard_config" => {
+            Some(("config_edit", Some("guard_config")))
+        }
+        "config.read_back" => Some(("config_edit", Some("read_back"))),
+        "config.restart_if_requested" => Some(("config_edit", Some("restart_if_requested"))),
         "system.run_command" | "system.run_cmd" => Some(("run_cmd", None)),
         _ => None,
     }) else {

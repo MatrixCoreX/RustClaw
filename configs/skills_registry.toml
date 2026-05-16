@@ -221,6 +221,48 @@ input_schema = { type = "object", required = ["action"], properties = { action =
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
+name = "config_edit"
+enabled = true
+kind = "runner"
+planner_kind = "tool"
+group = "config"
+primary_fallback_role = "primary"
+aliases = ["config_mutation", "config_write", "config_set"]
+timeout_seconds = 45
+prompt_file = "prompts/skills/config_edit.md"
+output_kind = "text"
+description = "Planner-facing structured config mutation tool. Use for plan/apply/validate/guard/read-back workflows when changing RustClaw config fields."
+semantic_tags = ["structured_config", "config_mutation", "toml", "json", "field_write", "field_read_back", "config_validation", "config_guard", "restart_recommendation"]
+risk_level = "high"
+auto_invocable = true
+requires_confirmation = true
+side_effect = true
+retryable = true
+capabilities = ["fs.read", "fs.write"]
+preferred_over_run_cmd = true
+supported_os = ["linux", "macos"]
+platform_notes = ["Uses structured TOML/JSON parsing and editing. apply_config_change mutates files; plan/validate/guard/read_back are observe/validate actions."]
+confirmation_exempt_when = [
+  { action = "plan_config_change" },
+  { action = "validate_config" },
+  { action = "guard_config" },
+  { action = "read_back" },
+  { action = "restart_if_requested", restart = false },
+]
+planner_capabilities = [
+  { name = "config.plan_change", action = "plan_config_change", effect = "observe", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "low", preferred = true },
+  { name = "config.apply_change", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "high", preferred = true },
+  { name = "config.write_field", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "high", preferred = true },
+  { name = "config.set_field", action = "apply_config_change", effect = "mutate", required = ["field_path", "value"], optional = ["path", "format", "operation"], risk_level = "high", preferred = true },
+  { name = "config.validate_after_change", action = "validate_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true },
+  { name = "config.guard_after_change", action = "guard_config", effect = "validate", optional = ["path", "format"], risk_level = "low", preferred = true },
+  { name = "config.read_back", action = "read_back", effect = "observe", required = ["field_path"], optional = ["path", "format"], risk_level = "low", preferred = true },
+  { name = "config.restart_if_requested", action = "restart_if_requested", effect = "external", optional = ["restart", "reason"], risk_level = "high", preferred = true },
+]
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["plan_config_change", "apply_config_change", "validate_config", "guard_config", "read_back", "restart_if_requested"] }, path = { type = "string" }, field_path = { type = "string" }, value = {}, operation = { type = "string", enum = ["set"] }, format = { type = "string", enum = ["toml", "json"] }, restart = { type = "boolean" }, reason = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
+
+[[skills]]
 name = "schedule"
 enabled = true
 kind = "builtin"
