@@ -244,7 +244,11 @@ fn parse_gate_delivery_intent(raw: &str) -> crate::OutputDeliveryIntent {
 
 fn parse_gate_semantic_kind(raw: &str) -> crate::OutputSemanticKind {
     match raw.trim().to_ascii_lowercase().as_str() {
-        "raw_command_output" => crate::OutputSemanticKind::RawCommandOutput,
+        "raw_command_output"
+        | "raw_output"
+        | "command_output"
+        | "command_result"
+        | "command_execution_result" => crate::OutputSemanticKind::RawCommandOutput,
         "service_status" => crate::OutputSemanticKind::ServiceStatus,
         "hidden_entries_check" => crate::OutputSemanticKind::HiddenEntriesCheck,
         "file_names" => crate::OutputSemanticKind::FileNames,

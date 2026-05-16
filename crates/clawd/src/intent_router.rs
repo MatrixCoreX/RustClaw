@@ -567,9 +567,11 @@ fn parse_output_delivery_intent(s: &str) -> OutputDeliveryIntent {
 
 fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
     match s.trim().to_ascii_lowercase().as_str() {
-        "raw_command_output" | "raw_output" | "command_output" => {
-            OutputSemanticKind::RawCommandOutput
-        }
+        "raw_command_output"
+        | "raw_output"
+        | "command_output"
+        | "command_result"
+        | "command_execution_result" => OutputSemanticKind::RawCommandOutput,
         "service_status" => OutputSemanticKind::ServiceStatus,
         "hidden_entries_check"
         | "hidden_entry_check"
@@ -3763,9 +3765,13 @@ fn normalize_output_delivery_intent_for_schema(raw: &str) -> &'static str {
 
 fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static str {
     match normalize_schema_token(raw).as_str() {
-        "raw" | "raw_output" | "command_output" | "shell_output" | "terminal_output" => {
-            OutputSemanticKind::RawCommandOutput.as_str()
-        }
+        "raw"
+        | "raw_output"
+        | "command_output"
+        | "command_result"
+        | "command_execution_result"
+        | "shell_output"
+        | "terminal_output" => OutputSemanticKind::RawCommandOutput.as_str(),
         "existence_boolean_with_path" | "boolean_with_path" | "exists_boolean_with_path" => {
             OutputSemanticKind::ExistenceWithPath.as_str()
         }
@@ -7863,6 +7869,48 @@ mod tests {
                 .pointer("/output_contract/semantic_kind")
                 .and_then(|v| v.as_str()),
             Some("none")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/requires_content_evidence")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+            &normalized,
+            crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+        )
+        .expect("schema validation");
+    }
+
+    #[test]
+    fn normalizer_schema_normalization_maps_legacy_command_result_contract_to_raw_output() {
+        let raw = r#"{
+          "resolved_user_intent":"执行pwd命令获取当前工作目录",
+          "answer_candidate":"",
+          "needs_clarify":false,
+          "reason":"local command execution",
+          "confidence":0.95,
+          "decision":"planner_execute",
+          "output_contract":"command_execution_result",
+          "execution_recipe":{
+            "command":"pwd",
+            "capture_stdout":true
+          }
+        }"#;
+        let normalized =
+            super::normalize_intent_normalizer_raw_for_schema(raw, "请执行 pwd，只输出命令结果");
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/semantic_kind")
+                .and_then(|v| v.as_str()),
+            Some("raw_command_output")
         );
         assert_eq!(
             value

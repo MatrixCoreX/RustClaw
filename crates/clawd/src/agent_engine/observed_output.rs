@@ -900,10 +900,7 @@ pub(crate) fn route_requires_synthesized_delivery(route: &crate::RouteResult) ->
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
-        && !matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
-        )
+        && route.output_contract.response_shape == crate::OutputResponseShape::OneSentence
 }
 
 fn db_basic_scalar_candidate(value: &serde_json::Value) -> Option<String> {
@@ -6487,8 +6484,24 @@ version.workspace = true
     }
 
     #[test]
-    fn chat_wrapped_unclassified_contract_requires_synthesized_delivery() {
+    fn chat_wrapped_free_unclassified_contract_allows_finalizer_passthrough() {
         let route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
+        assert!(!route_requires_synthesized_delivery(&route));
+
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+        let contract = observed_contract_json(Some(&agent_run_context));
+        assert!(contract.contains(r#""direct_observation_passthrough_allowed":true"#));
+        assert!(
+            observed_response_style_hint(Some(&agent_run_context)).contains("short direct answer")
+        );
+    }
+
+    #[test]
+    fn chat_wrapped_one_sentence_unclassified_contract_requires_synthesized_delivery() {
+        let route = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
         assert!(route_requires_synthesized_delivery(&route));
 
         let agent_run_context = AgentRunContext {
