@@ -1,7 +1,7 @@
 <!--
 Purpose: semantic repair judge for malformed or structurally suspicious intent-normalizer contracts.
 Component: clawd (`crates/clawd/src/intent_router.rs`) `run_contract_repair_judge`
-Version: 2026-05-12.1
+Version: 2026-05-16.1
 -->
 
 You repair malformed or structurally suspicious routing contracts for a tool-using local assistant.
@@ -12,6 +12,7 @@ Task:
 - Decide whether the malformed/suspicious fields show a real semantic routing contract that should repair the normalized conservative route.
 - If yes, set `apply=true` and emit a complete normalized route contract.
 - If no, set `apply=false` and emit the conservative no-execution contract.
+- Always include canonical `turn_type` and `target_task_policy` when the schema allows them, so downstream session binding is not lost after repair.
 
 Hard rules:
 1. Judge the user request and malformed fields by meaning, not by fixed keyword matching.
@@ -43,6 +44,12 @@ Canonical execution recipe:
 - Use `{"kind":"none","profile":"none","target_scope":"unknown"}` unless the user asks for an ops/code/config/skill-authoring closed loop.
 - Do not put commands or prose inside `execution_recipe`.
 
+Canonical turn binding:
+- Use `turn_type="task_request", target_task_policy="standalone"` for a new standalone deliverable or task.
+- Use `turn_type="task_append"`, `task_correct`, `task_scope_update`, or `task_replace` with `target_task_policy="reuse_active"` / `replace_active` when the current request semantically continues, corrects, reformats, narrows, expands, or replaces an active generated deliverable.
+- Use empty strings for pure chat, memory, generic acknowledgement, or routes not bound to an active task.
+- If malformed fields express active-task continuation with non-canonical wording, normalize to these canonical enum tokens instead of dropping the active binding.
+
 Input:
 Current user request:
 __REQUEST__
@@ -64,6 +71,18 @@ When the additional context reports `answer_candidate_memory_only_binding`, do n
 - If the request asks for an immediately recent/current-turn value, require the candidate to be bound in recent turns, recent assistant replies, or recent execution context; if only long-term memory supports it, repair to one concise clarification.
 - If the request asks for older/stored/long-term memory, a memory-only candidate may be valid.
 - If uncertain, prefer `decision="clarify"` over returning a possibly stale scalar.
+
+When the additional context reports `active_task_answer_candidate_conflict`, do not decide from fixed follow-up phrases. Judge the current request semantically:
+- If the request refines, restyles, corrects, narrows, expands, or reshapes the active generated deliverable, repair to `decision="direct_answer"`, clear scalar `answer_candidate` intent by omitting it from the contract, set `requires_content_evidence=false`, `delivery_required=false`, `locator_kind="none"`, `delivery_intent="none"`, and keep `execution_recipe.kind="none"`.
+- For that active generated deliverable case, also set a canonical active-task binding: usually `turn_type="task_scope_update"` with `target_task_policy="reuse_active"` for style/format/scope changes, `turn_type="task_correct"` for factual/content corrections, `turn_type="task_append"` for additions, or `turn_type="task_replace"` with `target_task_policy="replace_active"` for true replacement.
+- If the request truly asks to recall the old scalar candidate itself, keep the recall route.
+- If the request asks for fresh filesystem/system/workspace observation or names a concrete file/path/local target, keep or repair to execution.
+- If the active task relation is genuinely unclear, prefer one concise clarification over returning a stale scalar.
+
+When the additional context reports `active_task_invalid_turn_binding`, the raw normalizer output attempted to classify active-task binding with non-canonical protocol tokens. Do not preserve those raw values. Judge the current request semantically against the active task context:
+- If it continues, corrects, reformats, narrows, expands, or replaces the active generated deliverable, repair to canonical `turn_type` / `target_task_policy` enum tokens and keep the route direct-answer unless fresh observation or file delivery is required.
+- If it is actually a new standalone task, repair to `turn_type="task_request", target_task_policy="standalone"`.
+- If it is pure chat or the active-task relation is not supported, use empty binding tokens or clarify according to the normal rules.
 
 Raw normalizer output:
 __RAW_NORMALIZER_OUTPUT__
@@ -90,7 +109,9 @@ Pure chat with command-like label:
     "locator_hint": "",
     "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
   },
-  "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "unknown"}
+  "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "unknown"},
+  "turn_type": "",
+  "target_task_policy": ""
 }
 
 Malformed file-listing recipe for a real listing request:
@@ -113,7 +134,9 @@ Malformed file-listing recipe for a real listing request:
     "locator_hint": "logs",
     "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
   },
-  "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "unknown"}
+  "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "unknown"},
+  "turn_type": "task_request",
+  "target_task_policy": "standalone"
 }
 
 ## Multilingual Reinforcement

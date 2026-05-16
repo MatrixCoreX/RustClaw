@@ -850,6 +850,50 @@ fn canonicalize_contract_repair_judge_execution_recipe(value: Value) -> (Value, 
     (Value::Object(recipe), normalized)
 }
 
+fn canonicalize_contract_repair_judge_turn_type(value: Option<Value>) -> (Value, bool) {
+    let Some(Value::String(raw)) = value else {
+        return (Value::String(String::new()), true);
+    };
+    let normalized = normalize_schema_token_for_gate(&raw);
+    let canonical = match normalized.as_str() {
+        "" | "none" | "null" => "",
+        "task_request" => "task_request",
+        "task_append" => "task_append",
+        "task_replace" => "task_replace",
+        "task_correct" => "task_correct",
+        "task_scope_update" => "task_scope_update",
+        "run_control" => "run_control",
+        "approval_decision" => "approval_decision",
+        "status_query" => "status_query",
+        "feedback_or_error" => "feedback_or_error",
+        "preference_or_memory" => "preference_or_memory",
+        _ => "",
+    };
+    (
+        Value::String(canonical.to_string()),
+        canonical != raw.trim(),
+    )
+}
+
+fn canonicalize_contract_repair_judge_target_task_policy(value: Option<Value>) -> (Value, bool) {
+    let Some(Value::String(raw)) = value else {
+        return (Value::String(String::new()), true);
+    };
+    let normalized = normalize_schema_token_for_gate(&raw);
+    let canonical = match normalized.as_str() {
+        "" | "none" | "null" => "",
+        "reuse_active" => "reuse_active",
+        "replace_active" => "replace_active",
+        "pause_and_queue" => "pause_and_queue",
+        "standalone" => "standalone",
+        _ => "",
+    };
+    (
+        Value::String(canonical.to_string()),
+        canonical != raw.trim(),
+    )
+}
+
 fn canonicalize_contract_repair_judge_object(
     mut map: serde_json::Map<String, Value>,
 ) -> (Value, bool) {
@@ -864,6 +908,8 @@ fn canonicalize_contract_repair_judge_object(
         "resolved_user_intent",
         "output_contract",
         "execution_recipe",
+        "turn_type",
+        "target_task_policy",
     ];
     map.retain(|key, _| allowed_keys.contains(&key.as_str()));
     let mut normalized = map.len() != original_len;
@@ -880,6 +926,14 @@ fn canonicalize_contract_repair_judge_object(
         normalized |= recipe_normalized;
         map.insert("execution_recipe".to_string(), execution_recipe);
     }
+    let (turn_type, turn_type_normalized) =
+        canonicalize_contract_repair_judge_turn_type(map.remove("turn_type"));
+    normalized |= turn_type_normalized;
+    map.insert("turn_type".to_string(), turn_type);
+    let (target_task_policy, target_policy_normalized) =
+        canonicalize_contract_repair_judge_target_task_policy(map.remove("target_task_policy"));
+    normalized |= target_policy_normalized;
+    map.insert("target_task_policy".to_string(), target_task_policy);
 
     (Value::Object(map), normalized)
 }

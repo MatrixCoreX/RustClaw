@@ -310,6 +310,7 @@ pub(crate) async fn process_ask_task(
         &prepared_flow.route_result,
         prepared_flow.turn_analysis.as_ref(),
         &prepared_flow.fuzzy_locator_suggestions,
+        prepared_flow.clarify_fallback_source,
         result,
     )
     .await

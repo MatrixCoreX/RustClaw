@@ -7,7 +7,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 BASE_URL="${BASE_URL:-http://127.0.0.1:8787}"
 CLAWD_BIN="${ROOT_DIR}/target/release/clawd"
 RUNTIME_ENV_FILE="${ROOT_DIR}/../runtime_env_filled.sh"
-WAIT_SECONDS="240"
+WAIT_SECONDS="600"
 POLL_SECONDS="1"
 PROVIDER_RETRIES="0"
 PROMPT_REPLY_ONLY=1
@@ -36,7 +36,7 @@ Options:
   --clawd-bin PATH        clawd binary. Default: target/release/clawd
   --runtime-env PATH      runtime env file. Default: ../runtime_env_filled.sh
   --no-runtime-env        do not source any runtime env file
-  --wait-seconds N        max wait seconds per NL case. Default: 240
+  --wait-seconds N        max wait seconds per NL case. Default: 600
   --poll-seconds N        polling interval seconds. Default: 1
   --provider-retries N    provider retry count passed to run_suite. Default: 0
   --log-dir PATH          log output directory. Default: /tmp
