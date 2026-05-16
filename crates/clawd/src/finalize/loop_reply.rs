@@ -2757,21 +2757,80 @@ fn plan_step_matches_execution(
     step: &crate::executor::StepExecutionResult,
 ) -> bool {
     let plan_skill = plan_step.skill.trim();
-    plan_skill.eq_ignore_ascii_case(step.skill.trim())
-        || (step.skill == "run_cmd" && plan_skill.eq_ignore_ascii_case("run_cmd"))
+    if !(plan_skill.eq_ignore_ascii_case(step.skill.trim())
+        || (step.skill == "run_cmd" && plan_skill.eq_ignore_ascii_case("run_cmd")))
+    {
+        return false;
+    }
+    plan_step_action_matches_execution(plan_step, step)
+}
+
+fn execution_output_json(step: &crate::executor::StepExecutionResult) -> Option<serde_json::Value> {
+    let raw = step.output.as_deref()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(raw).ok()
+}
+
+fn execution_output_action(step: &crate::executor::StepExecutionResult) -> Option<String> {
+    execution_output_json(step)?
+        .get("action")?
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn plan_step_action_arg(plan_step: &crate::PlanStep) -> Option<&str> {
+    plan_step
+        .args
+        .get("action")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn plan_step_action_matches_execution(
+    plan_step: &crate::PlanStep,
+    step: &crate::executor::StepExecutionResult,
+) -> bool {
+    let Some(plan_action) = plan_step_action_arg(plan_step) else {
+        return true;
+    };
+    let Some(output_action) = execution_output_action(step) else {
+        return true;
+    };
+    plan_action.eq_ignore_ascii_case(output_action.trim())
 }
 
 fn plan_step_for_execution<'a>(
     loop_state: &'a LoopState,
     step: &crate::executor::StepExecutionResult,
 ) -> Option<&'a crate::PlanStep> {
-    loop_state
+    let exact = loop_state
         .round_traces
         .iter()
         .filter_map(|trace| trace.plan_result.as_ref())
         .flat_map(|plan| plan.steps.iter())
         .find(|plan_step| {
             plan_step.step_id == step.step_id && plan_step_matches_execution(plan_step, step)
+        });
+    if exact.is_some() {
+        return exact;
+    }
+
+    let output_action = execution_output_action(step)?;
+    loop_state
+        .round_traces
+        .iter()
+        .rev()
+        .filter_map(|trace| trace.plan_result.as_ref())
+        .flat_map(|plan| plan.steps.iter())
+        .find(|plan_step| {
+            plan_step_matches_execution(plan_step, step)
+                && plan_step_action_arg(plan_step)
+                    .is_some_and(|action| action.eq_ignore_ascii_case(output_action.trim()))
         })
 }
 
@@ -3898,6 +3957,291 @@ fn deterministic_observed_execution_status_summary(
     }
 }
 
+#[derive(Debug)]
+struct ConfigEditObservedOutput {
+    index: usize,
+    value: serde_json::Value,
+}
+
+fn config_edit_output_action(value: &serde_json::Value) -> Option<&str> {
+    value
+        .get("action")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn config_edit_observed_outputs(
+    loop_state: &crate::agent_engine::LoopState,
+) -> Vec<ConfigEditObservedOutput> {
+    let latest_config_edit_step = loop_state
+        .executed_step_results
+        .iter()
+        .rfind(|step| step.skill == "config_edit");
+    if latest_config_edit_step.is_some_and(|step| !step.is_ok()) {
+        return Vec::new();
+    }
+    loop_state
+        .executed_step_results
+        .iter()
+        .enumerate()
+        .filter_map(|(index, step)| {
+            if !step.is_ok() || step.skill != "config_edit" {
+                return None;
+            }
+            let value =
+                serde_json::from_str::<serde_json::Value>(step.output.as_deref()?.trim()).ok()?;
+            config_edit_output_action(&value)?;
+            Some(ConfigEditObservedOutput { index, value })
+        })
+        .collect()
+}
+
+fn config_edit_string_field<'a>(value: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    value
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn config_edit_path_label(value: &serde_json::Value) -> &str {
+    config_edit_string_field(value, "path")
+        .or_else(|| config_edit_string_field(value, "resolved_path"))
+        .unwrap_or("config")
+}
+
+fn config_edit_field_label(value: &serde_json::Value) -> &str {
+    config_edit_string_field(value, "field_path").unwrap_or("field")
+}
+
+fn config_edit_value_label(value: &serde_json::Value, primary_key: &str) -> Option<String> {
+    config_edit_string_field(value, "value_text")
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            value
+                .get(primary_key)
+                .map(execution_summary_value_to_string)
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())
+        })
+}
+
+fn config_edit_output_matches_field(
+    value: &serde_json::Value,
+    field_path: &str,
+    path: &str,
+) -> bool {
+    config_edit_string_field(value, "field_path") == Some(field_path)
+        && config_edit_string_field(value, "path")
+            .or_else(|| config_edit_string_field(value, "resolved_path"))
+            .is_none_or(|candidate| candidate == path)
+}
+
+fn config_edit_summary() -> crate::task_journal::TaskJournalFinalizerSummary {
+    crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        parsed: true,
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    }
+}
+
+fn direct_config_edit_apply_answer(
+    outputs: &[ConfigEditObservedOutput],
+    prefer_english: bool,
+) -> Option<String> {
+    let applied = outputs.iter().rev().find(|item| {
+        config_edit_output_action(&item.value) == Some("apply_config_change")
+            && item.value.get("applied").and_then(|value| value.as_bool()) == Some(true)
+    })?;
+    let field_path = config_edit_field_label(&applied.value);
+    let path = config_edit_path_label(&applied.value);
+    let read_back = outputs.iter().rev().find(|item| {
+        item.index > applied.index
+            && config_edit_output_action(&item.value) == Some("read_back")
+            && item.value.get("exists").and_then(|value| value.as_bool()) == Some(true)
+            && config_edit_output_matches_field(&item.value, field_path, path)
+    });
+    let value_label = read_back
+        .and_then(|item| config_edit_value_label(&item.value, "value"))
+        .or_else(|| config_edit_value_label(&applied.value, "new_value"));
+    let validation_after_apply = outputs.iter().rev().find(|item| {
+        item.index > applied.index
+            && config_edit_output_action(&item.value) == Some("validate_config")
+            && config_edit_path_label(&item.value) == path
+    });
+    let validation_passed = validation_after_apply
+        .and_then(|item| item.value.get("valid").and_then(|value| value.as_bool()))
+        .or_else(|| {
+            applied
+                .value
+                .get("validated")
+                .and_then(|value| value.as_bool())
+        })
+        .unwrap_or(false);
+    let guard = outputs.iter().rev().find(|item| {
+        item.index > applied.index
+            && config_edit_output_action(&item.value) == Some("guard_config")
+            && config_edit_path_label(&item.value) == path
+    });
+    let risk_count = guard.and_then(|item| item.value.get("risk_count").and_then(|v| v.as_u64()));
+
+    let mut parts = Vec::new();
+    match (prefer_english, value_label) {
+        (true, Some(value)) => parts.push(format!(
+            "Config updated: `{field_path}` = `{value}` in `{path}`."
+        )),
+        (true, None) => parts.push(format!("Config updated: `{field_path}` in `{path}`.")),
+        (false, Some(value)) => parts.push(format!(
+            "配置已更新：`{field_path}` = `{value}`（`{path}`）。"
+        )),
+        (false, None) => parts.push(format!("配置已更新：`{field_path}`（`{path}`）。")),
+    }
+    if validation_passed {
+        parts.push(if prefer_english {
+            "Validation passed.".to_string()
+        } else {
+            "验证通过。".to_string()
+        });
+    }
+    if let Some(risk_count) = risk_count {
+        parts.push(if prefer_english {
+            if risk_count == 0 {
+                "Guard check found no risks.".to_string()
+            } else {
+                format!("Guard check found {risk_count} risk(s).")
+            }
+        } else if risk_count == 0 {
+            "安全检查未发现风险。".to_string()
+        } else {
+            format!("安全检查发现 {risk_count} 个风险。")
+        });
+    }
+    Some(parts.join(if prefer_english { " " } else { "" }))
+}
+
+fn direct_config_edit_plan_answer(
+    outputs: &[ConfigEditObservedOutput],
+    prefer_english: bool,
+) -> Option<String> {
+    let planned = outputs.iter().rev().find(|item| {
+        config_edit_output_action(&item.value) == Some("plan_config_change")
+            && !outputs.iter().any(|candidate| {
+                candidate.index > item.index
+                    && config_edit_output_action(&candidate.value) == Some("apply_config_change")
+            })
+    })?;
+    let field_path = config_edit_field_label(&planned.value);
+    let path = config_edit_path_label(&planned.value);
+    let value = config_edit_value_label(&planned.value, "new_value");
+    let would_change = planned
+        .value
+        .get("would_change")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    Some(match (prefer_english, value, would_change) {
+        (true, Some(value), true) => format!(
+            "Config change planned only: `{field_path}` would be set to `{value}` in `{path}`. No config file was written."
+        ),
+        (true, Some(value), false) => format!(
+            "Config change planned only: `{field_path}` is already `{value}` in `{path}`. No config file was written."
+        ),
+        (true, None, _) => {
+            format!("Config change planned only for `{field_path}` in `{path}`. No config file was written.")
+        }
+        (false, Some(value), true) => format!(
+            "已生成配置变更计划：`{field_path}` 将设置为 `{value}`（`{path}`）。尚未写入配置。"
+        ),
+        (false, Some(value), false) => format!(
+            "已生成配置变更计划：`{field_path}` 当前已经是 `{value}`（`{path}`）。尚未写入配置。"
+        ),
+        (false, None, _) => {
+            format!("已生成配置变更计划：`{field_path}`（`{path}`）。尚未写入配置。")
+        }
+    })
+}
+
+fn direct_config_edit_validate_answer(
+    outputs: &[ConfigEditObservedOutput],
+    prefer_english: bool,
+) -> Option<String> {
+    let validation = outputs
+        .iter()
+        .rev()
+        .find(|item| config_edit_output_action(&item.value) == Some("validate_config"))?;
+    let path = config_edit_path_label(&validation.value);
+    let valid = validation.value.get("valid")?.as_bool()?;
+    if valid {
+        return Some(if prefer_english {
+            format!("Config validation passed for `{path}`.")
+        } else {
+            format!("配置验证通过：`{path}`。")
+        });
+    }
+    let reason = config_edit_string_field(&validation.value, "error_text").unwrap_or("invalid");
+    Some(if prefer_english {
+        format!("Config validation failed for `{path}`: {reason}.")
+    } else {
+        format!("配置验证未通过：`{path}`，原因：{reason}。")
+    })
+}
+
+fn direct_config_edit_read_back_answer(
+    outputs: &[ConfigEditObservedOutput],
+    prefer_english: bool,
+) -> Option<String> {
+    let read_back = outputs
+        .iter()
+        .rev()
+        .find(|item| config_edit_output_action(&item.value) == Some("read_back"))?;
+    let field_path = config_edit_field_label(&read_back.value);
+    let path = config_edit_path_label(&read_back.value);
+    let exists = read_back
+        .value
+        .get("exists")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    if !exists {
+        return Some(if prefer_english {
+            format!("`{field_path}` was not found in `{path}`.")
+        } else {
+            format!("`{path}` 中未找到 `{field_path}`。")
+        });
+    }
+    let value = config_edit_value_label(&read_back.value, "value").unwrap_or_default();
+    Some(if prefer_english {
+        format!("`{field_path}` in `{path}` is `{value}`.")
+    } else {
+        format!("`{path}` 中 `{field_path}` 的当前值是 `{value}`。")
+    })
+}
+
+pub(crate) fn direct_config_edit_observed_answer(
+    state: &AppState,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let outputs = config_edit_observed_outputs(loop_state);
+    if outputs.is_empty() {
+        return None;
+    }
+    let request_language = crate::language_policy::request_language_hint(user_text);
+    let prefer_english = request_language == "en"
+        || (request_language == "config_default" && prefer_english_for_user_text(state, user_text));
+    let answer = direct_config_edit_apply_answer(&outputs, prefer_english)
+        .or_else(|| direct_config_edit_plan_answer(&outputs, prefer_english))
+        .or_else(|| direct_config_edit_validate_answer(&outputs, prefer_english))
+        .or_else(|| direct_config_edit_read_back_answer(&outputs, prefer_english))?;
+    Some((answer, config_edit_summary()))
+}
+
 fn path_display_label(value: &serde_json::Value, fallback: &str) -> String {
     let raw = value
         .get("path")
@@ -4243,6 +4587,11 @@ async fn missing_delivery_after_observation_message(
     {
         return answer;
     }
+    if let Some((answer, _summary)) =
+        direct_config_edit_observed_answer(state, user_text, loop_state)
+    {
+        return answer;
+    }
     let default_text = missing_delivery_after_observation_default_message(state, user_text);
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let contract = crate::fallback::UserResponseContract::tool_failure(
@@ -4287,6 +4636,10 @@ async fn observed_execution_without_publishable_delivery_reply(
         deterministic_execution_failed_step_answer(state, user_text, loop_state, agent_run_context)
             .or_else(|| {
                 deterministic_observed_execution_status_answer(state, user_text, loop_state)
+            })
+            .or_else(|| {
+                direct_config_edit_observed_answer(state, user_text, loop_state)
+                    .map(|(answer, _summary)| answer)
             })
             .or_else(|| {
                 deterministic_missing_observed_target_answer(
@@ -4585,6 +4938,20 @@ pub(crate) async fn finalize_loop_reply(
             append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
             info!(
                 "delivery fallback_from_observed_scalar task_id={}",
+                task.task_id
+            );
+        }
+    }
+
+    if loop_state.delivery_messages.is_empty() {
+        if let Some((answer, summary)) =
+            direct_config_edit_observed_answer(state, user_text, &loop_state)
+        {
+            finalizer_summary = Some(summary);
+            loop_state.last_user_visible_respond = Some(answer.clone());
+            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+            info!(
+                "delivery fallback_from_config_edit_observed task_id={}",
                 task.task_id
             );
         }
@@ -5108,7 +5475,7 @@ mod tests {
         compare_paths_size_ratio_answer, content_evidence_step_failure_answer,
         content_evidence_terminal_respond_is_contractual_answer,
         deterministic_missing_observed_target_answer,
-        deterministic_observed_execution_status_answer,
+        deterministic_observed_execution_status_answer, direct_config_edit_observed_answer,
         direct_file_token_from_observed_auto_locator_filename,
         direct_file_token_from_observed_inventory, direct_non_builtin_skill_raw_answer,
         direct_publishable_observed_answer, direct_quantity_comparison_from_compare_paths,
@@ -5429,6 +5796,93 @@ mod tests {
             started_at: 1,
             finished_at: 2,
         }
+    }
+
+    #[test]
+    fn direct_config_edit_observed_answer_summarizes_apply_validate_readback() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(4);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "config_edit",
+            r#"{"action":"plan_config_change","path":"run/nl_eval_tmp/config_edit_smoke/config.toml","field_path":"skills.skill_switches.config_edit_nl_smoke","new_value":true,"would_change":true}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "config_edit",
+            r#"{"action":"apply_config_change","applied":true,"path":"run/nl_eval_tmp/config_edit_smoke/config.toml","field_path":"skills.skill_switches.config_edit_nl_smoke","new_value":true,"validated":true}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_3",
+            "config_edit",
+            r#"{"action":"validate_config","path":"run/nl_eval_tmp/config_edit_smoke/config.toml","valid":true}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_4",
+            "config_edit",
+            r#"{"action":"read_back","path":"run/nl_eval_tmp/config_edit_smoke/config.toml","field_path":"skills.skill_switches.config_edit_nl_smoke","exists":true,"value":true,"value_text":"true"}"#,
+        ));
+
+        let (answer, summary) = direct_config_edit_observed_answer(
+            &state,
+            "把 config_edit_nl_smoke 开关打开，然后验证并读回",
+            &loop_state,
+        )
+        .expect("config_edit structured answer");
+
+        assert!(answer.contains("配置已更新"));
+        assert!(answer.contains("skills.skill_switches.config_edit_nl_smoke"));
+        assert!(answer.contains("true"));
+        assert!(answer.contains("验证通过"));
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[tokio::test]
+    async fn finalize_loop_reply_uses_config_edit_observed_answer_after_synthesis_failure() {
+        let state = test_state();
+        let task = claimed_task("task-config-edit-fallback");
+        let mut loop_state = crate::agent_engine::LoopState::new(5);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.has_recoverable_failure_context = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "config_edit",
+            r#"{"action":"apply_config_change","applied":true,"path":"run/nl_eval_tmp/config_edit_smoke/config.toml","field_path":"skills.skill_switches.config_edit_nl_smoke","new_value":true,"validated":true}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "config_edit",
+            r#"{"action":"validate_config","path":"run/nl_eval_tmp/config_edit_smoke/config.toml","valid":true}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_3",
+            "config_edit",
+            r#"{"action":"read_back","path":"run/nl_eval_tmp/config_edit_smoke/config.toml","field_path":"skills.skill_switches.config_edit_nl_smoke","exists":true,"value":true,"value_text":"true"}"#,
+        ));
+        loop_state.executed_step_results.push(err_step_result(
+            "step_4",
+            "synthesize_answer",
+            "synthesis failed",
+        ));
+
+        let reply = finalize_loop_reply(
+            &state,
+            &task,
+            "把 config_edit_nl_smoke 开关打开，然后验证并读回",
+            loop_state,
+            None,
+        )
+        .await
+        .expect("finalize should succeed");
+
+        assert!(!reply.should_fail_task);
+        assert!(reply.text.contains("配置已更新"));
+        assert!(reply.text.contains("验证通过"));
+        assert!(!reply.text.contains("没能整理成可靠结论"));
     }
 
     #[test]
@@ -5770,6 +6224,83 @@ mod tests {
         assert!(summary.contains("Called skill `archive_basic`"));
         assert!(summary.contains("Called skill `system_basic`"));
         assert!(!summary.contains("Called skill `respond`"));
+    }
+
+    #[test]
+    fn execution_summary_uses_output_action_when_global_step_ids_shift() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "read old config field".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "config_basic".to_string(),
+                    args: serde_json::json!({"action": "read_field"}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }])),
+                verify_result: None,
+            });
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 2,
+                goal: "edit config field".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![
+                    crate::PlanStep {
+                        step_id: "step_1".to_string(),
+                        action_type: "call_tool".to_string(),
+                        skill: "config_edit".to_string(),
+                        args: serde_json::json!({"action": "plan_config_change"}),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    crate::PlanStep {
+                        step_id: "step_2".to_string(),
+                        action_type: "call_tool".to_string(),
+                        skill: "config_edit".to_string(),
+                        args: serde_json::json!({"action": "apply_config_change"}),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    crate::PlanStep {
+                        step_id: "step_3".to_string(),
+                        action_type: "call_tool".to_string(),
+                        skill: "config_edit".to_string(),
+                        args: serde_json::json!({"action": "validate_config"}),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                ])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "config_edit",
+            r#"{"action":"plan_config_change"}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_3",
+            "config_edit",
+            r#"{"action":"apply_config_change"}"#,
+        ));
+
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(free_route_result()),
+            ..Default::default()
+        };
+        let summary =
+            build_execution_summary_message(&loop_state, Some(&ctx), Some("把配置项打开"))
+                .expect("execution summary");
+
+        assert!(summary.contains("action=plan_config_change"));
+        assert!(summary.contains("action=apply_config_change"));
+        assert!(!summary.contains("action=validate_config"));
     }
 
     #[test]

@@ -109,6 +109,22 @@ fn synthesize_direct_observed_fallback_answer(
     .filter(|answer| !answer.is_empty())
 }
 
+fn synthesize_user_language_source<'a>(
+    user_text: &'a str,
+    agent_run_context: Option<&'a AgentRunContext>,
+) -> &'a str {
+    agent_run_context
+        .and_then(|context| {
+            context
+                .original_user_request
+                .as_deref()
+                .or(context.user_request.as_deref())
+        })
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .unwrap_or(user_text)
+}
+
 fn deterministic_observed_execution_status_answer(
     state: &AppState,
     task: &ClaimedTask,
@@ -2182,6 +2198,13 @@ pub(super) async fn handle_synthesize_answer_action(
             if let Some(answer) =
                 deterministic_observed_execution_status_answer(state, task, user_text, loop_state)
             {
+                return Ok(answer);
+            }
+            if let Some((answer, _summary)) = crate::finalize::direct_config_edit_observed_answer(
+                state,
+                synthesize_user_language_source(user_text, agent_run_context),
+                loop_state,
+            ) {
                 return Ok(answer);
             }
             let requires_synthesized_delivery = agent_run_context

@@ -112,7 +112,7 @@ fn required_args_for_skill(skill: &str) -> &'static [&'static str] {
 fn is_confirmation_like_skill(skill: &str) -> bool {
     matches!(
         skill,
-        "run_cmd" | "write_file" | "remove_file" | "make_dir" | "schedule"
+        "run_cmd" | "write_file" | "remove_file" | "make_dir" | "schedule" | "config_edit"
     )
 }
 

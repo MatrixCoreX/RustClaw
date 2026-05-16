@@ -411,6 +411,23 @@ Skill behavior notes (file/path):
 - Do not plan patch/write operations through `config_guard`; use the dedicated config APIs/UI or an explicitly confirmed edit workflow outside this skill.
 - Always keep secret values redacted in any final response.
 
+### config_edit
+- Use `config_edit` for structured RustClaw config mutations. Use `config_basic` for read-only config field extraction, key listing, and validation.
+- Actions: `plan_config_change|apply_config_change|validate_config|guard_config|read_back|restart_if_requested`.
+- Common workflow: `plan_config_change` first, then `apply_config_change` after confirmation, then `validate_config`, then `guard_config` and/or `read_back`, then `restart_if_requested` only when restart was requested or must be reported. After `apply_config_change`, prefer this tool's `read_back` action for the edited field instead of switching to a generic config reader.
+- Default path: omit `path` or use `configs/config.toml` for RustClaw main config. For module configs such as STT/audio, pass the actual file path such as `configs/audio.toml`.
+- Field changes are structured as `field_path` plus typed JSON `value`; do not rely on language phrases or rewrite entire config files.
+- Secret-like fields are redacted in output. Do not expose raw token/key/password values.
+
+#### config_edit JSON-schema style contract (strict)
+- Base shape: `{"type":"call_tool","tool":"config_edit","args":{"action":"plan_config_change","path":"configs/config.toml","field_path":"skills.skill_switches.photo_organize","value":true}}`
+- `plan_config_change`: required `field_path`, `value`; optional `path`, `format`, `operation="set"`.
+- `apply_config_change`: required `field_path`, `value`; optional `path`, `format`, `operation="set"`; mutates config and requires confirmation.
+- `validate_config`: optional `path`, `format`.
+- `guard_config`: optional `path`, `format`.
+- `read_back`: required `field_path`; optional `path`, `format`.
+- `restart_if_requested`: optional `restart`, `reason`; the first version reports restart recommendation/handoff and does not restart by itself.
+
 ### db_basic
 - action: `sqlite_query|sqlite_execute`
 - required:
@@ -613,7 +630,7 @@ Skill behavior notes (file/path):
 - For cancel requests without a specific number, prefer `cancel_all`
 
 ### system_basic (supplementary — runtime/system facts and compatibility backing)
-- Prefer `fs_basic` for filesystem facts, inventory, search, bounded reads, and path comparison. Prefer `config_basic` for structured config fields, keys, and validation. `system_basic` remains the backing/runtime compatibility layer for several readonly filesystem/config actions and the primary tool for system/runtime facts.
+- Prefer `fs_basic` for filesystem facts, inventory, search, bounded reads, and path comparison. Prefer `config_basic` for structured config fields, keys, and validation. Prefer `config_edit` for structured config mutations. `system_basic` remains the backing/runtime compatibility layer for several readonly filesystem/config actions and the primary tool for system/runtime facts.
 - **Atomic file/directory/command capabilities must still avoid `system_basic`**: use `fs_basic` or standalone filesystem tools for filesystem primitives, and `run_cmd` for shell commands.
 - `system_basic` remains the **higher-level query layer**:
   - `info`: host/runtime information and system self-inspection

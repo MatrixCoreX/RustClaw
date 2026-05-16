@@ -38,7 +38,7 @@ Use `{"type":"call_tool","tool":"config_basic","args":{...}}` for structured TOM
 - For RustClaw main-config safety checks, call `config_basic` with `action="guard_rustclaw_config"` directly. Omit `path` unless the user supplied an explicit config file; do not search or list directories first just to find the default config.
 - Field paths support dot/bracket selectors. For arrays of objects, `<item-name>.<field>` may resolve the unique object whose `name`, `id`, or `key` equals `<item-name>` before reading `<field>`.
 - Do not plan `patch_field`, `write`, `set`, or other generic config mutation through `config_basic` in v1.
-- Confirmed config edits still use explicit file or command workflows, followed by `config_basic.validate`, `config_basic.guard_rustclaw_config`, service checks, or project tests.
+- Confirmed structured config edits should use `config_edit` when available, followed by validation, guard checks, and read-back. Use broad file or command workflows only when the requested mutation cannot be represented as a config field path and typed value.
 - `config_guard` remains the backing RustClaw safety scanner, not a general editor.
 - For non-structured files, use `fs_basic`, raw file tools, or `run_cmd`.
 
@@ -53,4 +53,4 @@ Keep only language-specific nuances here; keep general rules in the main prompt 
 -->
 ### zh-CN
 - 中文里的“配置项/字段/key/开关/版本号/模型名”要按结构化字段任务理解，优先产出 `field_path` 或 `field_paths`，不要读完整配置后再猜。
-- 如果用户要求修改配置，先走确认过的文件修改流程，修改后再用本工具做解析或安全检查。
+- 如果用户要求修改配置，优先让 `config_edit` 处理结构化字段变更；本工具继续负责读取字段、解析校验和安全检查。

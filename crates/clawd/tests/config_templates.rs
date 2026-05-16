@@ -356,6 +356,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         // secrets capability；image_generate 仍显式要求专用生成 key。
         ("browser_web", &["fs.write", "net"]),
         ("config_guard", &["fs.read"]),
+        ("config_edit", &["fs.read", "fs.write"]),
         ("doc_parse", &["fs.read"]),
         ("extension_manager", &["llm"]),
         ("config_basic", &["fs.read"]),
@@ -390,6 +391,7 @@ fn registry_capabilities_declared_match_expected_demo_skill() {
         // Docker 模板保持专用 image_edit / image_vision secret 声明。
         ("browser_web", &["fs.write", "net"]),
         ("config_guard", &["fs.read"]),
+        ("config_edit", &["fs.read", "fs.write"]),
         ("doc_parse", &["fs.read"]),
         ("extension_manager", &["llm"]),
         ("config_basic", &["fs.read"]),

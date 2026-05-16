@@ -63,7 +63,7 @@ flowchart TD
     VF --> L{Verified action}
     L -->|respond| M[Respond]
     L -->|synthesize_answer| SS[Grounded synthesis LLM]
-    L -->|call_tool| N[Tool execution<br/>fs_basic/config_basic adapter]
+    L -->|call_tool| N[Tool execution<br/>fs_basic/config_basic/config_edit adapter]
     L -->|call_skill| N1[run_skill_with_runner<br/>skill dispatch]
     RS --> N1
     N1 -->|builtin| N1B[In-process builtin skill]
@@ -151,7 +151,7 @@ flowchart TD
     Kr --> Kv[PlanVerifier<br/>schema + visibility + risk/effect]
     Kv --> K{Verified step type}
     K -->|respond| L[Respond text]
-    K -->|call_tool| M[Execute tool<br/>fs_basic/config_basic adapter]
+    K -->|call_tool| M[Execute tool<br/>fs_basic/config_basic/config_edit adapter]
     K -->|call_skill| Ms[run_skill_with_runner<br/>skill dispatch]
     Ms -->|builtin| Msb[In-process builtin skill]
     Ms -->|external| Mse[External skill adapter]
@@ -433,7 +433,7 @@ UI notes:
 RustClaw currently ships a broad skill set. Representative groups:
 
 - system and ops: `system_basic`, `process_basic`, `service_control`, `health_check`, `log_analyze`, `task_control`
-- files and developer tools: `fs_basic`, `config_basic`, `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
+- files, config, and developer tools: `fs_basic`, `config_basic`, `config_edit`, `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
 - network and content: `http_basic`, `rss_fetch`, `browser_web`, `doc_parse`, `transform`, `web_search_extract`
 - multimodal: `image_generate`, `image_edit`, `image_vision`, `audio_transcribe`, `audio_synthesize`
 - domain skills: `crypto`, `stock`, `weather`, `map_merchant`, `kb`, `x`
