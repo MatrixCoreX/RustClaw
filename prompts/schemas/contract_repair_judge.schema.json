@@ -14,7 +14,9 @@
     "clarify_question",
     "resolved_user_intent",
     "output_contract",
-    "execution_recipe"
+    "execution_recipe",
+    "turn_type",
+    "target_task_policy"
   ],
   "properties": {
     "apply": {
@@ -172,6 +174,26 @@
           ]
         }
       }
+    },
+    "turn_type": {
+      "type": "string",
+      "enum": [
+        "",
+        "task_request",
+        "task_append",
+        "task_replace",
+        "task_correct",
+        "task_scope_update",
+        "run_control",
+        "approval_decision",
+        "status_query",
+        "feedback_or_error",
+        "preference_or_memory"
+      ]
+    },
+    "target_task_policy": {
+      "type": "string",
+      "enum": ["", "reuse_active", "replace_active", "pause_and_queue", "standalone"]
     }
   }
 }

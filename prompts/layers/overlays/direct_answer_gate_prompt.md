@@ -29,6 +29,7 @@ Hard rules:
 7. If uncertain whether local/project evidence is required, prefer `planner_execute` for user-specific/current-workspace claims and `direct_answer` for general knowledge or opinion.
 8. When a relevant capability can safely resolve an omitted parameter by bounded lookup, discovery, default behavior, or a prepare/candidates step, choose `planner_execute` instead of front-door `clarify`; let execution return observed candidates if the runtime cannot choose uniquely.
 9. For relative or ordinal follow-up references to prior files, prior actions, or prior results, bind from Recent execution context first when it is provided. Treat the previous executed target path/action as the reference target. Do not substitute a path, filename, or object merely because it appeared inside a prior file excerpt, listing text, summary, or route reason.
+10. If the current request only asks to restate, reshape, shorten, finalize, or output a prior chat deliverable and does not itself name a concrete file/path/field/system target or ask to deliver an existing file artifact, choose `direct_answer`. Do not promote only because recent execution context mentions files, paths, or tools from an earlier turn.
 
 Canonical output contract:
 - For `direct_answer`: keep `requires_content_evidence=false`, `delivery_required=false`, `locator_kind="none"`, `delivery_intent="none"`.
@@ -122,9 +123,11 @@ Existing selected file delivery:
 - 缺少必要对象时用 `clarify`，不要猜路径或名字。
 - 如果中文语义是在要文件本体，例如发送/交付一个已存在文件或目录列表里选中的文件，输出合同应是 `file_token`，不能只返回文件名。
 - “上个/上上个/前一个/后一个”等相对引用如果指向之前执行过的文件或动作，优先绑定最近执行目标；文件内容里提到的路径只是内容证据，不能替换成被引用的“上个文件”。
+- 如果当前中文请求只是要求重述、改格式、缩短、最终输出上一轮聊天交付物，且本轮没有明确文件/路径/字段/系统目标，也没有要求交付已有文件本体，选择 `direct_answer`；不要只因为近期执行上下文里出现过文件或工具就升级执行。
 ### en
 - Imperative tone alone is not execution intent. Grounding requirements decide the route.
 - For current workspace/repository/project claims, prefer `planner_execute` unless the user explicitly asks for a non-observational discussion.
 - Current hostname, current user, current working directory, ports, disk, processes, and service state are dynamic runtime facts. Re-observe them instead of trusting memory or a prior answer candidate.
 - If the semantic goal is to receive the existing file itself, use file-token delivery rather than filename-only text.
 - For "previous / second previous / last / next" references to executed files or actions, use the recent executed target sequence. A path mentioned inside a previous file's content is not itself the previous file target.
+- If the current request only asks to restate, reshape, shorten, finalize, or output a prior chat deliverable, and the current request does not name a concrete file/path/field/system target or ask for an existing file artifact, keep `direct_answer`; do not promote only because recent execution context mentions files or tools.

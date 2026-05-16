@@ -686,6 +686,7 @@ pub(crate) async fn finalize_ask_result(
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     fuzzy_locator_suggestions: &[String],
+    clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
     result: Result<crate::AskReply, String>,
 ) -> Result<()> {
     // §3.1: ask 状态机 — 进入 finalize。
@@ -879,6 +880,7 @@ pub(crate) async fn finalize_ask_result(
                     semantic_clarify,
                     fuzzy_locator_suggestions,
                     &journal,
+                    clarify_fallback_source,
                 );
                 if semantic_clarify {
                     insert_unfinished_goal_memory(state, task, prompt, &answer_text);
@@ -983,6 +985,7 @@ pub(crate) async fn finalize_ask_result(
                         false,
                         fuzzy_locator_suggestions,
                         &journal,
+                        clarify_fallback_source,
                     );
                     let completed_transition = crate::log_ask_transition(
                         state,

@@ -566,6 +566,101 @@ fn direct_answer_gate_can_skip_for_self_contained_payload(
         && !surface.has_delivery_token_reference()
 }
 
+fn direct_answer_gate_can_skip_for_active_task_text_mutation(
+    current_user_request: &str,
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> bool {
+    let Some(ctx) = agent_run_context else {
+        return false;
+    };
+    let Some(route) = ctx.route_result.as_ref() else {
+        return false;
+    };
+    let Some(analysis) = ctx.turn_analysis.as_ref() else {
+        return false;
+    };
+    if route.needs_clarify
+        || route.is_execute_gate()
+        || route.wants_file_delivery
+        || !matches!(route.schedule_kind, crate::ScheduleKind::None)
+        || output_contract_requires_planner_execution(&route.output_contract)
+        || !route.output_contract.locator_hint.trim().is_empty()
+        || !matches!(
+            route.output_contract.self_extension.mode,
+            crate::SelfExtensionMode::None
+        )
+        || !matches!(
+            route.output_contract.self_extension.trigger,
+            crate::SelfExtensionTrigger::None
+        )
+        || route.output_contract.self_extension.execute_now
+        || analysis.attachment_processing_required
+        || analysis.should_interrupt_active_run
+    {
+        return false;
+    }
+    if !matches!(
+        analysis.turn_type,
+        Some(
+            crate::intent_router::TurnType::TaskAppend
+                | crate::intent_router::TurnType::TaskCorrect
+                | crate::intent_router::TurnType::TaskReplace
+                | crate::intent_router::TurnType::TaskScopeUpdate
+        )
+    ) || !matches!(
+        analysis.target_task_policy,
+        Some(
+            crate::intent_router::TargetTaskPolicy::ReuseActive
+                | crate::intent_router::TargetTaskPolicy::ReplaceActive
+        )
+    ) {
+        return false;
+    }
+
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    !surface.has_explicit_path_or_url()
+        && surface.locator_target_pair.is_none()
+        && surface.field_selector_count == 0
+        && surface.dotted_field_selector.is_none()
+        && !surface.has_delivery_token_reference()
+        && surface
+            .filename_candidates_excluding_field_selectors()
+            .is_empty()
+}
+
+fn direct_answer_gate_promotion_depends_only_on_background_context(
+    current_user_request: &str,
+    route: &crate::RouteResult,
+    promoted_contract: &crate::IntentOutputContract,
+) -> bool {
+    let Some(candidate) = normalizer_answer_candidate_from_resolved_prompt(&route.resolved_intent)
+    else {
+        return false;
+    };
+    if route.needs_clarify
+        || route.is_execute_gate()
+        || route.wants_file_delivery
+        || !matches!(route.schedule_kind, crate::ScheduleKind::None)
+        || output_contract_requires_planner_execution(&route.output_contract)
+        || !route.output_contract.locator_hint.trim().is_empty()
+        || !output_contract_requires_planner_execution(promoted_contract)
+        || text_mentions_artifact_locator(&candidate)
+    {
+        return false;
+    }
+
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    !surface.has_deictic_reference()
+        && !surface.has_explicit_path_or_url()
+        && surface.locator_target_pair.is_none()
+        && surface.field_selector_count == 0
+        && surface.dotted_field_selector.is_none()
+        && !surface.has_delivery_token_reference()
+        && surface
+            .filename_candidates_excluding_field_selectors()
+            .is_empty()
+}
+
 fn direct_answer_gate_promotion_needs_unbound_deictic_clarify(
     current_user_request: &str,
     auto_locator_path: Option<&str>,
@@ -793,6 +888,14 @@ fn apply_direct_answer_gate_outcome(
                 }
             }
             if output_contract_requires_planner_execution(&contract) {
+                if direct_answer_gate_promotion_depends_only_on_background_context(
+                    current_user_request,
+                    route,
+                    &contract,
+                ) {
+                    append_route_reason(route, "direct_answer_gate_background_only_ignored");
+                    return DirectAnswerPreflight::DirectAnswer;
+                }
                 let resolved_locator_path = bind_direct_answer_gate_contract_locator(
                     state,
                     current_user_request,
@@ -840,6 +943,14 @@ fn apply_direct_answer_gate_outcome(
                 gate.output_contract.clone(),
                 &fallback_contract,
             );
+            if direct_answer_gate_promotion_depends_only_on_background_context(
+                current_user_request,
+                route,
+                &contract,
+            ) {
+                append_route_reason(route, "direct_answer_gate_background_only_ignored");
+                return DirectAnswerPreflight::DirectAnswer;
+            }
             let resolved_locator_path = bind_direct_answer_gate_contract_locator(
                 state,
                 current_user_request,
@@ -1066,19 +1177,22 @@ fn state_patch_alias_bindings_ack(
     language_hint: &str,
 ) -> Option<AskReply> {
     let analysis = agent_run_context?.turn_analysis.as_ref()?;
-    if analysis.turn_type != Some(crate::intent_router::TurnType::PreferenceOrMemory) {
+    if analysis.turn_type.is_some()
+        && analysis.turn_type != Some(crate::intent_router::TurnType::PreferenceOrMemory)
+    {
         return None;
     }
-    let bindings = analysis
-        .state_patch
-        .as_ref()?
-        .get("alias_bindings")?
-        .as_array()?;
+    let state_patch = analysis.state_patch.as_ref()?;
+    if !crate::conversation_state::state_patch_is_alias_bindings_only(state_patch) {
+        return None;
+    }
+    let bindings =
+        crate::conversation_state::session_alias_bindings_from_state_patch(Some(state_patch));
     let pairs = bindings
         .iter()
         .filter_map(|binding| {
-            let alias = binding.get("alias")?.as_str()?.trim();
-            let target = binding.get("target")?.as_str()?.trim();
+            let alias = binding.alias.trim();
+            let target = binding.target.trim();
             if alias.is_empty() || target.is_empty() {
                 None
             } else {
@@ -1573,6 +1687,16 @@ pub(crate) async fn execute_ask_routed(
             &process_language_hint,
         ));
     }
+    if let Some(reply) =
+        state_patch_alias_bindings_ack(agent_run_context.as_ref(), &process_language_hint)
+    {
+        tracing::info!(
+            "{} worker_once: ask state_patch_alias_bindings_ack task_id={}",
+            crate::highlight_tag("routing"),
+            task.task_id
+        );
+        return Ok(reply);
+    }
     match ask_mode.first_layer_decision() {
         crate::FirstLayerDecision::DirectAnswer => {
             if let Some(candidate) = normalizer_chat_direct_answer_candidate(
@@ -1650,10 +1774,14 @@ pub(crate) async fn execute_ask_routed(
                 agent_run_context
                     .as_ref()
                     .and_then(|ctx| ctx.route_result.as_ref()),
-            );
+            )
+                || direct_answer_gate_can_skip_for_active_task_text_mutation(
+                    &current_turn_user_request,
+                    agent_run_context.as_ref(),
+                );
             if skip_direct_answer_gate {
                 tracing::info!(
-                    "{} worker_once: ask direct_answer_gate_skipped_self_contained_payload task_id={}",
+                    "{} worker_once: ask direct_answer_gate_skipped task_id={}",
                     crate::highlight_tag("routing"),
                     task.task_id
                 );
@@ -1845,7 +1973,9 @@ mod tests {
     use super::{
         apply_direct_answer_gate_outcome, ask_reply_with_chat_process,
         chat_prompt_context_with_route_resolution, chat_request_for_prompt, chat_user_request,
-        direct_answer_chat_user_request, direct_answer_gate_can_skip_for_self_contained_payload,
+        direct_answer_chat_user_request, direct_answer_gate_can_skip_for_active_task_text_mutation,
+        direct_answer_gate_can_skip_for_self_contained_payload,
+        direct_answer_gate_promotion_depends_only_on_background_context,
         direct_answer_gate_promotion_needs_unbound_deictic_clarify,
         direct_answer_gate_recent_execution_context, direct_answer_gate_route_context,
         normalizer_chat_direct_answer_candidate, preferred_route_clarify_question,
@@ -2064,6 +2194,93 @@ mod tests {
             r#"读取 README.md 并按 [{"field":"score"}] 排序"#,
             Some(&route),
         ));
+    }
+
+    #[test]
+    fn direct_answer_gate_skips_active_text_mutation_without_locator() {
+        let mut route = chat_route_for_gate();
+        route.route_confidence = Some(0.72);
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            turn_analysis: Some(crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::TaskCorrect),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+                should_interrupt_active_run: false,
+                state_patch: Some(serde_json::json!({"format": "three-step checklist"})),
+                attachment_processing_required: false,
+            }),
+            ..Default::default()
+        };
+
+        assert!(direct_answer_gate_can_skip_for_active_task_text_mutation(
+            "Actually switch it to a three-step checklist.",
+            Some(&ctx)
+        ));
+    }
+
+    #[test]
+    fn direct_answer_gate_does_not_skip_active_text_mutation_with_explicit_file_target() {
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(chat_route_for_gate()),
+            turn_analysis: Some(crate::intent_router::TurnAnalysis {
+                turn_type: Some(crate::intent_router::TurnType::TaskCorrect),
+                target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+                should_interrupt_active_run: false,
+                state_patch: Some(serde_json::json!({"format": "three-step checklist"})),
+                attachment_processing_required: false,
+            }),
+            ..Default::default()
+        };
+
+        assert!(!direct_answer_gate_can_skip_for_active_task_text_mutation(
+            "In README.md, switch it to a three-step checklist.",
+            Some(&ctx)
+        ));
+    }
+
+    #[test]
+    fn direct_answer_gate_ignores_background_only_promotion_for_bound_answer_candidate() {
+        let mut route = chat_route_for_gate();
+        route.resolved_intent =
+            "User wants to output only the final checklist.\nanswer_candidate: final_checklist"
+                .to_string();
+        let promoted_contract = crate::IntentOutputContract {
+            requires_content_evidence: true,
+            locator_kind: crate::OutputLocatorKind::Path,
+            locator_hint: "README.md".to_string(),
+            ..crate::IntentOutputContract::default()
+        };
+
+        assert!(
+            direct_answer_gate_promotion_depends_only_on_background_context(
+                "Output only the final checklist.",
+                &route,
+                &promoted_contract,
+            )
+        );
+    }
+
+    #[test]
+    fn direct_answer_gate_keeps_deictic_file_followup_promotable() {
+        let mut route = chat_route_for_gate();
+        route.resolved_intent =
+            "User wants the selected file.\nanswer_candidate: README.md".to_string();
+        let promoted_contract = crate::IntentOutputContract {
+            requires_content_evidence: true,
+            delivery_required: true,
+            locator_kind: crate::OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+            locator_hint: "README.md".to_string(),
+            ..crate::IntentOutputContract::default()
+        };
+
+        assert!(
+            !direct_answer_gate_promotion_depends_only_on_background_context(
+                "Send that file.",
+                &route,
+                &promoted_contract,
+            )
+        );
     }
 
     #[test]

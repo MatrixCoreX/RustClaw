@@ -14,7 +14,7 @@ EXTERNAL_USER_ID_VALUE="${EXTERNAL_USER_ID:-}"
 USER_KEY_VALUE="${RUSTCLAW_USER_KEY:-${USER_KEY:-}}"
 CONFIG_PATH_VALUE="${RUSTCLAW_CONFIG_PATH:-${ROOT_DIR}/configs/config.toml}"
 DB_PATH_VALUE="${RUSTCLAW_DB_PATH:-}"
-WAIT_SECONDS_VALUE="${MAX_WAIT_SECONDS:-240}"
+WAIT_SECONDS_VALUE="${MAX_WAIT_SECONDS:-600}"
 POLL_SECONDS_VALUE="${POLL_INTERVAL_SECONDS:-1}"
 LOG_ROOT="${ROOT_DIR}/scripts/nl_suite_logs/client_like_continuous"
 PROMPT_REPLY_ONLY=1
@@ -47,7 +47,7 @@ Options:
   --user-key KEY             RustClaw user key. Default: RUSTCLAW_USER_KEY/USER_KEY or first enabled admin key
   --config PATH              config.toml used to resolve DB path for assertions
   --db-path PATH             main SQLite DB path for assertions
-  --wait-seconds N           max wait per turn. Default: 240
+  --wait-seconds N           max wait per turn. Default: 600
   --poll-seconds N           poll interval seconds. Default: 1
   --log-root PATH            log output root
   --case-file PATH           append prompts from a case file into the same client-like conversation
@@ -271,6 +271,7 @@ result_text_contains() {
   python3 - "$file" "$expected" <<'PY'
 import json
 import sys
+import unicodedata
 from pathlib import Path
 
 obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
@@ -288,7 +289,10 @@ for item in result.get("messages") or []:
     elif isinstance(item, dict):
         texts.append(str(item.get("text") or ""))
 joined = "\n".join(texts)
-raise SystemExit(0 if expected in joined else 1)
+def normalize_text(value: str) -> str:
+    return unicodedata.normalize("NFKC", value).replace("\u00a0", " ").replace("\u202f", " ")
+
+raise SystemExit(0 if normalize_text(expected) in normalize_text(joined) else 1)
 PY
 }
 

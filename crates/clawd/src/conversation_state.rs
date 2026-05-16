@@ -84,7 +84,7 @@ fn normalize_alias_target(raw_target: &str) -> Option<String> {
         .or_else(|| Some(trimmed.to_string()))
 }
 
-fn parse_session_alias_bindings_from_state_patch(
+pub(crate) fn session_alias_bindings_from_state_patch(
     state_patch: Option<&Value>,
 ) -> Vec<SessionAliasBinding> {
     let Some(state_patch) = state_patch else {
@@ -157,6 +157,50 @@ fn parse_session_alias_bindings_from_state_patch(
     out
 }
 
+pub(crate) fn state_patch_is_alias_bindings_only(state_patch: &Value) -> bool {
+    let Some(obj) = state_patch.as_object() else {
+        return false;
+    };
+    !obj.is_empty()
+        && obj.iter().all(|(key, value)| {
+            if !json_value_is_meaningful(value) {
+                return true;
+            }
+            if key == "alias_bindings" {
+                return value.as_array().is_some_and(|items| {
+                    !items.is_empty()
+                        && items.iter().all(|item| {
+                            let alias = item
+                                .get("alias")
+                                .and_then(Value::as_str)
+                                .map(str::trim)
+                                .filter(|alias| !alias.is_empty());
+                            let target = item
+                                .get("target")
+                                .and_then(Value::as_str)
+                                .map(str::trim)
+                                .filter(|target| !target.is_empty());
+                            alias.is_some() && target.is_some()
+                        })
+                });
+            }
+            compatibility_alias_key(key).is_some()
+                && compatibility_alias_target(value)
+                    .and_then(normalize_alias_target)
+                    .is_some()
+        })
+}
+
+fn json_value_is_meaningful(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::String(text) => !text.trim().is_empty(),
+        Value::Array(items) => items.iter().any(json_value_is_meaningful),
+        Value::Object(map) => map.values().any(json_value_is_meaningful),
+        _ => true,
+    }
+}
+
 fn compatibility_alias_key(key: &str) -> Option<String> {
     let trimmed = key.trim();
     let alias = trimmed
@@ -184,7 +228,7 @@ fn merge_alias_bindings(
     let mut alias_bindings = prior_state
         .map(|state| state.alias_bindings.clone())
         .unwrap_or_default();
-    let parsed = parse_session_alias_bindings_from_state_patch(
+    let parsed = session_alias_bindings_from_state_patch(
         turn_analysis.and_then(|analysis| analysis.state_patch.as_ref()),
     );
     if parsed.is_empty() {
@@ -445,6 +489,60 @@ fn should_track_primary_task_output(
     is_primary_task_turn_type(turn_type)
 }
 
+fn active_primary_followup_turn(
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    matches!(
+        (
+            turn_analysis.and_then(|analysis| analysis.turn_type),
+            turn_analysis.and_then(|analysis| analysis.target_task_policy),
+        ),
+        (
+            Some(
+                crate::intent_router::TurnType::TaskAppend
+                    | crate::intent_router::TurnType::TaskCorrect
+                    | crate::intent_router::TurnType::TaskReplace
+                    | crate::intent_router::TurnType::TaskScopeUpdate
+            ),
+            Some(
+                crate::intent_router::TargetTaskPolicy::ReuseActive
+                    | crate::intent_router::TargetTaskPolicy::ReplaceActive
+            )
+        )
+    )
+}
+
+fn active_primary_non_success_preserves_prior(
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    active_primary_followup_turn(turn_analysis)
+        && matches!(
+            journal.final_status,
+            Some(
+                crate::task_journal::TaskJournalFinalStatus::Clarify
+                    | crate::task_journal::TaskJournalFinalStatus::Failure
+                    | crate::task_journal::TaskJournalFinalStatus::ResumeFailure
+            )
+        )
+}
+
+fn model_fallback_preserves_primary_state(
+    fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    matches!(
+        fallback_source,
+        Some(
+            crate::fallback::ClarifyFallbackSource::LlmUnavailable
+                | crate::fallback::ClarifyFallbackSource::EmptyResponse
+        )
+    ) && matches!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Clarify)
+    )
+}
+
 fn prior_last_primary_task_output(prior_state: Option<&ConversationState>) -> Option<String> {
     prior_state.and_then(|state| state.last_primary_task_output.clone())
 }
@@ -625,6 +723,9 @@ fn next_last_primary_task_output(
 ) -> Option<String> {
     if standalone_preference_or_memory_turn_clears_primary_task(route_result, turn_analysis) {
         return None;
+    }
+    if active_primary_non_success_preserves_prior(turn_analysis, journal) {
+        return prior_last_primary_task_output(prior_state);
     }
     if should_preserve_active_session_pointers(turn_analysis)
         || route_result.is_clarify_gate()
@@ -926,9 +1027,13 @@ pub(crate) fn update_active_session_from_ask_outcome(
     semantic_clarify: bool,
     fuzzy_locator_suggestions: &[String],
     journal: &crate::task_journal::TaskJournal,
+    clarify_fallback_source: Option<crate::fallback::ClarifyFallbackSource>,
 ) {
     let prior_session_snapshot = load_active_session_snapshot(state, task);
     let prior_state = load_active_conversation_state(state, task);
+    let preserve_primary_task_for_clarifying_output =
+        active_primary_non_success_preserves_prior(turn_analysis, journal)
+            || model_fallback_preserves_primary_state(clarify_fallback_source, journal);
     let mut db = match state.core.db.get() {
         Ok(db) => db,
         Err(err) => {
@@ -940,7 +1045,8 @@ pub(crate) fn update_active_session_from_ask_outcome(
             return;
         }
     };
-    let preserve_active_session_pointers = should_preserve_active_session_pointers(turn_analysis);
+    let preserve_active_session_pointers = should_preserve_active_session_pointers(turn_analysis)
+        || preserve_primary_task_for_clarifying_output;
     if preserve_active_session_pointers {
         tracing::info!(
             "conversation_state preserve_active_session_pointers task_id={} turn_type={}",
@@ -1028,23 +1134,35 @@ pub(crate) fn update_active_session_from_ask_outcome(
                 route_result,
                 resolved_prompt_for_execution,
             ),
-            last_primary_task_prompt: next_last_primary_task_prompt(
-                prior_state.as_ref(),
-                route_result,
-                turn_analysis,
-                journal,
-                prompt,
-                resolved_prompt_for_execution,
-            ),
-            last_primary_task_output: next_last_primary_task_output(
-                prior_state.as_ref(),
-                route_result,
-                turn_analysis,
-                journal,
-                resolved_prompt_for_execution,
-                answer_text,
-                answer_messages,
-            ),
+            last_primary_task_prompt: if preserve_primary_task_for_clarifying_output {
+                prior_state
+                    .as_ref()
+                    .and_then(|state| state.last_primary_task_prompt.clone())
+            } else {
+                next_last_primary_task_prompt(
+                    prior_state.as_ref(),
+                    route_result,
+                    turn_analysis,
+                    journal,
+                    prompt,
+                    resolved_prompt_for_execution,
+                )
+            },
+            last_primary_task_output: if preserve_primary_task_for_clarifying_output {
+                prior_state
+                    .as_ref()
+                    .and_then(|state| state.last_primary_task_output.clone())
+            } else {
+                next_last_primary_task_output(
+                    prior_state.as_ref(),
+                    route_result,
+                    turn_analysis,
+                    journal,
+                    resolved_prompt_for_execution,
+                    answer_text,
+                    answer_messages,
+                )
+            },
             locale_hint: effective_locale_hint(prior_state.as_ref(), payload),
             last_task_id: task.task_id.clone(),
             updated_at_ts: crate::now_ts_u64(),
@@ -1250,6 +1368,14 @@ mod tests {
         crate::task_journal::TaskJournal::new("test")
     }
 
+    fn journal_with_final_status(
+        status: crate::task_journal::TaskJournalFinalStatus,
+    ) -> crate::task_journal::TaskJournal {
+        let mut journal = crate::task_journal::TaskJournal::new("test");
+        journal.record_final_status(status);
+        journal
+    }
+
     fn next_last_primary_task_prompt(
         prior_state: Option<&ConversationState>,
         route_result: &crate::RouteResult,
@@ -1424,6 +1550,66 @@ mod tests {
 
         assert_eq!(prompt.as_deref(), Some("帮我写个方案"));
         assert_eq!(output.as_deref(), Some("方案正文"));
+    }
+
+    #[test]
+    fn active_task_non_success_preserves_prior_primary_output() {
+        let route_result = route_result_for_test(crate::AskMode::direct_answer(), false);
+        let turn_analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskCorrect),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+            should_interrupt_active_run: false,
+            state_patch: Some(json!({"target": "Python 3.10 -> Python 3.11"})),
+            attachment_processing_required: false,
+        };
+        let prior_state = ConversationState {
+            last_primary_task_prompt: Some("Write a short release note for RustClaw".to_string()),
+            last_primary_task_output: Some(
+                "1. Manage settings easily\n2. Track work clearly\n3. Communicate naturally"
+                    .to_string(),
+            ),
+            ..ConversationState::default()
+        };
+        let journal =
+            journal_with_final_status(crate::task_journal::TaskJournalFinalStatus::Clarify);
+
+        assert!(super::active_primary_non_success_preserves_prior(
+            Some(&turn_analysis),
+            &journal
+        ));
+        let output = super::next_last_primary_task_output(
+            Some(&prior_state),
+            &route_result,
+            Some(&turn_analysis),
+            &journal,
+            "Correction: mention Python 3.11, not Python 3.10.",
+            "The model is temporarily unavailable.",
+            &[],
+        );
+
+        assert_eq!(
+            output.as_deref(),
+            Some("1. Manage settings easily\n2. Track work clearly\n3. Communicate naturally")
+        );
+    }
+
+    #[test]
+    fn model_fallback_preserves_primary_state_from_structured_source() {
+        let journal =
+            journal_with_final_status(crate::task_journal::TaskJournalFinalStatus::Clarify);
+
+        assert!(super::model_fallback_preserves_primary_state(
+            Some(crate::fallback::ClarifyFallbackSource::LlmUnavailable),
+            &journal
+        ));
+        assert!(super::model_fallback_preserves_primary_state(
+            Some(crate::fallback::ClarifyFallbackSource::EmptyResponse),
+            &journal
+        ));
+        assert!(!super::model_fallback_preserves_primary_state(
+            Some(crate::fallback::ClarifyFallbackSource::IntentUnresolved),
+            &journal
+        ));
     }
 
     #[test]
@@ -1942,6 +2128,16 @@ mod tests {
         assert!(merged.iter().any(
             |binding| binding.alias == "currentFolder" && binding.target == "/tmp/device/docs"
         ));
+    }
+
+    #[test]
+    fn state_patch_rejects_unstructured_alias_like_map() {
+        let patch = json!({
+            "甲文件": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+        });
+
+        assert!(!super::state_patch_is_alias_bindings_only(&patch));
+        assert!(super::session_alias_bindings_from_state_patch(Some(&patch)).is_empty());
     }
 
     #[test]

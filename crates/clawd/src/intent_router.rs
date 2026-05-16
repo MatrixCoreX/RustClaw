@@ -304,6 +304,10 @@ struct ContractRepairJudgeOut {
     output_contract: Option<IntentOutputContractOut>,
     #[serde(default)]
     execution_recipe: Option<IntentExecutionRecipeOut>,
+    #[serde(default)]
+    turn_type: String,
+    #[serde(default)]
+    target_task_policy: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -1939,6 +1943,136 @@ fn should_route_active_task_mutation_to_direct_answer(
     active_task_turn_can_reuse_semantic_patch(&surface, state_patch)
 }
 
+fn state_patch_has_semantic_update(state_patch: Option<&Value>) -> bool {
+    let Some(Value::Object(map)) = state_patch else {
+        return false;
+    };
+    !map.is_empty() && map.values().any(is_meaningful_state_patch)
+}
+
+fn prompt_has_concrete_locator_for_patch_repair(
+    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> bool {
+    surface.has_explicit_path_or_url()
+        || surface.locator_target_pair.is_some()
+        || surface.field_selector_count > 0
+        || surface.dotted_field_selector.is_some()
+        || surface.has_delivery_token_reference()
+        || !surface
+            .filename_candidates_excluding_field_selectors()
+            .is_empty()
+}
+
+fn active_primary_text_context(
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+) -> Option<(&str, Option<&str>)> {
+    let state = session_snapshot.and_then(|snapshot| snapshot.conversation_state.as_ref())?;
+    let prompt = state
+        .last_primary_task_prompt
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let output = state
+        .last_primary_task_output
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && !crate::finalize::is_execution_summary_message(value));
+    Some((prompt, output))
+}
+
+fn active_text_patch_locator_context_is_safe(
+    turn_type: Option<TurnType>,
+    target_task_policy: Option<TargetTaskPolicy>,
+    output_contract: &IntentOutputContract,
+) -> bool {
+    if output_contract.locator_hint.trim().is_empty() {
+        return true;
+    }
+    matches!(
+        (turn_type, target_task_policy),
+        (
+            Some(
+                TurnType::TaskAppend
+                    | TurnType::TaskCorrect
+                    | TurnType::TaskReplace
+                    | TurnType::TaskScopeUpdate
+            ),
+            Some(TargetTaskPolicy::ReuseActive | TargetTaskPolicy::ReplaceActive)
+        )
+    )
+}
+
+fn apply_active_task_structured_patch_repair(
+    prompt: &str,
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+    turn_type: &mut Option<TurnType>,
+    target_task_policy: &mut Option<TargetTaskPolicy>,
+    attachment_processing_required: bool,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
+    needs_clarify: &mut bool,
+    schedule_kind: ScheduleKind,
+    should_refresh_long_term_memory: bool,
+    output_contract: &mut IntentOutputContract,
+    state_patch: Option<&Value>,
+) -> Option<&'static str> {
+    active_primary_text_context(session_snapshot)?;
+    if attachment_processing_required
+        || should_refresh_long_term_memory
+        || !matches!(schedule_kind, ScheduleKind::None)
+        || crate::conversation_state::state_patch_is_alias_bindings_only(state_patch?)
+        || !state_patch_has_semantic_update(state_patch)
+        || output_contract.delivery_required
+        || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        || !matches!(
+            output_contract.locator_kind,
+            OutputLocatorKind::None | OutputLocatorKind::CurrentWorkspace
+        )
+        || !active_text_patch_locator_context_is_safe(
+            *turn_type,
+            *target_task_policy,
+            output_contract,
+        )
+    {
+        return None;
+    }
+
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
+    if prompt_has_concrete_locator_for_patch_repair(&surface)
+        || unresolved_deictic_observable_target_should_clarify(
+            &surface,
+            output_contract,
+            state_patch,
+        )
+        || !active_task_turn_can_reuse_semantic_patch(&surface, state_patch)
+    {
+        return None;
+    }
+
+    if !matches!(
+        turn_type,
+        None | Some(TurnType::TaskRequest | TurnType::TaskCorrect | TurnType::TaskAppend)
+    ) || !matches!(
+        target_task_policy,
+        None | Some(TargetTaskPolicy::Standalone | TargetTaskPolicy::ReuseActive)
+    ) {
+        return None;
+    }
+
+    *turn_type = Some(TurnType::TaskCorrect);
+    *target_task_policy = Some(TargetTaskPolicy::ReuseActive);
+    *needs_clarify = false;
+    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *execution_finalize_style = ActFinalizeStyle::Plain;
+    output_contract.requires_content_evidence = false;
+    output_contract.delivery_required = false;
+    output_contract.locator_kind = OutputLocatorKind::None;
+    output_contract.delivery_intent = OutputDeliveryIntent::None;
+    output_contract.semantic_kind = OutputSemanticKind::None;
+    output_contract.locator_hint.clear();
+    Some("active_task_structured_patch_repair")
+}
+
 fn apply_active_task_scope_refinement_repair(
     prompt: &str,
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
@@ -2018,6 +2152,154 @@ fn output_contract_allows_chat_only_task_mutation(output_contract: &IntentOutput
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
         && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+}
+
+fn clear_output_contract_for_active_text_followup(output_contract: &mut IntentOutputContract) {
+    output_contract.requires_content_evidence = false;
+    output_contract.delivery_required = false;
+    output_contract.locator_kind = OutputLocatorKind::None;
+    output_contract.delivery_intent = OutputDeliveryIntent::None;
+    output_contract.semantic_kind = OutputSemanticKind::None;
+    output_contract.locator_hint.clear();
+}
+
+fn output_contract_looks_like_contextual_text_followup(
+    output_contract: &IntentOutputContract,
+) -> bool {
+    !output_contract.delivery_required
+        && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        && matches!(
+            output_contract.locator_kind,
+            OutputLocatorKind::None | OutputLocatorKind::CurrentWorkspace
+        )
+        && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+        && matches!(
+            output_contract.response_shape,
+            OutputResponseShape::Free
+                | OutputResponseShape::OneSentence
+                | OutputResponseShape::Strict
+        )
+}
+
+fn answer_candidate_can_conflict_with_active_text_followup(
+    binding: Option<&AnswerCandidateBindingReport>,
+) -> bool {
+    binding.is_some_and(|binding| {
+        binding.is_distinctive()
+            && !binding.in_current_request
+            && (binding.in_recent_assistant_replies
+                || binding.in_recent_turns_full
+                || binding.in_last_turn_full
+                || binding.in_memory_context)
+    })
+}
+fn apply_active_text_followup_route_repair(
+    prompt: &str,
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+    turn_type: &mut Option<TurnType>,
+    target_task_policy: &mut Option<TargetTaskPolicy>,
+    attachment_processing_required: bool,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
+    needs_clarify: &mut bool,
+    schedule_kind: ScheduleKind,
+    should_refresh_long_term_memory: bool,
+    wants_file_delivery: &mut bool,
+    output_contract: &mut IntentOutputContract,
+    state_patch: Option<&Value>,
+    semantic_active_text_candidate_repair: bool,
+    answer_candidate: &mut String,
+) -> Option<&'static str> {
+    active_primary_text_context(session_snapshot)?;
+    if attachment_processing_required
+        || should_refresh_long_term_memory
+        || !matches!(schedule_kind, ScheduleKind::None)
+        || *wants_file_delivery
+        || !output_contract_looks_like_contextual_text_followup(output_contract)
+    {
+        return None;
+    }
+
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
+    if prompt_has_concrete_locator_for_patch_repair(&surface)
+        || unresolved_deictic_observable_target_should_clarify(
+            &surface,
+            output_contract,
+            state_patch,
+        )
+        || !active_task_turn_can_reuse_semantic_patch(&surface, state_patch)
+    {
+        return None;
+    }
+
+    let model_already_bound_active_task = matches!(
+        (*turn_type, *target_task_policy),
+        (
+            Some(
+                TurnType::TaskAppend
+                    | TurnType::TaskCorrect
+                    | TurnType::TaskReplace
+                    | TurnType::TaskScopeUpdate
+            ),
+            Some(TargetTaskPolicy::ReuseActive | TargetTaskPolicy::ReplaceActive)
+        )
+    );
+    let stale_contextual_evidence = output_contract.requires_content_evidence
+        && matches!(
+            output_contract.locator_kind,
+            OutputLocatorKind::None | OutputLocatorKind::CurrentWorkspace
+        );
+    let stale_scalar_candidate = semantic_active_text_candidate_repair;
+
+    if !(model_already_bound_active_task || stale_contextual_evidence || stale_scalar_candidate) {
+        return None;
+    }
+
+    if !matches!(
+        turn_type,
+        None | Some(
+            TurnType::TaskRequest
+                | TurnType::TaskAppend
+                | TurnType::TaskCorrect
+                | TurnType::TaskReplace
+                | TurnType::TaskScopeUpdate
+                | TurnType::PreferenceOrMemory
+        )
+    ) || !matches!(
+        target_task_policy,
+        None | Some(
+            TargetTaskPolicy::Standalone
+                | TargetTaskPolicy::ReuseActive
+                | TargetTaskPolicy::ReplaceActive
+        )
+    ) {
+        return None;
+    }
+
+    if !matches!(*target_task_policy, Some(TargetTaskPolicy::ReplaceActive))
+        && !matches!(*turn_type, Some(TurnType::TaskReplace))
+    {
+        *target_task_policy = Some(TargetTaskPolicy::ReuseActive);
+    }
+    if turn_type.is_none()
+        || matches!(
+            *turn_type,
+            Some(TurnType::TaskRequest | TurnType::PreferenceOrMemory)
+        )
+    {
+        *turn_type = Some(if stale_scalar_candidate {
+            TurnType::TaskScopeUpdate
+        } else {
+            TurnType::TaskCorrect
+        });
+    }
+    *needs_clarify = false;
+    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *execution_finalize_style = ActFinalizeStyle::Plain;
+    *wants_file_delivery = false;
+    answer_candidate.clear();
+    clear_output_contract_for_active_text_followup(output_contract);
+    Some("active_text_followup_route_repair")
 }
 
 fn render_self_extension_runtime(state: &AppState) -> String {
@@ -2232,6 +2514,111 @@ fn answer_candidate_binding_repair_context(
     )
 }
 
+fn append_contract_repair_context(context: &mut String, block: String) {
+    if block.trim().is_empty() {
+        return;
+    }
+    if context.trim().is_empty() || context == "none" {
+        *context = block;
+    } else {
+        context.push_str("\n\n");
+        context.push_str(&block);
+    }
+}
+
+fn active_text_answer_candidate_conflict_context(
+    binding: Option<&AnswerCandidateBindingReport>,
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    should_refresh_long_term_memory: bool,
+) -> Option<String> {
+    if should_refresh_long_term_memory
+        || req_surface.has_explicit_path_or_url()
+        || req_surface.locator_target_pair.is_some()
+        || req_surface.has_structured_target_refinement()
+        || req_surface.has_delivery_token_reference()
+        || req_surface.inline_json_shape.is_some()
+    {
+        return None;
+    }
+    let binding = binding?;
+    if !answer_candidate_can_conflict_with_active_text_followup(Some(binding)) {
+        return None;
+    }
+    let (prior_prompt, prior_output) = active_primary_text_context(session_snapshot)?;
+    if prior_output.is_none() {
+        return None;
+    }
+    Some(format!(
+        "active_task_answer_candidate_conflict:\n\
+         candidate: {}\n\
+         in_recent_assistant_replies: {}\n\
+         in_recent_turns_full: {}\n\
+         in_last_turn_full: {}\n\
+         in_memory_context: {}\n\
+         active_task_prompt: {}\n\
+         active_task_has_output: {}",
+        crate::truncate_for_log(&binding.candidate),
+        binding.in_recent_assistant_replies,
+        binding.in_recent_turns_full,
+        binding.in_last_turn_full,
+        binding.in_memory_context,
+        crate::truncate_for_log(prior_prompt),
+        prior_output.is_some()
+    ))
+}
+
+fn active_task_invalid_turn_binding_context(
+    raw_normalizer_output: &str,
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    should_refresh_long_term_memory: bool,
+) -> Option<String> {
+    if should_refresh_long_term_memory
+        || req_surface.has_explicit_path_or_url()
+        || req_surface.locator_target_pair.is_some()
+        || req_surface.has_structured_target_refinement()
+        || req_surface.has_delivery_token_reference()
+        || req_surface.inline_json_shape.is_some()
+    {
+        return None;
+    }
+    let (prior_prompt, prior_output) = active_primary_text_context(session_snapshot)?;
+    prior_output?;
+    let raw_value =
+        crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<Value>(raw_normalizer_output)?;
+    let obj = raw_value.as_object()?;
+    let raw_turn_type = obj
+        .get("turn_type")
+        .and_then(scalar_json_value_text)
+        .unwrap_or_default();
+    let raw_target_task_policy = obj
+        .get("target_task_policy")
+        .and_then(scalar_json_value_text)
+        .unwrap_or_default();
+    let turn_type_invalid =
+        !raw_turn_type.trim().is_empty() && parse_turn_type(&raw_turn_type).is_none();
+    let target_policy_invalid = !raw_target_task_policy.trim().is_empty()
+        && parse_target_task_policy(&raw_target_task_policy).is_none();
+    if !(turn_type_invalid || target_policy_invalid) {
+        return None;
+    }
+    Some(format!(
+        "active_task_invalid_turn_binding:\n\
+         raw_turn_type: {}\n\
+         raw_target_task_policy: {}\n\
+         turn_type_invalid: {}\n\
+         target_task_policy_invalid: {}\n\
+         active_task_prompt: {}\n\
+         active_task_has_output: true",
+        crate::truncate_for_log(raw_turn_type.trim()),
+        crate::truncate_for_log(raw_target_task_policy.trim()),
+        turn_type_invalid,
+        target_policy_invalid,
+        crate::truncate_for_log(prior_prompt)
+    ))
+}
+
 fn clear_memory_update_answer_candidate_if_memory_only(
     out: &mut IntentNormalizerOut,
     binding: Option<&AnswerCandidateBindingReport>,
@@ -2380,7 +2767,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push(compact_prompt_slot(
         "ACTIVE_TASK",
         &route_view.active_task_context,
-        120,
+        760,
     ));
     parts.push(compact_prompt_slot(
         "ANCHOR",
@@ -2444,6 +2831,12 @@ fn render_compact_intent_normalizer_prompt(
     // ordinal/deictic resolution does not fall back to older memory or prose
     // when a provider truncates the middle context.
     parts.push("FOLLOWUP_ANCHOR_PRIORITY: ANCHOR is the latest structured execution state and overrides MEMORY/ASSISTANT/RECENT for ordinal or deictic follow-ups unless REQUEST names a new target.".to_string());
+    parts.push("ACTIVE_TASK_PRIORITY: if REQUEST semantically refines the active writing/drafting/planning deliverable, ACTIVE_TASK overrides MEMORY/ASSISTANT scalar recall candidates unless REQUEST explicitly asks to recall that exact scalar.".to_string());
+    parts.push(compact_prompt_slot(
+        "ACTIVE_TASK",
+        &route_view.active_task_context,
+        900,
+    ));
     parts.push(compact_prompt_slot(
         "ANCHOR",
         &route_view.active_execution_anchor_context,
@@ -4658,9 +5051,26 @@ fn apply_contract_repair_judge_output(
     if !repair.resolved_user_intent.trim().is_empty() {
         out.resolved_user_intent = repair.resolved_user_intent;
     }
+    out.wants_file_delivery = repaired_contract_wants_file_delivery(&output_contract);
     out.output_contract = Some(output_contract);
     out.execution_recipe = Some(execution_recipe);
     out.confidence = repair.confidence.clamp(0.0, 1.0);
+    let repaired_turn_type = normalize_schema_token(&repair.turn_type);
+    if repaired_turn_type.is_empty() {
+        if parse_turn_type(&out.turn_type).is_none() {
+            out.turn_type.clear();
+        }
+    } else if parse_turn_type(&repaired_turn_type).is_some() {
+        out.turn_type = repaired_turn_type;
+    }
+    let repaired_target_task_policy = normalize_schema_token(&repair.target_task_policy);
+    if repaired_target_task_policy.is_empty() {
+        if parse_target_task_policy(&out.target_task_policy).is_none() {
+            out.target_task_policy.clear();
+        }
+    } else if parse_target_task_policy(&repaired_target_task_policy).is_some() {
+        out.target_task_policy = repaired_target_task_policy;
+    }
     if repair.reason.trim().is_empty() {
         append_route_reason(&mut out.reason, "llm_semantic_contract_repair");
     } else {
@@ -4670,6 +5080,18 @@ fn apply_contract_repair_judge_output(
         );
     }
     true
+}
+
+fn repaired_contract_wants_file_delivery(contract: &IntentOutputContractOut) -> bool {
+    contract.delivery_required
+        || matches!(
+            parse_output_response_shape(&contract.response_shape),
+            OutputResponseShape::FileToken
+        )
+        || !matches!(
+            parse_output_delivery_intent(&contract.delivery_intent),
+            OutputDeliveryIntent::None
+        )
 }
 
 fn append_route_reason(reason: &mut String, addition: &str) {
@@ -4897,6 +5319,7 @@ pub(crate) async fn run_intent_normalizer(
         let answer_candidate_binding =
             analyze_answer_candidate_binding(req, &out.answer_candidate, route_view);
         let mut contract_repair_context = String::from("none");
+        let mut active_text_answer_candidate_conflict = false;
         let cleared_memory_update_candidate = clear_memory_update_answer_candidate_if_memory_only(
             &mut out,
             answer_candidate_binding.as_ref(),
@@ -4917,9 +5340,29 @@ pub(crate) async fn run_intent_normalizer(
             );
             contract_repair_report.add("semantic_suspect", "answer_candidate_memory_only_binding");
         }
+        if let Some(active_conflict_context) = active_text_answer_candidate_conflict_context(
+            answer_candidate_binding.as_ref(),
+            session_snapshot,
+            &req_surface,
+            out.should_refresh_long_term_memory,
+        ) {
+            active_text_answer_candidate_conflict = true;
+            append_contract_repair_context(&mut contract_repair_context, active_conflict_context);
+            contract_repair_report.add("semantic_suspect", "active_task_answer_candidate_conflict");
+        }
+        if let Some(invalid_binding_context) = active_task_invalid_turn_binding_context(
+            &llm_out,
+            session_snapshot,
+            &req_surface,
+            out.should_refresh_long_term_memory,
+        ) {
+            append_contract_repair_context(&mut contract_repair_context, invalid_binding_context);
+            contract_repair_report.add("semantic_suspect", "active_task_invalid_turn_binding");
+        }
         if let Some(detail) = semantic_suspect_detail_for_normalizer_output(&out) {
             contract_repair_report.add("semantic_suspect", detail);
         }
+        let mut active_text_answer_candidate_repair_applied = false;
         if contract_repair_report.needs_llm_semantic_repair() {
             if let Some(repair) = run_contract_repair_judge(
                 state,
@@ -4933,6 +5376,9 @@ pub(crate) async fn run_intent_normalizer(
             .await
             {
                 if apply_contract_repair_judge_output(&mut out, repair) {
+                    if active_text_answer_candidate_conflict {
+                        active_text_answer_candidate_repair_applied = true;
+                    }
                     let mut repair_applied = ContractRepairReport::default();
                     repair_applied.add("llm_semantic", "contract_repair_judge_applied");
                     contract_repair_report.merge(&repair_applied);
@@ -5273,6 +5719,38 @@ pub(crate) async fn run_intent_normalizer(
                 crate::truncate_for_log(req)
             );
         }
+        if let Some(repair_reason) = apply_active_text_followup_route_repair(
+            req,
+            session_snapshot,
+            &mut turn_type,
+            &mut target_task_policy,
+            out.attachment_processing_required,
+            &mut first_layer_decision,
+            &mut execution_finalize_style,
+            &mut needs_clarify,
+            schedule_kind,
+            out.should_refresh_long_term_memory,
+            &mut wants_file_delivery,
+            &mut output_contract,
+            state_patch.as_ref(),
+            active_text_answer_candidate_repair_applied,
+            &mut out.answer_candidate,
+        ) {
+            clarify_question.clear();
+            force_current_request_resolved_intent = true;
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
+            info!(
+                "{} intent_normalizer task_id={} active_text_followup_route_repair input={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                crate::truncate_for_log(req)
+            );
+        }
         let resolved_user_intent = if force_current_request_resolved_intent || resolved.is_empty() {
             req.to_string()
         } else {
@@ -5300,6 +5778,34 @@ pub(crate) async fn run_intent_normalizer(
             }
             info!(
                 "{} intent_normalizer task_id={} current_turn_locator_overrides_contextual_path input={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                crate::truncate_for_log(req)
+            );
+        }
+        if let Some(repair_reason) = apply_active_task_structured_patch_repair(
+            req,
+            session_snapshot,
+            &mut turn_type,
+            &mut target_task_policy,
+            out.attachment_processing_required,
+            &mut first_layer_decision,
+            &mut execution_finalize_style,
+            &mut needs_clarify,
+            schedule_kind,
+            out.should_refresh_long_term_memory,
+            &mut output_contract,
+            state_patch.as_ref(),
+        ) {
+            clarify_question.clear();
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
+            info!(
+                "{} intent_normalizer task_id={} active_task_structured_patch_repair input={}",
                 crate::highlight_tag("routing"),
                 task.task_id,
                 crate::truncate_for_log(req)
@@ -6480,7 +6986,9 @@ mod tests {
             "locator_hint": "logs",
             "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
           },
-          "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "unknown"}
+          "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "unknown"},
+          "turn_type": "task_request",
+          "target_task_policy": "standalone"
         }"#;
 
         crate::prompt_utils::validate_against_schema::<super::ContractRepairJudgeOut>(
@@ -6538,6 +7046,8 @@ mod tests {
                 profile: "none".to_string(),
                 target_scope: "unknown".to_string(),
             }),
+            turn_type: "task_request".to_string(),
+            target_task_policy: "standalone".to_string(),
         };
 
         assert!(super::apply_contract_repair_judge_output(&mut out, repair));
@@ -6550,6 +7060,78 @@ mod tests {
         assert_eq!(contract.semantic_kind, OutputSemanticKind::FileNames);
         assert!(contract.requires_content_evidence);
         assert_eq!(contract.locator_hint, "document");
+    }
+
+    #[test]
+    fn contract_repair_judge_output_clears_stale_file_delivery_flag() {
+        let mut out = super::IntentNormalizerOut {
+            resolved_user_intent: "Write a short release note for RustClaw".to_string(),
+            answer_candidate: String::new(),
+            resume_behavior: "none".to_string(),
+            schedule_kind: "none".to_string(),
+            wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: "RustClaw".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            reason: "malformed output contract".to_string(),
+            confidence: 0.5,
+            decision: "planner_execute".to_string(),
+            schedule_intent: None,
+            output_contract: Some(super::IntentOutputContractOut {
+                response_shape: "file_token".to_string(),
+                exact_sentence_count: None,
+                requires_content_evidence: false,
+                delivery_required: true,
+                locator_kind: "path".to_string(),
+                delivery_intent: "file_single".to_string(),
+                semantic_kind: "none".to_string(),
+                locator_hint: String::new(),
+                self_extension: None,
+            }),
+            execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+            turn_type: String::new(),
+            target_task_policy: String::new(),
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+        let repair = super::ContractRepairJudgeOut {
+            apply: true,
+            reason: "inline_text_contract".to_string(),
+            confidence: 0.85,
+            decision: "direct_answer".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            resolved_user_intent: "Write a short release note for RustClaw as inline content."
+                .to_string(),
+            output_contract: Some(super::IntentOutputContractOut {
+                response_shape: "free".to_string(),
+                exact_sentence_count: None,
+                requires_content_evidence: false,
+                delivery_required: false,
+                locator_kind: "none".to_string(),
+                delivery_intent: "none".to_string(),
+                semantic_kind: "none".to_string(),
+                locator_hint: String::new(),
+                self_extension: None,
+            }),
+            execution_recipe: Some(super::IntentExecutionRecipeOut {
+                kind: "none".to_string(),
+                profile: "none".to_string(),
+                target_scope: "none".to_string(),
+            }),
+            turn_type: String::new(),
+            target_task_policy: String::new(),
+        };
+
+        assert!(super::apply_contract_repair_judge_output(&mut out, repair));
+
+        assert!(!out.wants_file_delivery);
+        let contract = super::parse_output_contract(out.output_contract, out.wants_file_delivery);
+        assert_eq!(contract.response_shape, OutputResponseShape::Free);
+        assert!(!contract.delivery_required);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     }
 
     #[test]
@@ -6637,6 +7219,8 @@ mod tests {
                 self_extension: None,
             }),
             execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+            turn_type: String::new(),
+            target_task_policy: String::new(),
         };
 
         assert!(!super::apply_contract_repair_judge_output(&mut out, repair));
@@ -11005,6 +11589,216 @@ mod tests {
     }
 
     #[test]
+    fn structured_replacement_patch_repairs_active_task_correction_metadata() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some(
+                    "Write a short setup checklist for RustClaw".to_string(),
+                ),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let patch = serde_json::json!({
+            "replacements": [
+                {"old": "Python 3.10", "new": "Python 3.11"}
+            ]
+        });
+        let mut turn_type = None;
+        let mut target_task_policy = None;
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+        let mut needs_clarify = false;
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::None,
+            locator_hint: String::new(),
+            self_extension: Default::default(),
+        };
+
+        let reason = super::apply_active_task_structured_patch_repair(
+            "Use Python 3.11 instead of Python 3.10.",
+            Some(&snapshot),
+            &mut turn_type,
+            &mut target_task_policy,
+            false,
+            &mut decision,
+            &mut finalize_style,
+            &mut needs_clarify,
+            super::ScheduleKind::None,
+            false,
+            &mut contract,
+            Some(&patch),
+        );
+
+        assert_eq!(reason, Some("active_task_structured_patch_repair"));
+        assert_eq!(turn_type, Some(TurnType::TaskCorrect));
+        assert_eq!(target_task_policy, Some(TargetTaskPolicy::ReuseActive));
+        assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+        assert!(!needs_clarify);
+        assert!(!contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    }
+
+    #[test]
+    fn structured_patch_repair_does_not_override_explicit_filename_target() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("Write a release note".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let patch = serde_json::json!({
+            "replacements": [
+                {"old": "Python 3.10", "new": "Python 3.11"}
+            ]
+        });
+        let mut turn_type = None;
+        let mut target_task_policy = None;
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+        let mut needs_clarify = false;
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::None,
+            locator_hint: String::new(),
+            self_extension: Default::default(),
+        };
+
+        let reason = super::apply_active_task_structured_patch_repair(
+            "In README.md, replace Python 3.10 with Python 3.11.",
+            Some(&snapshot),
+            &mut turn_type,
+            &mut target_task_policy,
+            false,
+            &mut decision,
+            &mut finalize_style,
+            &mut needs_clarify,
+            super::ScheduleKind::None,
+            false,
+            &mut contract,
+            Some(&patch),
+        );
+
+        assert_eq!(reason, None);
+        assert_eq!(turn_type, None);
+        assert_eq!(target_task_policy, None);
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert!(contract.requires_content_evidence);
+    }
+
+    #[test]
+    fn scalar_patch_with_locator_hint_requires_active_binding_for_repair() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some(
+                    "Write a short release note for RustClaw".to_string(),
+                ),
+                last_primary_task_output: Some(
+                    "RustClaw Release Notes - Your Quick Checklist".to_string(),
+                ),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let patch = serde_json::json!({"release_notes_python_version": "Python 3.11"});
+        let mut turn_type = None;
+        let mut target_task_policy = None;
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+        let mut needs_clarify = false;
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::None,
+            locator_hint: "release notes".to_string(),
+            self_extension: Default::default(),
+        };
+
+        let reason = super::apply_active_task_structured_patch_repair(
+            "Use Python 3.11 instead of Python 3.10.",
+            Some(&snapshot),
+            &mut turn_type,
+            &mut target_task_policy,
+            false,
+            &mut decision,
+            &mut finalize_style,
+            &mut needs_clarify,
+            super::ScheduleKind::None,
+            false,
+            &mut contract,
+            Some(&patch),
+        );
+
+        assert_eq!(reason, None);
+        assert_eq!(turn_type, None);
+        assert_eq!(target_task_policy, None);
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_hint, "release notes");
+
+        let mut turn_type = Some(TurnType::TaskCorrect);
+        let mut target_task_policy = Some(TargetTaskPolicy::ReuseActive);
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+        let mut needs_clarify = false;
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::None,
+            locator_hint: "release notes".to_string(),
+            self_extension: Default::default(),
+        };
+        let reason = super::apply_active_task_structured_patch_repair(
+            "Use Python 3.11 instead of Python 3.10.",
+            Some(&snapshot),
+            &mut turn_type,
+            &mut target_task_policy,
+            false,
+            &mut decision,
+            &mut finalize_style,
+            &mut needs_clarify,
+            super::ScheduleKind::None,
+            false,
+            &mut contract,
+            Some(&patch),
+        );
+
+        assert_eq!(reason, Some("active_task_structured_patch_repair"));
+        assert_eq!(turn_type, Some(TurnType::TaskCorrect));
+        assert_eq!(target_task_policy, Some(TargetTaskPolicy::ReuseActive));
+        assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+        assert!(!contract.requires_content_evidence);
+        assert!(contract.locator_hint.is_empty());
+    }
+
+    #[test]
     fn standalone_execution_target_misroute_is_repaired_to_active_scope_update() {
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: Some(crate::conversation_state::ConversationState {
@@ -11239,6 +12033,160 @@ mod tests {
     }
 
     #[test]
+    fn active_text_followup_clears_stale_scalar_answer_candidate() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some(
+                    "Write a short release note for RustClaw".to_string(),
+                ),
+                last_primary_task_output: Some(
+                    "RustClaw v0.1.7 ships with clearer configuration controls.".to_string(),
+                ),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let binding = super::AnswerCandidateBindingReport {
+            candidate: "RC-CONT-EN-0428-B".to_string(),
+            in_current_request: false,
+            in_recent_assistant_replies: true,
+            in_recent_turns_full: true,
+            in_last_turn_full: true,
+            in_recent_execution_context: false,
+            in_memory_context: true,
+        };
+        let mut turn_type = Some(TurnType::PreferenceOrMemory);
+        let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
+        let mut decision = FirstLayerDecision::DirectAnswer;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+        let mut needs_clarify = false;
+        let mut wants_file_delivery = false;
+        let mut answer_candidate = binding.candidate.clone();
+        let mut contract = IntentOutputContract::default();
+
+        let reason = super::apply_active_text_followup_route_repair(
+            "Make it for non-technical users.",
+            Some(&snapshot),
+            &mut turn_type,
+            &mut target_task_policy,
+            false,
+            &mut decision,
+            &mut finalize_style,
+            &mut needs_clarify,
+            super::ScheduleKind::None,
+            false,
+            &mut wants_file_delivery,
+            &mut contract,
+            None,
+            true,
+            &mut answer_candidate,
+        );
+
+        assert_eq!(reason, Some("active_text_followup_route_repair"));
+        assert_eq!(turn_type, Some(TurnType::TaskScopeUpdate));
+        assert_eq!(target_task_policy, Some(TargetTaskPolicy::ReuseActive));
+        assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+        assert!(answer_candidate.is_empty());
+        assert!(!contract.requires_content_evidence);
+    }
+
+    #[test]
+    fn active_task_invalid_turn_binding_context_uses_schema_tokens_not_user_phrases() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some(
+                    "Write a short release note for RustClaw".to_string(),
+                ),
+                last_primary_task_output: Some(
+                    "RustClaw v0.1.7 ships with clearer configuration controls.".to_string(),
+                ),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(
+            "Make it easier for non-technical readers.",
+        );
+        let raw = serde_json::json!({
+            "turn_type": "response",
+            "target_task_policy": "release_note_rewrite_non_technical"
+        })
+        .to_string();
+
+        let context =
+            super::active_task_invalid_turn_binding_context(&raw, Some(&snapshot), &surface, false)
+                .unwrap();
+
+        assert!(context.contains("active_task_invalid_turn_binding"));
+        assert!(context.contains("turn_type_invalid: true"));
+        assert!(context.contains("target_task_policy_invalid: true"));
+    }
+
+    #[test]
+    fn active_text_correction_clears_stale_workspace_evidence_contract() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some(
+                    "Write a short release note for RustClaw".to_string(),
+                ),
+                last_primary_task_output: Some(
+                    "RustClaw v0.1.7 supports Python 3.10 setup notes.".to_string(),
+                ),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let mut turn_type = Some(TurnType::TaskCorrect);
+        let mut target_task_policy = Some(TargetTaskPolicy::ReuseActive);
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+        let mut needs_clarify = false;
+        let mut wants_file_delivery = false;
+        let mut answer_candidate = String::new();
+        let mut contract = IntentOutputContract {
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            semantic_kind: OutputSemanticKind::None,
+            locator_hint: "release notes".to_string(),
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_active_text_followup_route_repair(
+            "Correction: mention Python 3.11, not Python 3.10.",
+            Some(&snapshot),
+            &mut turn_type,
+            &mut target_task_policy,
+            false,
+            &mut decision,
+            &mut finalize_style,
+            &mut needs_clarify,
+            super::ScheduleKind::None,
+            false,
+            &mut wants_file_delivery,
+            &mut contract,
+            None,
+            false,
+            &mut answer_candidate,
+        );
+
+        assert_eq!(reason, Some("active_text_followup_route_repair"));
+        assert_eq!(turn_type, Some(TurnType::TaskCorrect));
+        assert_eq!(target_task_policy, Some(TargetTaskPolicy::ReuseActive));
+        assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+        assert!(!contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+        assert!(contract.locator_hint.is_empty());
+    }
+
+    #[test]
     fn active_task_mutation_with_content_evidence_stays_executable() {
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: Some(crate::conversation_state::ConversationState {
@@ -11267,6 +12215,59 @@ mod tests {
             &contract,
             None,
         ));
+    }
+
+    #[test]
+    fn active_text_followup_repair_preserves_real_workspace_summary_contract() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("Summarize this repository".to_string()),
+                last_primary_task_output: Some("It has a web UI and backend services.".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let mut turn_type = Some(TurnType::TaskScopeUpdate);
+        let mut target_task_policy = Some(TargetTaskPolicy::ReuseActive);
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+        let mut needs_clarify = false;
+        let mut wants_file_delivery = false;
+        let mut answer_candidate = String::new();
+        let mut contract = IntentOutputContract {
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_active_text_followup_route_repair(
+            "Focus only on the UI part",
+            Some(&snapshot),
+            &mut turn_type,
+            &mut target_task_policy,
+            false,
+            &mut decision,
+            &mut finalize_style,
+            &mut needs_clarify,
+            super::ScheduleKind::None,
+            false,
+            &mut wants_file_delivery,
+            &mut contract,
+            None,
+            false,
+            &mut answer_candidate,
+        );
+
+        assert_eq!(reason, None);
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(
+            contract.semantic_kind,
+            OutputSemanticKind::WorkspaceProjectSummary
+        );
     }
 
     #[test]
