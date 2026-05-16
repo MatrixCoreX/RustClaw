@@ -518,7 +518,10 @@ fn normalize_locator_identity_token(value: &str) -> String {
 }
 
 fn should_attempt_auto_locator(route_result: &crate::RouteResult) -> bool {
-    if route_result.needs_clarify {
+    if route_result.needs_clarify
+        && route_result.output_contract.locator_kind != crate::OutputLocatorKind::CurrentWorkspace
+        && route_result.output_contract.locator_hint.trim().is_empty()
+    {
         return false;
     }
     if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
@@ -534,12 +537,39 @@ fn should_attempt_auto_locator(route_result: &crate::RouteResult) -> bool {
     )
 }
 
+fn execute_route_without_input_locator_should_plan(route_result: &crate::RouteResult) -> bool {
+    route_result.is_execute_gate()
+        && route_result.output_contract.requires_content_evidence
+        && route_result.output_contract.locator_kind == crate::OutputLocatorKind::None
+        && route_result.output_contract.locator_hint.trim().is_empty()
+        && !route_result.wants_file_delivery
+        && !route_result.output_contract.delivery_required
+        && !matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+}
+
+fn active_observed_facts_have_bound_target(
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> bool {
+    session_snapshot
+        .active_observed_facts
+        .as_ref()
+        .and_then(|facts| facts.bound_target.as_deref())
+        .map(str::trim)
+        .is_some_and(|target| !target.is_empty())
+}
+
 fn deictic_memory_only_route_should_force_clarify(
     prompt: &str,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
 ) -> bool {
+    if execute_route_without_input_locator_should_plan(route_result) {
+        return false;
+    }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
     if !surface.has_deictic_reference()
         || surface.has_concrete_locator_hint()
@@ -551,6 +581,11 @@ fn deictic_memory_only_route_should_force_clarify(
         return false;
     }
     if session_has_authoritative_deictic_anchor(prompt, route_result, session_snapshot) {
+        return false;
+    }
+    if route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && !active_observed_facts_have_bound_target(session_snapshot)
+    {
         return false;
     }
     route_result.is_execute_gate()
@@ -1324,6 +1359,30 @@ mod tests {
     }
 
     #[test]
+    fn deictic_memory_only_command_output_reference_does_not_force_clarify() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        route.wants_file_delivery = false;
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(!deictic_memory_only_route_should_force_clarify(
+            "执行 pwd，然后用一句话解释这个路径代表什么",
+            &route,
+            None,
+            &snapshot,
+        ));
+    }
+
+    #[test]
     fn deictic_forced_clarify_preserves_only_scalar_shape_from_answer_candidate() {
         let mut route = executable_filename_route();
         route.output_contract.response_shape = crate::OutputResponseShape::Strict;
@@ -1627,6 +1686,40 @@ mod tests {
             },
         };
         assert!(should_attempt_auto_locator(&route));
+    }
+
+    #[test]
+    fn auto_locator_attempts_for_clarify_with_resolvable_workspace_scope() {
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::clarify(),
+            resolved_intent: "检查当前目录".to_string(),
+            needs_clarify: true,
+            route_reason: String::new(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                requires_content_evidence: true,
+                ..Default::default()
+            },
+        };
+        assert!(should_attempt_auto_locator(&route));
+
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "docs".to_string();
+        assert!(should_attempt_auto_locator(&route));
+
+        route.output_contract.locator_hint.clear();
+        assert!(!should_attempt_auto_locator(&route));
     }
 
     #[test]

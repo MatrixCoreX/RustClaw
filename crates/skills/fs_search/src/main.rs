@@ -122,6 +122,23 @@ fn string_values_from_args(obj: &serde_json::Map<String, Value>, keys: &[&str]) 
     out
 }
 
+fn extension_values_from_args(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw in string_values_from_args(obj, keys) {
+        for part in raw.split(|ch: char| matches!(ch, ',' | ';' | '|')) {
+            let normalized = part
+                .trim()
+                .trim_start_matches('.')
+                .trim()
+                .to_ascii_lowercase();
+            if !normalized.is_empty() && !out.iter().any(|existing| existing == &normalized) {
+                out.push(normalized);
+            }
+        }
+    }
+    out
+}
+
 fn expand_name_pattern(raw: &str) -> Vec<String> {
     let normalized = normalize_locator_text(raw);
     let stripped = normalized.trim_matches(|ch: char| {
@@ -463,13 +480,20 @@ fn execute(args: Value) -> Result<Value, String> {
             }))
         }
         "find_ext" => {
-            let ext = obj
-                .get("ext")
-                .or_else(|| obj.get("extension"))
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| "ext is required".to_string())?
-                .trim_start_matches('.')
-                .to_ascii_lowercase();
+            let exts = extension_values_from_args(
+                obj,
+                &[
+                    "ext",
+                    "extension",
+                    "extensions",
+                    "ext_filter",
+                    "file_extension",
+                    "file_extensions",
+                ],
+            );
+            if exts.is_empty() {
+                return Err("ext is required".to_string());
+            }
             let pattern_norms = optional_name_patterns_from_args(obj);
             walk_collect(&search_root, scan_limits, &mut |p| {
                 let got = p
@@ -484,15 +508,17 @@ fn execute(args: Value) -> Result<Value, String> {
                     || pattern_norms
                         .iter()
                         .any(|pattern_norm| name_matches_pattern(&name, pattern_norm));
-                if got == ext && name_matches {
+                if exts.iter().any(|ext| ext == &got) && name_matches {
                     results.push(to_rel(&root, p));
                 }
                 results.len() >= max_results
             })?;
+            let ext = exts.first().cloned().unwrap_or_default();
             Ok(json!({
                 "action": "find_ext",
                 "root": to_rel(&root, &search_root),
                 "ext": ext,
+                "exts": exts,
                 "patterns": pattern_norms,
                 "count": results.len(),
                 "results": results,
@@ -995,6 +1021,47 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(results.len(), 1);
         assert!(results[0].ends_with("execution_intent_routing_repair_plan_20260509.md"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn find_ext_accepts_extension_alias_array_and_pattern() {
+        let root = unique_temp_dir("find-ext-alias-array");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::write(root.join("clawd.log.md"), "").expect("write md target");
+        std::fs::write(root.join("agent-log.txt"), "").expect("write txt target");
+        std::fs::write(root.join("agent-log.toml"), "").expect("write non-target extension");
+        std::fs::write(root.join("notes.md"), "").expect("write non-target name");
+
+        let out = execute(json!({
+            "action": "find_ext",
+            "ext_filter": ["md", ".txt"],
+            "query": "log",
+            "root": root.to_string_lossy().to_string(),
+            "max_depth": 1,
+            "max_results": 10
+        }))
+        .expect("find_ext succeeds with extension aliases");
+
+        assert_eq!(out.get("count").and_then(Value::as_u64), Some(2));
+        let exts = out
+            .get("exts")
+            .and_then(Value::as_array)
+            .expect("exts array")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(exts, vec!["md", "txt"]);
+        let results = out
+            .get("results")
+            .and_then(Value::as_array)
+            .expect("results array")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert!(results.iter().any(|path| path.ends_with("clawd.log.md")));
+        assert!(results.iter().any(|path| path.ends_with("agent-log.txt")));
 
         let _ = std::fs::remove_dir_all(root);
     }

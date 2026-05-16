@@ -2032,9 +2032,42 @@ fn can_fallback_to_initial_plan_after_repair_failure(
             loop_state,
             actions,
         )
-        && !actions_use_ad_hoc_command_without_route_preferred_skill(state, route_result, actions)
+        && (!actions_use_ad_hoc_command_without_route_preferred_skill(state, route_result, actions)
+            || safe_observation_run_cmd_plan_can_fallback(state, Some(route_result), actions))
         && has_executable_observation_or_action(actions)
         && fallback_shape_is_safe
+}
+
+fn safe_observation_run_cmd_plan_can_fallback(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    actions: &[AgentAction],
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if route.needs_clarify
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+    {
+        return false;
+    }
+
+    let mut saw_run_cmd = false;
+    for action in actions {
+        match action {
+            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. } => {
+                if !is_non_mutating_run_cmd_action(state, action) {
+                    return false;
+                }
+                saw_run_cmd = true;
+            }
+            AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. } => {}
+            AgentAction::CallCapability { .. } | AgentAction::Think { .. } => return false,
+        }
+    }
+    saw_run_cmd
 }
 
 fn scalar_path_auto_locator_observation_plan(
@@ -2069,6 +2102,67 @@ fn scalar_path_auto_locator_observation_plan(
             "include_missing": true,
         }),
     }])
+}
+
+fn generic_directory_auto_locator_observation_plan(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<Vec<AgentAction>> {
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !route_expects_terminal_user_answer(route)
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+        || !matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+                | crate::OutputSemanticKind::FileNames
+                | crate::OutputSemanticKind::DirectoryNames
+                | crate::OutputSemanticKind::DirectoryEntryGroups
+                | crate::OutputSemanticKind::FilePaths
+                | crate::OutputSemanticKind::DirectoryPurposeSummary
+                | crate::OutputSemanticKind::WorkspaceProjectSummary
+        )
+    {
+        return None;
+    }
+
+    let path = route_directory_locator_path(route, auto_locator_path)?;
+    if !Path::new(&path).is_dir() {
+        return None;
+    }
+
+    let mut args = serde_json::json!({
+        "action": "list_dir",
+        "path": path,
+        "names_only": false,
+        "max_entries": 1000,
+        "sort_by": "size_desc",
+    });
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::FileNames
+        || route.output_contract.semantic_kind == crate::OutputSemanticKind::FilePaths
+    {
+        args["files_only"] = Value::Bool(true);
+    } else if route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryNames {
+        args["dirs_only"] = Value::Bool(true);
+    }
+
+    Some(vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args,
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ])
 }
 
 fn scalar_path_auto_locator_deterministic_plan_result(
@@ -5034,6 +5128,7 @@ fn enforce_output_contract_tool_args(
                     if action_name_lower == "inventory_dir" {
                         enforce_directory_names_inventory_args(route, obj);
                         enforce_general_directory_inventory_args(route, obj);
+                        enforce_strict_directory_metadata_inventory_args(route, obj);
                     }
                     if route.output_contract.semantic_kind
                         != crate::OutputSemanticKind::HiddenEntriesCheck
@@ -5056,6 +5151,23 @@ fn enforce_output_contract_tool_args(
                     if skill.eq_ignore_ascii_case("fs_search") =>
                 {
                     enforce_fs_search_path_output_args(route, args);
+                }
+                AgentAction::CallSkill { skill, args }
+                | AgentAction::CallTool { tool: skill, args }
+                    if skill.eq_ignore_ascii_case("fs_basic") =>
+                {
+                    let Some(obj) = args.as_object_mut() else {
+                        return action;
+                    };
+                    let action_name = obj
+                        .get("action")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    if action_name == "list_dir" {
+                        enforce_strict_directory_metadata_inventory_args(route, obj);
+                    }
                 }
                 _ => {}
             }
@@ -5100,6 +5212,26 @@ fn enforce_general_directory_inventory_args(
     }
     obj.insert("names_only".to_string(), Value::Bool(false));
     info!("plan_contract_enforce_general_directory_inventory");
+}
+
+fn route_requires_strict_directory_metadata_inventory(route: &RouteResult) -> bool {
+    !route.output_contract.delivery_required
+        && route.output_contract.requires_content_evidence
+        && route.output_contract.response_shape == crate::OutputResponseShape::Strict
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+}
+
+fn enforce_strict_directory_metadata_inventory_args(
+    route: &RouteResult,
+    obj: &mut serde_json::Map<String, Value>,
+) {
+    if !route_requires_strict_directory_metadata_inventory(route) {
+        return;
+    }
+    obj.insert("names_only".to_string(), Value::Bool(false));
+    obj.entry("max_entries".to_string())
+        .or_insert_with(|| Value::Number(serde_json::Number::from(1000)));
+    info!("plan_contract_enforce_strict_directory_metadata_inventory");
 }
 
 fn enforce_directory_names_inventory_args(
@@ -5768,7 +5900,10 @@ fn path_metadata_facts_plan_satisfies_route(
     if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
         || (route_result.output_contract.semantic_kind == crate::OutputSemanticKind::None
             && route_result.output_contract.requires_content_evidence
-            && route_result.output_contract.locator_kind == crate::OutputLocatorKind::Path
+            && matches!(
+                route_result.output_contract.locator_kind,
+                crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
+            )
             && !route_result.output_contract.delivery_required)
     {
         return path_metadata_facts_response_is_sufficient(actions)
@@ -9823,6 +9958,17 @@ pub(super) async fn plan_round_actions(
             fallback
         })
         .or_else(|| {
+            let fallback =
+                generic_directory_auto_locator_observation_plan(route_result, auto_locator_path);
+            if fallback.is_some() {
+                warn!(
+                    "plan_parse_failed_using_generic_directory_auto_locator_plan task_id={} round={}",
+                    task.task_id, loop_state.round_no
+                );
+            }
+            fallback
+        })
+        .or_else(|| {
             let route = route_result?;
             if loop_state.has_tool_or_skill_output
                 || !route_needs_workspace_respond_only_default_evidence(route)
@@ -10118,6 +10264,7 @@ mod tests {
         existence_with_path_locator_deterministic_plan_result,
         explicit_command_deterministic_plan_result, file_paths_locator_deterministic_plan_result,
         fill_missing_read_range_path_from_route_locator,
+        generic_directory_auto_locator_observation_plan,
         has_pre_observation_structured_output_shape,
         inject_synthesize_answer_for_bare_placeholder_respond, is_bare_last_output_placeholder,
         normalize_archive_basic_schema_aliases, normalize_git_basic_schema_aliases,
@@ -10513,6 +10660,40 @@ mod tests {
             &actions
         ));
         assert!(can_fallback_to_initial_plan_after_repair_failure(
+            &state,
+            Some(&route),
+            &loop_state,
+            &actions
+        ));
+    }
+
+    #[test]
+    fn filename_path_metadata_answer_does_not_force_content_repair_for_generic_contract() {
+        let state = test_state();
+        let loop_state = LoopState::new(1);
+        let mut route = base_route_result();
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Filename;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_hint = "rustclaw.service".to_string();
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "stat_paths",
+                    "paths": ["/home/guagua/rustclaw/rustclaw.service"]
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        assert!(!should_force_actionable_plan_repair(
             &state,
             Some(&route),
             &loop_state,
@@ -12665,7 +12846,7 @@ version = "0.1.7"
     }
 
     #[test]
-    fn preferred_registry_skill_route_forces_repair_from_run_cmd() {
+    fn preferred_registry_skill_route_forces_repair_but_can_fallback_to_safe_run_cmd() {
         let state = test_state_with_registry();
         let loop_state = LoopState::new(2);
         let mut route = route_result(
@@ -12696,6 +12877,34 @@ version = "0.1.7"
         assert_eq!(
             plan_repair_reason(&state, Some(&route), &loop_state, Some(&actions)),
             "preferred_skill_required_for_semantic_route"
+        );
+        assert!(can_fallback_to_initial_plan_after_repair_failure(
+            &state,
+            Some(&route),
+            &loop_state,
+            &actions
+        ));
+    }
+
+    #[test]
+    fn preferred_registry_skill_route_does_not_fallback_to_mutating_run_cmd() {
+        let state = test_state_with_registry();
+        let loop_state = LoopState::new(2);
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({"command": "systemctl restart clawd"}),
+        }];
+
+        assert!(
+            super::actions_use_ad_hoc_command_without_route_preferred_skill(
+                &state, &route, &actions
+            )
         );
         assert!(!can_fallback_to_initial_plan_after_repair_failure(
             &state,
@@ -14270,6 +14479,47 @@ version = "0.1.7"
             }
             other => panic!("expected fs_basic stat_paths action, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn generic_directory_auto_locator_builds_inventory_synthesis_plan() {
+        let root = TempDirGuard::new("generic_dir_auto_locator");
+        fs::write(root.path.join("small.log"), "x").expect("write small");
+        fs::write(root.path.join("large.log"), "xxxxxx").expect("write large");
+        let root_path = root.path.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = String::new();
+        route.output_contract.delivery_required = false;
+
+        let actions =
+            generic_directory_auto_locator_observation_plan(Some(&route), Some(root_path.as_str()))
+                .expect("directory route should build a default observation plan");
+
+        assert_eq!(actions.len(), 3);
+        match &actions[0] {
+            AgentAction::CallTool { tool, args } => {
+                assert_eq!(tool, "fs_basic");
+                assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
+                assert_eq!(
+                    args.get("path").and_then(Value::as_str),
+                    Some(root_path.as_str())
+                );
+                assert_eq!(
+                    args.get("sort_by").and_then(Value::as_str),
+                    Some("size_desc")
+                );
+                assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(false));
+            }
+            other => panic!("expected fs_basic list_dir action, got {other:?}"),
+        }
+        assert!(matches!(actions[1], AgentAction::SynthesizeAnswer { .. }));
+        assert!(matches!(actions[2], AgentAction::Respond { .. }));
     }
 
     #[test]
@@ -17378,6 +17628,70 @@ version = "0.1.7"
         let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
         assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
         assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    fn strict_unclassified_directory_inventory_forces_metadata_for_fs_basic() {
+        let actions = vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "list_dir",
+                "path": "/workspace/logs",
+                "names_only": true
+            }),
+        }];
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            "return the directory listing with requested details",
+            None,
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
+        assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(false));
+        assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(1000));
+    }
+
+    #[test]
+    fn strict_unclassified_system_inventory_forces_metadata_before_fs_rewrite() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: serde_json::json!({
+                "action": "inventory_dir",
+                "path": "/workspace/logs",
+                "names_only": true
+            }),
+        }];
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            "return the directory listing with requested details",
+            None,
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
+        assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(false));
+        assert_eq!(args.get("max_entries").and_then(Value::as_u64), Some(1000));
     }
 
     #[test]

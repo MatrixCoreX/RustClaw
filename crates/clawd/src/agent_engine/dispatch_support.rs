@@ -1522,7 +1522,7 @@ mod tests {
             agent_display_name_hint: String::new(),
             output_contract: crate::IntentOutputContract {
                 exact_sentence_count: None,
-                response_shape: crate::OutputResponseShape::Strict,
+                response_shape: crate::OutputResponseShape::Free,
                 requires_content_evidence: true,
                 delivery_required: false,
                 locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
@@ -1538,6 +1538,43 @@ mod tests {
         };
 
         assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
+    }
+
+    #[test]
+    fn synthesize_route_allows_direct_fallback_for_strict_plain_observation() {
+        let route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent: "Return an already formatted observed result.".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "strict formatted output".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: "logs".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let ctx = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+
+        assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
     }
 
     #[test]
