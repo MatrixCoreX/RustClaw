@@ -1315,6 +1315,212 @@ fn apply_spurious_structured_observation_clarify_repair(
     Some("structured_observation_clarify_repair")
 }
 
+fn semantic_kind_can_use_workspace_default_for_observation(kind: OutputSemanticKind) -> bool {
+    matches!(
+        kind,
+        OutputSemanticKind::HiddenEntriesCheck
+            | OutputSemanticKind::FileNames
+            | OutputSemanticKind::DirectoryNames
+            | OutputSemanticKind::DirectoryEntryGroups
+            | OutputSemanticKind::FilePaths
+            | OutputSemanticKind::DirectoryPurposeSummary
+            | OutputSemanticKind::WorkspaceProjectSummary
+            | OutputSemanticKind::ScalarCount
+            | OutputSemanticKind::ExistenceWithPath
+            | OutputSemanticKind::ExistenceWithPathSummary
+    )
+}
+
+fn apply_workspace_default_observation_clarify_repair(
+    output_contract: &mut IntentOutputContract,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
+    state_patch: Option<&Value>,
+    needs_clarify: &mut bool,
+    clarify_question: &mut String,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
+) -> Option<&'static str> {
+    if !*needs_clarify
+        || !output_contract.requires_content_evidence
+        || !semantic_kind_can_use_workspace_default_for_observation(output_contract.semantic_kind)
+    {
+        return None;
+    }
+    if state_patch_deictic_reference_requires_clarify(state_patch)
+        || (req_surface.has_deictic_reference()
+            && !req_surface.has_concrete_locator_hint()
+            && output_contract.locator_hint.trim().is_empty())
+    {
+        return None;
+    }
+    if matches!(output_contract.locator_kind, OutputLocatorKind::None) {
+        output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        output_contract.locator_hint = workspace_root.display().to_string();
+    }
+    *needs_clarify = false;
+    clarify_question.clear();
+    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *execution_finalize_style =
+        crate::post_route_policy::content_evidence_execution_finalize_style(output_contract, false)
+            .unwrap_or_else(|| execution_finalize_style_for_contract(output_contract));
+    Some("workspace_default_observation_clarify_repair")
+}
+
+fn resolved_existing_directory_from_current_request(state: &AppState, req: &str) -> Option<String> {
+    match crate::worker::try_resolve_implicit_locator_path(
+        state,
+        req,
+        "",
+        OutputLocatorKind::Path,
+        None,
+    ) {
+        Some(crate::worker::LocatorAutoResolution::Direct(path)) if Path::new(&path).is_dir() => {
+            return Some(path);
+        }
+        Some(crate::worker::LocatorAutoResolution::Direct(_))
+        | Some(crate::worker::LocatorAutoResolution::Fuzzy(_))
+        | None => {}
+    }
+    resolve_unique_direct_child_directory_token(state, req)
+}
+
+fn resolve_unique_direct_child_directory_token(state: &AppState, req: &str) -> Option<String> {
+    let mut matches = Vec::new();
+    for token in current_request_locator_tokens(req) {
+        for root in [
+            state.skill_rt.workspace_root.as_path(),
+            state.skill_rt.default_locator_search_dir.as_path(),
+        ] {
+            collect_direct_child_directory_token_matches(root, &token, &mut matches);
+        }
+    }
+    matches.sort();
+    matches.dedup();
+    (matches.len() == 1).then(|| matches.remove(0))
+}
+
+fn current_request_locator_tokens(req: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw in req.split_whitespace() {
+        for token in raw.split(|ch: char| {
+            matches!(
+                ch,
+                ',' | '，'
+                    | '。'
+                    | ';'
+                    | '；'
+                    | ':'
+                    | '：'
+                    | '('
+                    | ')'
+                    | '（'
+                    | '）'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '<'
+                    | '>'
+                    | '《'
+                    | '》'
+            )
+        }) {
+            let token = token
+                .trim_matches(|ch: char| {
+                    !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+                })
+                .trim();
+            if token.chars().count() < 2
+                || token.contains('/')
+                || token.contains('\\')
+                || token.starts_with('.')
+                || token.chars().all(|ch| ch.is_ascii_digit())
+                || !token
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+            {
+                continue;
+            }
+            if !out.iter().any(|existing: &String| existing == token) {
+                out.push(token.to_string());
+            }
+        }
+    }
+    out
+}
+
+fn collect_direct_child_directory_token_matches(
+    root: &Path,
+    token: &str,
+    matches: &mut Vec<String>,
+) {
+    if !root.is_dir() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !name.eq_ignore_ascii_case(token) {
+            continue;
+        }
+        let canonical = path.canonicalize().unwrap_or(path);
+        matches.push(canonical.display().to_string());
+    }
+}
+
+fn apply_resolved_directory_observation_clarify_repair(
+    state: &AppState,
+    output_contract: &mut IntentOutputContract,
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    state_patch: Option<&Value>,
+    needs_clarify: &mut bool,
+    clarify_question: &mut String,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
+) -> Option<&'static str> {
+    if !*needs_clarify
+        || req_surface.is_structural_locator_only_reply()
+        || req_surface.token_count <= 2
+        || output_contract.delivery_required
+        || matches!(
+            output_contract.response_shape,
+            OutputResponseShape::FileToken
+        )
+    {
+        return None;
+    }
+    if state_patch_deictic_reference_requires_clarify(state_patch)
+        || (req_surface.has_deictic_reference()
+            && !req_surface.has_concrete_locator_hint()
+            && output_contract.locator_hint.trim().is_empty())
+    {
+        return None;
+    }
+    let directory = resolved_existing_directory_from_current_request(state, req)?;
+    output_contract.requires_content_evidence = true;
+    output_contract.delivery_required = false;
+    output_contract.delivery_intent = OutputDeliveryIntent::None;
+    output_contract.locator_kind = OutputLocatorKind::Path;
+    output_contract.locator_hint = directory;
+    *needs_clarify = false;
+    clarify_question.clear();
+    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *execution_finalize_style =
+        crate::post_route_policy::content_evidence_execution_finalize_style(output_contract, false)
+            .unwrap_or_else(|| execution_finalize_style_for_contract(output_contract));
+    Some("resolved_directory_observation_clarify_repair")
+}
+
 fn bare_path_only_input_can_fill_active_observable_task(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
     turn_type: Option<TurnType>,
@@ -5543,6 +5749,36 @@ pub(crate) async fn run_intent_normalizer(
             &mut first_layer_decision,
             &mut execution_finalize_style,
         );
+        let workspace_default_clarify_repair = if structured_clarify_repair.is_none() {
+            apply_workspace_default_observation_clarify_repair(
+                &mut output_contract,
+                &req_surface,
+                &state.skill_rt.workspace_root,
+                state_patch.as_ref(),
+                &mut needs_clarify,
+                &mut clarify_question,
+                &mut first_layer_decision,
+                &mut execution_finalize_style,
+            )
+        } else {
+            None
+        };
+        let resolved_directory_clarify_repair =
+            if structured_clarify_repair.is_none() && workspace_default_clarify_repair.is_none() {
+                apply_resolved_directory_observation_clarify_repair(
+                    state,
+                    &mut output_contract,
+                    req,
+                    &req_surface,
+                    state_patch.as_ref(),
+                    &mut needs_clarify,
+                    &mut clarify_question,
+                    &mut first_layer_decision,
+                    &mut execution_finalize_style,
+                )
+            } else {
+                None
+            };
         let executionless_route_repair = downgrade_executionless_route_to_direct_answer(
             &mut first_layer_decision,
             &mut execution_finalize_style,
@@ -5655,6 +5891,22 @@ pub(crate) async fn run_intent_normalizer(
             );
         }
         if let Some(repair_reason) = structured_clarify_repair {
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
+        }
+        if let Some(repair_reason) = workspace_default_clarify_repair {
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
+        }
+        if let Some(repair_reason) = resolved_directory_clarify_repair {
             if reason.trim().is_empty() {
                 reason = repair_reason.to_string();
             } else if !reason.contains(repair_reason) {
@@ -10876,6 +11128,44 @@ mod tests {
     }
 
     #[test]
+    fn workspace_default_observation_clarify_repair_routes_listing_without_absolute_path_to_act() {
+        let req = "List files directly under UI if the directory exists; otherwise say it does not exist.";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root");
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Strict,
+            semantic_kind: OutputSemanticKind::FileNames,
+            requires_content_evidence: true,
+            ..IntentOutputContract::default()
+        };
+        let mut needs_clarify = true;
+        let mut clarify_question = "Please provide the full UI directory path.".to_string();
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+        let reason = super::apply_workspace_default_observation_clarify_repair(
+            &mut contract,
+            &surface,
+            workspace_root,
+            None,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(reason, Some("workspace_default_observation_clarify_repair"));
+        assert!(!needs_clarify);
+        assert!(clarify_question.is_empty());
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+        assert_eq!(contract.locator_hint, workspace_root.display().to_string());
+    }
+
+    #[test]
     fn structured_observation_clarify_repair_routes_two_explicit_targets_to_act() {
         let req = "比较 configs/skills_registry.toml 和 docker/config/skills_registry.toml 哪个文件更大，只回答文件名和大小差";
         let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
@@ -10914,6 +11204,97 @@ mod tests {
             contract.locator_hint,
             "configs/skills_registry.toml, docker/config/skills_registry.toml"
         );
+    }
+
+    #[test]
+    fn resolved_directory_observation_clarify_repair_routes_existing_workspace_dir_to_act() {
+        let workspace_root = make_temp_workspace_with_child("resolved_dir_clarify", "docs");
+        std::fs::write(workspace_root.join("docs").join("a.md"), "alpha").expect("write a");
+        std::fs::write(workspace_root.join("docs").join("b.md"), "beta").expect("write b");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = workspace_root.clone();
+        state.skill_rt.default_locator_search_dir = workspace_root.clone();
+        let req =
+            "List the two largest files directly under docs and say what kind of docs they appear to be.";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            ..IntentOutputContract::default()
+        };
+        let mut needs_clarify = true;
+        let mut clarify_question = "Should I use document or docs?".to_string();
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+
+        let reason = super::apply_resolved_directory_observation_clarify_repair(
+            &state,
+            &mut contract,
+            req,
+            &surface,
+            None,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(
+            reason,
+            Some("resolved_directory_observation_clarify_repair")
+        );
+        assert!(!needs_clarify);
+        assert!(clarify_question.is_empty());
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(
+            contract.locator_hint,
+            workspace_root
+                .join("docs")
+                .canonicalize()
+                .unwrap()
+                .display()
+                .to_string()
+        );
+        std::fs::remove_dir_all(workspace_root).ok();
+    }
+
+    #[test]
+    fn resolved_directory_observation_clarify_repair_preserves_bare_locator_only_reply() {
+        let workspace_root = make_temp_workspace_with_child("resolved_dir_bare", "docs");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = workspace_root.clone();
+        state.skill_rt.default_locator_search_dir = workspace_root.clone();
+        let req = "docs";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            ..IntentOutputContract::default()
+        };
+        let mut needs_clarify = true;
+        let mut clarify_question = "What should I do with docs?".to_string();
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+
+        let reason = super::apply_resolved_directory_observation_clarify_repair(
+            &state,
+            &mut contract,
+            req,
+            &surface,
+            None,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(reason, None);
+        assert!(needs_clarify);
+        assert_eq!(decision, FirstLayerDecision::Clarify);
+        assert_eq!(clarify_question, "What should I do with docs?");
+        std::fs::remove_dir_all(workspace_root).ok();
     }
 
     #[test]

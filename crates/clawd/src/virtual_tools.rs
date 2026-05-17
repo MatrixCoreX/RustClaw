@@ -381,6 +381,7 @@ fn normalize_fs_basic_args(args: &mut Value) -> bool {
             ("read_text", "read_text_range"),
             ("find", "find_entries"),
             ("find_name", "find_entries"),
+            ("find_path", "find_entries"),
             ("find_ext", "find_entries"),
             ("search", "find_entries"),
             ("grep", "grep_text"),
@@ -761,6 +762,37 @@ mod tests {
         assert_eq!(
             rewrite.runtime_args.get("ext").and_then(|v| v.as_str()),
             Some("sh")
+        );
+    }
+
+    #[test]
+    fn fs_basic_find_path_alias_rewrites_to_find_entries() {
+        let mut args = json!({
+            "action": "find_path",
+            "root": "docs",
+            "target_kind": "file",
+            "max_results": 4
+        });
+        assert!(normalize_virtual_tool_arg_aliases("fs_basic", &mut args));
+        let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+            .unwrap()
+            .expect("rewrite");
+
+        assert_eq!(rewrite.runtime_tool, "system_basic");
+        assert_eq!(
+            rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+            Some("inventory_dir")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("path").and_then(|v| v.as_str()),
+            Some("docs")
+        );
+        assert_eq!(
+            rewrite
+                .runtime_args
+                .get("files_only")
+                .and_then(|v| v.as_bool()),
+            Some(true)
         );
     }
 

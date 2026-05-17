@@ -2151,6 +2151,101 @@ fn latest_tail_read_range_observed_answer(
     ))
 }
 
+fn step_output_is_tail_read_range(step: &crate::executor::StepExecutionResult) -> bool {
+    if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+        return false;
+    }
+    let Some(output) = step
+        .output
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+        return false;
+    };
+    value.get("action").and_then(|v| v.as_str()) == Some("read_range")
+        && value.get("mode").and_then(|v| v.as_str()) == Some("tail")
+}
+
+fn current_user_visible_delivery_text(loop_state: &LoopState) -> Option<&str> {
+    loop_state
+        .delivery_messages
+        .iter()
+        .rev()
+        .find_map(|message| {
+            let text = message.trim();
+            (!text.is_empty() && !crate::finalize::is_execution_summary_message(text))
+                .then_some(text)
+        })
+        .or_else(|| {
+            loop_state
+                .last_user_visible_respond
+                .as_deref()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+        })
+}
+
+fn latest_tail_replacement_can_recover_stale_synthesis(
+    loop_state: &LoopState,
+    current_delivery: &str,
+) -> bool {
+    let current_delivery = current_delivery.trim();
+    let Some(synthesis_idx) = loop_state.executed_step_results.iter().rposition(|step| {
+        step.skill == "synthesize_answer"
+            && step
+                .output
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|output| output == current_delivery)
+    }) else {
+        return false;
+    };
+    loop_state
+        .executed_step_results
+        .iter()
+        .rposition(step_output_is_tail_read_range)
+        .is_some_and(|tail_idx| tail_idx > synthesis_idx)
+}
+
+fn current_delivery_is_latest_registered_output(
+    loop_state: &LoopState,
+    current_delivery: &str,
+) -> bool {
+    loop_state
+        .last_output
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|last_output| last_output == current_delivery.trim())
+}
+
+fn latest_tail_read_range_should_preserve_current_delivery(
+    route: Option<&crate::RouteResult>,
+    loop_state: &LoopState,
+    replacement_answer: &str,
+) -> bool {
+    let Some(current_delivery) = current_user_visible_delivery_text(loop_state) else {
+        return false;
+    };
+    if current_delivery.trim() == replacement_answer.trim() {
+        return false;
+    }
+    if latest_tail_replacement_can_recover_stale_synthesis(loop_state, current_delivery) {
+        return false;
+    }
+    if current_delivery_is_latest_registered_output(loop_state, current_delivery) {
+        return true;
+    }
+    route
+        .map(|route| {
+            route.output_contract.semantic_kind == crate::OutputSemanticKind::ContentExcerptSummary
+        })
+        .unwrap_or(false)
+}
+
 fn replace_delivery_with_latest_tail_read_range_answer(
     state: &AppState,
     task: &ClaimedTask,
@@ -2168,6 +2263,14 @@ fn replace_delivery_with_latest_tail_read_range_answer(
     ) else {
         return false;
     };
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    if latest_tail_read_range_should_preserve_current_delivery(route, loop_state, &answer) {
+        info!(
+            "delivery keep_current_summary_over_tail_read_range task_id={}",
+            task.task_id
+        );
+        return false;
+    }
     if loop_state
         .delivery_messages
         .last()
@@ -2396,6 +2499,10 @@ fn direct_non_builtin_skill_raw_answer(
         return None;
     }
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    if route.is_some_and(crate::agent_engine::observed_output::route_requires_synthesized_delivery)
+    {
+        return None;
+    }
     let answer = loop_state
         .executed_step_results
         .iter()
@@ -9113,6 +9220,71 @@ mod tests {
     }
 
     #[test]
+    fn direct_structured_observed_answer_skips_raw_passthrough_for_strict_exact_sentence() {
+        let raw_snapshot = "exit=0\nState  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787      0.0.0.0:*    users:((\"clawd\",pid=117002,fd=31))";
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "process_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(raw_snapshot.to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.exact_sentence_count = Some(1);
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(
+            direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn direct_non_builtin_raw_answer_skips_synthesized_delivery_contract() {
+        let raw_snapshot = "exit=0\nState  Recv-Q Send-Q Local Address:Port Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787      0.0.0.0:*    users:((\"clawd\",pid=117002,fd=31))";
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .output_vars
+            .insert("last_skill_name".to_string(), "process_basic".to_string());
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "process_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(raw_snapshot.to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.exact_sentence_count = Some(1);
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(direct_non_builtin_skill_raw_answer(
+            &test_state(),
+            &loop_state,
+            Some(&agent_run_context),
+        )
+        .is_none());
+    }
+
+    #[test]
     fn tail_read_range_observed_answer_replaces_failed_synthesis_for_content_excerpt() {
         let state = test_state();
         let task = claimed_task("task-tail");
@@ -9289,6 +9461,99 @@ mod tests {
             Some(&agent_run_context),
             &mut finalizer_summary,
         ));
+    }
+
+    #[test]
+    fn tail_read_range_observed_answer_preserves_existing_content_summary() {
+        let state = test_state();
+        let task = claimed_task("task-tail-preserve-summary");
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "logs/clawd.run.log".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let summary = "最后几行都是同一任务的工具调度记录。".to_string();
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state
+            .delivery_messages
+            .push("**执行过程**\n1. 调用技能 `system_basic`（action=read_range）".to_string());
+        loop_state.delivery_messages.push(summary.clone());
+        loop_state.last_user_visible_respond = Some(summary.clone());
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","mode":"tail","requested_n":2,"excerpt":"1|raw alpha\n2|raw beta"}"#,
+        ));
+        let mut finalizer_summary = None;
+
+        assert!(!replace_delivery_with_latest_tail_read_range_answer(
+            &state,
+            &task,
+            "查看最后两行，只做简短概述",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut finalizer_summary,
+        ));
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some(summary.as_str())
+        );
+        assert_eq!(
+            loop_state.delivery_messages.last().map(String::as_str),
+            Some(summary.as_str())
+        );
+        assert!(finalizer_summary.is_none());
+    }
+
+    #[test]
+    fn tail_read_range_observed_answer_preserves_latest_registered_respond() {
+        let state = test_state();
+        let task = claimed_task("task-tail-preserve-respond");
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "logs/clawd.run.log".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let summary = "最后几行都是同一任务的工具调度记录。".to_string();
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state
+            .delivery_messages
+            .push("**执行过程**\n1. 调用技能 `system_basic`（action=read_range）".to_string());
+        loop_state.delivery_messages.push(summary.clone());
+        loop_state.last_user_visible_respond = Some(summary.clone());
+        loop_state.last_output = Some(summary.clone());
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","mode":"tail","requested_n":2,"excerpt":"1|raw alpha\n2|raw beta"}"#,
+        ));
+        let mut finalizer_summary = None;
+
+        assert!(!replace_delivery_with_latest_tail_read_range_answer(
+            &state,
+            &task,
+            "查看最后两行，只做简短概述",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut finalizer_summary,
+        ));
+        assert_eq!(
+            loop_state.delivery_messages.last().map(String::as_str),
+            Some(summary.as_str())
+        );
+        assert!(finalizer_summary.is_none());
     }
 
     #[test]
