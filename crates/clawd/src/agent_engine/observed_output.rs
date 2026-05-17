@@ -518,6 +518,7 @@ fn route_allows_strict_plain_observation_passthrough(route: &crate::RouteResult)
         && !route.output_contract.delivery_required
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
         && route.output_contract.response_shape == crate::OutputResponseShape::Strict
+        && route.output_contract.exact_sentence_count.is_none()
 }
 
 fn strict_plain_observation_passthrough_candidate(body: &str) -> Option<String> {
@@ -896,11 +897,14 @@ pub(crate) fn route_requires_synthesized_delivery(route: &crate::RouteResult) ->
     if route_allows_strict_plain_observation_passthrough(route) {
         return false;
     }
+    let constrained_sentence_delivery = route.output_contract.response_shape
+        == crate::OutputResponseShape::OneSentence
+        || route.output_contract.exact_sentence_count.is_some();
     route.ask_mode.finalize_chat_wrapped()
         && route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::None
-        && route.output_contract.response_shape == crate::OutputResponseShape::OneSentence
+        && constrained_sentence_delivery
 }
 
 fn db_basic_scalar_candidate(value: &serde_json::Value) -> Option<String> {
@@ -3210,7 +3214,7 @@ fn structured_field_display_line(
             state,
             "clawd.msg.structured_field_missing_display",
             "{field_path}: 不存在",
-            "{field_path}: <missing>",
+            "{field_path}: not found",
             prefer_english,
             &[("field_path", field_path)],
         );
@@ -6502,6 +6506,22 @@ version.workspace = true
     #[test]
     fn chat_wrapped_one_sentence_unclassified_contract_requires_synthesized_delivery() {
         let route = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
+        assert!(route_requires_synthesized_delivery(&route));
+
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+        let contract = observed_contract_json(Some(&agent_run_context));
+        assert!(contract.contains(r#""direct_observation_passthrough_allowed":false"#));
+        assert!(observed_response_style_hint(Some(&agent_run_context))
+            .contains("Do not answer by copying only the raw observed output"));
+    }
+
+    #[test]
+    fn chat_wrapped_strict_exact_sentence_contract_requires_synthesized_delivery() {
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route.output_contract.exact_sentence_count = Some(1);
         assert!(route_requires_synthesized_delivery(&route));
 
         let agent_run_context = AgentRunContext {

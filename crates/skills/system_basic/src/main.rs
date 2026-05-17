@@ -1868,6 +1868,10 @@ fn lookup_field_value_with_resolution<'a>(value: &'a Value, field_path: &str) ->
         return found;
     }
 
+    if let Some(found) = lookup_array_item_identity(value, field_path) {
+        return found;
+    }
+
     if let Some(found) = lookup_parent_scoped_suffix_field(value, field_path) {
         return found;
     }
@@ -2126,6 +2130,27 @@ fn lookup_array_item_key_path<'a>(value: &'a Value, field_path: &str) -> Option<
     })
 }
 
+fn lookup_array_item_identity<'a>(value: &'a Value, field_path: &str) -> Option<FieldLookup<'a>> {
+    let selector_value = bare_field_key_selector(field_path)?;
+    let mut matches = Vec::new();
+    collect_array_item_identity_matches(value, selector_value, "", &mut matches);
+    if matches.len() == 1 {
+        let (resolved_field_path, found) = matches.remove(0);
+        return Some(FieldLookup {
+            value: Some(found),
+            resolved_field_path: Some(resolved_field_path),
+            match_strategy: "array_item_identity",
+            match_count: 1,
+        });
+    }
+    (!matches.is_empty()).then_some(FieldLookup {
+        value: None,
+        resolved_field_path: None,
+        match_strategy: "array_item_identity",
+        match_count: matches.len(),
+    })
+}
+
 fn collect_array_item_key_path_matches<'a>(
     value: &'a Value,
     selector_value: &str,
@@ -2178,6 +2203,45 @@ fn collect_array_item_key_path_matches<'a>(
     }
 }
 
+fn collect_array_item_identity_matches<'a>(
+    value: &'a Value,
+    selector_value: &str,
+    current_path: &str,
+    out: &mut Vec<(String, &'a Value)>,
+) {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                let child_path = if current_path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{current_path}.{key}")
+                };
+                collect_array_item_identity_matches(child, selector_value, &child_path, out);
+            }
+        }
+        Value::Array(items) => {
+            for (idx, child) in items.iter().enumerate() {
+                let item_path = if current_path.is_empty() {
+                    format!("[{idx}]")
+                } else {
+                    format!("{current_path}[{idx}]")
+                };
+                if let Some(selector_key) = array_item_identity_match(child, selector_value) {
+                    let resolved_path = if current_path.is_empty() {
+                        format!("[{selector_key}={selector_value}]")
+                    } else {
+                        format!("{current_path}[{selector_key}={selector_value}]")
+                    };
+                    out.push((resolved_path, child));
+                }
+                collect_array_item_identity_matches(child, selector_value, &item_path, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn array_item_key_path_match<'a>(
     item: &'a Value,
     selector_value: &str,
@@ -2192,6 +2256,20 @@ fn array_item_key_path_match<'a>(
         {
             let nested_value = lookup_field_value(item, nested_field_path)?;
             return Some((selector_key, nested_value));
+        }
+    }
+    None
+}
+
+fn array_item_identity_match(item: &Value, selector_value: &str) -> Option<&'static str> {
+    let map = item.as_object()?;
+    for selector_key in ["name", "id", "key"] {
+        if map
+            .get(selector_key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == selector_value)
+        {
+            return Some(selector_key);
         }
     }
     None
@@ -2766,6 +2844,86 @@ planner_kind = "tool"
         assert_eq!(
             value.get("match_strategy").and_then(Value::as_str),
             Some("array_item_key_path")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extract_field_resolves_array_item_identity_for_toml() {
+        let root = temp_root("extract_field_array_item_identity");
+        let target = root.join("skills_registry.toml");
+        std::fs::write(
+            &target,
+            r#"
+[[skills]]
+name = "read_file"
+planner_kind = "tool"
+
+[[skills]]
+name = "run_cmd"
+planner_kind = "tool"
+runner_name = "run-cmd-skill"
+"#,
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("format".to_string(), json!("toml"));
+        obj.insert("field_path".to_string(), json!("run_cmd"));
+
+        let out = extract_field(&root, &obj, true).expect("extract field");
+        let value: Value = serde_json::from_str(&out).expect("json");
+
+        assert_eq!(value.get("exists").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            value
+                .get("value")
+                .and_then(Value::as_object)
+                .and_then(|obj| obj.get("planner_kind"))
+                .and_then(Value::as_str),
+            Some("tool")
+        );
+        assert_eq!(
+            value.get("resolved_field_path").and_then(Value::as_str),
+            Some("skills[name=run_cmd]")
+        );
+        assert_eq!(
+            value.get("match_strategy").and_then(Value::as_str),
+            Some("array_item_identity")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extract_field_keeps_ambiguous_array_item_identity_missing() {
+        let root = temp_root("extract_field_ambiguous_array_item_identity");
+        let target = root.join("skills_registry.toml");
+        std::fs::write(
+            &target,
+            r#"
+[[skills]]
+name = "run_cmd"
+planner_kind = "tool"
+
+[[aliases]]
+name = "run_cmd"
+target = "system.run_command"
+"#,
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("format".to_string(), json!("toml"));
+        obj.insert("field_path".to_string(), json!("run_cmd"));
+
+        let out = extract_field(&root, &obj, true).expect("extract field");
+        let value: Value = serde_json::from_str(&out).expect("json");
+
+        assert_eq!(value.get("exists").and_then(Value::as_bool), Some(false));
+        assert_eq!(value.get("match_count").and_then(Value::as_u64), Some(2));
+        assert_eq!(
+            value.get("match_strategy").and_then(Value::as_str),
+            Some("array_item_identity")
         );
         let _ = std::fs::remove_dir_all(root);
     }

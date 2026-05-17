@@ -217,6 +217,7 @@ fn skill_doc_heading(line: &str) -> Option<String> {
 
 fn lightweight_prompt_heading_is_relevant(heading: &str) -> bool {
     heading.contains("capability summary")
+        || heading.contains("config entry points")
         || heading == "actions"
         || heading.contains("parameter contract")
         || heading.contains("error contract")
@@ -3419,6 +3420,65 @@ fn request_has_configured_negative_marker(
     })
 }
 
+fn contains_angle_placeholder_token(text: &str) -> bool {
+    let mut chars = text.char_indices().peekable();
+    while let Some((start_idx, ch)) = chars.next() {
+        if ch != '<' {
+            continue;
+        }
+        let Some((end_idx, _)) = chars.clone().find(|(_, candidate)| *candidate == '>') else {
+            continue;
+        };
+        let inner = text[start_idx + ch.len_utf8()..end_idx].trim();
+        if inner.is_empty() {
+            continue;
+        }
+        let has_identifier_char = inner.chars().any(|candidate| candidate.is_alphanumeric());
+        let placeholder_shaped = inner.chars().all(|candidate| {
+            candidate.is_alphanumeric() || matches!(candidate, '_' | '-' | '.' | ' ' | '\t')
+        });
+        if has_identifier_char && placeholder_shaped {
+            return true;
+        }
+    }
+    false
+}
+
+fn literal_command_segment_has_unresolved_template(segment: &str) -> bool {
+    contains_angle_placeholder_token(segment) || literal_segment_looks_like_output_template(segment)
+}
+
+fn literal_segment_looks_like_output_template(segment: &str) -> bool {
+    let segment = segment.trim();
+    if segment.is_empty()
+        || segment.contains('\n')
+        || segment
+            .chars()
+            .any(|ch| matches!(ch, '|' | ';' | '&' | '>' | '<'))
+    {
+        return false;
+    }
+    let mut words = segment.split_whitespace();
+    let Some(first) = words.next() else {
+        return false;
+    };
+    let Some(rest) = words.next() else {
+        return false;
+    };
+    if words.next().is_some() || !first.ends_with(':') {
+        return false;
+    }
+    let label = first.trim_end_matches(':');
+    let label_ok = !label.is_empty()
+        && label
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'));
+    let placeholder_ok = rest
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '<' | '>'));
+    label_ok && placeholder_ok
+}
+
 fn shellish_literal_command_segment(request: &str) -> Option<String> {
     let mut parts = request.split('`');
     parts.next();
@@ -3426,7 +3486,8 @@ fn shellish_literal_command_segment(request: &str) -> Option<String> {
         .step_by(2)
         .map(|segment| crate::bootstrap::config_loaders::trim_command_text(segment.to_string()))
         .find(|segment| {
-            looks_like_concrete_command_tail(segment)
+            !literal_command_segment_has_unresolved_template(segment)
+                && looks_like_concrete_command_tail(segment)
                 && segment
                     .chars()
                     .any(|ch| matches!(ch, '|' | ';' | '&' | '>' | '<') || ch.is_whitespace())
@@ -3737,6 +3798,12 @@ fn normalize_planned_actions_with_original_and_context(
         auto_locator_path,
         actions,
         skip_legacy_semantic_rewrites,
+    );
+    let actions = rewrite_readonly_file_read_run_cmd_to_fs_basic(
+        state,
+        user_text,
+        original_user_text,
+        actions,
     );
     let actions = normalize_evidence_contract_actions(
         state,
@@ -5476,7 +5543,12 @@ fn action_is_workspace_summary_evidence(action: &AgentAction) -> bool {
             .is_some_and(|action| {
                 matches!(
                     action.trim().to_ascii_lowercase().as_str(),
-                    "inventory_dir" | "read_range" | "workspace_glance" | "tree_summary"
+                    "find_name"
+                        | "find_path"
+                        | "inventory_dir"
+                        | "read_range"
+                        | "tree_summary"
+                        | "workspace_glance"
                 )
             }),
         _ => false,
@@ -5945,11 +6017,28 @@ fn workspace_synthesis_needs_more_text_evidence(
         return false;
     };
     route_needs_workspace_synthesis_evidence(route)
+        && has_only_workspace_summary_observation_actions(actions)
         && !has_listing_grounded_synthesis_answer_plan(route, actions)
         && !has_workspace_text_content_evidence(loop_state, actions)
         && !has_compact_structured_observation_answer_plan(actions)
         && !has_mixed_last_output_terminal_respond(actions)
         && !has_run_cmd_observation_action(actions)
+}
+
+fn has_only_workspace_summary_observation_actions(actions: &[AgentAction]) -> bool {
+    let mut saw_observation = false;
+    for action in actions {
+        match action {
+            AgentAction::CallSkill { .. } | AgentAction::CallTool { .. } => {
+                saw_observation = true;
+                if !action_is_workspace_summary_evidence(action) {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    saw_observation
 }
 
 fn has_listing_grounded_synthesis_answer_plan(
@@ -7584,10 +7673,16 @@ fn rewrite_extract_field_paths_to_structured_candidates(
 
     let mut rewritten = actions;
     for (idx, action) in rewritten.iter_mut().enumerate() {
-        let AgentAction::CallSkill { skill, args } = action else {
-            continue;
+        let (skill, args) = match action {
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => (skill, args),
+            _ => {
+                continue;
+            }
         };
-        if !skill.eq_ignore_ascii_case("system_basic") {
+        if !skill.eq_ignore_ascii_case("system_basic")
+            && !skill.eq_ignore_ascii_case("config_basic")
+        {
             continue;
         }
         let Some(request) = structured_extract_request(args) else {
@@ -7671,12 +7766,20 @@ fn rewrite_cargo_workspace_package_fields_to_workspace_package(
         .and_then(Value::as_str)
         .map(str::trim)
         .unwrap_or_default();
-    if action_name.eq_ignore_ascii_case("extract_field") && rewritten_fields.len() == 1 {
+    if matches!(
+        action_name.to_ascii_lowercase().as_str(),
+        "extract_field" | "read_field"
+    ) && rewritten_fields.len() == 1
+    {
         obj.insert(
             "field_path".to_string(),
             Value::String(rewritten_fields[0].clone()),
         );
-    } else if action_name.eq_ignore_ascii_case("extract_fields") {
+    } else if matches!(
+        action_name.to_ascii_lowercase().as_str(),
+        "extract_fields" | "read_fields"
+    ) {
+        obj.remove("fields");
         obj.insert(
             "field_paths".to_string(),
             Value::Array(
@@ -7708,15 +7811,27 @@ fn structured_extract_request(args: &Value) -> Option<StructuredExtractRequest> 
         .filter(|value| !value.is_empty())?
         .to_string();
     let mut fields = match action {
-        action if action.eq_ignore_ascii_case("extract_field") => obj
-            .get("field_path")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| vec![value.to_string()])
-            .unwrap_or_default(),
-        action if action.eq_ignore_ascii_case("extract_fields") => {
-            string_list_from_value(obj.get("field_paths"))
+        action
+            if matches!(
+                action.to_ascii_lowercase().as_str(),
+                "extract_field" | "read_field"
+            ) =>
+        {
+            obj.get("field_path")
+                .or_else(|| obj.get("field"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| vec![value.to_string()])
+                .unwrap_or_default()
+        }
+        action
+            if matches!(
+                action.to_ascii_lowercase().as_str(),
+                "extract_fields" | "read_fields"
+            ) =>
+        {
+            string_list_from_value(obj.get("field_paths").or_else(|| obj.get("fields")))
                 .into_iter()
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
@@ -8686,6 +8801,223 @@ fn run_cmd_args_for_rewritten_command(
         }
     }
     next_args
+}
+
+fn fs_basic_read_available_for_plan(state: &AppState) -> bool {
+    let enabled_skills = state.get_skills_list();
+    enabled_skills.is_empty()
+        || enabled_skills.contains("fs_basic")
+        || enabled_skills.contains("system_basic")
+}
+
+fn command_has_shell_control_or_expansion(command: &str) -> bool {
+    if command.contains('\n') || command.contains('\r') || command.contains('$') {
+        return true;
+    }
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for ch in command.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            if quote != Some('\'') {
+                escaped = true;
+            }
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            if ch == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        if matches!(ch, '\'' | '"') {
+            quote = Some(ch);
+            continue;
+        }
+        if matches!(ch, '`' | '|' | ';' | '<' | '>' | '&') {
+            return true;
+        }
+    }
+    quote.is_some()
+}
+
+fn parse_shell_line_count(raw: &str) -> Option<u64> {
+    let value = raw.trim();
+    if value.is_empty() || !value.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    value.parse::<u64>().ok().filter(|n| (1..=500).contains(n))
+}
+
+fn shell_file_path_token_is_safe(path: &str) -> bool {
+    let path = path.trim();
+    !path.is_empty()
+        && path != "-"
+        && !path.starts_with('~')
+        && !path.contains('\0')
+        && !path.contains('$')
+        && !path
+            .chars()
+            .any(|ch| matches!(ch, '*' | '?' | '[' | ']' | '{' | '}'))
+}
+
+fn absolutize_readonly_file_path_from_run_cmd_args(path: &str, args: &Value) -> String {
+    let trimmed = path.trim();
+    let candidate = Path::new(trimmed);
+    if candidate.is_absolute() {
+        return trimmed.to_string();
+    }
+    args.get("cwd")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|cwd| !cwd.is_empty())
+        .map(|cwd| Path::new(cwd).join(candidate).display().to_string())
+        .unwrap_or_else(|| trimmed.to_string())
+}
+
+fn readonly_file_read_from_shell_command(command: &str) -> Option<(&'static str, u64, String)> {
+    if command_has_shell_control_or_expansion(command) {
+        return None;
+    }
+    let words = shell_like_words(command);
+    let executable = words.first().map(|word| command_basename(word))?;
+    let mode = match executable.to_ascii_lowercase().as_str() {
+        "head" => "head",
+        "tail" => "tail",
+        _ => return None,
+    };
+    let mut n = 10;
+    let mut paths = Vec::new();
+    let mut idx = 1;
+    while idx < words.len() {
+        let word = words[idx].trim();
+        if word.is_empty() {
+            idx += 1;
+            continue;
+        }
+        if word == "--" {
+            paths.extend(words.iter().skip(idx + 1).cloned());
+            break;
+        }
+        if matches!(word, "-q" | "--quiet" | "--silent") {
+            idx += 1;
+            continue;
+        }
+        if matches!(word, "-n" | "--lines") {
+            let value = words.get(idx + 1)?;
+            n = parse_shell_line_count(value)?;
+            idx += 2;
+            continue;
+        }
+        if let Some(value) = word.strip_prefix("-n") {
+            n = parse_shell_line_count(value)?;
+            idx += 1;
+            continue;
+        }
+        if let Some(value) = word.strip_prefix("--lines=") {
+            n = parse_shell_line_count(value)?;
+            idx += 1;
+            continue;
+        }
+        if let Some(value) = word.strip_prefix('-') {
+            n = parse_shell_line_count(value)?;
+            idx += 1;
+            continue;
+        }
+        paths.push(word.to_string());
+        idx += 1;
+    }
+    if paths.len() != 1 || !shell_file_path_token_is_safe(&paths[0]) {
+        return None;
+    }
+    Some((mode, n, paths.remove(0)))
+}
+
+fn rewrite_readonly_file_read_run_cmd_to_fs_basic(
+    state: &AppState,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if !fs_basic_read_available_for_plan(state) {
+        return actions;
+    }
+    let mut changed = false;
+    let rewritten = actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallSkill { skill, args }
+                if skill.trim().eq_ignore_ascii_case("run_cmd") =>
+            {
+                let Some(command) = run_cmd_command_from_args(&args) else {
+                    return AgentAction::CallSkill { skill, args };
+                };
+                if args
+                    .get(super::CLAWD_LITERAL_COMMAND_ARG)
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    || should_preserve_user_supplied_shell_command(
+                        command,
+                        user_text,
+                        original_user_text,
+                    )
+                {
+                    return AgentAction::CallSkill { skill, args };
+                }
+                let Some((mode, n, path)) = readonly_file_read_from_shell_command(command) else {
+                    return AgentAction::CallSkill { skill, args };
+                };
+                changed = true;
+                AgentAction::CallTool {
+                    tool: "fs_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": "read_text_range",
+                        "path": absolutize_readonly_file_path_from_run_cmd_args(&path, &args),
+                        "mode": mode,
+                        "n": n,
+                    }),
+                }
+            }
+            AgentAction::CallTool { tool, args } if tool.trim().eq_ignore_ascii_case("run_cmd") => {
+                let Some(command) = run_cmd_command_from_args(&args) else {
+                    return AgentAction::CallTool { tool, args };
+                };
+                if args
+                    .get(super::CLAWD_LITERAL_COMMAND_ARG)
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    || should_preserve_user_supplied_shell_command(
+                        command,
+                        user_text,
+                        original_user_text,
+                    )
+                {
+                    return AgentAction::CallTool { tool, args };
+                }
+                let Some((mode, n, path)) = readonly_file_read_from_shell_command(command) else {
+                    return AgentAction::CallTool { tool, args };
+                };
+                changed = true;
+                AgentAction::CallTool {
+                    tool: "fs_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": "read_text_range",
+                        "path": absolutize_readonly_file_path_from_run_cmd_args(&path, &args),
+                        "mode": mode,
+                        "n": n,
+                    }),
+                }
+            }
+            other => other,
+        })
+        .collect();
+    if changed {
+        info!("plan_rewrite_readonly_file_read_run_cmd_to_fs_basic");
+    }
+    rewritten
 }
 
 fn docker_basic_available_for_plan(state: &AppState) -> bool {
@@ -10258,7 +10590,7 @@ mod tests {
         actions_use_ad_hoc_command_without_route_preferred_skill,
         build_lightweight_skill_playbooks_text, build_lightweight_skill_quick_index_text,
         build_lightweight_tool_spec, can_fallback_to_initial_plan_after_repair_failure,
-        classify_planning_prompt_class,
+        classify_planning_prompt_class, compact_skill_playbook_from_prompt,
         content_excerpt_summary_auto_locator_deterministic_plan_result,
         enforce_output_contract_tool_args, ensure_content_excerpt_summary_has_bounded_content,
         existence_with_path_locator_deterministic_plan_result,
@@ -11494,6 +11826,24 @@ mod tests {
     }
 
     #[test]
+    fn lightweight_skill_playbook_keeps_config_entry_points() {
+        let prompt = r#"
+## Capability Summary
+- Converts audio to text.
+
+## Config Entry Points
+- Main STT config: `configs/audio.toml` -> `[audio_transcribe]`.
+- Local provider uses `audio_transcribe.providers.custom`.
+
+## Parameter Contract
+- `path` is optional here.
+"#;
+        let compact = compact_skill_playbook_from_prompt("audio_transcribe", prompt);
+        assert!(compact.contains("configs/audio.toml"));
+        assert!(compact.contains("audio_transcribe.providers.custom"));
+    }
+
+    #[test]
     fn lightweight_tool_spec_includes_route_task_contract() {
         let mut route = base_route_result();
         route.output_contract.response_shape = OutputResponseShape::Strict;
@@ -11931,6 +12281,59 @@ version = "0.1.7"
             Some(&route),
             &LoopState::new(1),
             "Read workspace package version from Cargo.toml",
+            Some(root_cargo.to_string_lossy().as_ref()),
+            actions,
+        );
+        let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some(root_cargo.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            args.get("field_path").and_then(Value::as_str),
+            Some("workspace.package.version")
+        );
+    }
+
+    #[test]
+    fn config_basic_read_field_rewrites_workspace_cargo_package_version_to_workspace_package_version(
+    ) {
+        let root = TempDirGuard::new("config_workspace_cargo_version");
+        fs::write(
+            root.path.join("Cargo.toml"),
+            r#"[workspace]
+members = ["crates/clawd"]
+
+[workspace.package]
+version = "0.1.7"
+"#,
+        )
+        .expect("write workspace cargo");
+
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+        route.output_contract.locator_kind = OutputLocatorKind::Filename;
+        let root_cargo = root.path.join("Cargo.toml");
+        let actions = vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "read_field",
+                "path": root_cargo.display().to_string(),
+                "field_path": "package.version"
+            }),
+        }];
+
+        let normalized = super::normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "Read Cargo.toml version and answer as `version=<value>` only.",
             Some(root_cargo.to_string_lossy().as_ref()),
             actions,
         );
@@ -18381,6 +18784,117 @@ version = "0.1.7"
     }
 
     #[test]
+    fn process_basic_synthesis_survives_workspace_text_guard_for_exact_sentence() {
+        let state = test_state();
+        let loop_state = LoopState::new(1);
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.exact_sentence_count = Some(1);
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "process_basic".to_string(),
+                args: serde_json::json!({ "action": "port_list" }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &loop_state,
+            &route.resolved_intent,
+            None,
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 3);
+        assert!(matches!(
+            &normalized[0],
+            AgentAction::CallSkill { skill, args }
+                if skill == "process_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("port_list")
+        ));
+        assert!(matches!(
+            &normalized[1],
+            AgentAction::SynthesizeAnswer { evidence_refs }
+                if evidence_refs == &vec!["last_output".to_string()]
+        ));
+        assert!(matches!(
+            &normalized[2],
+            AgentAction::Respond { content } if content == "{{last_output}}"
+        ));
+    }
+
+    #[test]
+    fn output_template_code_span_is_not_treated_as_literal_command() {
+        let request = "Read Cargo.toml version and answer as `version=<value>` only.";
+        assert!(super::shellish_literal_command_segment(request).is_none());
+
+        let state = test_state_with_enabled_skills(&["run_cmd", "config_basic"]);
+        let loop_state = LoopState::new(1);
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::Filename;
+        route.output_contract.locator_hint = "Cargo.toml".to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+
+        assert!(explicit_command_deterministic_plan_result(
+            &state,
+            "<goal>",
+            Some(&route),
+            &loop_state,
+            request,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn colon_output_template_code_span_is_not_treated_as_literal_command() {
+        let request = "Return the current git branch in the format `branch: NAME`.";
+        assert!(super::shellish_literal_command_segment(request).is_none());
+
+        let state = test_state_with_enabled_skills(&["run_cmd", "git_basic"]);
+        let loop_state = LoopState::new(1);
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
+
+        assert!(explicit_command_deterministic_plan_result(
+            &state,
+            "<goal>",
+            Some(&route),
+            &loop_state,
+            request,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn concrete_shell_code_span_still_uses_literal_command_path() {
+        let request = "Check current directory with `pwd && ls Cargo.toml`.";
+        assert_eq!(
+            super::shellish_literal_command_segment(request).as_deref(),
+            Some("pwd && ls Cargo.toml")
+        );
+    }
+
+    #[test]
     fn direct_passthrough_keeps_mixed_placeholder_terminal_respond() {
         let state = test_state();
         let mut route = route_result(
@@ -20006,6 +20520,112 @@ version = "0.1.7"
         for action in normalized.iter().take(2) {
             let args = super::action_args(action).expect("run_cmd args");
             assert_eq!(args.get("_clawd_continue_on_error"), None);
+        }
+    }
+
+    #[test]
+    fn planner_introduced_tail_run_cmd_rewrites_to_fs_basic_read_range() {
+        let route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Free,
+        );
+        let loop_state = LoopState::new(1);
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: json!({"command": "tail -n 3 /home/guagua/rustclaw/logs/clawd.run.log"}),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+        ];
+
+        let state = test_state_with_enabled_skills(&["system_basic", "run_cmd"]);
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "查看 logs/clawd.run.log 最后 3 行，只做简短概述。",
+            None,
+            Some("/home/guagua/rustclaw/logs/clawd.run.log"),
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "fs_basic", "read_text_range");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some("/home/guagua/rustclaw/logs/clawd.run.log")
+        );
+        assert_eq!(args.get("mode").and_then(Value::as_str), Some("tail"));
+        assert_eq!(args.get("n").and_then(Value::as_u64), Some(3));
+    }
+
+    #[test]
+    fn user_supplied_tail_command_stays_run_cmd() {
+        let route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Free,
+        );
+        let loop_state = LoopState::new(1);
+        let command = "tail -n 3 logs/clawd.run.log";
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({"command": command}),
+        }];
+
+        let state = test_state_with_enabled_skills(&["system_basic", "run_cmd"]);
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "执行 tail -n 3 logs/clawd.run.log",
+            Some("执行 tail -n 3 logs/clawd.run.log"),
+            Some("/home/guagua/rustclaw/logs/clawd.run.log"),
+            actions,
+        );
+
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "run_cmd");
+                assert_eq!(args.get("command").and_then(Value::as_str), Some(command));
+            }
+            other => panic!("expected preserved run_cmd action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn piped_tail_command_is_not_rewritten_to_file_tool() {
+        let route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Free,
+        );
+        let loop_state = LoopState::new(1);
+        let command = "tail -n 3 logs/clawd.run.log | sed -n '1p'";
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({"command": command}),
+        }];
+
+        let state = test_state_with_enabled_skills(&["system_basic", "run_cmd"]);
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "查看日志尾部第一行",
+            None,
+            Some("/home/guagua/rustclaw/logs/clawd.run.log"),
+            actions,
+        );
+
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "run_cmd");
+                assert_eq!(args.get("command").and_then(Value::as_str), Some(command));
+            }
+            other => panic!("expected preserved piped run_cmd action, got {other:?}"),
         }
     }
 
