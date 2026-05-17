@@ -398,8 +398,10 @@ fn observed_output_action_is(observed: &GenericObservedOutput, expected_action: 
 }
 
 fn route_allows_scalar_read_range_direct_answer(route: &crate::RouteResult) -> bool {
-    route.output_contract.response_shape == crate::OutputResponseShape::Scalar
-        && !route.output_contract.delivery_required
+    matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
+    ) && !route.output_contract.delivery_required
         && matches!(
             route.output_contract.semantic_kind,
             crate::OutputSemanticKind::None
@@ -3008,14 +3010,54 @@ fn structured_scalar_candidate(
             .or_else(|| service_control_summary_candidate(&value));
     }
     if skill == "fs_search" {
-        return fs_search_scalar_candidate(
-            state,
-            &value,
-            locator_hint,
-            auto_locator_path,
-            prefer_full_path,
-            prefer_english,
-        );
+        if let Some(answer) = route
+            .and_then(|route| {
+                fs_search_output_direct_answer_candidate(
+                    state,
+                    Some(route),
+                    &value,
+                    locator_hint,
+                    prefer_english,
+                    true,
+                    prefer_full_path,
+                )
+            })
+            .or_else(|| {
+                fs_search_scalar_candidate(
+                    state,
+                    &value,
+                    locator_hint,
+                    auto_locator_path,
+                    prefer_full_path,
+                    prefer_english,
+                )
+            })
+        {
+            return Some(answer);
+        }
+        return None;
+    }
+    if skill == "fs_basic"
+        && value
+            .get("action")
+            .and_then(|v| v.as_str())
+            .is_some_and(|action| {
+                action.eq_ignore_ascii_case("find_ext") || action.eq_ignore_ascii_case("find_name")
+            })
+    {
+        if let Some(answer) = route.and_then(|route| {
+            fs_search_output_direct_answer_candidate(
+                state,
+                Some(route),
+                &value,
+                locator_hint,
+                prefer_english,
+                true,
+                prefer_full_path,
+            )
+        }) {
+            return Some(answer);
+        }
     }
     if !matches!(skill, "system_basic" | "config_basic" | "fs_basic") {
         return None;
@@ -3033,6 +3075,7 @@ fn structured_scalar_candidate(
                             state,
                             excerpt,
                             prefer_english,
+                            read_range_preserve_blank_lines(&value),
                         )
                     })
             }),
@@ -3538,6 +3581,7 @@ fn normalize_read_range_excerpt_for_direct_answer(
     state: Option<&AppState>,
     excerpt: &str,
     prefer_english: bool,
+    preserve_blank_lines: bool,
 ) -> Option<String> {
     let lines = excerpt
         .lines()
@@ -3556,7 +3600,7 @@ fn normalize_read_range_excerpt_for_direct_answer(
     if lines.is_empty() || lines.iter().all(|line| line.is_empty()) {
         return None;
     }
-    if lines.iter().any(|line| line.is_empty()) {
+    if !preserve_blank_lines && lines.iter().any(|line| line.is_empty()) {
         let blank = observed_t(
             state,
             "clawd.msg.read_range_blank_line",
@@ -3573,6 +3617,11 @@ fn normalize_read_range_excerpt_for_direct_answer(
         );
     }
     Some(lines.join("\n"))
+}
+
+fn read_range_preserve_blank_lines(value: &serde_json::Value) -> bool {
+    value.get("start_line").and_then(|v| v.as_u64()).is_some()
+        && value.get("end_line").and_then(|v| v.as_u64()).is_some()
 }
 
 pub(crate) fn tail_read_range_direct_answer_candidate(
@@ -3594,7 +3643,7 @@ pub(crate) fn tail_read_range_direct_answer_candidate(
         .get("excerpt")
         .and_then(|v| v.as_str())
         .and_then(|excerpt| {
-            normalize_read_range_excerpt_for_direct_answer(None, excerpt, prefer_english)
+            normalize_read_range_excerpt_for_direct_answer(None, excerpt, prefer_english, false)
         })
 }
 
@@ -4266,6 +4315,7 @@ fn extract_direct_answer_from_generic_output_impl(
                                     state,
                                     excerpt,
                                     prefers_english_free_text,
+                                    read_range_preserve_blank_lines(&value),
                                 )
                             })
                     } else if action == Some("inventory_dir")
@@ -6185,6 +6235,49 @@ version.workspace = true
     }
 
     #[test]
+    fn virtual_fs_basic_find_ext_directory_contract_returns_parent_dirs() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"find_ext","ext":"sh","count":4,"results":["system_report.sh","scripts/run.sh","scripts/dev/check.sh","component_start/start-clawd.sh"],"root":""}"#,
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: "list unique directories containing sh scripts".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                semantic_kind: OutputSemanticKind::DirectoryNames,
+                ..IntentOutputContract::default()
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/home/guagua/rustclaw".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some(".\nscripts\nscripts/dev\ncomponent_start")
+        );
+    }
+
+    #[test]
     fn fs_search_direct_answer_does_not_confirm_ambiguous_matches_when_direct_list_disallowed() {
         let value = serde_json::from_str::<serde_json::Value>(
             r#"{"action":"find_name","pattern":"abcd","count":4,"results":["abcd_report.md","my_abcd.txt","x_abcd_log.txt","zz_abcd_backup.log"],"root":""}"#,
@@ -6857,6 +6950,53 @@ version.workspace = true
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
             Some("# RustClaw\n（空行）\n<img src=\"./RustClaw.png\" width=\"420\" />\n（空行）")
+        );
+    }
+
+    #[test]
+    fn direct_answer_preserves_blank_lines_for_explicit_read_range() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"read_range","mode":"range","start_line":1,"end_line":4,"path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|\n3|<img src=\"./RustClaw.png\" width=\"420\" />\n4|"}"#,
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: "Show exactly the first 4 raw lines of README.md.".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Filename,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "README.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/README.md".to_string()),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("# RustClaw\n\n<img src=\"./RustClaw.png\" width=\"420\" />\n")
         );
     }
 

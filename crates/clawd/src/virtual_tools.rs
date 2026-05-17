@@ -143,10 +143,12 @@ fn canonicalize_config_guard_call(args: Value) -> Option<VirtualToolCanonicalCal
     let mut obj = args_object(args, "config_guard").ok()?;
     obj.insert(
         "action".to_string(),
-        Value::String("guard_rustclaw_config".to_string()),
+        Value::String("guard_config".to_string()),
     );
+    obj.entry("path".to_string())
+        .or_insert_with(|| Value::String("configs/config.toml".to_string()));
     Some(VirtualToolCanonicalCall {
-        tool: "config_basic".to_string(),
+        tool: "config_edit".to_string(),
         args: Value::Object(obj),
     })
 }
@@ -352,8 +354,13 @@ fn rewrite_config_basic_call(args: Value) -> Result<VirtualToolRewrite, String> 
         }
         "guard_rustclaw_config" => {
             move_value_alias_if_missing(&mut obj, "path", &["file", "file_path", "config_path"]);
-            obj.remove("action");
-            Ok(rewrite_to("config_guard", obj))
+            obj.entry("path".to_string())
+                .or_insert_with(|| Value::String("configs/config.toml".to_string()));
+            obj.insert(
+                "action".to_string(),
+                Value::String("guard_config".to_string()),
+            );
+            Ok(rewrite_to("config_edit", obj))
         }
         _ => Err(format!(
             "unsupported config_basic action `{}`; allowed: read_field|read_fields|list_keys|validate|guard_rustclaw_config",
@@ -412,6 +419,11 @@ fn normalize_config_basic_args(args: &mut Value) -> bool {
             ("check", "guard_rustclaw_config"),
         ],
     );
+    if action_name(obj).as_deref() == Some("guard_rustclaw_config") {
+        obj.entry("path".to_string())
+            .or_insert_with(|| Value::String("configs/config.toml".to_string()));
+        changed = true;
+    }
     if action_name(obj).is_none() {
         if has_any_non_empty_arg(obj, &["field_paths", "fields", "keys"]) {
             obj.insert(
@@ -1023,13 +1035,20 @@ mod tests {
     }
 
     #[test]
-    fn config_basic_guard_rewrites_to_config_guard() {
-        let args = json!({"action":"guard_rustclaw_config", "path":"configs/config.toml"});
+    fn config_basic_guard_rewrites_to_config_edit_guard() {
+        let args = json!({"action":"guard_rustclaw_config"});
         let rewrite = rewrite_virtual_tool_call("config_basic", args)
             .unwrap()
             .expect("rewrite");
-        assert_eq!(rewrite.runtime_tool, "config_guard");
-        assert!(rewrite.runtime_args.get("action").is_none());
+        assert_eq!(rewrite.runtime_tool, "config_edit");
+        assert_eq!(
+            rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+            Some("guard_config")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("path").and_then(|v| v.as_str()),
+            Some("configs/config.toml")
+        );
     }
 
     #[test]

@@ -1093,6 +1093,8 @@ fn action_supports_structured_direct_observed_finalize(
             crate::OutputSemanticKind::None
                 | crate::OutputSemanticKind::StructuredKeys
                 | crate::OutputSemanticKind::FileNames
+                | crate::OutputSemanticKind::DirectoryNames
+                | crate::OutputSemanticKind::FilePaths
         )
     }) {
         return false;
@@ -1151,6 +1153,24 @@ fn action_supports_structured_direct_observed_finalize(
                             .is_some_and(path_has_structured_document_extension)
                     })
             }
+            _ => false,
+        },
+        "fs_basic" => match action {
+            Some("find_entries") => route_result.is_some_and(|route| {
+                matches!(
+                    route.output_contract.semantic_kind,
+                    crate::OutputSemanticKind::FileNames
+                        | crate::OutputSemanticKind::DirectoryNames
+                        | crate::OutputSemanticKind::FilePaths
+                )
+            }),
+            Some("list_dir") => route_result.is_some_and(|route| {
+                matches!(
+                    route.output_contract.semantic_kind,
+                    crate::OutputSemanticKind::FileNames
+                        | crate::OutputSemanticKind::DirectoryNames
+                )
+            }),
             _ => false,
         },
         _ => false,
@@ -3805,6 +3825,15 @@ fn normalize_planned_actions_with_original_and_context(
         original_user_text,
         actions,
     );
+    let actions = rewrite_readonly_find_run_cmd_to_fs_basic(
+        state,
+        route_result,
+        user_text,
+        original_user_text,
+        actions,
+    );
+    let actions =
+        strip_terminal_discussion_for_direct_skill_passthrough(state, route_result, actions);
     let actions = normalize_evidence_contract_actions(
         state,
         route_result,
@@ -4245,6 +4274,14 @@ fn normalize_inventory_dir_sort_by_value(obj: &serde_json::Map<String, Value>) -
 }
 
 fn normalize_read_range_line_aliases(obj: &mut serde_json::Map<String, Value>) {
+    normalize_arg_alias(obj, "start_line", &["line_start", "from_line"]);
+    normalize_arg_alias(obj, "end_line", &["line_end", "to_line"]);
+    if obj.get("start_line").is_some_and(has_non_empty_json_value)
+        && obj.get("end_line").is_some_and(has_non_empty_json_value)
+    {
+        obj.entry("mode".to_string())
+            .or_insert_with(|| Value::String("range".to_string()));
+    }
     let Some(range_value) = obj
         .remove("lines")
         .or_else(|| obj.remove("line_range"))
@@ -9016,6 +9053,316 @@ fn rewrite_readonly_file_read_run_cmd_to_fs_basic(
         .collect();
     if changed {
         info!("plan_rewrite_readonly_file_read_run_cmd_to_fs_basic");
+    }
+    rewritten
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReadonlyFindCommand {
+    root: String,
+    extension: String,
+}
+
+fn filesystem_find_route_prefers_structured_tool(route_result: Option<&RouteResult>) -> bool {
+    route_result.is_some_and(|route| {
+        !route.output_contract.delivery_required
+            && matches!(
+                route.output_contract.semantic_kind,
+                crate::OutputSemanticKind::DirectoryNames
+                    | crate::OutputSemanticKind::FileNames
+                    | crate::OutputSemanticKind::FilePaths
+            )
+    })
+}
+
+fn simple_shell_extension_pattern(pattern: &str) -> Option<String> {
+    let pattern = pattern.trim();
+    let candidate = pattern
+        .strip_prefix("*.")
+        .or_else(|| pattern.strip_prefix('.'))
+        .unwrap_or(pattern)
+        .trim();
+    if candidate.is_empty()
+        || candidate.contains('/')
+        || candidate
+            .chars()
+            .any(|ch| matches!(ch, '*' | '?' | '[' | ']' | '{' | '}'))
+    {
+        return None;
+    }
+    Some(candidate.to_ascii_lowercase())
+}
+
+fn readonly_find_extension_from_shell_command(command: &str) -> Option<ReadonlyFindCommand> {
+    if command.contains('\n')
+        || command.contains('\r')
+        || command.contains('\0')
+        || command.contains('`')
+        || command.contains('<')
+        || command.contains('>')
+        || command.contains('&')
+    {
+        return None;
+    }
+    let words = shell_like_words(command);
+    let pipe_index = words.iter().position(|word| word == "|");
+    if let Some(index) = pipe_index {
+        if !readonly_find_pipeline_suffix_is_supported(&words[index + 1..]) {
+            return None;
+        }
+    }
+    let find_words = match pipe_index {
+        Some(index) => &words[..index],
+        None => words.as_slice(),
+    };
+    if find_words
+        .first()
+        .map(|word| !command_basename(word).eq_ignore_ascii_case("find"))
+        .unwrap_or(true)
+    {
+        return None;
+    }
+    let mut index = 1usize;
+    let mut root = ".".to_string();
+    if let Some(candidate) = find_words.get(index) {
+        if !candidate.starts_with('-') {
+            if !shell_file_path_token_is_safe(candidate) {
+                return None;
+            }
+            root = candidate.to_string();
+            index += 1;
+        }
+    }
+    let mut extension = None;
+    while index < find_words.len() {
+        let word = find_words[index].as_str();
+        match word {
+            "-name" | "-iname" => {
+                let pattern = find_words.get(index + 1)?;
+                extension = Some(simple_shell_extension_pattern(pattern)?);
+                index += 2;
+            }
+            "-type" => {
+                if find_words.get(index + 1).map(String::as_str) != Some("f") {
+                    return None;
+                }
+                index += 2;
+            }
+            "-maxdepth" | "-mindepth" => {
+                find_words.get(index + 1)?;
+                index += 2;
+            }
+            "-exec" => {
+                let executable = find_words.get(index + 1)?;
+                if !command_basename(executable).eq_ignore_ascii_case("dirname") {
+                    return None;
+                }
+                let mut end = index + 2;
+                while end < find_words.len() && find_words[end] != ";" {
+                    end += 1;
+                }
+                if end >= find_words.len() {
+                    return None;
+                }
+                index = end + 1;
+            }
+            _ => return None,
+        }
+    }
+    Some(ReadonlyFindCommand {
+        root,
+        extension: extension?,
+    })
+}
+
+fn readonly_find_pipeline_suffix_is_supported(words: &[String]) -> bool {
+    let segments = words
+        .split(|word| word == "|")
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    match segments.as_slice() {
+        [single] => {
+            readonly_find_suffix_is_sort_unique(single)
+                || readonly_find_suffix_is_parent_projection(single)
+        }
+        [project, sort] => {
+            readonly_find_suffix_is_parent_projection(project)
+                && readonly_find_suffix_is_sort_unique(sort)
+        }
+        _ => false,
+    }
+}
+
+fn readonly_find_suffix_is_sort_unique(words: &[String]) -> bool {
+    matches!(
+        words,
+        [cmd, flag]
+            if command_basename(cmd).eq_ignore_ascii_case("sort")
+                && matches!(flag.as_str(), "-u" | "--unique")
+    )
+}
+
+fn readonly_find_suffix_is_parent_projection(words: &[String]) -> bool {
+    match words {
+        [cmd, expr] if command_basename(cmd).eq_ignore_ascii_case("sed") => {
+            readonly_sed_parent_projection_expr(expr)
+        }
+        [cmd, flag, expr] if command_basename(cmd).eq_ignore_ascii_case("sed") && flag == "-e" => {
+            readonly_sed_parent_projection_expr(expr)
+        }
+        [cmd, dirname] if command_basename(cmd).eq_ignore_ascii_case("xargs") => {
+            command_basename(dirname).eq_ignore_ascii_case("dirname")
+        }
+        [cmd, n_flag, n_value, dirname]
+            if command_basename(cmd).eq_ignore_ascii_case("xargs")
+                && matches!(n_flag.as_str(), "-n" | "--max-args")
+                && n_value == "1" =>
+        {
+            command_basename(dirname).eq_ignore_ascii_case("dirname")
+        }
+        [cmd, n_flag, dirname]
+            if command_basename(cmd).eq_ignore_ascii_case("xargs") && n_flag == "-n1" =>
+        {
+            command_basename(dirname).eq_ignore_ascii_case("dirname")
+        }
+        _ => false,
+    }
+}
+
+fn readonly_sed_parent_projection_expr(expr: &str) -> bool {
+    matches!(
+        expr,
+        "s|/[^/]*$||"
+            | "s#/[^/]*$##"
+            | "s,/[^/]*$,,"
+            | "s|/[^/]*$|.|"
+            | "s#/[^/]*$#.#"
+            | "s,/[^/]*$,.,"
+    )
+}
+
+fn fs_basic_find_entries_extension_from_action(action: &AgentAction) -> Option<String> {
+    let (name, args) = match action {
+        AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
+        AgentAction::CallTool { tool, args } => (tool.as_str(), args),
+        _ => return None,
+    };
+    if !name.eq_ignore_ascii_case("fs_basic")
+        || args.get("action").and_then(Value::as_str) != Some("find_entries")
+    {
+        return None;
+    }
+    args.get("extension")
+        .or_else(|| args.get("ext"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| ext.to_ascii_lowercase())
+}
+
+fn rewrite_readonly_find_run_cmd_to_fs_basic(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if !fs_basic_read_available_for_plan(state)
+        || !filesystem_find_route_prefers_structured_tool(route_result)
+    {
+        return actions;
+    }
+    let existing_find_extensions = actions
+        .iter()
+        .filter_map(fs_basic_find_entries_extension_from_action)
+        .collect::<Vec<_>>();
+    let mut changed = false;
+    let rewritten = actions
+        .into_iter()
+        .filter_map(|action| match action {
+            AgentAction::CallSkill { skill, args }
+                if skill.trim().eq_ignore_ascii_case("run_cmd") =>
+            {
+                let Some(command) = run_cmd_command_from_args(&args) else {
+                    return Some(AgentAction::CallSkill { skill, args });
+                };
+                if args
+                    .get(super::CLAWD_LITERAL_COMMAND_ARG)
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    || should_preserve_user_supplied_shell_command(
+                        command,
+                        user_text,
+                        original_user_text,
+                    )
+                {
+                    return Some(AgentAction::CallSkill { skill, args });
+                }
+                let Some(find) = readonly_find_extension_from_shell_command(command) else {
+                    return Some(AgentAction::CallSkill { skill, args });
+                };
+                if existing_find_extensions
+                    .iter()
+                    .any(|ext| ext.eq_ignore_ascii_case(&find.extension))
+                {
+                    changed = true;
+                    return None;
+                }
+                changed = true;
+                Some(AgentAction::CallTool {
+                    tool: "fs_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": "find_entries",
+                        "root": find.root,
+                        "extension": find.extension,
+                        "files_only": true,
+                        "recursive": true,
+                    }),
+                })
+            }
+            AgentAction::CallTool { tool, args } if tool.trim().eq_ignore_ascii_case("run_cmd") => {
+                let Some(command) = run_cmd_command_from_args(&args) else {
+                    return Some(AgentAction::CallTool { tool, args });
+                };
+                if args
+                    .get(super::CLAWD_LITERAL_COMMAND_ARG)
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                    || should_preserve_user_supplied_shell_command(
+                        command,
+                        user_text,
+                        original_user_text,
+                    )
+                {
+                    return Some(AgentAction::CallTool { tool, args });
+                }
+                let Some(find) = readonly_find_extension_from_shell_command(command) else {
+                    return Some(AgentAction::CallTool { tool, args });
+                };
+                if existing_find_extensions
+                    .iter()
+                    .any(|ext| ext.eq_ignore_ascii_case(&find.extension))
+                {
+                    changed = true;
+                    return None;
+                }
+                changed = true;
+                Some(AgentAction::CallTool {
+                    tool: "fs_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": "find_entries",
+                        "root": find.root,
+                        "extension": find.extension,
+                        "files_only": true,
+                        "recursive": true,
+                    }),
+                })
+            }
+            other => Some(other),
+        })
+        .collect();
+    if changed {
+        info!("plan_rewrite_readonly_find_run_cmd_to_fs_basic");
     }
     rewritten
 }
@@ -16557,6 +16904,45 @@ version = "0.1.7"
     }
 
     #[test]
+    fn system_basic_read_range_line_start_alias_becomes_range_bounds() {
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "read_range",
+                "path": "README.md",
+                "line_start": 1,
+                "line_end": 8,
+            }),
+        }];
+
+        let normalized = normalize_system_basic_schema_aliases(actions);
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "system_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("read_range")
+                );
+                assert_eq!(
+                    args.get("mode").and_then(|value| value.as_str()),
+                    Some("range")
+                );
+                assert_eq!(
+                    args.get("start_line").and_then(|value| value.as_u64()),
+                    Some(1)
+                );
+                assert_eq!(
+                    args.get("end_line").and_then(|value| value.as_u64()),
+                    Some(8)
+                );
+                assert!(args.get("line_start").is_none());
+                assert!(args.get("line_end").is_none());
+            }
+            other => panic!("expected system_basic read_range action, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn system_basic_read_alias_with_lines_becomes_range_bounds() {
         let actions = vec![AgentAction::CallSkill {
             skill: "system_basic".to_string(),
@@ -20583,6 +20969,174 @@ version = "0.1.7"
             "执行 tail -n 3 logs/clawd.run.log",
             Some("执行 tail -n 3 logs/clawd.run.log"),
             Some("/home/guagua/rustclaw/logs/clawd.run.log"),
+            actions,
+        );
+
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "run_cmd");
+                assert_eq!(args.get("command").and_then(Value::as_str), Some(command));
+            }
+            other => panic!("expected preserved run_cmd action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn planner_introduced_find_extension_dirs_rewrites_to_fs_basic() {
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
+        let loop_state = LoopState::new(1);
+        let command = r#"find . -name '*.sh' -type f -exec dirname {} \; | sort -u"#;
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: json!({"command": command}),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+        ];
+
+        let state = test_state_with_enabled_skills(&["fs_basic", "run_cmd"]);
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "查找当前仓库里所有 sh 脚本所在的目录，去重后列出来",
+            None,
+            Some("/home/guagua/rustclaw"),
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "fs_basic", "find_entries");
+        assert_eq!(args.get("root").and_then(Value::as_str), Some("."));
+        assert_eq!(args.get("extension").and_then(Value::as_str), Some("sh"));
+        assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
+        assert_eq!(args.get("recursive").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    fn planner_introduced_find_sed_parent_dirs_rewrites_to_fs_basic() {
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
+        let loop_state = LoopState::new(1);
+        let command =
+            r#"find /home/guagua/rustclaw -name '*.sh' -type f | sed 's|/[^/]*$||' | sort -u"#;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({"command": command}),
+        }];
+
+        let state = test_state_with_enabled_skills(&["fs_basic", "run_cmd"]);
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "扫描当前仓库中所有.sh文件，提取其所在目录路径并去重排序后输出",
+            None,
+            Some("/home/guagua/rustclaw"),
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "fs_basic", "find_entries");
+        assert_eq!(
+            args.get("root").and_then(Value::as_str),
+            Some("/home/guagua/rustclaw")
+        );
+        assert_eq!(args.get("extension").and_then(Value::as_str), Some("sh"));
+        assert_eq!(args.get("files_only").and_then(Value::as_bool), Some(true));
+        assert_eq!(args.get("recursive").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    fn structured_find_observation_strips_redundant_shell_followup() {
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
+        let loop_state = LoopState::new(1);
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "find_entries",
+                    "root": "/home/guagua/rustclaw",
+                    "ext": "sh",
+                    "target_kind": "file"
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: json!({
+                    "command": "find /home/guagua/rustclaw -name '*.sh' -exec dirname {} \\; | sort -u"
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+        ];
+
+        let state = test_state_with_enabled_skills(&["fs_basic", "run_cmd"]);
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "查找当前仓库里所有 sh 脚本所在的目录，去重后列出来",
+            None,
+            Some("/home/guagua/rustclaw"),
+            actions,
+        );
+
+        assert!(normalized.iter().all(
+            |action| !matches!(action, AgentAction::CallSkill { skill, .. } if skill == "run_cmd")
+        ));
+        assert!(normalized
+            .iter()
+            .all(|action| !matches!(action, AgentAction::SynthesizeAnswer { .. })));
+        assert!(normalized.iter().all(|action| planned_call_is(
+            action,
+            "fs_basic",
+            "find_entries"
+        )));
+    }
+
+    #[test]
+    fn user_supplied_find_extension_command_stays_run_cmd() {
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::DirectoryNames;
+        let loop_state = LoopState::new(1);
+        let command = r#"find . -name '*.sh' -type f -exec dirname {} \; | sort -u"#;
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({"command": command}),
+        }];
+
+        let state = test_state_with_enabled_skills(&["fs_basic", "run_cmd"]);
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "执行 find . -name '*.sh' -type f -exec dirname {} \\; | sort -u",
+            Some("执行 find . -name '*.sh' -type f -exec dirname {} \\; | sort -u"),
+            Some("/home/guagua/rustclaw"),
             actions,
         );
 
