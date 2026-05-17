@@ -2345,6 +2345,7 @@ fn prefer_observed_answer_for_exact_contract(
             .map(|message| message.trim() == synthesis)
             .unwrap_or(false)
             && !(has_prior_step_error && allow_prior_step_error_replacement)
+            && planned_delivery_is_explicit_contractual_answer(route, synthesis)
         {
             info!(
                 "delivery exact_contract_keep_synthesis task_id={} answer={}",
@@ -4300,6 +4301,60 @@ fn direct_config_edit_validate_answer(
     })
 }
 
+fn config_edit_risk_labels(value: &serde_json::Value) -> Vec<String> {
+    value
+        .get("risks")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn direct_config_edit_guard_answer(
+    outputs: &[ConfigEditObservedOutput],
+    prefer_english: bool,
+) -> Option<String> {
+    let guard = outputs
+        .iter()
+        .rev()
+        .find(|item| config_edit_output_action(&item.value) == Some("guard_config"))?;
+    let path = config_edit_path_label(&guard.value);
+    let risk_count = guard
+        .value
+        .get("risk_count")
+        .and_then(|value| value.as_u64())
+        .unwrap_or_else(|| config_edit_risk_labels(&guard.value).len() as u64);
+    if risk_count == 0 {
+        return Some(if prefer_english {
+            format!("No obvious config risks found in `{path}`.")
+        } else {
+            format!("`{path}` 未发现明显配置风险。")
+        });
+    }
+    let risks = config_edit_risk_labels(&guard.value);
+    let risk_text = if risks.is_empty() {
+        if prefer_english {
+            format!("{risk_count} risk(s)")
+        } else {
+            format!("{risk_count} 个风险")
+        }
+    } else {
+        risks.join(if prefer_english { "; " } else { "；" })
+    };
+    Some(if prefer_english {
+        format!("Found {risk_count} config risk(s) in `{path}`: {risk_text}.")
+    } else {
+        format!("`{path}` 发现 {risk_count} 个配置风险：{risk_text}。")
+    })
+}
+
 fn direct_config_edit_read_back_answer(
     outputs: &[ConfigEditObservedOutput],
     prefer_english: bool,
@@ -4344,6 +4399,7 @@ pub(crate) fn direct_config_edit_observed_answer(
         || (request_language == "config_default" && prefer_english_for_user_text(state, user_text));
     let answer = direct_config_edit_apply_answer(&outputs, prefer_english)
         .or_else(|| direct_config_edit_plan_answer(&outputs, prefer_english))
+        .or_else(|| direct_config_edit_guard_answer(&outputs, prefer_english))
         .or_else(|| direct_config_edit_validate_answer(&outputs, prefer_english))
         .or_else(|| direct_config_edit_read_back_answer(&outputs, prefer_english))?;
     Some((answer, config_edit_summary()))
@@ -4366,7 +4422,28 @@ fn path_display_label(value: &serde_json::Value, fallback: &str) -> String {
         .to_string()
 }
 
-fn compare_paths_size_ratio_answer(body: &str, prefer_english: bool) -> Option<String> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SizeComparisonAnswerStyle {
+    DeltaOnly,
+    ExplainRatio,
+}
+
+fn size_comparison_answer_style(route: &crate::RouteResult) -> SizeComparisonAnswerStyle {
+    if matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
+    ) {
+        SizeComparisonAnswerStyle::DeltaOnly
+    } else {
+        SizeComparisonAnswerStyle::ExplainRatio
+    }
+}
+
+fn compare_paths_size_ratio_answer_with_style(
+    body: &str,
+    prefer_english: bool,
+    style: SizeComparisonAnswerStyle,
+) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     if value.get("action").and_then(|value| value.as_str()) != Some("compare_paths") {
         return None;
@@ -4377,6 +4454,25 @@ fn compare_paths_size_ratio_answer(body: &str, prefer_english: bool) -> Option<S
     let right_size = right.get("size_bytes").and_then(|value| value.as_u64())?;
     let left_label = path_display_label(left, "left");
     let right_label = path_display_label(right, "right");
+    if style == SizeComparisonAnswerStyle::DeltaOnly {
+        if left_size == right_size {
+            return Some(if prefer_english {
+                format!("{left_label} and {right_label}: 0 bytes")
+            } else {
+                format!("{left_label} 和 {right_label}：0 字节")
+            });
+        }
+        let (larger_label, delta) = if left_size > right_size {
+            (left_label, left_size - right_size)
+        } else {
+            (right_label, right_size - left_size)
+        };
+        return Some(if prefer_english {
+            format!("{larger_label}: {delta} bytes")
+        } else {
+            format!("{larger_label}：{delta} 字节")
+        });
+    }
     if right_size == 0 {
         return Some(if prefer_english {
             format!(
@@ -4398,6 +4494,15 @@ fn compare_paths_size_ratio_answer(body: &str, prefer_english: bool) -> Option<S
             "`{left_label}` 大约是 `{right_label}` 的 {ratio:.2} 倍（{left_label}={left_size} 字节，{right_label}={right_size} 字节）。"
         )
     })
+}
+
+#[cfg(test)]
+fn compare_paths_size_ratio_answer(body: &str, prefer_english: bool) -> Option<String> {
+    compare_paths_size_ratio_answer_with_style(
+        body,
+        prefer_english,
+        SizeComparisonAnswerStyle::ExplainRatio,
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -4427,7 +4532,11 @@ fn path_batch_size_facts(value: &serde_json::Value) -> Option<Vec<PathSizeFact>>
     (out.len() >= 2).then_some(out)
 }
 
-fn path_batch_size_comparison_answer(body: &str, prefer_english: bool) -> Option<String> {
+fn path_batch_size_comparison_answer_with_style(
+    body: &str,
+    prefer_english: bool,
+    style: SizeComparisonAnswerStyle,
+) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     let mut facts = path_batch_size_facts(&value)?;
     facts.sort_by(|a, b| {
@@ -4445,12 +4554,28 @@ fn path_batch_size_comparison_answer(body: &str, prefer_english: bool) -> Option
             .collect::<Vec<_>>()
             .join(", ");
         return Some(if prefer_english {
-            format!(
-                "They are the same size: {tied} are all {} bytes.",
-                largest.size_bytes
-            )
+            if style == SizeComparisonAnswerStyle::DeltaOnly {
+                format!("{tied}: 0 bytes")
+            } else {
+                format!(
+                    "They are the same size: {tied} are all {} bytes.",
+                    largest.size_bytes
+                )
+            }
         } else {
-            format!("它们一样大：{tied} 都是 {} 字节。", largest.size_bytes)
+            if style == SizeComparisonAnswerStyle::DeltaOnly {
+                format!("{tied}：0 字节")
+            } else {
+                format!("它们一样大：{tied} 都是 {} 字节。", largest.size_bytes)
+            }
+        });
+    }
+    if style == SizeComparisonAnswerStyle::DeltaOnly {
+        let delta = largest.size_bytes.saturating_sub(runner_up.size_bytes);
+        return Some(if prefer_english {
+            format!("{}: {} bytes", largest.label, delta)
+        } else {
+            format!("{}：{} 字节", largest.label, delta)
         });
     }
     let ratio = if runner_up.size_bytes == 0 {
@@ -4478,6 +4603,15 @@ fn path_batch_size_comparison_answer(body: &str, prefer_english: bool) -> Option
     })
 }
 
+#[cfg(test)]
+fn path_batch_size_comparison_answer(body: &str, prefer_english: bool) -> Option<String> {
+    path_batch_size_comparison_answer_with_style(
+        body,
+        prefer_english,
+        SizeComparisonAnswerStyle::ExplainRatio,
+    )
+}
+
 fn direct_quantity_comparison_from_compare_paths(
     state: &AppState,
     user_text: &str,
@@ -4495,6 +4629,7 @@ fn direct_quantity_comparison_from_compare_paths(
         return None;
     }
     let prefer_english = prefer_english_for_user_text(state, user_text);
+    let style = size_comparison_answer_style(route);
     let answer = loop_state
         .executed_step_results
         .iter()
@@ -4504,8 +4639,9 @@ fn direct_quantity_comparison_from_compare_paths(
                 return None;
             }
             let output = step.output.as_deref()?;
-            compare_paths_size_ratio_answer(output, prefer_english)
-                .or_else(|| path_batch_size_comparison_answer(output, prefer_english))
+            compare_paths_size_ratio_answer_with_style(output, prefer_english, style).or_else(
+                || path_batch_size_comparison_answer_with_style(output, prefer_english, style),
+            )
         })?;
     Some((
         answer,
@@ -4699,6 +4835,14 @@ async fn missing_delivery_after_observation_message(
     {
         return answer;
     }
+    if let Some((answer, _summary)) = direct_quantity_comparison_from_compare_paths(
+        state,
+        user_text,
+        loop_state,
+        agent_run_context,
+    ) {
+        return answer;
+    }
     let default_text = missing_delivery_after_observation_default_message(state, user_text);
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let contract = crate::fallback::UserResponseContract::tool_failure(
@@ -4747,6 +4891,15 @@ async fn observed_execution_without_publishable_delivery_reply(
             .or_else(|| {
                 direct_config_edit_observed_answer(state, user_text, loop_state)
                     .map(|(answer, _summary)| answer)
+            })
+            .or_else(|| {
+                direct_quantity_comparison_from_compare_paths(
+                    state,
+                    user_text,
+                    loop_state,
+                    agent_run_context,
+                )
+                .map(|(answer, _summary)| answer)
             })
             .or_else(|| {
                 deterministic_missing_observed_target_answer(
@@ -5869,6 +6022,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn direct_quantity_comparison_strict_shape_returns_byte_delta() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.has_recoverable_failure_context = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","path":"README.md","resolved_path":"/tmp/README.md","size_bytes":29191},"path":"README.md"},{"exists":true,"fact":{"kind":"file","path":"AGENTS.md","resolved_path":"/tmp/AGENTS.md","size_bytes":20744},"path":"AGENTS.md"}],"include_missing":true}"#,
+        ));
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "synthesize_answer".to_string(),
+            status: StepExecutionStatus::Error,
+            output: None,
+            error: Some("synthesis failed".to_string()),
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = free_route_result();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "README.md|AGENTS.md".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let (answer, summary) = direct_quantity_comparison_from_compare_paths(
+            &state,
+            "Compare README.md and AGENTS.md by file size, then answer with the larger file name and byte delta only.",
+            &loop_state,
+            Some(&ctx),
+        )
+        .expect("structured strict delta fallback");
+
+        assert_eq!(answer, "README.md: 8447 bytes");
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
     fn plan_result_with_steps(steps: Vec<crate::PlanStep>) -> crate::PlanResult {
         crate::PlanResult {
             goal: "test goal".to_string(),
@@ -5942,6 +6141,34 @@ mod tests {
         assert!(answer.contains("skills.skill_switches.config_edit_nl_smoke"));
         assert!(answer.contains("true"));
         assert!(answer.contains("验证通过"));
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
+    fn direct_config_edit_observed_answer_summarizes_guard_config() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(1);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "config_edit",
+            r#"{"action":"guard_config","path":"configs/config.toml","risk_count":2,"risks":["llm.minimax.api_key looks like a real secret","tools.allow_sudo=true"]}"#,
+        ));
+
+        let (answer, summary) = direct_config_edit_observed_answer(
+            &state,
+            "检查 RustClaw 主配置有没有明显风险，不能泄露任何密钥值",
+            &loop_state,
+        )
+        .expect("config_edit guard answer");
+
+        assert!(answer.contains("configs/config.toml"));
+        assert!(answer.contains("2"));
+        assert!(answer.contains("llm.minimax.api_key looks like a real secret"));
+        assert!(answer.contains("tools.allow_sudo=true"));
         assert_eq!(
             summary.disposition,
             Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
@@ -7022,6 +7249,50 @@ mod tests {
         );
 
         assert_eq!(delivery, vec!["alpha.md\nbeta.md"]);
+        assert!(finalizer_summary.is_some());
+    }
+
+    #[test]
+    fn exact_directory_names_contract_replaces_file_list_synthesis_with_parent_dirs() {
+        let state = test_state();
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryNames;
+        route.resolved_intent = "Find directories containing .sh files".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"find_ext","count":4,"ext":"sh","results":["build-all.sh","component_start/start-clawd.sh","scripts/check.sh","component_start/start-feishud.sh"],"root":""}"#,
+        ));
+        let file_list =
+            "1. build-all.sh\n2. component_start/start-clawd.sh\n3. scripts/check.sh".to_string();
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "synthesize_answer",
+            &file_list,
+        ));
+        loop_state.last_user_visible_respond = Some(file_list.clone());
+        loop_state.last_publishable_synthesis_output = Some(file_list.clone());
+        let mut delivery = vec![file_list];
+        let mut finalizer_summary = None;
+
+        prefer_observed_answer_for_exact_contract(
+            &state,
+            "task_test",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        );
+
+        assert_eq!(delivery, vec![".\ncomponent_start\nscripts"]);
         assert!(finalizer_summary.is_some());
     }
 
