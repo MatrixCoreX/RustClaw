@@ -93,6 +93,7 @@
             "file_paths",
             "directory_purpose_summary",
             "content_excerpt_summary",
+            "content_presence_check",
             "excerpt_kind_judgment",
             "recent_artifacts_judgment",
             "workspace_project_summary",

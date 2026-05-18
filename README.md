@@ -16,7 +16,7 @@ Current repository highlights:
 - task runtime and HTTP API in `clawd`
 - shared skill dispatch with in-process builtins, external adapters, and runner subprocesses through `skill-runner`
 - built-in, external, and runner-based skills for system, files, web, images, audio, crypto, KB, and automation tasks
-- local browser UI in `UI/`
+- local browser UI in `UI/`, including a standalone NNI device-signing page
 - Raspberry Pi / small-screen desktop app in `pi_app/`
 
 ## Planner-First Architecture
@@ -200,6 +200,7 @@ flowchart TD
 - `crates/clawcli`: terminal CLI for talking to `clawd`
 - `crates/webd`: optional reverse proxy and login session bridge for public/browser access
 - `crates/telegramd`, `crates/wechatd`, `crates/feishud`, `crates/larkd`, `crates/whatsappd`, `crates/whatsapp_webd`: channel daemons
+- `services/wa-web-bridge`: local Node bridge used by the WhatsApp Web channel
 - `crates/skills/*`: skill implementations and `INTERFACE.md` specs
 - `UI/`: Vite + React local console
 - `pi_app/`: small-screen desktop monitor and launcher scripts
@@ -286,6 +287,12 @@ Current channel config files:
 # Set the primary target
 ./build-all.sh --target aarch64-unknown-linux-gnu
 
+# Raspberry Pi cross-build: defaults to 64-bit Raspberry Pi OS
+./cross-build-pi.sh
+
+# 32-bit Raspberry Pi OS
+./cross-build-pi.sh --target pi32
+
 # Build multiple targets in one run
 ./build-all.sh --target host --extra-target aarch64-unknown-linux-gnu
 ```
@@ -296,6 +303,7 @@ Current `build-all.sh` behavior:
 - always builds `release`, auto-discovers workspace binaries, and verifies that the expected outputs exist
 - calls `build-ui-nginx.sh` when `UI/` exists and you did not pass `no-ui`, which means the default "build UI + deploy to nginx" path
 - writes host outputs to `target/release` and cross-target outputs to `target/<triple>/release`
+- `cross-build-pi.sh` prepares the Raspberry Pi linker / `cc` / bindgen environment before calling the existing build flow; it skips UI builds by default unless you pass `--with-ui`
 
 You can still use plain `cargo build --workspace --release` for ad hoc local builds, but it does not include the repo-level sync, UI build, or output verification done by `build-all.sh`.
 
@@ -340,6 +348,7 @@ Single-service scripts are also available when you want finer control:
 ./component_start/start-larkd.sh
 ./component_start/start-whatsappd.sh
 ./component_start/start-whatsapp-webd.sh
+./component_start/start-wa-web-bridge.sh
 ./component_start/start-clawd-ui.sh
 ```
 
@@ -388,10 +397,29 @@ The main API still comes from `clawd`, but the current script flow prefers expos
 
 In the current defaults, `clawd` commonly listens on `0.0.0.0:8787` and `webd` commonly listens on `0.0.0.0:8788`; the deploy scripts derive the nginx upstream from `configs/channels/webd.toml`.
 
-Useful endpoints:
+Useful endpoints (send `X-RustClaw-Key` for the current UI/user key):
 
 - `GET /v1/health`
 - `POST /v1/tasks`
+- `GET /v1/tasks/{task_id}`
+- `POST /v1/tasks/cancel`
+- `GET /v1/auth/me`
+- `POST /v1/auth/channel/bind`
+- `GET/POST /v1/auth/crypto-credentials`: reads or overwrites exchange credentials scoped to the current `X-RustClaw-Key`
+- `GET /v1/nni/device/status`: reports NNI helper status, supported actions, and whether a device-signing chip is present
+- `POST /v1/nni/device/action`: runs one of `pubkey`, `sign_timestamp`, `tng_device_pubkey`, `tng_device_cert`, `tng_signer_cert`, or `tng_root_cert`
+
+Quick example:
+
+```bash
+curl http://127.0.0.1:8787/v1/health \
+  -H "X-RustClaw-Key: rk-xxxx"
+
+curl -X POST http://127.0.0.1:8787/v1/tasks \
+  -H "Content-Type: application/json" \
+  -H "X-RustClaw-Key: rk-xxxx" \
+  -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello","agent_mode":true}}'
+```
 
 ## NL Regression Shortcuts
 
@@ -402,22 +430,6 @@ Focused long-tail closed-loop entries:
 - `bash scripts/nl_tests/run_suite.sh ops_http_repair`
 
 `ops_http_repair` is the focused bilingual retry suite for `ops_http_repair_then_validate_{zh,en}` and writes logs under `scripts/nl_suite_logs/ops_http_repair/<timestamp>/`.
-- `GET /v1/tasks/{task_id}`
-- `POST /v1/tasks/cancel`
-- `GET /v1/auth/me`
-- `POST /v1/auth/channel/bind`
-- `GET/POST /v1/auth/crypto-credentials`: reads or overwrites exchange credentials scoped to the current `X-RustClaw-Key`
-
-Quick example:
-
-```bash
-curl http://127.0.0.1:8787/v1/health
-
-curl -X POST http://127.0.0.1:8787/v1/tasks \
-  -H "Content-Type: application/json" \
-  -H "X-RustClaw-Key: rk-xxxx" \
-  -d '{"user_id":1,"chat_id":1,"user_key":"rk-xxxx","channel":"ui","external_user_id":"local-ui","external_chat_id":"local-ui","kind":"ask","payload":{"text":"hello","agent_mode":true}}'
-```
 
 UI notes:
 
@@ -426,6 +438,7 @@ UI notes:
 - `build-ui-nginx.sh` is the main "build UI + copy to nginx + refresh nginx config" path
 - `deploy-ui-nginx.sh` is the "deploy existing `UI/dist`" path, with optional `--build`
 - `install-rustclaw-cmd.sh` also deploys UI/nginx by default unless you pass `--no-deploy-ui`
+- the browser UI has a standalone `NNI` navigation section backed by `/v1/nni/device/*`; devices without a signing chip surface `signature_chip_present=false` and show an explicit missing-chip state
 - `webd` can sit in front of `clawd` as a reverse proxy and login/session bridge
 
 ## Skills
@@ -451,9 +464,9 @@ Planner skill selection is registry-, capability-, and interface-driven. After a
 
 Skill integration entry points:
 
-- unified guide: `docs/skill_integration_guide.md`
-- standard `runner` skills: `skill_develop/README.md`
+- built-in and standard `runner` skills: `skill_develop/README.md`
 - external skill example: `external_skills/example/README.md`
+- skill setup and prerequisite reference: `prompts/references/skill_setup_guide.md`
 
 ### Local STT With whisper.cpp
 
@@ -494,6 +507,7 @@ The empty `api_key` is accepted only for loopback `custom` providers (`localhost
 - `crates/`: Rust services, daemons, CLI, and skills
 - `prompts/`: prompt layers and generated skill prompt files
 - `scripts/`: setup, regression, maintenance, and skill-call helpers
+- `services/`: non-Rust helper services such as the WhatsApp Web bridge
 - `UI/`: browser UI project
 - `pi_app/`: desktop small-screen app
 - `docker/`: docker-oriented configs and entrypoint files
@@ -511,6 +525,8 @@ cd pi_app && ./open-small-screen.sh
 ```
 
 It reads health status from `clawd`, so start the backend first.
+
+The Pi App also carries the NNI device-signing helper used by the backend and browser UI. `pi_app/signature.py` supports Slot 0 public-key reads, timestamp signing, and TNG device/signer/root certificate reads when supported hardware and `cryptoauthlib` are present; see `pi_app/TNG_SERVER_GUIDE.md`. Devices without that chip are valid deployments and are reported as a missing-signature-chip state.
 
 ## Developer Notes
 

@@ -155,15 +155,12 @@ pub(crate) struct CommandIntentRules {
     pub(crate) execute_prefixes: Vec<String>,
     #[serde(default)]
     pub(crate) result_suffixes: Vec<String>,
-    #[serde(default)]
-    pub(crate) negative_markers: Vec<String>,
 }
 
 #[derive(Clone)]
 pub(crate) struct CommandIntentRuntime {
     pub(crate) all_result_suffixes: Vec<String>,
     pub(crate) execute_prefixes: Vec<String>,
-    pub(crate) negative_markers: Vec<String>,
     pub(crate) default_locale: String,
     pub(crate) verify_enforce_enabled: bool,
 }

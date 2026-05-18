@@ -632,6 +632,9 @@ def capability_family_names(name: str) -> set[str]:
         "read_file": {"read_file", "system_basic", "doc_parse"},
         # Directory inventory/listing may be served by the structured system tool.
         "list_dir": {"list_dir", "system_basic"},
+        # RustClaw config guard is now exposed through config_edit.guard_config;
+        # config_guard remains a compatibility label in older NL case tags.
+        "config_guard": {"config_guard", "config_edit"},
     }
     return families.get(name, {name})
 

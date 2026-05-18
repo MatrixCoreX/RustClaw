@@ -386,6 +386,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         }
         OutputSemanticKind::ServiceStatus
         | OutputSemanticKind::HiddenEntriesCheck
+        | OutputSemanticKind::ContentPresenceCheck
         | OutputSemanticKind::ScalarPathOnly
         | OutputSemanticKind::ExistenceWithPath
         | OutputSemanticKind::GitCommitSubject
@@ -468,6 +469,9 @@ pub(crate) fn required_evidence_fields_for_output_contract(
         | OutputSemanticKind::WorkspaceProjectSummary
         | OutputSemanticKind::ExcerptKindJudgment => {
             fields.insert("content_excerpt");
+        }
+        OutputSemanticKind::ContentPresenceCheck => {
+            fields.insert("content_match");
         }
         OutputSemanticKind::DirectoryPurposeSummary => {
             fields.insert("candidates");

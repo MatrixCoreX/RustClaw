@@ -15,6 +15,13 @@ mod prepare_round;
 mod skill_execution;
 mod support;
 
+pub(crate) fn explicit_command_segment_for_policy(
+    runtime: &crate::CommandIntentRuntime,
+    request: &str,
+) -> Option<String> {
+    planning::explicit_command_segment(runtime, request)
+}
+
 use self::arg_resolver::{
     normalize_skill_arg_aliases, resolve_arg_string, resolve_arg_value,
     rewrite_args_with_auto_locator_path, rewrite_run_cmd_with_written_aliases,

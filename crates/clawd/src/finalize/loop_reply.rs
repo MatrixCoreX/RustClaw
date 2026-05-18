@@ -2009,6 +2009,12 @@ fn direct_structured_observed_answer(
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    if route.ask_mode.finalize_chat_wrapped()
+        && route.output_contract.requires_content_evidence
+        && latest_plan_requested_synthesis(loop_state)
+    {
+        return None;
+    }
     if matches!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
@@ -2087,6 +2093,15 @@ fn direct_structured_observed_answer(
             ..Default::default()
         },
     ))
+}
+
+fn latest_plan_requested_synthesis(loop_state: &LoopState) -> bool {
+    loop_state.round_traces.iter().rev().any(|round| {
+        round
+            .plan_result
+            .as_ref()
+            .is_some_and(|plan| plan.raw_plan_text.contains("\"synthesize_answer\""))
+    })
 }
 
 fn route_allows_latest_tail_read_range_delivery(route: &crate::RouteResult) -> bool {
@@ -5315,6 +5330,18 @@ pub(crate) async fn finalize_loop_reply(
         );
     }
 
+    if let Some(reply) = content_evidence_step_failure_reply_from_loop(
+        state,
+        task,
+        user_text,
+        &loop_state,
+        agent_run_context,
+    )
+    .await
+    {
+        return Ok(reply);
+    }
+
     if loop_state.delivery_messages.is_empty() {
         match crate::agent_engine::observed_output::try_synthesize_answer_from_observed_output(
             state,
@@ -5390,18 +5417,6 @@ pub(crate) async fn finalize_loop_reply(
             "delivery auto_requested_success_marker task_id={} marker={}",
             task.task_id, marker
         );
-    }
-
-    if let Some(reply) = content_evidence_step_failure_reply_from_loop(
-        state,
-        task,
-        user_text,
-        &loop_state,
-        agent_run_context,
-    )
-    .await
-    {
-        return Ok(reply);
     }
 
     normalize_file_token_delivery_from_auto_locator(&mut loop_state, agent_run_context);
@@ -5762,8 +5777,8 @@ mod tests {
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
         AgentRuntimeConfig, AppState, ClaimedTask, IntentOutputContract, OutputLocatorKind,
-        OutputResponseShape, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
-        SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
+        OutputResponseShape, OutputSemanticKind, ResumeBehavior, RiskCeiling, RouteResult,
+        ScheduleKind, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
     };
     use claw_core::config::{AgentConfig, ToolsConfig};
 
@@ -6080,6 +6095,13 @@ mod tests {
         }
     }
 
+    fn plan_result_with_raw_text(raw_plan_text: &str) -> crate::PlanResult {
+        crate::PlanResult {
+            raw_plan_text: raw_plan_text.to_string(),
+            ..plan_result_with_steps(Vec::new())
+        }
+    }
+
     fn ok_step_result(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
         StepExecutionResult {
             step_id: step_id.to_string(),
@@ -6090,6 +6112,62 @@ mod tests {
             started_at: 1,
             finished_at: 2,
         }
+    }
+
+    #[test]
+    fn direct_structured_observed_answer_defers_when_plan_requested_synthesis() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# Device Local Fixture\n2|\n3|This directory contains stable local files for tests."}"#,
+        ));
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "read then summarize".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_raw_text(
+                    r#"{"steps":[{"type":"call_tool","tool":"fs_basic"},{"type":"synthesize_answer","evidence_refs":["last_output"]}]}"#,
+                )),
+                verify_result: None,
+            });
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/README.md".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(direct_structured_observed_answer(None, &loop_state, Some(&ctx)).is_none());
+    }
+
+    #[test]
+    fn direct_structured_observed_answer_keeps_passthrough_without_synthesis_plan() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","path":"/tmp/config.toml","resolved_path":"/tmp/config.toml","excerpt":"1|[app]\n2|name = \"fixture\""}"#,
+        ));
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/config.toml".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let (answer, _) = direct_structured_observed_answer(None, &loop_state, Some(&ctx))
+            .expect("direct passthrough without synthesis plan");
+
+        assert_eq!(answer, "[app]\nname = \"fixture\"");
     }
 
     fn err_step_result(step_id: &str, skill: &str, error: &str) -> StepExecutionResult {
@@ -10560,6 +10638,59 @@ mod tests {
         assert!(reply.messages[0].contains("**执行过程**"));
         assert!(reply.messages[0].contains("run_cmd"));
         assert_eq!(reply.messages[1], "有，路径：/tmp/rustclaw.service");
+        assert!(!reply.should_fail_task);
+        assert!(!reply.is_llm_reply);
+    }
+
+    #[tokio::test]
+    async fn finalize_loop_reply_uses_latest_fs_basic_path_fact_after_repair() {
+        let state = test_state();
+        let task = claimed_task("task-path-fact-after-repair");
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"path_batch_facts","count":4,"facts":[{"exists":false,"path":"agent_guard.toml"},{"exists":false,"path":"audio.toml"},{"exists":false,"path":"browser_web_wait_map.json"},{"exists":false,"path":"channel_commands.toml"}],"include_missing":true}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "fs_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"configs/channels","resolved_path":"/tmp/repo/configs/channels","size_bytes":4096},"path":"/tmp/repo/configs/channels"}],"include_missing":true}"#,
+        ));
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.resolved_intent = "查看 configs 目录下最后一个条目的路径和类型信息".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/repo/configs/channels".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let reply = finalize_loop_reply(
+            &state,
+            &task,
+            "看最后一个的基本信息，只回答路径和类型",
+            loop_state,
+            Some(&agent_run_context),
+        )
+        .await
+        .expect("finalize should succeed");
+
+        assert_eq!(reply.text, "/tmp/repo/configs/channels | 目录");
+        assert!(!reply.text.contains("没能整理成可靠结论"));
+        assert!(reply
+            .messages
+            .iter()
+            .any(|message| crate::finalize::is_execution_summary_message(message)));
+        assert_eq!(
+            reply.messages.last().map(String::as_str),
+            Some("/tmp/repo/configs/channels | 目录")
+        );
         assert!(!reply.should_fail_task);
         assert!(!reply.is_llm_reply);
     }

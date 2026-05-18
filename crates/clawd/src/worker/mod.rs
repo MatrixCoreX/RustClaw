@@ -22,7 +22,8 @@ pub(crate) use channels::{
 };
 pub(super) use locator::{
     has_concrete_locator_hint, has_explicit_path_or_url_locator_hint,
-    try_resolve_implicit_locator_path, LocatorAutoResolution,
+    semantic_kind_can_bind_workspace_child_locator, try_resolve_implicit_locator_path,
+    try_resolve_workspace_child_locator_from_text, LocatorAutoResolution,
 };
 pub(super) use run_skill_finalize::finalize_run_skill_result;
 pub(crate) use runtime_support::spawn_long_term_summary_refresh;

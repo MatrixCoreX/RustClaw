@@ -524,6 +524,10 @@ fn default_direct_answer_gate_contract() -> Value {
     })
 }
 
+fn default_direct_answer_gate_reference_resolution() -> Value {
+    json!({ "target": "none" })
+}
+
 fn normalize_schema_token_for_gate(raw: &str) -> String {
     raw.trim()
         .to_ascii_lowercase()
@@ -583,9 +587,19 @@ fn normalize_direct_answer_gate_delivery_intent(raw: &str) -> &'static str {
 
 fn normalize_direct_answer_gate_semantic_kind(raw: &str) -> &'static str {
     match normalize_schema_token_for_gate(raw).as_str() {
+        "none" => "none",
         "raw" | "raw_output" | "command_output" | "shell_output" | "terminal_output" => {
             "raw_command_output"
         }
+        "raw_command_output" => "raw_command_output",
+        "service_status"
+        | "service_state"
+        | "service_running_status"
+        | "process_status"
+        | "process_state"
+        | "process_running_status"
+        | "daemon_status"
+        | "daemon_state" => "service_status",
         "hidden_files"
         | "hidden_entries"
         | "hidden_file_check"
@@ -617,11 +631,33 @@ fn normalize_direct_answer_gate_semantic_kind(raw: &str) -> &'static str {
         | "folder_names"
         | "folder_names_only"
         | "folders_only" => "directory_names",
+        "directory_entry_groups"
+        | "directory_file_groups"
+        | "file_directory_groups"
+        | "entry_kind_groups"
+        | "entries_by_kind"
+        | "grouped_entries"
+        | "grouped_entry_names" => "directory_entry_groups",
         "file_paths" | "file_paths_only" | "path_list" | "paths_list" | "file_path_list" => {
             "file_paths"
         }
+        "directory_purpose_summary" | "listing_purpose_summary" | "directory_listing_summary" => {
+            "directory_purpose_summary"
+        }
         "content_excerpt" | "content_excerpt_summary" | "file_excerpt" | "tail_lines" => {
             "content_excerpt_summary"
+        }
+        "content_presence_check"
+        | "content_contains_check"
+        | "content_match_check"
+        | "identifier_presence_check"
+        | "field_presence_check"
+        | "text_presence_check" => "content_presence_check",
+        "excerpt_kind_judgment" | "content_excerpt_judgment" | "log_vs_checklist" => {
+            "excerpt_kind_judgment"
+        }
+        "recent_artifacts_judgment" | "artifact_style_classification" => {
+            "recent_artifacts_judgment"
         }
         "workspace_summary" | "workspace_project_summary" => "workspace_project_summary",
         "scalar_count" | "count" => "scalar_count",
@@ -653,6 +689,41 @@ fn normalize_direct_answer_gate_semantic_kind(raw: &str) -> &'static str {
         "docker_container_lifecycle" => "docker_container_lifecycle",
         _ => "none",
     }
+}
+
+fn normalize_direct_answer_gate_reference_target(raw: &str) -> &'static str {
+    match normalize_schema_token_for_gate(raw).as_str() {
+        "current_action_result" => "current_action_result",
+        "current_turn_locator" => "current_turn_locator",
+        "comparison_result" => "comparison_result",
+        "unresolved_prior_object" => "unresolved_prior_object",
+        "missing_locator" => "missing_locator",
+        "ambiguous_locator" => "ambiguous_locator",
+        _ => "none",
+    }
+}
+
+fn canonicalize_direct_answer_gate_reference_resolution(value: Value) -> (Value, bool) {
+    let Value::Object(mut map) = value else {
+        return (default_direct_answer_gate_reference_resolution(), true);
+    };
+    let original_len = map.len();
+    map.retain(|key, _| key == "target");
+    let mut normalized = map.len() != original_len;
+    match map.get("target").and_then(Value::as_str) {
+        Some(raw) => {
+            let canonical = normalize_direct_answer_gate_reference_target(raw);
+            if canonical != raw {
+                map.insert("target".to_string(), Value::String(canonical.to_string()));
+                normalized = true;
+            }
+        }
+        None => {
+            map.insert("target".to_string(), Value::String("none".to_string()));
+            normalized = true;
+        }
+    }
+    (Value::Object(map), normalized)
 }
 
 fn canonicalize_direct_answer_gate_contract(value: Value) -> (Value, bool) {
@@ -771,6 +842,7 @@ fn canonicalize_direct_answer_gate_object(
         "confidence",
         "clarify_question",
         "resolved_user_intent",
+        "reference_resolution",
         "output_contract",
     ];
     map.retain(|key, _| allowed_keys.contains(&key.as_str()));
@@ -784,6 +856,18 @@ fn canonicalize_direct_answer_gate_object(
         map.insert(
             "output_contract".to_string(),
             default_direct_answer_gate_contract(),
+        );
+        normalized = true;
+    }
+    if let Some(reference_resolution) = map.remove("reference_resolution") {
+        let (reference_resolution, reference_normalized) =
+            canonicalize_direct_answer_gate_reference_resolution(reference_resolution);
+        normalized |= reference_normalized;
+        map.insert("reference_resolution".to_string(), reference_resolution);
+    } else {
+        map.insert(
+            "reference_resolution".to_string(),
+            default_direct_answer_gate_reference_resolution(),
         );
         normalized = true;
     }
@@ -2133,6 +2217,7 @@ mod tests {
             "reason": "Fresh system state observation is required.",
             "confidence": 0.94,
             "decision": "planner_execute",
+            "reference_resolution": {"target": "none"},
             "output_contract": {
                 "response_shape": "free",
                 "requires_content_evidence": true,
@@ -2183,6 +2268,47 @@ mod tests {
     }
 
     #[test]
+    fn validate_against_schema_defaults_missing_direct_answer_gate_reference_resolution() {
+        let raw = r#"{
+            "decision": "planner_execute",
+            "reason": "Fresh file content is required.",
+            "confidence": 0.93,
+            "clarify_question": "",
+            "resolved_user_intent": "Inspect the current workspace schema for a target enum",
+            "output_contract": {
+                "response_shape": "free",
+                "requires_content_evidence": true,
+                "delivery_required": false,
+                "locator_kind": "current_workspace",
+                "delivery_intent": "none",
+                "semantic_kind": "content_presence_check",
+                "locator_hint": "",
+                "self_extension": {
+                    "mode": "none",
+                    "trigger": "none",
+                    "execute_now": false
+                }
+            }
+        }"#;
+        let validated =
+            super::validate_against_schema::<Value>(raw, super::PromptSchemaId::DirectAnswerGate)
+                .expect("missing reference_resolution should be normalized to none");
+
+        assert!(validated.schema_normalized);
+        assert_eq!(
+            validated
+                .value
+                .pointer("/reference_resolution/target")
+                .and_then(|v| v.as_str()),
+            Some("none")
+        );
+        assert_eq!(
+            validated.value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
+    }
+
+    #[test]
     fn validate_against_schema_normalizes_direct_answer_gate_file_locator_alias() {
         let raw = r#"{
             "decision": "planner_execute",
@@ -2190,6 +2316,7 @@ mod tests {
             "confidence": 0.95,
             "clarify_question": "",
             "resolved_user_intent": "Read the last lines from /tmp/clawd.log",
+            "reference_resolution": {"target": "none"},
             "output_contract": {
                 "response_shape": "free",
                 "requires_content_evidence": true,
@@ -2224,6 +2351,56 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("content_excerpt_summary")
         );
+    }
+
+    #[test]
+    fn validate_against_schema_preserves_direct_answer_gate_semantic_enums() {
+        let semantic_kinds = [
+            "service_status",
+            "directory_entry_groups",
+            "directory_purpose_summary",
+            "excerpt_kind_judgment",
+            "recent_artifacts_judgment",
+        ];
+
+        for semantic_kind in semantic_kinds {
+            let raw = json!({
+                "decision": "planner_execute",
+                "reason": "fresh observation is required",
+                "confidence": 0.95,
+                "clarify_question": "",
+                "resolved_user_intent": "Inspect a concrete workspace target",
+                "reference_resolution": {"target": "none"},
+                "output_contract": {
+                    "response_shape": "strict",
+                    "requires_content_evidence": true,
+                    "delivery_required": false,
+                    "locator_kind": "path",
+                    "delivery_intent": "none",
+                    "semantic_kind": semantic_kind,
+                    "locator_hint": "logs",
+                    "self_extension": {
+                        "mode": "none",
+                        "trigger": "none",
+                        "execute_now": false
+                    }
+                }
+            })
+            .to_string();
+            let validated = super::validate_against_schema::<Value>(
+                &raw,
+                super::PromptSchemaId::DirectAnswerGate,
+            )
+            .expect("canonical semantic kind should pass gate schema");
+
+            assert_eq!(
+                validated
+                    .value
+                    .pointer("/output_contract/semantic_kind")
+                    .and_then(|v| v.as_str()),
+                Some(semantic_kind)
+            );
+        }
     }
 
     #[test]

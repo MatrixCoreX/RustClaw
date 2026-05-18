@@ -1189,29 +1189,6 @@ fn assess_health_check_validation(output: &str) -> ValidationObservation {
     ValidationObservation::Inconclusive
 }
 
-fn has_strong_run_cmd_success_marker(command: &str, output_lower: &str) -> bool {
-    let first_word = normalized_first_command_word(command);
-    output_lower.lines().any(|line| {
-        let trimmed = line.trim();
-        matches!(
-            trimmed,
-            "active" | "running" | "ok" | "healthy" | "success" | "ready" | "passed"
-        ) || trimmed == "status=200"
-            || trimmed == "status=204"
-            || trimmed == "status=301"
-            || trimmed == "status=302"
-            || trimmed == "validation_passed"
-            || trimmed.contains("syntax is ok")
-            || trimmed.contains("test is successful")
-            || trimmed.contains("configuration ok")
-            || trimmed.contains("configuration file") && trimmed.contains("test is successful")
-    }) || (output_lower.trim().is_empty()
-        && matches!(
-            first_word.as_deref(),
-            Some("curl" | "wget" | "nc" | "ss" | "lsof")
-        ))
-}
-
 fn has_strong_run_cmd_failure_marker(output_lower: &str) -> bool {
     contains_any(
         output_lower,
@@ -1236,6 +1213,28 @@ fn has_strong_run_cmd_failure_marker(output_lower: &str) -> bool {
             "not ok",
         ],
     )
+}
+
+fn command_declares_validation_sentinel(command: &str) -> bool {
+    let command_lower = command.to_ascii_lowercase();
+    command_lower.contains("validation_passed") || command_lower.contains("validation_failed")
+}
+
+fn declared_validation_sentinel_observation(command: &str, output: &str) -> ValidationObservation {
+    if !command_declares_validation_sentinel(command) {
+        return ValidationObservation::Inconclusive;
+    }
+    let has_passed = output
+        .lines()
+        .any(|line| line.trim().eq_ignore_ascii_case("validation_passed"));
+    let has_failed = output
+        .lines()
+        .any(|line| line.trim().eq_ignore_ascii_case("validation_failed"));
+    match (has_passed, has_failed) {
+        (true, false) => ValidationObservation::Passed,
+        (false, true) => ValidationObservation::Failed(output.trim().to_string()),
+        _ => ValidationObservation::Inconclusive,
+    }
 }
 
 fn first_nonempty_line(text: &str) -> Option<&str> {
@@ -1320,11 +1319,9 @@ fn assess_sing_box_check_validation(output: &str) -> ValidationObservation {
 
 fn assess_http_probe_validation(command: &str, output: &str) -> ValidationObservation {
     let lower = output.trim().to_ascii_lowercase();
-    if lower.contains("validation_passed") {
-        return ValidationObservation::Passed;
-    }
-    if lower.contains("validation_failed") {
-        return ValidationObservation::Failed(output.trim().to_string());
+    let sentinel = declared_validation_sentinel_observation(command, output);
+    if !matches!(sentinel, ValidationObservation::Inconclusive) {
+        return sentinel;
     }
     if let Some(status_line) =
         first_nonempty_line(output).and_then(|line| line.strip_prefix("status="))
@@ -1396,14 +1393,7 @@ fn assess_run_cmd_validation(command: &str, output: &str) -> ValidationObservati
     {
         return assess_socket_listing_validation(output);
     }
-    let output_lower = output.trim().to_ascii_lowercase();
-    let has_success = has_strong_run_cmd_success_marker(command, &output_lower);
-    let has_failure = has_strong_run_cmd_failure_marker(&output_lower);
-    match (has_success, has_failure) {
-        (true, false) => ValidationObservation::Passed,
-        (false, true) => ValidationObservation::Failed(output.trim().to_string()),
-        _ => ValidationObservation::Inconclusive,
-    }
+    declared_validation_sentinel_observation(command, output)
 }
 
 fn assess_system_basic_validation(args: &Value, output: &str) -> ValidationObservation {
@@ -1509,17 +1499,10 @@ fn structured_validation_from_output_text(output: &str) -> ValidationObservation
 }
 
 fn declared_validation_success_fallback(
-    state: &AppState,
-    skill_name: &str,
-    output: &str,
+    _state: &AppState,
+    _skill_name: &str,
+    _output: &str,
 ) -> ValidationObservation {
-    let normalized_skill = state.resolve_canonical_skill_name(skill_name);
-    if normalized_skill == "run_cmd" {
-        let output_lower = output.trim().to_ascii_lowercase();
-        if has_strong_run_cmd_failure_marker(&output_lower) {
-            return ValidationObservation::Failed(output.trim().to_string());
-        }
-    }
     ValidationObservation::Passed
 }
 

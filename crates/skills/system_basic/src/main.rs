@@ -850,17 +850,15 @@ fn structured_keys(
             .to_string())
         }
         Value::Array(arr) => {
+            let preview_limit = max_keys.min(20);
             let preview = arr
                 .iter()
-                .take(max_keys.min(20))
+                .take(preview_limit)
                 .enumerate()
-                .map(|(idx, item)| {
-                    json!({
-                        "index": idx,
-                        "value_type": json_value_type(item),
-                    })
-                })
+                .map(|(idx, item)| structured_array_item_preview(idx, item))
                 .collect::<Vec<_>>();
+            let (identity_values, identity_omitted) =
+                structured_array_identity_values(arr, max_keys);
             Ok(json!({
                 "action": "structured_keys",
                 "path": path,
@@ -870,6 +868,8 @@ fn structured_keys(
                 "exists": true,
                 "container_type": "array",
                 "count": arr.len(),
+                "identity_values": identity_values,
+                "identity_omitted": identity_omitted,
                 "indices_preview": preview,
             })
             .to_string())
@@ -887,6 +887,47 @@ fn structured_keys(
         })
         .to_string()),
     }
+}
+
+fn structured_array_item_preview(idx: usize, item: &Value) -> Value {
+    let mut out = Map::new();
+    out.insert("index".to_string(), json!(idx));
+    out.insert("value_type".to_string(), json!(json_value_type(item)));
+    if let Some(map) = item.as_object() {
+        let mut keys = map.keys().cloned().collect::<Vec<_>>();
+        keys.sort();
+        let omitted = keys.len().saturating_sub(8);
+        if keys.len() > 8 {
+            keys.truncate(8);
+        }
+        out.insert("keys".to_string(), json!(keys));
+        out.insert("keys_omitted".to_string(), json!(omitted));
+        if let Some((key, value)) = structured_array_item_identity(map) {
+            out.insert("identity_key".to_string(), json!(key));
+            out.insert("identity_value".to_string(), json!(value));
+        }
+    }
+    Value::Object(out)
+}
+
+fn structured_array_identity_values(arr: &[Value], max_values: usize) -> (Vec<String>, usize) {
+    let all_values = arr
+        .iter()
+        .filter_map(|item| item.as_object())
+        .filter_map(|map| structured_array_item_identity(map).map(|(_, value)| value.to_string()))
+        .collect::<Vec<_>>();
+    let omitted = all_values.len().saturating_sub(max_values);
+    let values = all_values.into_iter().take(max_values).collect();
+    (values, omitted)
+}
+
+fn structured_array_item_identity(map: &Map<String, Value>) -> Option<(&'static str, &str)> {
+    for selector_key in ["name", "id", "key"] {
+        if let Some(value) = map.get(selector_key).and_then(Value::as_str) {
+            return Some((selector_key, value));
+        }
+    }
+    None
 }
 
 fn validate_structured(
@@ -1880,6 +1921,10 @@ fn lookup_field_value_with_resolution<'a>(value: &'a Value, field_path: &str) ->
         return found;
     }
 
+    if let Some(found) = lookup_json_schema_properties_path(value, field_path) {
+        return found;
+    }
+
     let Some(key) = bare_field_key_selector(field_path) else {
         return FieldLookup {
             value: None,
@@ -2089,6 +2134,106 @@ fn lookup_missing_parent_leaf_suffix_field<'a>(
         match_strategy: "missing_parent_leaf_key_suffix",
         match_count: matches.len(),
     })
+}
+
+fn lookup_json_schema_properties_path<'a>(
+    value: &'a Value,
+    field_path: &str,
+) -> Option<FieldLookup<'a>> {
+    let segments = split_field_path(field_path)?;
+    if segments.len() < 3 || segments.first()? != &"properties" {
+        return None;
+    }
+    let property_key = segments.get(1)?.trim();
+    if property_key.is_empty() {
+        return None;
+    }
+    let nested_field_path = segments[2..].join(".");
+    if nested_field_path.trim().is_empty() {
+        return None;
+    }
+
+    let mut matches = Vec::new();
+    collect_json_schema_properties_path_matches(
+        value,
+        property_key,
+        &nested_field_path,
+        "",
+        &mut matches,
+    );
+    if matches.len() == 1 {
+        let (resolved_field_path, found) = matches.remove(0);
+        return Some(FieldLookup {
+            value: Some(found),
+            resolved_field_path: Some(resolved_field_path),
+            match_strategy: "json_schema_properties_path",
+            match_count: 1,
+        });
+    }
+    (!matches.is_empty()).then_some(FieldLookup {
+        value: None,
+        resolved_field_path: None,
+        match_strategy: "json_schema_properties_path",
+        match_count: matches.len(),
+    })
+}
+
+fn collect_json_schema_properties_path_matches<'a>(
+    value: &'a Value,
+    property_key: &str,
+    nested_field_path: &str,
+    current_path: &str,
+    out: &mut Vec<(String, &'a Value)>,
+) {
+    match value {
+        Value::Object(map) => {
+            if let Some(properties) = map.get("properties").and_then(Value::as_object) {
+                if let Some(property_schema) = properties.get(property_key) {
+                    if let Some(nested_value) =
+                        lookup_field_value(property_schema, nested_field_path)
+                    {
+                        let base_path = if current_path.is_empty() {
+                            format!("properties.{property_key}")
+                        } else {
+                            format!("{current_path}.properties.{property_key}")
+                        };
+                        out.push((format!("{base_path}.{nested_field_path}"), nested_value));
+                    }
+                }
+            }
+            for (key, child) in map {
+                let child_path = if current_path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{current_path}.{key}")
+                };
+                collect_json_schema_properties_path_matches(
+                    child,
+                    property_key,
+                    nested_field_path,
+                    &child_path,
+                    out,
+                );
+            }
+        }
+        Value::Array(items) => {
+            for (idx, child) in items.iter().enumerate() {
+                let child_path = if current_path.is_empty() {
+                    format!("[{idx}]")
+                } else {
+                    format!("{current_path}[{idx}]")
+                };
+                collect_json_schema_properties_path_matches(
+                    child,
+                    property_key,
+                    nested_field_path,
+                    &child_path,
+                    out,
+                );
+            }
+        }
+        _ => {}
+    }
 }
 
 fn lookup_array_item_key_path<'a>(value: &'a Value, field_path: &str) -> Option<FieldLookup<'a>> {
@@ -3072,6 +3217,108 @@ selected_model = "MiniMax-M2.7"
         assert_eq!(
             value.get("match_strategy").and_then(Value::as_str),
             Some("missing_parent_leaf_key_suffix")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn extract_field_resolves_nested_json_schema_properties_path() {
+        let root = temp_root("extract_field_json_schema_properties_path");
+        let target = root.join("schema.json");
+        std::fs::write(
+            &target,
+            r#"{
+  "type": "object",
+  "properties": {
+    "reference_resolution": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "enum": [
+            "none",
+            "current_action_result",
+            "current_turn_locator"
+          ]
+        }
+      }
+    }
+  }
+}"#,
+        )
+        .expect("write json");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("format".to_string(), json!("json"));
+        obj.insert("field_path".to_string(), json!("properties.target.enum"));
+
+        let out = extract_field(&root, &obj, true).expect("extract field");
+        let value: Value = serde_json::from_str(&out).expect("json");
+
+        assert_eq!(value.get("exists").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            value.get("resolved_field_path").and_then(Value::as_str),
+            Some("properties.reference_resolution.properties.target.enum")
+        );
+        assert_eq!(
+            value.get("match_strategy").and_then(Value::as_str),
+            Some("json_schema_properties_path")
+        );
+        assert_eq!(
+            value
+                .get("value")
+                .and_then(Value::as_array)
+                .and_then(|items| items.get(1))
+                .and_then(Value::as_str),
+            Some("current_action_result")
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn structured_keys_array_includes_object_identity_values() {
+        let root = temp_root("structured_keys_array_identity");
+        let target = root.join("skills_registry.toml");
+        std::fs::write(
+            &target,
+            r#"
+[[skills]]
+name = "fs_basic"
+planner_kind = "tool"
+
+[[skills]]
+name = "config_basic"
+planner_kind = "tool"
+"#,
+        )
+        .expect("write toml");
+        let mut obj = Map::new();
+        obj.insert("path".to_string(), json!(target.display().to_string()));
+        obj.insert("field_path".to_string(), json!("skills"));
+
+        let out = structured_keys(&root, &obj, true).expect("structured keys");
+        let value: Value = serde_json::from_str(&out).expect("json");
+
+        assert_eq!(
+            value.get("container_type").and_then(Value::as_str),
+            Some("array")
+        );
+        assert_eq!(
+            value
+                .get("identity_values")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(Value::as_str),
+            Some("fs_basic")
+        );
+        assert_eq!(
+            value
+                .get("indices_preview")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(|item| item.get("identity_value"))
+                .and_then(Value::as_str),
+            Some("fs_basic")
         );
         let _ = std::fs::remove_dir_all(root);
     }

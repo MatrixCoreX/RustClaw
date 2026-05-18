@@ -107,6 +107,62 @@ pub(crate) fn try_resolve_implicit_locator_path(
     )
 }
 
+pub(crate) fn semantic_kind_can_bind_workspace_child_locator(
+    kind: crate::OutputSemanticKind,
+) -> bool {
+    matches!(
+        kind,
+        crate::OutputSemanticKind::HiddenEntriesCheck
+            | crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::DirectoryEntryGroups
+            | crate::OutputSemanticKind::FilePaths
+            | crate::OutputSemanticKind::DirectoryPurposeSummary
+            | crate::OutputSemanticKind::ContentExcerptSummary
+            | crate::OutputSemanticKind::RecentArtifactsJudgment
+            | crate::OutputSemanticKind::ScalarCount
+            | crate::OutputSemanticKind::ExistenceWithPath
+            | crate::OutputSemanticKind::ExistenceWithPathSummary
+            | crate::OutputSemanticKind::ArchiveList
+    )
+}
+
+pub(crate) fn try_resolve_workspace_child_locator_from_text(
+    workspace_root: &Path,
+    default_locator_search_dir: &Path,
+    text: &str,
+) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || has_explicit_path_or_url_locator(trimmed) {
+        return None;
+    }
+    let keywords = extract_locator_keywords(trimmed);
+    if keywords.is_empty() {
+        return None;
+    }
+    let filename_tokens = extract_filename_like_tokens(trimmed);
+    let resolved = resolve_explicit_workspace_child_target(
+        workspace_root,
+        default_locator_search_dir,
+        &keywords,
+        &filename_tokens,
+    )?;
+    let LocatorAutoResolution::Direct(path) = resolved else {
+        return None;
+    };
+    let path_buf = PathBuf::from(&path);
+    if normalize_workspace_child_candidate(&path_buf)
+        == normalize_workspace_child_candidate(workspace_root)
+    {
+        return None;
+    }
+    Some(path)
+}
+
+fn normalize_workspace_child_candidate(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
 fn resolve_current_workspace_target(
     workspace_root: &Path,
     keywords: &[String],
