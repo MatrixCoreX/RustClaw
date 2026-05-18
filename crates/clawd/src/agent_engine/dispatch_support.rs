@@ -319,6 +319,24 @@ fn planner_can_repair_structured_skill_error(err: &str) -> bool {
     })
 }
 
+fn structured_read_permission_denial_is_terminal(normalized_skill: &str, err: &str) -> bool {
+    let Some(structured) = crate::skills::parse_structured_skill_error(err) else {
+        return false;
+    };
+    if structured.error_kind != "permission_denied" {
+        return false;
+    }
+    let effective_skill = if structured.skill.trim().is_empty() {
+        normalized_skill
+    } else {
+        structured.skill.as_str()
+    };
+    matches!(
+        effective_skill.to_ascii_lowercase().as_str(),
+        "fs_basic" | "system_basic" | "read_file" | "list_dir"
+    )
+}
+
 fn run_cmd_error_is_observable(normalized_skill: &str, err: &str) -> bool {
     if crate::skills::is_observable_run_cmd_error(normalized_skill, err) {
         return true;
@@ -353,6 +371,9 @@ pub(super) fn classify_skill_failure_recovery(
     call_args: Option<&Value>,
     err: &str,
 ) -> Option<&'static str> {
+    if structured_read_permission_denial_is_terminal(normalized_skill, err) {
+        return Some("recoverable_failure_finalize");
+    }
     if crate::skills::is_recoverable_skill_error(normalized_skill, err) {
         if has_remaining_action_after(actions, current_idx, max_steps)
             && !remaining_actions_are_discussion_only(actions, current_idx, max_steps)
@@ -881,7 +902,7 @@ mod tests {
     }
 
     #[test]
-    fn retryable_permission_failure_without_remaining_action_continues_next_round() {
+    fn permission_failure_without_remaining_action_finalizes_without_shell_fallback() {
         let state = test_state_with_registry();
         let actions = vec![AgentAction::CallSkill {
             skill: "system_basic".to_string(),
@@ -906,7 +927,49 @@ mod tests {
                 Some(&serde_json::json!({"action":"read_range","path":"/root/secret.txt"})),
                 &err,
             ),
-            Some("recoverable_failure_continue_round")
+            Some("recoverable_failure_finalize")
+        );
+    }
+
+    #[test]
+    fn fs_basic_virtual_permission_failure_finalizes_without_shell_fallback() {
+        let state = test_state_with_registry();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "fs_basic".to_string(),
+                args: serde_json::json!({
+                    "action":"read_text_range",
+                    "path":"/root/secret.txt"
+                }),
+            },
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: serde_json::json!({"command":"head -n 1 /root/secret.txt"}),
+            },
+        ];
+        let err = format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "system_basic",
+                "error_kind": "permission_denied",
+                "error_text": "permission denied: /root/secret.txt"
+            })
+        );
+
+        assert_eq!(
+            classify_skill_failure_recovery(
+                &state,
+                &actions,
+                0,
+                4,
+                "fs_basic",
+                Some(&serde_json::json!({
+                    "action":"read_text_range",
+                    "path":"/root/secret.txt"
+                })),
+                &err,
+            ),
+            Some("recoverable_failure_finalize")
         );
     }
 

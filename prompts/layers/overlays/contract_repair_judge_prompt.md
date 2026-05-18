@@ -37,6 +37,7 @@ Canonical output contract:
 - `semantic_kind`: one of the schema enum values. Use `none` when no enum fits.
 - Use `semantic_kind="directory_entry_groups"` when the repaired contract must preserve both files and directories as separate groups from one directory inventory. Use `file_names` only for an ungrouped names-only list.
 - Use `semantic_kind="scalar_count"` when the current request asks for the number/count of directory children, entries, files, folders, matches, or other countable items. Do not repair a count request to `file_names` or `directory_entry_groups` unless the requested final answer also asks to list/group the entries.
+- Use `semantic_kind="scalar_path_only"` only when the repaired final answer has exactly one path slot and `response_shape="scalar"`. If the answer must preserve a path plus any additional observed metadata/value such as entry kind, file/directory type, size, timestamp, existence status, or a field/value pair, use `response_shape="strict"` and a semantic kind that preserves the compound answer (`none`, `existence_with_path`, `quantity_comparison`, etc. as appropriate), never `scalar_path_only`.
 - `locator_hint`: the concrete path/name/scope only when supported by the request or malformed fields.
 - `self_extension`: keep `{"mode":"none","trigger":"none","execute_now":false}` unless the user explicitly asks RustClaw to modify itself.
 

@@ -57,6 +57,10 @@ impl ContractRepairReport {
         }
     }
 
+    fn has_detail(&self, detail: &'static str) -> bool {
+        self.details.contains(detail)
+    }
+
     fn needs_llm_semantic_repair(&self) -> bool {
         if self.sources.contains("tool_payload") || self.sources.contains("semantic_suspect") {
             return true;
@@ -572,7 +576,14 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         | "command_output"
         | "command_result"
         | "command_execution_result" => OutputSemanticKind::RawCommandOutput,
-        "service_status" => OutputSemanticKind::ServiceStatus,
+        "service_status"
+        | "service_state"
+        | "service_running_status"
+        | "process_status"
+        | "process_state"
+        | "process_running_status"
+        | "daemon_status"
+        | "daemon_state" => OutputSemanticKind::ServiceStatus,
         "hidden_entries_check"
         | "hidden_entry_check"
         | "hidden_files_check"
@@ -617,6 +628,12 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         "content_excerpt_summary" | "document_excerpt_summary" | "file_excerpt_summary" => {
             OutputSemanticKind::ContentExcerptSummary
         }
+        "content_presence_check"
+        | "content_contains_check"
+        | "content_match_check"
+        | "identifier_presence_check"
+        | "field_presence_check"
+        | "text_presence_check" => OutputSemanticKind::ContentPresenceCheck,
         "excerpt_kind_judgment" | "content_excerpt_judgment" | "log_vs_checklist" => {
             OutputSemanticKind::ExcerptKindJudgment
         }
@@ -1020,6 +1037,7 @@ fn apply_current_turn_structural_contract_repair(
 
 fn apply_self_contained_payload_direct_answer_contract_repair(
     output_contract: &mut IntentOutputContract,
+    req: &str,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
@@ -1032,6 +1050,7 @@ fn apply_self_contained_payload_direct_answer_contract_repair(
     if needs_clarify
         || answer_candidate.trim().is_empty()
         || req_surface.inline_json_shape.is_none()
+        || crate::intent::surface_signals::inline_json_transform_request(req)
         || wants_file_delivery
         || !matches!(schedule_kind, ScheduleKind::None)
         || execution_recipe_hint.is_some_and(|spec| {
@@ -1208,6 +1227,7 @@ fn semantic_kind_can_use_existing_observed_context(kind: OutputSemanticKind) -> 
     matches!(
         kind,
         OutputSemanticKind::ContentExcerptSummary
+            | OutputSemanticKind::ContentPresenceCheck
             | OutputSemanticKind::ExcerptKindJudgment
             | OutputSemanticKind::RecentArtifactsJudgment
     )
@@ -1283,21 +1303,21 @@ fn apply_spurious_structured_observation_clarify_repair(
     }
 
     output_contract.requires_content_evidence = true;
+    if output_contract.locator_hint.trim().is_empty() && req_surface.locator_target_pair.is_some() {
+        if let Some((left, right)) = req_surface.locator_target_pair.as_ref() {
+            output_contract.locator_kind = OutputLocatorKind::Path;
+            output_contract.locator_hint = format!("{left}, {right}");
+        }
+    }
     if output_contract.locator_hint.trim().is_empty() {
         if let Some(filename) = req_surface.single_filename_candidate() {
             output_contract.locator_kind = OutputLocatorKind::Filename;
             output_contract.locator_hint = filename.to_string();
         }
     }
-    if output_contract.locator_hint.trim().is_empty()
-        && matches!(output_contract.locator_kind, OutputLocatorKind::None)
-        && req_surface.locator_target_pair.is_some()
+    if let Some(locator) =
+        fallback_locator.filter(|_| output_contract.locator_hint.trim().is_empty())
     {
-        if let Some((left, right)) = req_surface.locator_target_pair.as_ref() {
-            output_contract.locator_kind = OutputLocatorKind::Path;
-            output_contract.locator_hint = format!("{left}, {right}");
-        }
-    } else if let Some(locator) = fallback_locator {
         output_contract.locator_kind = locator.locator_kind;
         output_contract.locator_hint = locator.locator_hint;
     } else if matches!(output_contract.locator_kind, OutputLocatorKind::None)
@@ -1333,7 +1353,6 @@ fn semantic_kind_can_use_workspace_default_for_observation(kind: OutputSemanticK
 
 fn apply_workspace_default_observation_clarify_repair(
     output_contract: &mut IntentOutputContract,
-    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     workspace_root: &Path,
     state_patch: Option<&Value>,
     needs_clarify: &mut bool,
@@ -1347,11 +1366,7 @@ fn apply_workspace_default_observation_clarify_repair(
     {
         return None;
     }
-    if state_patch_deictic_reference_requires_clarify(state_patch)
-        || (req_surface.has_deictic_reference()
-            && !req_surface.has_concrete_locator_hint()
-            && output_contract.locator_hint.trim().is_empty())
-    {
+    if state_patch_deictic_reference_requires_clarify(state_patch) {
         return None;
     }
     if matches!(output_contract.locator_kind, OutputLocatorKind::None) {
@@ -1499,10 +1514,10 @@ fn apply_resolved_directory_observation_clarify_repair(
     {
         return None;
     }
-    if state_patch_deictic_reference_requires_clarify(state_patch)
-        || (req_surface.has_deictic_reference()
-            && !req_surface.has_concrete_locator_hint()
-            && output_contract.locator_hint.trim().is_empty())
+    if state_patch_deictic_reference_requires_clarify(state_patch) {
+        return None;
+    }
+    if !crate::worker::semantic_kind_can_bind_workspace_child_locator(output_contract.semantic_kind)
     {
         return None;
     }
@@ -1845,6 +1860,71 @@ fn downgrade_executionless_route_to_direct_answer(
     Some("executionless_route_downgraded_to_direct_answer")
 }
 
+fn apply_explicit_command_execution_contract_repair(
+    command_runtime: &crate::CommandIntentRuntime,
+    current_user_request: &str,
+    needs_clarify: bool,
+    output_contract: &mut IntentOutputContract,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
+) -> Option<&'static str> {
+    if needs_clarify
+        || crate::agent_engine::explicit_command_segment_for_policy(
+            command_runtime,
+            current_user_request,
+        )
+        .is_none()
+    {
+        return None;
+    }
+    if matches!(*first_layer_decision, FirstLayerDecision::DirectAnswer)
+        && !output_contract.requires_content_evidence
+        && !output_contract.delivery_required
+        && matches!(output_contract.locator_kind, OutputLocatorKind::None)
+        && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+    {
+        return None;
+    }
+    output_contract.requires_content_evidence = true;
+    output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    output_contract.locator_kind = OutputLocatorKind::None;
+    output_contract.locator_hint.clear();
+    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
+    Some("explicit_command_requires_fresh_execution")
+}
+
+fn apply_command_payload_contract_repair(
+    command_payload_declared: bool,
+    output_contract: &mut IntentOutputContract,
+    needs_clarify: &mut bool,
+    clarify_question: &mut String,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
+) -> Option<&'static str> {
+    if !command_payload_declared || output_contract.delivery_required {
+        return None;
+    }
+    if matches!(output_contract.semantic_kind, OutputSemanticKind::None) {
+        output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    }
+    if !matches!(
+        output_contract.semantic_kind,
+        OutputSemanticKind::RawCommandOutput
+    ) {
+        return None;
+    }
+    output_contract.requires_content_evidence = true;
+    output_contract.locator_kind = OutputLocatorKind::None;
+    output_contract.locator_hint.clear();
+    *needs_clarify = false;
+    clarify_question.clear();
+    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
+    Some("command_payload_requires_raw_output_execution")
+}
+
 fn route_has_structured_execution_signal(
     output_contract: &IntentOutputContract,
     wants_file_delivery: bool,
@@ -1889,6 +1969,7 @@ fn output_semantic_kind_requires_fresh_evidence(kind: OutputSemanticKind) -> boo
             | OutputSemanticKind::FilePaths
             | OutputSemanticKind::DirectoryPurposeSummary
             | OutputSemanticKind::ContentExcerptSummary
+            | OutputSemanticKind::ContentPresenceCheck
             | OutputSemanticKind::ExcerptKindJudgment
             | OutputSemanticKind::RecentArtifactsJudgment
             | OutputSemanticKind::WorkspaceProjectSummary
@@ -2011,22 +2092,13 @@ fn unresolved_deictic_observable_target_should_clarify(
     if state_patch_deictic_reference_is_resolved(state_patch) {
         return false;
     }
-    if !surface.has_deictic_reference() || !output_contract.requires_content_evidence {
-        return false;
+    if surface.has_deictic_reference()
+        && output_contract.requires_content_evidence
+        && !surface.has_explicit_path_or_url()
+    {
+        return true;
     }
-    let current_turn_has_concrete_locator = surface.has_explicit_path_or_url()
-        || surface.has_single_filename_candidate()
-        || surface.has_concrete_locator_hint()
-        || surface.has_structured_target_refinement()
-        || surface.has_delivery_token_reference();
-    if current_turn_has_concrete_locator {
-        return false;
-    }
-    let contract_has_concrete_locator = !matches!(
-        output_contract.locator_kind,
-        OutputLocatorKind::None | OutputLocatorKind::CurrentWorkspace
-    ) && !output_contract.locator_hint.trim().is_empty();
-    !contract_has_concrete_locator
+    false
 }
 
 fn should_resolve_task_scope_update_clarify_with_active_task(
@@ -2389,6 +2461,48 @@ fn output_contract_looks_like_contextual_text_followup(
         )
 }
 
+fn active_context_has_structured_observation_anchor(
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+) -> bool {
+    let Some(snapshot) = session_snapshot else {
+        return false;
+    };
+
+    let followup_anchor = snapshot
+        .active_followup_frame
+        .as_ref()
+        .is_some_and(|frame| {
+            matches!(
+                frame.op_kind,
+                crate::followup_frame::FollowupOpKind::Read
+                    | crate::followup_frame::FollowupOpKind::List
+            ) || frame
+                .bound_target
+                .as_deref()
+                .is_some_and(|target| !target.trim().is_empty())
+                || !frame.ordered_entries.is_empty()
+                || frame.selected_entry_index.is_some()
+                || frame.slice_spec.is_some()
+        });
+    if followup_anchor {
+        return true;
+    }
+
+    snapshot
+        .active_observed_facts
+        .as_ref()
+        .is_some_and(|facts| {
+            facts
+                .bound_target
+                .as_deref()
+                .is_some_and(|target| !target.trim().is_empty())
+                || !facts.ordered_entries.is_empty()
+                || facts.selected_entry_index.is_some()
+                || facts.observed_entry_count.is_some()
+                || facts.slice_spec.is_some()
+        })
+}
+
 fn answer_candidate_can_conflict_with_active_text_followup(
     binding: Option<&AnswerCandidateBindingReport>,
 ) -> bool {
@@ -2415,6 +2529,7 @@ fn apply_active_text_followup_route_repair(
     wants_file_delivery: &mut bool,
     output_contract: &mut IntentOutputContract,
     state_patch: Option<&Value>,
+    current_request_has_runtime_locator_anchor: bool,
     semantic_active_text_candidate_repair: bool,
     answer_candidate: &mut String,
 ) -> Option<&'static str> {
@@ -2430,6 +2545,7 @@ fn apply_active_text_followup_route_repair(
 
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
     if prompt_has_concrete_locator_for_patch_repair(&surface)
+        || current_request_has_runtime_locator_anchor
         || unresolved_deictic_observable_target_should_clarify(
             &surface,
             output_contract,
@@ -2457,6 +2573,11 @@ fn apply_active_text_followup_route_repair(
             output_contract.locator_kind,
             OutputLocatorKind::None | OutputLocatorKind::CurrentWorkspace
         );
+    if stale_contextual_evidence
+        && active_context_has_structured_observation_anchor(session_snapshot)
+    {
+        return None;
+    }
     let stale_scalar_candidate = semantic_active_text_candidate_repair;
 
     if !(model_already_bound_active_task || stale_contextual_evidence || stale_scalar_candidate) {
@@ -2926,6 +3047,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push(
         "Compact intent normalizer. Output exactly one raw JSON object and then stop. No markdown, no answer text after JSON.".to_string(),
     );
+    parts.push("Normalizer protocol is internal only: the raw-JSON/no-markdown requirement applies only to this classifier response. Never treat it as a user-visible output-format limit; preserve requested final formats such as markdown tables or CSV in the route contract/resolved intent.".to_string());
     parts.push("Always include all top-level schema keys: resolved_user_intent, answer_candidate, resume_behavior, schedule_kind, schedule_intent, wants_file_delivery, should_refresh_long_term_memory, agent_display_name_hint, needs_clarify, clarify_question, reason, confidence, decision, output_contract, execution_recipe, turn_type, target_task_policy, should_interrupt_active_run, state_patch, attachment_processing_required.".to_string());
     parts.push("Use decision as the only first-layer semantic gate: clarify, direct_answer, planner_execute.".to_string());
     parts.push("Prefer decision=direct_answer for greetings, confirmations, memory-only requests, and pure discussion. Use decision=clarify only when a required target/action is truly missing.".to_string());
@@ -2939,6 +3061,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("Do not ask optional preference clarifications for harmless creative/chat requests; answer generically when the deliverable is clear. For a negative constraint plus positive deliverable, preserve the constraint and route the positive deliverable.".to_string());
     parts.push("If CAPABILITIES or a visible skill contract says a missing target/parameter can be handled by safe discovery, default behavior, bounded lookup, or a candidate-returning prepare step, keep the request executable instead of asking a front-door clarification; execution can return observed candidates when it cannot choose uniquely.".to_string());
     parts.push("Example pattern: if a photo-organization capability declares external-drive discovery, route the request to execution without a source_dir so the skill can inspect mounts and either preview the unique candidate or return observed candidates. This is a contract example, not a phrase trigger.".to_string());
+    parts.push("Inline-data transform invariant: if REQUEST embeds complete structured data and asks to sort, filter, project, aggregate, convert, or render it, do not clarify because of the requested output format. Use an enabled structured transform capability when visible; otherwise direct-answer from the inline data when no local/external evidence is needed.".to_string());
     parts.push("Current REQUEST overrides RECENT/MEMORY. Prior assistant refusals, tool failures, exact IDs, scalar values, or capability claims in history are background only unless the current request explicitly asks for them.".to_string());
     parts.push("Do not import a prior directory/path scope from RECENT/MEMORY into the current REQUEST when the current REQUEST names its own file/dir target. Reuse prior scope only for explicit follow-ups like same directory, that file, or previous result.".to_string());
     parts.push("If REQUEST asks for observable local/system/workspace state, filesystem inspection, command output, file content, directory listing, counts, or extracting a value, choose decision=\"planner_execute\". Do not claim the assistant cannot execute; the runtime has tools and the AUTH block describes permission.".to_string());
@@ -3018,19 +3141,19 @@ fn render_compact_intent_normalizer_prompt(
         .unwrap_or_else(|| compact_runtime_context_from_auth(auth_policy_context));
     parts.push(format!("LANG={}", request_language_hint));
     parts.push("CONTRACT: output_contract must be a JSON object. hidden/dot-entry check => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"hidden_entries_check\". yes/no-only existence check => response_shape=\"scalar\", semantic_kind=\"existence_with_path\"; existence check that must return a path/locator/evidence field => response_shape=\"strict\", semantic_kind=\"existence_with_path\"; if it also needs a content-grounded purpose/summary/explanation when found, use semantic_kind=\"existence_with_path_summary\". exact file or mixed entry names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_names\". exact folder/directory names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"directory_names\". grouped files-vs-directories list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"directory_entry_groups\". exact file paths list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_paths\". local file/path metadata comparison => requires_content_evidence=true, semantic_kind=\"quantity_comparison\". git commit subject/title only => response_shape=\"scalar\", requires_content_evidence=true, semantic_kind=\"git_commit_subject\". current path only => response_shape=\"scalar\", semantic_kind=\"scalar_path_only\"; never use scalar_path_only for directory listings.".to_string());
-    // Keep memory immediately before the current request so providers with
-    // compact head+tail truncation preserve recent goals with the query.
+    // Keep memory and assistant recall context close to the current request so
+    // compact head+tail truncation preserves both structure labels and goals.
     parts.push(compact_prompt_slot(
         "MEMORY",
         &route_view.memory_context,
-        900,
+        560,
     ));
     // Keep recent assistant replies closest to the request so exact scalar
     // recall can use the assistant's visible answer rather than memory scores.
     parts.push(compact_prompt_slot(
         "ASSISTANT",
         &route_view.recent_assistant_replies,
-        420,
+        260,
     ));
     parts.push(compact_prompt_slot("RUNTIME", &runtime_context, 260));
     parts.push("LOCAL_EXEC: local file/dir/command/count/metadata/read/list/summarize => decision=\"planner_execute\"; no cannot-access-FS reply; do not ask user to paste local files; current target beats prior directory.".to_string());
@@ -3043,12 +3166,12 @@ fn render_compact_intent_normalizer_prompt(
     parts.push(compact_prompt_slot(
         "ACTIVE_TASK",
         &route_view.active_task_context,
-        900,
+        360,
     ));
     parts.push(compact_prompt_slot(
         "ANCHOR",
         &route_view.active_execution_anchor_context,
-        700,
+        360,
     ));
     parts.push(compact_prompt_slot("REQUEST", req, 480));
     parts.join("\n")
@@ -3978,6 +4101,13 @@ fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static str {
         | "command_execution_result"
         | "shell_output"
         | "terminal_output" => OutputSemanticKind::RawCommandOutput.as_str(),
+        "service_state"
+        | "service_running_status"
+        | "process_status"
+        | "process_state"
+        | "process_running_status"
+        | "daemon_status"
+        | "daemon_state" => OutputSemanticKind::ServiceStatus.as_str(),
         "existence_boolean_with_path" | "boolean_with_path" | "exists_boolean_with_path" => {
             OutputSemanticKind::ExistenceWithPath.as_str()
         }
@@ -4463,15 +4593,19 @@ fn execution_recipe_value_has_text(value: Option<&Value>, predicate: fn(&str) ->
 }
 
 fn execution_recipe_value_declares_command_payload(value: Option<&Value>) -> bool {
-    let Some(Value::Object(map)) = value else {
-        return false;
-    };
-    map.iter().any(|(key, value)| {
-        matches!(
-            normalize_schema_token(key).as_str(),
-            "command" | "commands" | "cmd" | "cmds" | "shell_command" | "shell_commands"
-        ) && value_has_nonempty_scalar_text(value)
-    })
+    match value {
+        Some(Value::Object(map)) => map.iter().any(|(key, value)| {
+            (matches!(
+                normalize_schema_token(key).as_str(),
+                "command" | "commands" | "cmd" | "cmds" | "shell_command" | "shell_commands"
+            ) && value_has_nonempty_scalar_text(value))
+                || execution_recipe_value_declares_command_payload(Some(value))
+        }),
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|value| execution_recipe_value_declares_command_payload(Some(value))),
+        _ => false,
+    }
 }
 
 fn execution_recipe_value_locator_hint(value: Option<&Value>) -> Option<String> {
@@ -4606,6 +4740,19 @@ fn normalize_output_contract_for_command_payload(
         );
     }
 
+    let semantic_kind = contract
+        .get("semantic_kind")
+        .and_then(scalar_json_value_text)
+        .unwrap_or_default();
+    if matches!(
+        parse_output_semantic_kind(&semantic_kind),
+        OutputSemanticKind::None
+    ) {
+        contract.insert(
+            "semantic_kind".to_string(),
+            Value::String(OutputSemanticKind::RawCommandOutput.as_str().to_string()),
+        );
+    }
     contract.insert("delivery_required".to_string(), Value::Bool(false));
 }
 
@@ -4967,6 +5114,7 @@ fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>
         || semantic_kind == OutputSemanticKind::DirectoryNames.as_str()
         || semantic_kind == OutputSemanticKind::DirectoryEntryGroups.as_str()
         || semantic_kind == OutputSemanticKind::FilePaths.as_str()
+        || semantic_kind == OutputSemanticKind::ContentPresenceCheck.as_str()
         || semantic_kind == OutputSemanticKind::GitCommitSubject.as_str()
     {
         contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
@@ -5611,13 +5759,16 @@ pub(crate) async fn run_intent_normalizer(
         let parsed_decision = parse_first_layer_decision_text(&out.decision);
         let parsed_turn_type = parse_turn_type(&out.turn_type);
         let parsed_target_task_policy = parse_target_task_policy(&out.target_task_policy);
+        let command_payload_declared =
+            contract_repair_report.has_detail("execution_recipe_command_payload");
         let mut wants_file_delivery = out.wants_file_delivery;
         let mut output_contract =
             parse_output_contract(out.output_contract.clone(), wants_file_delivery);
         let mut clarify_question = out.clarify_question.trim().to_string();
         let mut execution_recipe_hint = parse_execution_recipe_hint(out.execution_recipe.clone());
+        let mut needs_clarify = out.needs_clarify;
         let mut first_layer_decision = parsed_decision.unwrap_or_else(|| {
-            if out.needs_clarify {
+            if needs_clarify {
                 FirstLayerDecision::Clarify
             } else if route_has_structured_execution_signal(
                 &output_contract,
@@ -5646,11 +5797,12 @@ pub(crate) async fn run_intent_normalizer(
         let self_contained_payload_repair =
             apply_self_contained_payload_direct_answer_contract_repair(
                 &mut output_contract,
+                req,
                 &req_surface,
                 wants_file_delivery,
                 schedule_kind,
                 execution_recipe_hint,
-                out.needs_clarify,
+                needs_clarify,
                 &out.answer_candidate,
                 &mut first_layer_decision,
                 &mut execution_finalize_style,
@@ -5662,7 +5814,21 @@ pub(crate) async fn run_intent_normalizer(
                 execution_finalize_style,
             );
         }
-        let decision_contract_conflict_repair = if !out.needs_clarify
+        let command_payload_contract_repair = apply_command_payload_contract_repair(
+            command_payload_declared,
+            &mut output_contract,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut first_layer_decision,
+            &mut execution_finalize_style,
+        );
+        if command_payload_contract_repair.is_some() {
+            synced_route_label = route_label_from_first_layer_decision(
+                first_layer_decision,
+                execution_finalize_style,
+            );
+        }
+        let decision_contract_conflict_repair = if !needs_clarify
             && matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
             && route_has_structured_execution_signal(
                 &output_contract,
@@ -5680,9 +5846,23 @@ pub(crate) async fn run_intent_normalizer(
         } else {
             None
         };
+        let explicit_command_execution_repair = apply_explicit_command_execution_contract_repair(
+            &state.policy.command_intent,
+            req,
+            needs_clarify,
+            &mut output_contract,
+            &mut first_layer_decision,
+            &mut execution_finalize_style,
+        );
+        if explicit_command_execution_repair.is_some() {
+            synced_route_label = route_label_from_first_layer_decision(
+                first_layer_decision,
+                execution_finalize_style,
+            );
+        }
         let current_turn_anchor_repair_allowed = current_turn_anchor_drift_repair_allowed(
             first_layer_decision,
-            out.needs_clarify,
+            needs_clarify,
             &output_contract,
             wants_file_delivery,
             schedule_kind,
@@ -5717,7 +5897,7 @@ pub(crate) async fn run_intent_normalizer(
         if let Some(finalize_style) =
             crate::post_route_policy::content_evidence_execution_finalize_style(
                 &output_contract,
-                out.needs_clarify,
+                needs_clarify,
             )
         {
             first_layer_decision = FirstLayerDecision::PlannerExecute;
@@ -5727,7 +5907,6 @@ pub(crate) async fn run_intent_normalizer(
                 execution_finalize_style,
             );
         }
-        let mut needs_clarify = out.needs_clarify;
         let state_patch = out.state_patch.clone().filter(is_meaningful_state_patch);
         let answer_candidate_path_repair = apply_answer_candidate_path_evidence_repair(
             &mut output_contract,
@@ -5752,7 +5931,6 @@ pub(crate) async fn run_intent_normalizer(
         let workspace_default_clarify_repair = if structured_clarify_repair.is_none() {
             apply_workspace_default_observation_clarify_repair(
                 &mut output_contract,
-                &req_surface,
                 &state.skill_rt.workspace_root,
                 state_patch.as_ref(),
                 &mut needs_clarify,
@@ -5793,7 +5971,7 @@ pub(crate) async fn run_intent_normalizer(
             out.schedule_intent.clone(),
             if resolved.is_empty() { req } else { resolved },
             &out.reason,
-            out.needs_clarify,
+            needs_clarify,
             &clarify_question,
             confidence,
         );
@@ -5922,6 +6100,22 @@ pub(crate) async fn run_intent_normalizer(
                 reason.push_str(repair_reason);
             }
         }
+        if let Some(repair_reason) = command_payload_contract_repair {
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
+        }
+        if let Some(repair_reason) = explicit_command_execution_repair {
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
+        }
         if let Some(repair_reason) = decision_contract_conflict_repair {
             if reason.trim().is_empty() {
                 reason = repair_reason.to_string();
@@ -5991,6 +6185,7 @@ pub(crate) async fn run_intent_normalizer(
             &mut wants_file_delivery,
             &mut output_contract,
             state_patch.as_ref(),
+            resolved_existing_directory_from_current_request(state, req).is_some(),
             active_text_answer_candidate_repair_applied,
             &mut out.answer_candidate,
         ) {
@@ -6680,7 +6875,8 @@ mod tests {
 
     #[test]
     fn inline_json_answer_candidate_can_repair_to_direct_answer_contract() {
-        let request = r#"把这个 JSON 数组按 score 从高到低排序，只输出 name 顺序：[{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
+        let request =
+            r#"解释这个 JSON 代表什么：[{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
         let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
         let mut contract = IntentOutputContract {
             requires_content_evidence: true,
@@ -6694,6 +6890,7 @@ mod tests {
 
         let repair = apply_self_contained_payload_direct_answer_contract_repair(
             &mut contract,
+            request,
             &surface,
             false,
             ScheduleKind::None,
@@ -6717,6 +6914,40 @@ mod tests {
     }
 
     #[test]
+    fn inline_json_transform_repair_keeps_planner_contract() {
+        let request = r#"把这个 JSON 数组按 score 从高到低排序，只输出 name 顺序：[{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+        let mut contract = IntentOutputContract {
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            locator_hint: "/tmp/rustclaw".to_string(),
+            semantic_kind: OutputSemanticKind::StructuredKeys,
+            ..IntentOutputContract::default()
+        };
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize = crate::ActFinalizeStyle::ChatWrapped;
+
+        let repair = apply_self_contained_payload_direct_answer_contract_repair(
+            &mut contract,
+            request,
+            &surface,
+            false,
+            ScheduleKind::None,
+            None,
+            false,
+            "beta, alpha",
+            &mut decision,
+            &mut finalize,
+        );
+
+        assert_eq!(repair, None);
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+        assert_eq!(finalize, crate::ActFinalizeStyle::ChatWrapped);
+    }
+
+    #[test]
     fn inline_json_direct_answer_repair_rejects_explicit_path() {
         let request = r#"读取 data/input.json 并按 [{"field":"score"}] 排序"#;
         let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
@@ -6730,6 +6961,7 @@ mod tests {
 
         let repair = apply_self_contained_payload_direct_answer_contract_repair(
             &mut contract,
+            request,
             &surface,
             false,
             ScheduleKind::None,
@@ -6878,7 +7110,53 @@ mod tests {
     }
 
     #[test]
-    fn contract_repair_report_marks_command_payload_without_semantic_guess() {
+    fn normalizer_schema_normalization_maps_process_status_alias_to_service_status() {
+        let raw = r#"{
+          "resolved_user_intent":"Check whether telegramd is currently running and explain the status briefly.",
+          "needs_clarify":false,
+          "decision":"direct_answer",
+          "output_contract":{
+            "response_shape":"free",
+            "requires_content_evidence":true,
+            "delivery_required":false,
+            "locator_kind":"none",
+            "delivery_intent":"none",
+            "semantic_kind":"process_status",
+            "locator_hint":""
+          },
+          "execution_recipe":{"kind":"none","profile":"none","target_scope":"unknown"}
+        }"#;
+        let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+            raw,
+            "check whether telegramd is currently running and explain the status briefly",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+        assert_eq!(
+            value.get("decision").and_then(|v| v.as_str()),
+            Some("planner_execute")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/semantic_kind")
+                .and_then(|v| v.as_str()),
+            Some("service_status")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/requires_content_evidence")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert!(report.source_csv().contains("enum_alias"));
+        assert!(
+            !report.needs_llm_semantic_repair(),
+            "process_status is a schema-token alias for service_status, not an unknown semantic"
+        );
+    }
+
+    #[test]
+    fn contract_repair_report_marks_command_payload_as_raw_output() {
         let raw = r#"{
           "resolved_user_intent":"列出 logs 目录下前 10 个文件名，不读取内容",
           "needs_clarify":false,
@@ -6899,7 +7177,7 @@ mod tests {
             value
                 .pointer("/output_contract/semantic_kind")
                 .and_then(|v| v.as_str()),
-            Some("none")
+            Some("raw_command_output")
         );
         assert!(report.source_csv().contains("command_payload"));
         assert!(report
@@ -8086,7 +8364,7 @@ mod tests {
     }
 
     #[test]
-    fn normalizer_schema_normalization_keeps_command_payload_as_execution_without_semantic_guess() {
+    fn normalizer_schema_normalization_maps_command_payload_to_raw_output_when_semantic_missing() {
         let raw = r#"{
           "resolved_user_intent":"列出 logs 目录下前 10 个文件名，不读取内容",
           "answer_candidate":"",
@@ -8120,7 +8398,7 @@ mod tests {
             value
                 .pointer("/output_contract/semantic_kind")
                 .and_then(|v| v.as_str()),
-            Some("none")
+            Some("raw_command_output")
         );
         assert_eq!(
             value
@@ -8133,6 +8411,53 @@ mod tests {
             crate::prompt_utils::PromptSchemaId::IntentNormalizer,
         )
         .expect("schema validation");
+    }
+
+    #[test]
+    fn normalizer_schema_normalization_detects_nested_command_payload() {
+        let raw = r#"{
+          "resolved_user_intent":"Execute whoami and pwd commands, then reply with both outputs combined with a self-deprecating signature.",
+          "answer_candidate":"",
+          "needs_clarify":false,
+          "reason":"sequential command execution",
+          "confidence":0.95,
+          "decision":"planner_execute",
+          "output_contract":"combined command output",
+          "execution_recipe":[
+            {"step":"run_whoami","command":"whoami","capture":true},
+            {"step":"run_pwd","command":"pwd","capture":true},
+            {"step":"compose_response","template":"{whoami} {pwd}"}
+          ],
+          "turn_type":"execution",
+          "target_task_policy":"default_execution"
+        }"#;
+        let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+            raw,
+            "先执行 whoami，再执行 pwd，然后把结果用一句自嘲签名回复我",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+        assert_eq!(
+            value
+                .pointer("/output_contract/semantic_kind")
+                .and_then(|v| v.as_str()),
+            Some("raw_command_output")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/requires_content_evidence")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/locator_kind")
+                .and_then(|v| v.as_str()),
+            Some("none")
+        );
+        assert!(report
+            .detail_csv()
+            .contains("execution_recipe_command_payload"));
     }
 
     #[test]
@@ -8232,7 +8557,7 @@ mod tests {
             value
                 .pointer("/output_contract/semantic_kind")
                 .and_then(|v| v.as_str()),
-            Some("none")
+            Some("raw_command_output")
         );
         assert_eq!(
             value
@@ -9933,6 +10258,8 @@ mod tests {
         assert!(prompt.contains("Use decision=\"planner_execute\" when the request inspects"));
         assert!(prompt.contains("Never ask the user to paste local file contents"));
         assert!(prompt.contains("Output exactly one raw JSON object and then stop"));
+        assert!(prompt.contains("Normalizer protocol is internal only"));
+        assert!(prompt.contains("Inline-data transform invariant"));
         assert!(prompt.contains("Always include all top-level schema keys"));
         assert!(prompt.contains("If ACTIVE_TASK is <none>, do not use task_append"));
         assert!(prompt.contains("turn_type=\"task_append\", target_task_policy=\"reuse_active\""));
@@ -10159,6 +10486,7 @@ mod tests {
                     recent_related_events: Vec::new(),
                 },
                 runtime_context: runtime_context.to_string(),
+                active_execution_anchor_context: "<none>".to_string(),
                 session_alias_context: "<none>".to_string(),
                 recent_turns_full: "<none>".to_string(),
                 last_turn_full: "<none>".to_string(),
@@ -10955,6 +11283,123 @@ mod tests {
     }
 
     #[test]
+    fn explicit_command_execution_repair_prevents_executionless_downgrade() {
+        let runtime = crate::CommandIntentRuntime {
+            all_result_suffixes: vec![],
+            execute_prefixes: vec!["请执行".to_string()],
+            default_locale: "zh-CN".to_string(),
+            verify_enforce_enabled: true,
+        };
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "/home/guagua/rustclaw".to_string(),
+            semantic_kind: OutputSemanticKind::ScalarPathOnly,
+            ..IntentOutputContract::default()
+        };
+
+        let repair = super::apply_explicit_command_execution_contract_repair(
+            &runtime,
+            "请执行 git rev-parse --abbrev-ref HEAD，只输出命令结果",
+            false,
+            &mut contract,
+            &mut decision,
+            &mut finalize_style,
+        );
+        let downgrade = super::downgrade_executionless_route_to_direct_answer(
+            &mut decision,
+            &mut finalize_style,
+            false,
+            &contract,
+            false,
+            crate::ScheduleKind::None,
+            None,
+        );
+
+        assert_eq!(repair, Some("explicit_command_requires_fresh_execution"));
+        assert_eq!(downgrade, None);
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+        assert!(contract.locator_hint.is_empty());
+    }
+
+    #[test]
+    fn explicit_command_execution_repair_respects_pure_direct_answer_contract() {
+        let runtime = crate::CommandIntentRuntime {
+            all_result_suffixes: vec![],
+            execute_prefixes: vec!["execute".to_string()],
+            default_locale: "en-US".to_string(),
+            verify_enforce_enabled: true,
+        };
+        let mut decision = FirstLayerDecision::DirectAnswer;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            ..IntentOutputContract::default()
+        };
+
+        let repair = super::apply_explicit_command_execution_contract_repair(
+            &runtime,
+            "execute ls -la: explain what this command means, do not run it",
+            false,
+            &mut contract,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(repair, None);
+        assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+        assert!(!contract.requires_content_evidence);
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+        assert!(contract.locator_hint.is_empty());
+    }
+
+    #[test]
+    fn command_payload_contract_repair_clears_spurious_locatorless_clarify() {
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+        let mut needs_clarify = true;
+        let mut clarify_question = "请提供要读取或检查的具体文件、目录或路径。".to_string();
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::None,
+            locator_kind: OutputLocatorKind::None,
+            ..IntentOutputContract::default()
+        };
+
+        let repair = super::apply_command_payload_contract_repair(
+            true,
+            &mut contract,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(
+            repair,
+            Some("command_payload_requires_raw_output_execution")
+        );
+        assert!(!needs_clarify);
+        assert!(clarify_question.is_empty());
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    }
+
+    #[test]
     fn plain_execute_is_not_downgraded_when_contract_is_sparse() {
         let mut decision = FirstLayerDecision::PlannerExecute;
         let mut finalize_style = crate::ActFinalizeStyle::Plain;
@@ -11129,8 +11574,6 @@ mod tests {
 
     #[test]
     fn workspace_default_observation_clarify_repair_routes_listing_without_absolute_path_to_act() {
-        let req = "List files directly under UI if the directory exists; otherwise say it does not exist.";
-        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
             .nth(2)
@@ -11148,7 +11591,6 @@ mod tests {
         let mut finalize_style = crate::ActFinalizeStyle::Plain;
         let reason = super::apply_workspace_default_observation_clarify_repair(
             &mut contract,
-            &surface,
             workspace_root,
             None,
             &mut needs_clarify,
@@ -11176,6 +11618,7 @@ mod tests {
         let mut contract = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
+            semantic_kind: OutputSemanticKind::FileNames,
             ..IntentOutputContract::default()
         };
         let mut needs_clarify = true;
@@ -11220,6 +11663,7 @@ mod tests {
         let mut contract = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
+            semantic_kind: OutputSemanticKind::FileNames,
             ..IntentOutputContract::default()
         };
         let mut needs_clarify = true;
@@ -11257,6 +11701,44 @@ mod tests {
                 .display()
                 .to_string()
         );
+        std::fs::remove_dir_all(workspace_root).ok();
+    }
+
+    #[test]
+    fn resolved_directory_observation_clarify_repair_preserves_non_locator_semantics() {
+        let workspace_root = make_temp_workspace_with_child("resolved_dir_non_locator", "target");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = workspace_root.clone();
+        state.skill_rt.default_locator_search_dir = workspace_root.clone();
+        let req = "查看那个 schema 里的 target enum";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            semantic_kind: OutputSemanticKind::None,
+            ..IntentOutputContract::default()
+        };
+        let mut needs_clarify = true;
+        let mut clarify_question = "请提供要查看的 schema 文件的路径或名称。".to_string();
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+
+        let reason = super::apply_resolved_directory_observation_clarify_repair(
+            &state,
+            &mut contract,
+            req,
+            &surface,
+            None,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(reason, None);
+        assert!(needs_clarify);
+        assert_eq!(decision, FirstLayerDecision::Clarify);
+        assert!(contract.locator_hint.is_empty());
         std::fs::remove_dir_all(workspace_root).ok();
     }
 
@@ -12509,6 +12991,7 @@ mod tests {
             &mut wants_file_delivery,
             &mut contract,
             None,
+            false,
             true,
             &mut answer_candidate,
         );
@@ -12602,6 +13085,7 @@ mod tests {
             &mut contract,
             None,
             false,
+            false,
             &mut answer_candidate,
         );
 
@@ -12613,6 +13097,119 @@ mod tests {
         assert!(!contract.requires_content_evidence);
         assert_eq!(contract.locator_kind, OutputLocatorKind::None);
         assert!(contract.locator_hint.is_empty());
+    }
+
+    #[test]
+    fn active_text_repair_preserves_current_request_runtime_locator_anchor() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("Write a document outline".to_string()),
+                last_primary_task_output: Some("Outline draft".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let mut turn_type = Some(TurnType::TaskCorrect);
+        let mut target_task_policy = Some(TargetTaskPolicy::ReuseActive);
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+        let mut needs_clarify = false;
+        let mut wants_file_delivery = false;
+        let mut answer_candidate = String::new();
+        let mut contract = IntentOutputContract {
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            semantic_kind: OutputSemanticKind::None,
+            response_shape: OutputResponseShape::Strict,
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_active_text_followup_route_repair(
+            "List entries under the observed workspace directory target",
+            Some(&snapshot),
+            &mut turn_type,
+            &mut target_task_policy,
+            false,
+            &mut decision,
+            &mut finalize_style,
+            &mut needs_clarify,
+            super::ScheduleKind::None,
+            false,
+            &mut wants_file_delivery,
+            &mut contract,
+            None,
+            true,
+            false,
+            &mut answer_candidate,
+        );
+
+        assert_eq!(reason, None);
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert!(contract.requires_content_evidence);
+    }
+
+    #[test]
+    fn active_ordered_observation_followup_keeps_executable_contract() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("List the logs directory entries".to_string()),
+                last_primary_task_output: Some("1. act_plan.log\n2. clawd.log".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+                source_request: "List the logs directory entries".to_string(),
+                op_kind: crate::followup_frame::FollowupOpKind::List,
+                bound_target: Some("logs".to_string()),
+                ordered_entries: vec!["act_plan.log".to_string(), "clawd.log".to_string()],
+                source_task_id: "task-1".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+                ..crate::followup_frame::FollowupFrame::default()
+            }),
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let mut turn_type = Some(TurnType::TaskScopeUpdate);
+        let mut target_task_policy = Some(TargetTaskPolicy::ReuseActive);
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+        let mut needs_clarify = false;
+        let mut wants_file_delivery = false;
+        let mut answer_candidate = String::new();
+        let mut contract = IntentOutputContract {
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            semantic_kind: OutputSemanticKind::None,
+            response_shape: OutputResponseShape::Strict,
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_active_text_followup_route_repair(
+            "Show metadata for item 2",
+            Some(&snapshot),
+            &mut turn_type,
+            &mut target_task_policy,
+            false,
+            &mut decision,
+            &mut finalize_style,
+            &mut needs_clarify,
+            super::ScheduleKind::None,
+            false,
+            &mut wants_file_delivery,
+            &mut contract,
+            None,
+            false,
+            false,
+            &mut answer_candidate,
+        );
+
+        assert_eq!(reason, None);
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
     }
 
     #[test]
@@ -12687,6 +13284,7 @@ mod tests {
             &mut contract,
             None,
             false,
+            false,
             &mut answer_candidate,
         );
 
@@ -12718,6 +13316,9 @@ mod tests {
             semantic_kind: OutputSemanticKind::None,
             ..IntentOutputContract::default()
         };
+        let state_patch = serde_json::json!({
+            "deictic_reference": {"target": "unresolved_prior_object"}
+        });
         assert!(
             !super::should_resolve_task_scope_update_clarify_with_active_task(
                 "看看那个文件最后 5 行",
@@ -12727,7 +13328,7 @@ mod tests {
                 false,
                 FirstLayerDecision::Clarify,
                 &contract,
-                None,
+                Some(&state_patch),
             )
         );
     }
@@ -12736,7 +13337,6 @@ mod tests {
     fn structured_deictic_unresolved_target_blocks_non_chinese_pronoun_fallback_gap() {
         let surface =
             crate::intent::surface_signals::analyze_prompt_surface("それの最後の2行を見せて");
-        assert!(!surface.has_deictic_reference());
         let contract = IntentOutputContract {
             requires_content_evidence: true,
             ..IntentOutputContract::default()
@@ -12759,7 +13359,6 @@ mod tests {
     #[test]
     fn structured_deictic_resolved_target_overrides_local_pronoun_fallback() {
         let surface = crate::intent::surface_signals::analyze_prompt_surface("看看那个最后 5 行");
-        assert!(surface.has_deictic_reference());
         let contract = IntentOutputContract {
             requires_content_evidence: true,
             ..IntentOutputContract::default()

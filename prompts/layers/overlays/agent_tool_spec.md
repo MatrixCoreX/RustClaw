@@ -398,7 +398,7 @@ Skill behavior notes (file/path):
 - Forbid missing audio path or non-workspace path assumptions.
 
 ### config_guard
-- Do not choose `config_guard` in new planner output. Use `config_basic` with `action="guard_rustclaw_config"` instead; `config_guard` remains the runtime backing tool and compatibility entry.
+- Do not choose `config_guard` in new planner output. Use `config_edit` with `action="guard_config"` instead; `config_guard` remains the runtime backing tool and compatibility entry.
 - current implementation: read-only RustClaw TOML config risk scan
 - action: no explicit action required; pass only optional `path`
 - optional: `path` (defaults to discovered `configs/config.toml`)
@@ -412,7 +412,7 @@ Skill behavior notes (file/path):
 - Always keep secret values redacted in any final response.
 
 ### config_edit
-- Use `config_edit` for structured RustClaw config mutations. Use `config_basic` for read-only config field extraction, key listing, and validation.
+- Use `config_edit` for structured RustClaw config mutations and config guard checks. Use `config_basic` for read-only config field extraction, key listing, and syntax/schema validation.
 - Actions: `plan_config_change|apply_config_change|validate_config|guard_config|read_back|restart_if_requested`.
 - Common workflow: `plan_config_change` first, then `apply_config_change` after confirmation, then `validate_config`, then `guard_config` and/or `read_back`, then `restart_if_requested` only when restart was requested or must be reported. After `apply_config_change`, prefer this tool's `read_back` action for the edited field instead of switching to a generic config reader.
 - Default path: omit `path` or use `configs/config.toml` for RustClaw main config. For module configs such as STT/audio, pass the actual file path such as `configs/audio.toml`.
@@ -452,6 +452,19 @@ Skill behavior notes (file/path):
 - `args.action` is required and must be supported.
 - For container-target actions, `container` is required.
 - Forbid broad destructive cleanup actions not in supported action set.
+
+### transform
+- action: `transform_data` only. Do not emit `action="transform"`.
+- required: `data` array.
+- For sort/filter/project/group/aggregate/dedup, encode operations in `ops` rather than ad hoc top-level shorthands.
+- Sort op shape: `{"op":"sort","by":"<field>","order":"asc|desc"}`.
+- Markdown table output: set `output_format="md_table"`.
+
+#### transform JSON-schema style contract (strict)
+- Base shape: `{"type":"call_skill","skill":"transform","args":{"action":"transform_data","data":[...],"ops":[...]}}`
+- `args.action` must be `transform_data`.
+- `args.data` must contain the inline records or observed records to transform.
+- Do not use top-level `sort_by`, `sort_field`, or `order_by`; represent sorting as an `ops` entry.
 
 ### fs_search
 - Prefer `fs_basic.find_entries` or `fs_basic.grep_text` in new planner output. `fs_search` remains the runtime backing tool and compatibility entry.
@@ -586,6 +599,7 @@ Skill behavior notes (file/path):
 
 ### process_basic
 - action: `ps|port_list|kill|tail_log`
+- Use `process_basic.ps` for local process inventory, top CPU/process ranking, and "what process is worth noticing" requests. Use `process_basic.port_list` for listening-port inspection. Preserve `run_cmd` only when the user supplied an exact shell command or the needed process query is outside this contract.
 - required by action:
   - `kill`: `pid` (optional `signal`, default `TERM`)
   - `tail_log`: `path` (optional `n`)

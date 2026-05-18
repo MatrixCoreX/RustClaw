@@ -18,6 +18,8 @@ struct DirectAnswerGateOut {
     clarify_question: String,
     #[serde(default)]
     resolved_user_intent: String,
+    #[serde(default)]
+    reference_resolution: DirectAnswerGateReferenceResolutionOut,
     output_contract: DirectAnswerGateContractOut,
 }
 
@@ -51,6 +53,12 @@ struct DirectAnswerGateSelfExtensionOut {
     trigger: String,
     #[serde(default)]
     execute_now: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct DirectAnswerGateReferenceResolutionOut {
+    #[serde(default)]
+    target: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -257,6 +265,7 @@ fn parse_gate_semantic_kind(raw: &str) -> crate::OutputSemanticKind {
         "file_paths" => crate::OutputSemanticKind::FilePaths,
         "directory_purpose_summary" => crate::OutputSemanticKind::DirectoryPurposeSummary,
         "content_excerpt_summary" => crate::OutputSemanticKind::ContentExcerptSummary,
+        "content_presence_check" => crate::OutputSemanticKind::ContentPresenceCheck,
         "excerpt_kind_judgment" => crate::OutputSemanticKind::ExcerptKindJudgment,
         "recent_artifacts_judgment" => crate::OutputSemanticKind::RecentArtifactsJudgment,
         "workspace_project_summary" => crate::OutputSemanticKind::WorkspaceProjectSummary,
@@ -532,6 +541,16 @@ fn output_contract_requires_planner_execution(contract: &crate::IntentOutputCont
         || !matches!(contract.semantic_kind, crate::OutputSemanticKind::None)
 }
 
+fn transform_skill_available_for_plan(state: &AppState) -> bool {
+    let enabled_skills = state.get_skills_list();
+    enabled_skills.is_empty() || enabled_skills.contains("transform")
+}
+
+fn package_manager_skill_available_for_plan(state: &AppState) -> bool {
+    let enabled_skills = state.get_skills_list();
+    enabled_skills.is_empty() || enabled_skills.contains("package_manager")
+}
+
 fn direct_answer_gate_can_skip_for_self_contained_payload(
     current_user_request: &str,
     route: Option<&crate::RouteResult>,
@@ -564,6 +583,9 @@ fn direct_answer_gate_can_skip_for_self_contained_payload(
         return false;
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    if crate::intent::surface_signals::inline_json_transform_request(current_user_request) {
+        return false;
+    }
     surface.inline_json_shape.is_some()
         && !surface.has_explicit_path_or_url()
         && !surface.has_filename_candidates()
@@ -636,6 +658,7 @@ fn direct_answer_gate_promotion_depends_only_on_background_context(
     current_user_request: &str,
     route: &crate::RouteResult,
     promoted_contract: &crate::IntentOutputContract,
+    reference_resolution: &DirectAnswerGateReferenceResolutionOut,
 ) -> bool {
     let Some(candidate) = normalizer_answer_candidate_from_resolved_prompt(&route.resolved_intent)
     else {
@@ -654,7 +677,7 @@ fn direct_answer_gate_promotion_depends_only_on_background_context(
     }
 
     let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
-    !surface.has_deictic_reference()
+    !direct_answer_gate_reference_is_present(reference_resolution)
         && !surface.has_explicit_path_or_url()
         && surface.locator_target_pair.is_none()
         && surface.field_selector_count == 0
@@ -666,32 +689,81 @@ fn direct_answer_gate_promotion_depends_only_on_background_context(
 }
 
 fn direct_answer_gate_promotion_needs_unbound_deictic_clarify(
+    state: &AppState,
     current_user_request: &str,
     auto_locator_path: Option<&str>,
     has_authoritative_deictic_anchor: bool,
     contract: &crate::IntentOutputContract,
+    reference_resolution: &DirectAnswerGateReferenceResolutionOut,
 ) -> bool {
     if !output_contract_requires_planner_execution(contract) {
         return false;
     }
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
-    if !surface.has_deictic_reference()
-        || surface.has_concrete_locator_hint()
-        || surface.has_structured_target_refinement()
-        || surface.has_delivery_token_reference()
+    let reference_requires_clarify =
+        direct_answer_gate_reference_requires_clarify(reference_resolution);
+    if !(matches!(
+        contract.locator_kind,
+        crate::OutputLocatorKind::Path
+            | crate::OutputLocatorKind::Filename
+            | crate::OutputLocatorKind::Url
+    ) || (contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && reference_requires_clarify))
     {
         return false;
     }
-    if auto_locator_path.is_some_and(|path| !path.trim().is_empty()) {
+    if current_request_has_direct_answer_gate_locator_surface(state, current_user_request, contract)
+    {
         return false;
     }
     if has_authoritative_deictic_anchor {
         return false;
     }
-    if contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace {
+    if auto_locator_path.is_some_and(|path| !path.trim().is_empty()) {
         return false;
     }
     true
+}
+
+fn current_request_has_direct_answer_gate_locator_surface(
+    state: &AppState,
+    current_user_request: &str,
+    contract: &crate::IntentOutputContract,
+) -> bool {
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    surface.has_concrete_locator_hint()
+        || surface.has_structured_target_refinement()
+        || surface.has_delivery_token_reference()
+        || (crate::worker::semantic_kind_can_bind_workspace_child_locator(contract.semantic_kind)
+            && crate::worker::try_resolve_workspace_child_locator_from_text(
+                &state.skill_rt.workspace_root,
+                &state.skill_rt.default_locator_search_dir,
+                current_user_request,
+            )
+            .is_some())
+}
+
+fn direct_answer_gate_reference_target(
+    reference_resolution: &DirectAnswerGateReferenceResolutionOut,
+) -> &str {
+    reference_resolution.target.trim()
+}
+
+fn direct_answer_gate_reference_is_present(
+    reference_resolution: &DirectAnswerGateReferenceResolutionOut,
+) -> bool {
+    !matches!(
+        direct_answer_gate_reference_target(reference_resolution),
+        "" | "none"
+    )
+}
+
+fn direct_answer_gate_reference_requires_clarify(
+    reference_resolution: &DirectAnswerGateReferenceResolutionOut,
+) -> bool {
+    matches!(
+        direct_answer_gate_reference_target(reference_resolution),
+        "unresolved_prior_object" | "missing_locator" | "ambiguous_locator"
+    )
 }
 
 fn planner_finalize_style_for_output_contract(
@@ -734,6 +806,7 @@ fn resolve_direct_answer_gate_contract_locator(
     current_user_request: &str,
     gate: &DirectAnswerGateOut,
     contract: &crate::IntentOutputContract,
+    reference_resolution: &DirectAnswerGateReferenceResolutionOut,
 ) -> Option<String> {
     if !matches!(
         contract.locator_kind,
@@ -748,27 +821,12 @@ fn resolve_direct_answer_gate_contract_locator(
         return None;
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
-    if surface.has_deictic_reference()
+    if direct_answer_gate_reference_requires_clarify(reference_resolution)
         && !surface.has_concrete_locator_hint()
         && !surface.has_structured_target_refinement()
         && !surface.has_delivery_token_reference()
     {
-        let locator_kind = if contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace {
-            crate::OutputLocatorKind::Path
-        } else {
-            contract.locator_kind
-        };
-        return crate::worker::try_resolve_implicit_locator_path(
-            state,
-            current_user_request,
-            current_user_request,
-            locator_kind,
-            None,
-        )
-        .and_then(|resolution| match resolution {
-            crate::worker::LocatorAutoResolution::Direct(path) => Some(path),
-            crate::worker::LocatorAutoResolution::Fuzzy(_) => None,
-        });
+        return None;
     }
     let resolved = if hint.is_empty() {
         gate.resolved_user_intent.trim()
@@ -802,8 +860,13 @@ fn bind_direct_answer_gate_contract_locator(
     gate: &DirectAnswerGateOut,
     contract: &mut crate::IntentOutputContract,
 ) -> Option<String> {
-    let path =
-        resolve_direct_answer_gate_contract_locator(state, current_user_request, gate, contract)?;
+    let path = resolve_direct_answer_gate_contract_locator(
+        state,
+        current_user_request,
+        gate,
+        contract,
+        &gate.reference_resolution,
+    )?;
     contract.locator_kind = crate::OutputLocatorKind::Path;
     contract.locator_hint = path.clone();
     Some(path)
@@ -865,6 +928,10 @@ fn apply_direct_answer_gate_outcome(
     };
     let auto_locator_path = ctx.auto_locator_path.as_deref();
     let has_authoritative_deictic_anchor = ctx.has_authoritative_deictic_anchor;
+    let force_inline_transform_execution = transform_skill_available_for_plan(state)
+        && crate::intent::surface_signals::inline_json_transform_request(current_user_request);
+    let force_package_manager_detect_execution = package_manager_skill_available_for_plan(state)
+        && crate::intent::surface_signals::package_manager_detection_request(current_user_request);
     match decision {
         DirectAnswerGateDecision::DirectAnswer => {
             let fallback_contract = route.output_contract.clone();
@@ -873,6 +940,42 @@ fn apply_direct_answer_gate_outcome(
                 gate.output_contract.clone(),
                 &fallback_contract,
             );
+            if force_inline_transform_execution {
+                contract.requires_content_evidence = true;
+                contract.locator_kind = crate::OutputLocatorKind::None;
+                contract.locator_hint.clear();
+                contract.semantic_kind = crate::OutputSemanticKind::None;
+                if matches!(
+                    contract.response_shape,
+                    crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
+                ) {
+                    contract.response_shape = crate::OutputResponseShape::Strict;
+                }
+                return promote_direct_answer_gate_to_planner(
+                    ctx,
+                    &gate,
+                    contract,
+                    "direct_answer_gate_inline_transform_execute",
+                );
+            }
+            if force_package_manager_detect_execution {
+                contract.requires_content_evidence = true;
+                contract.locator_kind = crate::OutputLocatorKind::None;
+                contract.locator_hint.clear();
+                contract.semantic_kind = crate::OutputSemanticKind::None;
+                if matches!(
+                    contract.response_shape,
+                    crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
+                ) {
+                    contract.response_shape = crate::OutputResponseShape::Strict;
+                }
+                return promote_direct_answer_gate_to_planner(
+                    ctx,
+                    &gate,
+                    contract,
+                    "direct_answer_gate_package_manager_detect_execute",
+                );
+            }
             let promoted_artifact_listing =
                 promote_artifact_listing_candidate_contract(&resolved_prompt, &mut contract);
             let promoted_recent_file_context =
@@ -896,21 +999,24 @@ fn apply_direct_answer_gate_outcome(
                     current_user_request,
                     route,
                     &contract,
+                    &gate.reference_resolution,
                 ) {
                     append_route_reason(route, "direct_answer_gate_background_only_ignored");
                     return DirectAnswerPreflight::DirectAnswer;
                 }
-                let resolved_locator_path = bind_direct_answer_gate_contract_locator(
+                bind_direct_answer_gate_contract_locator(
                     state,
                     current_user_request,
                     &gate,
                     &mut contract,
                 );
                 if direct_answer_gate_promotion_needs_unbound_deictic_clarify(
+                    state,
                     current_user_request,
-                    resolved_locator_path.as_deref().or(auto_locator_path),
+                    auto_locator_path,
                     has_authoritative_deictic_anchor,
                     &contract,
+                    &gate.reference_resolution,
                 ) {
                     return apply_direct_answer_gate_unbound_deictic_clarify(route, &gate);
                 }
@@ -951,21 +1057,24 @@ fn apply_direct_answer_gate_outcome(
                 current_user_request,
                 route,
                 &contract,
+                &gate.reference_resolution,
             ) {
                 append_route_reason(route, "direct_answer_gate_background_only_ignored");
                 return DirectAnswerPreflight::DirectAnswer;
             }
-            let resolved_locator_path = bind_direct_answer_gate_contract_locator(
+            bind_direct_answer_gate_contract_locator(
                 state,
                 current_user_request,
                 &gate,
                 &mut contract,
             );
             if direct_answer_gate_promotion_needs_unbound_deictic_clarify(
+                state,
                 current_user_request,
-                resolved_locator_path.as_deref().or(auto_locator_path),
+                auto_locator_path,
                 has_authoritative_deictic_anchor,
                 &contract,
+                &gate.reference_resolution,
             ) {
                 return apply_direct_answer_gate_unbound_deictic_clarify(route, &gate);
             }
@@ -1985,8 +2094,8 @@ mod tests {
         normalizer_chat_direct_answer_candidate, preferred_route_clarify_question,
         route_structured_clarify_context, runtime_scalar_path_direct_answer_candidate,
         state_patch_alias_bindings_ack, structural_alias_binding_ack, task_payload_text,
-        DirectAnswerGateContractOut, DirectAnswerGateOut, DirectAnswerGateSelfExtensionOut,
-        DirectAnswerPreflight,
+        DirectAnswerGateContractOut, DirectAnswerGateOut, DirectAnswerGateReferenceResolutionOut,
+        DirectAnswerGateSelfExtensionOut, DirectAnswerPreflight,
     };
 
     fn chat_route_for_gate() -> crate::RouteResult {
@@ -2035,6 +2144,7 @@ mod tests {
             clarify_question: String::new(),
             resolved_user_intent: "Write a grounded RustClaw article using workspace evidence."
                 .to_string(),
+            reference_resolution: DirectAnswerGateReferenceResolutionOut::default(),
             output_contract: contract,
         }
     }
@@ -2176,7 +2286,70 @@ mod tests {
     }
 
     #[test]
-    fn direct_answer_gate_can_skip_self_contained_inline_json_payload() {
+    fn direct_answer_gate_promotes_inline_json_transform_to_planner() {
+        let mut route = chat_route_for_gate();
+        route.resolved_intent =
+            "Sort inline JSON by score descending\nanswer_candidate: beta, alpha".to_string();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let request = r#"把这个 JSON 数组按 score 从高到低排序，只输出 name 顺序：[{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
+
+        let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
+
+        assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_execute_gate());
+        assert!(route.output_contract.requires_content_evidence);
+        assert!(route
+            .route_reason
+            .contains("direct_answer_gate_inline_transform_execute"));
+    }
+
+    #[test]
+    fn direct_answer_gate_promotes_package_manager_detect_to_planner() {
+        let mut route = chat_route_for_gate();
+        route.resolved_intent =
+            "看看当前机器识别到的包管理器\nanswer_candidate: 当前没有执行检测".to_string();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let request = "看看当前机器识别到的包管理器，再一句话说最可能日常会用哪个";
+
+        let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
+
+        assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_execute_gate());
+        assert!(route.output_contract.requires_content_evidence);
+        assert!(route
+            .route_reason
+            .contains("direct_answer_gate_package_manager_detect_execute"));
+    }
+
+    #[test]
+    fn direct_answer_gate_can_skip_self_contained_inline_json_explanation() {
+        let mut route = chat_route_for_gate();
+        route.resolved_intent =
+            "Explain inline JSON records\nanswer_candidate: two score records".to_string();
+        let request =
+            r#"解释这个 JSON 代表什么：[{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+
+        assert!(
+            direct_answer_gate_can_skip_for_self_contained_payload(request, Some(&route),),
+            "surface={surface:?}"
+        );
+    }
+
+    #[test]
+    fn direct_answer_gate_does_not_skip_inline_json_transform_payload() {
         let mut route = chat_route_for_gate();
         route.resolved_intent =
             "Sort inline JSON by score descending\nanswer_candidate: beta, alpha".to_string();
@@ -2184,7 +2357,7 @@ mod tests {
         let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
 
         assert!(
-            direct_answer_gate_can_skip_for_self_contained_payload(request, Some(&route),),
+            !direct_answer_gate_can_skip_for_self_contained_payload(request, Some(&route),),
             "surface={surface:?}"
         );
     }
@@ -2260,6 +2433,7 @@ mod tests {
                 "Output only the final checklist.",
                 &route,
                 &promoted_contract,
+                &DirectAnswerGateReferenceResolutionOut::default(),
             )
         );
     }
@@ -2283,6 +2457,9 @@ mod tests {
                 "Send that file.",
                 &route,
                 &promoted_contract,
+                &DirectAnswerGateReferenceResolutionOut {
+                    target: "current_action_result".to_string(),
+                },
             )
         );
     }
@@ -2389,7 +2566,8 @@ mod tests {
         let gate = gate_out("direct_answer", contract);
         let state = crate::AppState::test_default_with_fixture_provider();
 
-        let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, "summarize log", gate);
+        let outcome =
+            apply_direct_answer_gate_outcome(&state, &mut ctx, "summarize /tmp/clawd.log", gate);
 
         assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
         let route = ctx.route_result.expect("route");
@@ -2482,7 +2660,8 @@ mod tests {
         };
         let mut contract = gate_contract(true, "path", "structured_keys");
         contract.locator_hint = "Cargo.toml".to_string();
-        let gate = gate_out("planner_execute", contract);
+        let mut gate = gate_out("planner_execute", contract);
+        gate.reference_resolution.target = "unresolved_prior_object".to_string();
         let state = crate::AppState::test_default_with_fixture_provider();
 
         let outcome = apply_direct_answer_gate_outcome(
@@ -2516,7 +2695,8 @@ mod tests {
         };
         let mut contract = gate_contract(true, "path", "structured_keys");
         contract.locator_hint = "/tmp/bound/package.json".to_string();
-        let gate = gate_out("planner_execute", contract);
+        let mut gate = gate_out("planner_execute", contract);
+        gate.reference_resolution.target = "unresolved_prior_object".to_string();
         let state = crate::AppState::test_default_with_fixture_provider();
 
         let outcome = apply_direct_answer_gate_outcome(
@@ -2544,7 +2724,8 @@ mod tests {
         };
         let mut contract = gate_contract(true, "path", "none");
         contract.locator_hint = "/tmp/bound/README.md".to_string();
-        let gate = gate_out("planner_execute", contract);
+        let mut gate = gate_out("planner_execute", contract);
+        gate.reference_resolution.target = "unresolved_prior_object".to_string();
         let state = crate::AppState::test_default_with_fixture_provider();
 
         let outcome =
@@ -2560,6 +2741,65 @@ mod tests {
     }
 
     #[test]
+    fn direct_answer_gate_clarifies_claimed_current_locator_without_current_surface() {
+        let route = chat_route_for_gate();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut contract = gate_contract(true, "path", "none");
+        contract.locator_hint =
+            "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md".to_string();
+        let mut gate = gate_out("planner_execute", contract);
+        gate.reference_resolution.target = "current_turn_locator".to_string();
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        let outcome =
+            apply_direct_answer_gate_outcome(&state, &mut ctx, "读一下那个文件前 3 行", gate);
+
+        assert!(matches!(outcome, DirectAnswerPreflight::Clarify(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.needs_clarify);
+        assert!(route
+            .route_reason
+            .contains("direct_answer_gate_unbound_deictic_clarify"));
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        );
+        assert!(route.output_contract.locator_hint.is_empty());
+    }
+
+    #[test]
+    fn direct_answer_gate_clarifies_locator_hint_without_current_surface_or_reference_report() {
+        let route = chat_route_for_gate();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut contract = gate_contract(true, "path", "none");
+        contract.locator_hint =
+            "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md".to_string();
+        let gate = gate_out("planner_execute", contract);
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        let outcome =
+            apply_direct_answer_gate_outcome(&state, &mut ctx, "读一下那个文件前 3 行", gate);
+
+        assert!(matches!(outcome, DirectAnswerPreflight::Clarify(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.needs_clarify);
+        assert!(route
+            .route_reason
+            .contains("direct_answer_gate_unbound_deictic_clarify"));
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        );
+        assert!(route.output_contract.locator_hint.is_empty());
+    }
+
+    #[test]
     fn direct_answer_gate_allows_deictic_observation_with_authoritative_anchor() {
         let route = chat_route_for_gate();
         let mut ctx = crate::agent_engine::AgentRunContext {
@@ -2569,7 +2809,8 @@ mod tests {
         };
         let mut contract = gate_contract(true, "path", "none");
         contract.locator_hint = "/tmp/bound/README.md".to_string();
-        let gate = gate_out("planner_execute", contract);
+        let mut gate = gate_out("planner_execute", contract);
+        gate.reference_resolution.target = "unresolved_prior_object".to_string();
         let state = crate::AppState::test_default_with_fixture_provider();
 
         let outcome =
@@ -2610,6 +2851,7 @@ mod tests {
             crate::OutputLocatorKind::CurrentWorkspace
         );
         assert!(!direct_answer_gate_promotion_needs_unbound_deictic_clarify(
+            &state,
             "先看当前目录顶层主要文件夹，再用一句话解释这个仓库怎么分区",
             None,
             false,
@@ -2619,7 +2861,40 @@ mod tests {
                 semantic_kind: crate::OutputSemanticKind::None,
                 ..Default::default()
             },
+            &DirectAnswerGateReferenceResolutionOut {
+                target: "current_action_result".to_string(),
+            },
         ));
+    }
+
+    #[test]
+    fn direct_answer_gate_clarifies_current_workspace_when_reference_is_unbound() {
+        let route = chat_route_for_gate();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut gate = gate_out(
+            "planner_execute",
+            gate_contract(true, "current_workspace", "content_presence_check"),
+        );
+        gate.reference_resolution.target = "missing_locator".to_string();
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        let outcome =
+            apply_direct_answer_gate_outcome(&state, &mut ctx, "查看指定 schema 的 enum", gate);
+
+        assert!(matches!(outcome, DirectAnswerPreflight::Clarify(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.needs_clarify);
+        assert!(route
+            .route_reason
+            .contains("direct_answer_gate_unbound_deictic_clarify"));
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        );
+        assert!(route.output_contract.locator_hint.is_empty());
     }
 
     #[test]

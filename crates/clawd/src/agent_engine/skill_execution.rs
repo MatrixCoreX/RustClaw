@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 
@@ -458,6 +459,69 @@ fn sudo_structured_read_command(normalized_skill: &str, args: &Value) -> Option<
     }
 }
 
+fn structured_read_request_path<'a>(normalized_skill: &str, args: &'a Value) -> Option<&'a str> {
+    match normalized_skill {
+        "read_file" | "list_dir" => args.get("path").and_then(Value::as_str),
+        "fs_basic" | "system_basic" => {
+            let action = args
+                .get("action")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase();
+            if matches!(
+                action.as_str(),
+                "read_text_range"
+                    | "read_range"
+                    | "list_dir"
+                    | "inventory_dir"
+                    | "count_entries"
+                    | "count_inventory"
+                    | "extract_field"
+                    | "extract_fields"
+                    | "structured_keys"
+            ) {
+                args.get("path").and_then(Value::as_str)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn path_stays_within_workspace(workspace_root: &Path, input: &str) -> bool {
+    let normalized_root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let raw = Path::new(input);
+    if raw
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return false;
+    }
+    let candidate = if raw.is_absolute() {
+        PathBuf::from(raw)
+    } else {
+        normalized_root.join(raw)
+    };
+    let normalized_candidate = candidate
+        .canonicalize()
+        .unwrap_or_else(|_| candidate.clone());
+    normalized_candidate.starts_with(normalized_root)
+}
+
+fn auto_sudo_structured_read_targets_outside_workspace(
+    state: &AppState,
+    normalized_skill: &str,
+    args: &Value,
+) -> bool {
+    structured_read_request_path(normalized_skill, args)
+        .map(|path| !path_stays_within_workspace(&state.skill_rt.workspace_root, path))
+        .unwrap_or(false)
+}
+
 fn build_auto_sudo_retry_args(
     state: &AppState,
     task: &ClaimedTask,
@@ -473,6 +537,9 @@ fn build_auto_sudo_retry_args(
         return None;
     }
     let args = recovery_args?;
+    if auto_sudo_structured_read_targets_outside_workspace(state, normalized_skill, args) {
+        return None;
+    }
     if normalized_skill == "run_cmd" {
         let command = args.get("command").and_then(Value::as_str)?.trim();
         if command.is_empty() || command_already_requests_sudo(command) {
@@ -1407,6 +1474,7 @@ pub(super) async fn execute_prepared_skill_action(
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
+    use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
 
     use super::{
@@ -1625,6 +1693,93 @@ mod tests {
     fn auto_sudo_retry_builds_structured_read_range_retry_for_admin_permission_denied() {
         let mut state = test_state();
         state.policy.allow_sudo = true;
+        state.skill_rt.workspace_root = PathBuf::from("/tmp/rustclaw-auto-sudo-workspace");
+        enable_test_skills(&state, &["run_cmd", "system_basic"]);
+        insert_auth_key(&state, "rk-admin", "admin");
+        let task = admin_task();
+        let restricted_path = "/tmp/rustclaw-auto-sudo-workspace/restricted.log";
+
+        let retry = build_auto_sudo_retry_args(
+            &state,
+            &task,
+            "system_basic",
+            Some(&serde_json::json!({
+                "action": "read_range",
+                "path": restricted_path,
+                "n": 1
+            })),
+            &crate::skills::structured_skill_error_from_parts(
+                "system_basic",
+                "permission_denied",
+                "read_range failed for restricted.log",
+                Some("linux"),
+                Some(serde_json::json!({
+                    "operation": "metadata",
+                    "path": restricted_path
+                })),
+            ),
+        )
+        .expect("admin permission denial should trigger sudo retry");
+
+        let command = retry
+            .get("command")
+            .and_then(|value| value.as_str())
+            .expect("retry command");
+        assert!(command.starts_with("sudo -n "), "got: {command}");
+        assert!(command.contains(restricted_path), "got: {command}");
+        assert!(command.contains("sed"), "got: {command}");
+        assert!(!command.contains(" -- "), "got: {command}");
+        assert!(!command.contains("-printf"), "got: {command}");
+    }
+
+    #[test]
+    fn auto_sudo_retry_uses_posix_directory_listing_for_cross_platform_hosts() {
+        let mut state = test_state();
+        state.policy.allow_sudo = true;
+        state.skill_rt.workspace_root = PathBuf::from("/tmp/rustclaw-auto-sudo-workspace");
+        enable_test_skills(&state, &["run_cmd", "system_basic"]);
+        insert_auth_key(&state, "rk-admin", "admin");
+        let task = admin_task();
+        let restricted_path = "/tmp/rustclaw-auto-sudo-workspace/var-log";
+
+        let retry = build_auto_sudo_retry_args(
+            &state,
+            &task,
+            "system_basic",
+            Some(&serde_json::json!({
+                "action": "inventory_dir",
+                "path": restricted_path,
+                "max_entries": 5
+            })),
+            &crate::skills::structured_skill_error_from_parts(
+                "system_basic",
+                "permission_denied",
+                "read_dir failed for restricted dir",
+                Some("linux"),
+                Some(serde_json::json!({
+                    "operation": "read_dir",
+                    "path": restricted_path
+                })),
+            ),
+        )
+        .expect("admin permission denial should trigger sudo retry");
+
+        let command = retry
+            .get("command")
+            .and_then(|value| value.as_str())
+            .expect("retry command");
+        assert!(command.starts_with("sudo -n sh -c "), "got: {command}");
+        assert!(command.contains("basename"), "got: {command}");
+        assert!(command.contains(restricted_path), "got: {command}");
+        assert!(!command.contains("-printf"), "got: {command}");
+        assert!(!command.contains("-maxdepth"), "got: {command}");
+    }
+
+    #[test]
+    fn auto_sudo_retry_skips_structured_reads_outside_workspace() {
+        let mut state = test_state();
+        state.policy.allow_sudo = true;
+        state.skill_rt.workspace_root = PathBuf::from("/home/guagua/rustclaw");
         enable_test_skills(&state, &["run_cmd", "system_basic"]);
         insert_auth_key(&state, "rk-admin", "admin");
         let task = admin_task();
@@ -1644,63 +1799,16 @@ mod tests {
                 "read_range failed for /etc/shadow",
                 Some("linux"),
                 Some(serde_json::json!({
-                    "operation": "metadata",
+                    "operation": "read_file",
                     "path": "/etc/shadow"
                 })),
             ),
-        )
-        .expect("admin permission denial should trigger sudo retry");
+        );
 
-        let command = retry
-            .get("command")
-            .and_then(|value| value.as_str())
-            .expect("retry command");
-        assert!(command.starts_with("sudo -n "), "got: {command}");
-        assert!(command.contains("/etc/shadow"), "got: {command}");
-        assert!(command.contains("sed"), "got: {command}");
-        assert!(!command.contains(" -- "), "got: {command}");
-        assert!(!command.contains("-printf"), "got: {command}");
-    }
-
-    #[test]
-    fn auto_sudo_retry_uses_posix_directory_listing_for_cross_platform_hosts() {
-        let mut state = test_state();
-        state.policy.allow_sudo = true;
-        enable_test_skills(&state, &["run_cmd", "system_basic"]);
-        insert_auth_key(&state, "rk-admin", "admin");
-        let task = admin_task();
-
-        let retry = build_auto_sudo_retry_args(
-            &state,
-            &task,
-            "system_basic",
-            Some(&serde_json::json!({
-                "action": "inventory_dir",
-                "path": "/var/log",
-                "max_entries": 5
-            })),
-            &crate::skills::structured_skill_error_from_parts(
-                "system_basic",
-                "permission_denied",
-                "read_dir failed for /var/log",
-                Some("linux"),
-                Some(serde_json::json!({
-                    "operation": "read_dir",
-                    "path": "/var/log"
-                })),
-            ),
-        )
-        .expect("admin permission denial should trigger sudo retry");
-
-        let command = retry
-            .get("command")
-            .and_then(|value| value.as_str())
-            .expect("retry command");
-        assert!(command.starts_with("sudo -n sh -c "), "got: {command}");
-        assert!(command.contains("basename"), "got: {command}");
-        assert!(command.contains("/var/log"), "got: {command}");
-        assert!(!command.contains("-printf"), "got: {command}");
-        assert!(!command.contains("-maxdepth"), "got: {command}");
+        assert!(
+            retry.is_none(),
+            "structured reads outside workspace must not auto-escalate to sudo"
+        );
     }
 
     #[test]

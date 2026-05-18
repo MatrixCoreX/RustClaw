@@ -16,6 +16,9 @@ pub(crate) fn normalize_delivery_message(state: &AppState, text: &str) -> Option
         return None;
     }
     if let Some((_kind, path)) = crate::finalize::parse_delivery_file_token(trimmed) {
+        if looks_like_placeholder_delivery_payload(path) {
+            return Some(normalized);
+        }
         let resolved = resolve_existing_delivery_path(state, path)?;
         return Some(format!("FILE:{}", resolved.display()));
     }
@@ -30,6 +33,13 @@ pub(crate) fn normalize_delivery_message(state: &AppState, text: &str) -> Option
         return Some(format!("{}{}", kind.prefix(), url));
     }
     Some(normalized)
+}
+
+fn looks_like_placeholder_delivery_payload(raw_path: &str) -> bool {
+    let path = raw_path.trim();
+    path.strip_prefix('<')
+        .and_then(|rest| rest.split_once('>'))
+        .is_some_and(|(placeholder, _)| !placeholder.trim().is_empty())
 }
 
 fn resolve_existing_delivery_path(state: &AppState, raw_path: &str) -> Option<PathBuf> {

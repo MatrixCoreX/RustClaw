@@ -1143,7 +1143,7 @@ fn system_basic_info_value(skill: &str, body: &str) -> Option<serde_json::Value>
 }
 
 fn system_basic_existence_with_path_value(skill: &str, body: &str) -> Option<serde_json::Value> {
-    if skill != "system_basic" {
+    if !matches!(skill, "system_basic" | "fs_basic") {
         return None;
     }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
@@ -2018,6 +2018,61 @@ fn path_batch_fact_size_bytes(entry: &serde_json::Map<String, serde_json::Value>
         .or_else(|| entry.get("size_bytes").and_then(|v| v.as_u64()))
 }
 
+fn display_path_kind(kind: &str, prefer_english: bool) -> String {
+    let normalized = kind.trim().to_ascii_lowercase();
+    match (normalized.as_str(), prefer_english) {
+        ("dir" | "directory", true) => "directory".to_string(),
+        ("dir" | "directory", false) => "目录".to_string(),
+        ("file", true) => "file".to_string(),
+        ("file", false) => "文件".to_string(),
+        ("symlink", true) => "symlink".to_string(),
+        ("symlink", false) => "符号链接".to_string(),
+        ("other", true) => "other".to_string(),
+        ("other", false) => "其他".to_string(),
+        _ => kind.trim().to_string(),
+    }
+}
+
+fn route_prefers_path_kind_fact_answer(route: &crate::RouteResult) -> bool {
+    route.output_contract.response_shape == crate::OutputResponseShape::Strict
+        && !route.output_contract.delivery_required
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+}
+
+fn path_batch_fact_path_kind_candidate(
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<String> {
+    if value.get("action").and_then(|v| v.as_str()) != Some("path_batch_facts")
+        || path_batch_facts_requests_size(value)
+    {
+        return None;
+    }
+    let facts = value.get("facts")?.as_array()?;
+    if facts.len() != 1 {
+        return None;
+    }
+    let entry = facts.first()?.as_object()?;
+    if !entry
+        .get("exists")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let fact = entry.get("fact").and_then(|v| v.as_object())?;
+    let path = path_batch_fact_preferred_path(entry)?;
+    let kind = fact
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    Some(format!(
+        "{path} | {}",
+        display_path_kind(kind, prefer_english)
+    ))
+}
+
 fn system_basic_existence_with_path_candidate(
     state: Option<&AppState>,
     value: &serde_json::Value,
@@ -2683,6 +2738,55 @@ fn fs_search_grep_text_direct_answer_candidate(
     allow_multi_result_list.then(|| paths.into_iter().take(3).collect::<Vec<_>>().join("\n"))
 }
 
+fn fs_search_content_presence_direct_answer_candidate(
+    state: Option<&AppState>,
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<String> {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ContentPresenceCheck {
+        return None;
+    }
+    let (matches, match_count, query) = fs_search_grep_text_results(value)?;
+    if match_count == 0 || matches.is_empty() {
+        let path = value
+            .get("root")
+            .or_else(|| value.get("path"))
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(route.output_contract.locator_hint.trim());
+        if path.is_empty() {
+            return Some(if prefer_english {
+                format!("Does not contain `{query}`.")
+            } else {
+                format!("不包含 `{query}`。")
+            });
+        }
+        return Some(if prefer_english {
+            format!("Does not contain `{query}`. Path: {path}")
+        } else {
+            format!("不包含 `{query}`。路径：{path}")
+        });
+    }
+    let mut paths = Vec::new();
+    for (path, _, _) in matches {
+        if !paths.iter().any(|seen| seen == &path) {
+            paths.push(path);
+        }
+    }
+    if paths.is_empty() {
+        return None;
+    }
+    let path_text = paths.into_iter().take(8).collect::<Vec<_>>().join("\n");
+    let _ = state;
+    Some(if prefer_english {
+        format!("Contains `{query}`. Path:\n{path_text}")
+    } else {
+        format!("包含 `{query}`。路径：\n{path_text}")
+    })
+}
+
 fn normalized_scope_text(value: &str) -> Option<String> {
     let normalized = value
         .trim()
@@ -2777,12 +2881,21 @@ fn result_extensions(results: &[String]) -> Vec<String> {
     exts
 }
 
-fn route_intent_extension_hints(route: &crate::RouteResult, results: &[String]) -> Vec<String> {
+fn structured_extension_hints(
+    pattern: Option<&str>,
+    locator_hint: &str,
+    results: &[String],
+) -> Vec<String> {
     let available_exts = result_extensions(results);
     if available_exts.is_empty() {
         return Vec::new();
     }
-    pathish_filter_tokens(&route.resolved_intent)
+    let mut tokens = Vec::new();
+    if let Some(pattern) = pattern {
+        tokens.extend(pathish_filter_tokens(pattern));
+    }
+    tokens.extend(pathish_filter_tokens(locator_hint));
+    tokens
         .into_iter()
         .filter(|token| available_exts.iter().any(|ext| ext == token))
         .collect::<Vec<_>>()
@@ -2803,13 +2916,12 @@ fn path_contains_filter_token(path: &str, token: &str) -> bool {
     path.contains(token) || file_name.contains(token) || stem.contains(token)
 }
 
-fn semantic_fs_search_score(path: &str, tokens: &[String], ignored_tokens: &[String]) -> usize {
+fn structured_fs_search_score(path: &str, tokens: &[String]) -> usize {
     tokens
         .iter()
         .filter(|token| {
             token.len() >= 3
                 && !token.chars().all(|ch| ch.is_ascii_digit())
-                && !ignored_tokens.iter().any(|ignored| ignored == *token)
                 && path_contains_filter_token(path, token)
         })
         .map(|token| token.len())
@@ -2853,7 +2965,9 @@ fn fs_search_route_filtered_listing_candidate(
         }
     }
 
-    let ext_hints = route_intent_extension_hints(route, &results);
+    let normalized_pattern = normalized_find_name_pattern(pattern.as_deref());
+    let ext_hints =
+        structured_extension_hints(normalized_pattern.as_deref(), locator_hint, &results);
     if !ext_hints.is_empty() {
         let ext_filtered = results
             .iter()
@@ -2871,33 +2985,32 @@ fn fs_search_route_filtered_listing_candidate(
         }
     }
 
-    let mut ignored_tokens = ext_hints;
-    ignored_tokens.extend(pathish_filter_tokens(locator_hint));
-    if let Some(pattern) = normalized_find_name_pattern(pattern.as_deref()) {
-        if locator_hint
-            .is_empty()
-            .then_some(false)
-            .unwrap_or_else(|| path_is_inside_locator_scope(&pattern, locator_hint))
-        {
-            ignored_tokens.extend(pathish_filter_tokens(&pattern));
-        }
+    let mut tokens = Vec::new();
+    tokens.extend(pathish_filter_tokens(locator_hint));
+    if let Some(pattern) = normalized_pattern.as_deref() {
+        tokens.extend(pathish_filter_tokens(pattern));
     }
-    ignored_tokens.sort();
-    ignored_tokens.dedup();
+    tokens.extend(ext_hints);
+    tokens.sort();
+    tokens.dedup();
 
-    let tokens = pathish_filter_tokens(&route.resolved_intent);
+    if tokens.is_empty() {
+        return allow_multi_result_list
+            .then(|| results.into_iter().take(3).collect::<Vec<_>>().join("\n"));
+    }
     let mut scored = results
         .iter()
         .cloned()
         .map(|path| {
-            let score = semantic_fs_search_score(&path, &tokens, &ignored_tokens);
+            let score = structured_fs_search_score(&path, &tokens);
             (score, path)
         })
         .collect::<Vec<_>>();
     scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
     let top_score = scored.first().map(|(score, _)| *score).unwrap_or_default();
     if top_score == 0 {
-        return None;
+        return allow_multi_result_list
+            .then(|| results.into_iter().take(3).collect::<Vec<_>>().join("\n"));
     }
     let second_score = scored
         .iter()
@@ -3010,19 +3123,8 @@ fn structured_scalar_candidate(
             .or_else(|| service_control_summary_candidate(&value));
     }
     if skill == "fs_search" {
-        if let Some(answer) = route
-            .and_then(|route| {
-                fs_search_output_direct_answer_candidate(
-                    state,
-                    Some(route),
-                    &value,
-                    locator_hint,
-                    prefer_english,
-                    true,
-                    prefer_full_path,
-                )
-            })
-            .or_else(|| {
+        let rooted_scalar = prefer_full_path
+            .then(|| {
                 fs_search_scalar_candidate(
                     state,
                     &value,
@@ -3032,7 +3134,31 @@ fn structured_scalar_candidate(
                     prefer_english,
                 )
             })
-        {
+            .flatten();
+        if let Some(answer) = rooted_scalar.or_else(|| {
+            route
+                .and_then(|route| {
+                    fs_search_output_direct_answer_candidate(
+                        state,
+                        Some(route),
+                        &value,
+                        locator_hint,
+                        prefer_english,
+                        true,
+                        prefer_full_path,
+                    )
+                })
+                .or_else(|| {
+                    fs_search_scalar_candidate(
+                        state,
+                        &value,
+                        locator_hint,
+                        auto_locator_path,
+                        prefer_full_path,
+                        prefer_english,
+                    )
+                })
+        }) {
             return Some(answer);
         }
         return None;
@@ -3389,6 +3515,11 @@ fn extract_field_direct_answer_candidate(
         field_value,
         serde_json::Value::Object(_) | serde_json::Value::Array(_)
     ) {
+        if let Some(answer) =
+            enum_field_direct_answer_candidate(state, field_path, field_value, prefer_english)
+        {
+            return Some(answer);
+        }
         return None;
     }
     Some(structured_field_display_line(
@@ -3401,9 +3532,47 @@ fn extract_field_direct_answer_candidate(
     ))
 }
 
+fn enum_field_direct_answer_candidate(
+    state: Option<&AppState>,
+    field_path: &str,
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<String> {
+    let enum_value = match value {
+        serde_json::Value::Object(map) => map.get("enum")?,
+        serde_json::Value::Array(_) => value,
+        _ => return None,
+    };
+    let values = enum_value.as_array()?;
+    if values.is_empty() {
+        return None;
+    }
+    let rendered_values = values
+        .iter()
+        .map(value_scalar_text)
+        .collect::<Option<Vec<_>>>()?
+        .into_iter()
+        .filter(|item| !item.trim().is_empty())
+        .map(|item| format!("`{item}`"))
+        .collect::<Vec<_>>();
+    if rendered_values.is_empty() {
+        return None;
+    }
+    let values_text = rendered_values.join(", ");
+    Some(observed_t_with_vars(
+        state,
+        "clawd.msg.enum_field_values",
+        "{field_path} 的枚举值是：{values}",
+        "`{field_path}` enum values: {values}",
+        prefer_english,
+        &[("field_path", field_path), ("values", &values_text)],
+    ))
+}
+
 fn structured_keys_direct_answer_candidate(
     state: Option<&AppState>,
     value: &serde_json::Value,
+    current_request: Option<&str>,
     response_shape: Option<crate::OutputResponseShape>,
     prefer_english: bool,
 ) -> Option<String> {
@@ -3461,6 +3630,19 @@ fn structured_keys_direct_answer_candidate(
             if keys.is_empty() {
                 return None;
             }
+            if let Some(target_key) = current_request
+                .and_then(|request| structured_keys_presence_target_from_request(request, &keys))
+            {
+                let contains = keys
+                    .iter()
+                    .any(|key| key.eq_ignore_ascii_case(target_key.as_str()));
+                return Some(structured_keys_presence_answer(
+                    state,
+                    &target_key,
+                    contains,
+                    prefer_english,
+                ));
+            }
             if matches!(
                 response_shape,
                 Some(crate::OutputResponseShape::OneSentence)
@@ -3470,6 +3652,40 @@ fn structured_keys_direct_answer_candidate(
             return Some(keys.join("\n"));
         }
         "array" => {
+            let identity_values = value
+                .get("identity_values")
+                .and_then(|v| v.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|text| !text.is_empty())
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if let Some(target_key) = current_request.and_then(|request| {
+                structured_keys_presence_target_from_request(request, &identity_values)
+            }) {
+                let contains = identity_values
+                    .iter()
+                    .any(|key| key.eq_ignore_ascii_case(target_key.as_str()));
+                return Some(structured_array_identity_presence_answer(
+                    state,
+                    &target_key,
+                    contains,
+                    prefer_english,
+                ));
+            }
+            if !identity_values.is_empty()
+                && !matches!(
+                    response_shape,
+                    Some(crate::OutputResponseShape::OneSentence)
+                )
+            {
+                return Some(identity_values.join("\n"));
+            }
             let indices = value
                 .get("indices_preview")
                 .and_then(|v| v.as_array())
@@ -3512,6 +3728,124 @@ fn structured_keys_direct_answer_candidate(
             &[("field_path", field_path)],
         )
     })
+}
+
+fn structured_keys_presence_answer(
+    state: Option<&AppState>,
+    key: &str,
+    contains: bool,
+    prefer_english: bool,
+) -> String {
+    if contains {
+        observed_t_with_vars(
+            state,
+            "clawd.msg.structured_keys_contains_key",
+            "包含 {key} 字段",
+            "Contains field `{key}`",
+            prefer_english,
+            &[("key", key)],
+        )
+    } else {
+        observed_t_with_vars(
+            state,
+            "clawd.msg.structured_keys_missing_key",
+            "不包含 {key} 字段",
+            "Does not contain field `{key}`",
+            prefer_english,
+            &[("key", key)],
+        )
+    }
+}
+
+fn structured_array_identity_presence_answer(
+    state: Option<&AppState>,
+    value: &str,
+    contains: bool,
+    prefer_english: bool,
+) -> String {
+    if contains {
+        observed_t_with_vars(
+            state,
+            "clawd.msg.structured_array_identity_contains_value",
+            "包含 {value}",
+            "Contains `{value}`",
+            prefer_english,
+            &[("value", value)],
+        )
+    } else {
+        observed_t_with_vars(
+            state,
+            "clawd.msg.structured_array_identity_missing_value",
+            "不包含 {value}",
+            "Does not contain `{value}`",
+            prefer_english,
+            &[("value", value)],
+        )
+    }
+}
+
+fn structured_keys_presence_target_from_request(request: &str, keys: &[String]) -> Option<String> {
+    let tokens = structured_key_candidate_tokens(request);
+    if tokens.is_empty() {
+        return None;
+    }
+    let mut observed_mentions = Vec::new();
+    for key in keys {
+        if tokens.iter().any(|token| token.eq_ignore_ascii_case(key)) {
+            push_unique_case_insensitive_string(&mut observed_mentions, key.clone());
+        }
+    }
+    if observed_mentions.len() == 1 {
+        return observed_mentions.into_iter().next();
+    }
+    let mut candidate_mentions = Vec::new();
+    for token in tokens {
+        if !token.contains(['_', '-', '.', '$']) {
+            continue;
+        }
+        if keys.iter().any(|key| key.eq_ignore_ascii_case(&token)) {
+            continue;
+        }
+        push_unique_case_insensitive_string(&mut candidate_mentions, token);
+    }
+    (candidate_mentions.len() == 1).then(|| candidate_mentions.remove(0))
+}
+
+fn structured_key_candidate_tokens(request: &str) -> Vec<String> {
+    let filename_candidates = crate::delivery_utils::extract_filename_candidates(request)
+        .into_iter()
+        .map(|candidate| candidate.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let mut tokens = Vec::new();
+    for raw in request.split(|ch: char| {
+        !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '$' | '/' | '\\'))
+    }) {
+        let token = raw.trim_matches(|ch: char| matches!(ch, '.' | '-' | '_' | '$'));
+        if token.len() < 2
+            || token.contains(['/', '\\'])
+            || token.chars().all(|ch| ch.is_ascii_digit())
+            || crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(token)
+        {
+            continue;
+        }
+        if filename_candidates
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(token))
+        {
+            continue;
+        }
+        push_unique_case_insensitive_string(&mut tokens, token.to_string());
+    }
+    tokens
+}
+
+fn push_unique_case_insensitive_string(values: &mut Vec<String>, value: String) {
+    if !values
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(&value))
+    {
+        values.push(value);
+    }
 }
 
 fn validate_structured_direct_answer_candidate(
@@ -3917,6 +4251,7 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
                     Some("inventory_dir") => return inventory_dir_observed_candidate(&value),
                     Some("read_range") => return read_range_observed_candidate(&value),
                     Some("count_inventory") => return count_inventory_observed_candidate(&value),
+                    Some("path_batch_facts") => return path_batch_facts_observed_candidate(&value),
                     _ => {}
                 }
             }
@@ -4353,6 +4688,7 @@ fn extract_direct_answer_from_generic_output_impl(
                         structured_keys_direct_answer_candidate(
                             state,
                             &value,
+                            current_turn_request_text(route, agent_run_context),
                             response_shape,
                             prefers_english_free_text,
                         )
@@ -4385,6 +4721,27 @@ fn extract_direct_answer_from_generic_output_impl(
                             &value,
                             prefers_english_presence_answer,
                         )
+                    } else if action == Some("path_batch_facts")
+                        && route.is_some_and(route_prefers_path_kind_fact_answer)
+                    {
+                        path_batch_fact_path_kind_candidate(&value, prefers_english_free_text)
+                            .or_else(|| {
+                                (!existence_with_path_should_use_llm_synthesis
+                                    && route.is_some_and(|route| {
+                                        route.output_contract.semantic_kind
+                                            == crate::OutputSemanticKind::ExistenceWithPath
+                                    }))
+                                .then(|| {
+                                    system_basic_existence_with_path_candidate(
+                                        state,
+                                        &value,
+                                        locator_hint,
+                                        auto_locator_path,
+                                        prefers_english_presence_answer,
+                                    )
+                                })
+                                .flatten()
+                            })
                     } else if !existence_with_path_should_use_llm_synthesis
                         && route.is_some_and(|route| {
                             route.output_contract.semantic_kind
@@ -4445,7 +4802,12 @@ fn fs_search_output_direct_answer_candidate(
 ) -> Option<String> {
     route
         .and_then(|route| {
-            fs_search_route_filtered_listing_candidate(route, value, allow_multi_result_list)
+            fs_search_content_presence_direct_answer_candidate(state, route, value, prefer_english)
+        })
+        .or_else(|| {
+            route.and_then(|route| {
+                fs_search_route_filtered_listing_candidate(route, value, allow_multi_result_list)
+            })
         })
         .or_else(|| route.and_then(|route| fs_search_semantic_listing_candidate(route, value)))
         .or_else(|| {
@@ -5450,6 +5812,32 @@ mod tests {
     }
 
     #[test]
+    fn direct_answer_formats_schema_enum_extract_field_with_resolved_path() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"target","resolved_field_path":"properties.reference_resolution.properties.target","match_strategy":"unique_bare_key","value":{"type":"string","enum":["none","current_action_result","current_turn_locator"]},"value_type":"object"}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint =
+            "prompts/schemas/direct_answer_gate.schema.json".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("schema enum should be formatted without synthesis");
+
+        assert!(answer.contains("properties.reference_resolution.properties.target"));
+        assert!(answer.contains("`none`"));
+        assert!(answer.contains("`current_turn_locator`"));
+    }
+
+    #[test]
     fn direct_answer_formats_config_basic_validate_result_as_pass_fail() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -5949,12 +6337,12 @@ version.workspace = true
     }
 
     #[test]
-    fn fs_search_file_paths_contract_filters_broad_pattern_with_route_semantics() {
+    fn fs_search_file_paths_contract_filters_with_structured_pattern() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
             "fs_search",
-            r#"{"action":"find_name","pattern":"plan","count":8,"results":["crates/clawd/src/agent_engine/planning.rs","docs/planning_deterministic_guardrails_audit.md","plan/agent_intelligence_architecture_plan_20260511_已完成.md","plan/builtin_skill_capability_governance_plan_20260510.md","plan/codex_style_agent_architecture_refactor_plan_20260511.md","plan/execution_intent_routing_repair_plan_20260509_已完成.md","plan/llm_first_agent_convergence_plan_20260511.md","prompts/layers/overlays/plan_repair_prompt.md"],"root":""}"#,
+            r#"{"action":"find_name","pattern":"execution_intent","count":8,"results":["crates/clawd/src/agent_engine/planning.rs","docs/planning_deterministic_guardrails_audit.md","plan/agent_intelligence_architecture_plan_20260511_已完成.md","plan/builtin_skill_capability_governance_plan_20260510.md","plan/codex_style_agent_architecture_refactor_plan_20260511.md","plan/execution_intent_routing_repair_plan_20260509_已完成.md","plan/llm_first_agent_convergence_plan_20260511.md","prompts/layers/overlays/plan_repair_prompt.md"],"root":""}"#,
         ));
         let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
         route.ask_mode = crate::AskMode::planner_execute_plain();
@@ -7362,6 +7750,106 @@ version.workspace = true
     }
 
     #[test]
+    fn direct_answer_formats_structured_keys_presence_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"structured_keys","path":"/tmp/en-US.toml","resolved_path":"/tmp/en-US.toml","field_path":"","exists":true,"container_type":"object","count":3,"keys":["execute_prefixes","locale","result_suffixes"]}"#,
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent: "读取 /tmp/en-US.toml 并确认是否存在 negative_markers 字段"
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "planner_locator_requires_evidence".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::StructuredKeys,
+                locator_hint: "/tmp/en-US.toml".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            original_user_request: Some(
+                "读取 configs/command_intent/en-US.toml，只回答是否还有 negative_markers 字段"
+                    .to_string(),
+            ),
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("不包含 negative_markers 字段")
+        );
+    }
+
+    #[test]
+    fn direct_answer_formats_structured_array_identity_presence_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"structured_keys","path":"/tmp/skills_registry.toml","resolved_path":"/tmp/skills_registry.toml","field_path":"skills","exists":true,"container_type":"array","count":2,"identity_values":["fs_basic","config_basic"],"identity_omitted":0,"indices_preview":[{"index":0,"value_type":"object","keys":["name","planner_kind"],"identity_key":"name","identity_value":"fs_basic"},{"index":1,"value_type":"object","keys":["name","planner_kind"],"identity_key":"name","identity_value":"config_basic"}]}"#,
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent: "读取 /tmp/skills_registry.toml，回答 fs_basic 是否注册".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "planner_locator_requires_evidence".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::StructuredKeys,
+                locator_hint: "/tmp/skills_registry.toml".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            original_user_request: Some(
+                "读取 docker/config/skills_registry.toml，回答 fs_basic 是否注册".to_string(),
+            ),
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("包含 fs_basic")
+        );
+    }
+
+    #[test]
     fn structured_keys_one_sentence_defers_to_synthesis() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -8148,6 +8636,35 @@ version.workspace = true
                 .as_deref(),
             Some("有，路径：/tmp/rustclaw-workspace/rustclaw.service")
         );
+    }
+
+    #[test]
+    fn direct_answer_formats_strict_path_kind_from_fs_basic_path_batch_facts() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"configs/channels","resolved_path":"/tmp/repo/configs/channels","size_bytes":4096},"path":"/tmp/repo/configs/channels"}],"include_missing":true}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route_result.resolved_intent =
+            "查看 configs 目录下最后一个条目的路径和类型信息".to_string();
+        route_result.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint = "/tmp/repo/configs/channels".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("/tmp/repo/configs/channels | 目录")
+        );
+        assert!(observed_output_entries(&loop_state)
+            .join("\n")
+            .contains("kind=dir"));
     }
 
     #[test]

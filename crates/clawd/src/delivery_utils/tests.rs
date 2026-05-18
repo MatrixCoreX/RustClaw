@@ -577,6 +577,30 @@ fn file_delivery_contract_does_not_reparse_request_filename_without_hint() {
 }
 
 #[test]
+fn non_file_contract_preserves_literal_file_token_placeholder_explanation() {
+    let state = test_state_with_i18n(&[]);
+    let contract = IntentOutputContract {
+        exact_sentence_count: None,
+        delivery_required: false,
+        response_shape: OutputResponseShape::Free,
+        ..IntentOutputContract::default()
+    };
+
+    let answer = "FILE:<path> 表示把生成或选中的文件作为路径 token 交付。";
+    let (text, messages) = intercept_response_payload_for_delivery(
+        &state,
+        "什么是 FILE:<path> 形式的交付？只解释概念",
+        false,
+        &contract,
+        answer.to_string(),
+        Vec::new(),
+    );
+
+    assert_eq!(text, answer);
+    assert_eq!(messages, vec![answer.to_string()]);
+}
+
+#[test]
 fn file_delivery_contract_does_not_reparse_request_explicit_path_without_hint() {
     let mut state = test_state_with_i18n(&[]);
     let isolated = TempDirGuard::new("file_delivery_no_raw_path_reparse");

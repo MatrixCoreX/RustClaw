@@ -11,6 +11,7 @@
     "confidence",
     "clarify_question",
     "resolved_user_intent",
+    "reference_resolution",
     "output_contract"
   ],
   "properties": {
@@ -31,6 +32,25 @@
     },
     "resolved_user_intent": {
       "type": "string"
+    },
+    "reference_resolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target"],
+      "properties": {
+        "target": {
+          "type": "string",
+          "enum": [
+            "none",
+            "current_action_result",
+            "current_turn_locator",
+            "comparison_result",
+            "unresolved_prior_object",
+            "missing_locator",
+            "ambiguous_locator"
+          ]
+        }
+      }
     },
     "output_contract": {
       "type": "object",
@@ -81,6 +101,7 @@
             "file_paths",
             "directory_purpose_summary",
             "content_excerpt_summary",
+            "content_presence_check",
             "excerpt_kind_judgment",
             "recent_artifacts_judgment",
             "workspace_project_summary",

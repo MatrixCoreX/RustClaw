@@ -156,13 +156,91 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
     }
 }
 
+pub(crate) fn inline_json_transform_request(prompt: &str) -> bool {
+    prompt_contains_inline_json_records(prompt) && prompt_has_transform_operation_surface(prompt)
+}
+
+pub(crate) fn package_manager_detection_request(prompt: &str) -> bool {
+    let lower = prompt.to_ascii_lowercase();
+    let mentions_package_manager = lower.contains("package manager")
+        || lower.contains("package-manager")
+        || lower.contains("pkg manager")
+        || lower.contains("pkg_manager")
+        || prompt.contains("包管理器");
+    if !mentions_package_manager {
+        return false;
+    }
+    if lower.contains("install")
+        || lower.contains("uninstall")
+        || prompt.contains("安装")
+        || prompt.contains("卸载")
+    {
+        return false;
+    }
+    lower.contains("detect")
+        || lower.contains("detected")
+        || lower.contains("available")
+        || lower.contains("installed")
+        || lower.contains("current")
+        || lower.contains("machine")
+        || lower.contains("which")
+        || lower.contains("what")
+        || prompt.contains("当前")
+        || prompt.contains("机器")
+        || prompt.contains("识别")
+        || prompt.contains("看看")
+        || prompt.contains("有哪些")
+        || prompt.contains("哪个")
+        || prompt.contains("用哪个")
+}
+
+fn prompt_contains_inline_json_records(prompt: &str) -> bool {
+    let Some(raw) = crate::extract_first_json_value_any(prompt) else {
+        return false;
+    };
+    serde_json::from_str::<serde_json::Value>(&raw)
+        .ok()
+        .and_then(|value| value.as_array().cloned())
+        .is_some_and(|items| !items.is_empty() && items.iter().any(serde_json::Value::is_object))
+}
+
+fn prompt_has_transform_operation_surface(prompt: &str) -> bool {
+    let lower = prompt.to_ascii_lowercase();
+    [
+        "sort",
+        "filter",
+        "dedup",
+        "deduplicate",
+        "project",
+        "group",
+        "aggregate",
+        "markdown table",
+        "md table",
+        "csv",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+        || [
+            "排序",
+            "筛选",
+            "过滤",
+            "去重",
+            "分组",
+            "聚合",
+            "投影",
+            "表格",
+            "从高到低",
+            "从低到高",
+        ]
+        .iter()
+        .any(|marker| prompt.contains(marker))
+}
+
 fn prompt_has_deictic_reference(prompt: &str) -> bool {
     let trimmed = prompt.trim();
     if trimmed.is_empty() {
         return false;
     }
-    // Grammar-level deictic markers only. This intentionally does not match
-    // task-specific target names such as README, archive, config, or logs.
     if [
         "那个", "这个", "那份", "这份", "那条", "这条", "那篇", "这篇", "那张", "这张",
     ]
@@ -174,7 +252,12 @@ fn prompt_has_deictic_reference(prompt: &str) -> bool {
     trimmed
         .split(|ch: char| !ch.is_ascii_alphanumeric())
         .map(|token| token.to_ascii_lowercase())
-        .any(|token| matches!(token.as_str(), "that" | "this" | "those" | "these"))
+        .any(|token| {
+            matches!(
+                token.as_str(),
+                "it" | "its" | "that" | "this" | "those" | "these"
+            )
+        })
 }
 
 fn classify_locator_hint_prompt_shape(
@@ -462,8 +545,8 @@ pub(crate) fn extract_field_selector_mentions(prompt: &str) -> Vec<String> {
 mod tests {
     use super::{
         analyze_prompt_surface, extract_dotted_field_selector, extract_field_selector_mentions,
-        prompt_contains_delivery_token_reference, InlineJsonShape, LocatorHintPromptShape,
-        LocatorReplyPromptShape,
+        package_manager_detection_request, prompt_contains_delivery_token_reference,
+        InlineJsonShape, LocatorHintPromptShape, LocatorReplyPromptShape,
     };
 
     #[test]
@@ -525,6 +608,19 @@ mod tests {
             signals.inline_json_shape,
             Some(InlineJsonShape::EmbeddedPayload)
         );
+    }
+
+    #[test]
+    fn detects_package_manager_detection_request() {
+        assert!(package_manager_detection_request(
+            "看看当前机器识别到的包管理器，再一句话说最可能日常会用哪个"
+        ));
+        assert!(package_manager_detection_request(
+            "Which package manager is available on this machine?"
+        ));
+        assert!(!package_manager_detection_request(
+            "Use the package manager to install jq"
+        ));
     }
 
     #[test]

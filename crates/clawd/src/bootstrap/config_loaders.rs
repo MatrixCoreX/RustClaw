@@ -29,7 +29,6 @@ pub(crate) fn load_command_intent_runtime(
     let rules_dir = workspace_root.join(cfg.rules_dir.trim());
     let mut all_result_suffixes = Vec::new();
     let mut execute_prefixes = Vec::new();
-    let mut negative_markers = Vec::new();
     for locale in ["zh-CN", "en-US"] {
         let path = rules_dir.join(format!("{locale}.toml"));
         match std::fs::read_to_string(&path) {
@@ -40,9 +39,6 @@ pub(crate) fn load_command_intent_runtime(
                     }
                     for value in rules.execute_prefixes {
                         push_unique_trimmed(&mut execute_prefixes, value);
-                    }
-                    for value in rules.negative_markers {
-                        push_unique_trimmed(&mut negative_markers, value);
                     }
                 }
                 Err(err) => {
@@ -64,7 +60,6 @@ pub(crate) fn load_command_intent_runtime(
     CommandIntentRuntime {
         all_result_suffixes,
         execute_prefixes,
-        negative_markers,
         default_locale,
         verify_enforce_enabled: cfg.verify_enforce_enabled,
     }

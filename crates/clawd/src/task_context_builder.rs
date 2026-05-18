@@ -39,6 +39,7 @@ pub(crate) struct ExecutionContextView {
     pub(crate) budget_tier: ExecutionContextBudgetTier,
     pub(crate) memory_ctx: PromptMemoryContext,
     pub(crate) runtime_context: String,
+    pub(crate) active_execution_anchor_context: String,
     pub(crate) session_alias_context: String,
     pub(crate) recent_turns_full: String,
     pub(crate) last_turn_full: String,
@@ -782,6 +783,7 @@ pub(crate) fn build_execution_task_context_bundle(
         budget_tier,
         memory_ctx,
         runtime_context: build_runtime_context(state),
+        active_execution_anchor_context: build_active_execution_anchor_context(&session_snapshot),
         session_alias_context: build_session_alias_context(&session_snapshot),
         recent_turns_full: if matches!(budget_tier, ExecutionContextBudgetTier::Full)
             && !suppress_execution_text_context
@@ -872,6 +874,14 @@ pub(crate) fn apply_execution_context_to_prompts(
         );
         resolved_prompt_for_execution.push_str(&alias_context_block);
         prompt_with_memory_for_execution.push_str(&alias_context_block);
+    }
+    if execution_view.active_execution_anchor_context != "<none>" {
+        let anchor_context_block = format!(
+            "\n\n{}\nActive ordered-entry rule: when the current request semantically selects an item by position or relative position from this active ordered list, use that exact listed entry under the bound target. Do not re-list, sort, or reinterpret the parent directory to choose a different item.",
+            execution_view.active_execution_anchor_context
+        );
+        resolved_prompt_for_execution.push_str(&anchor_context_block);
+        prompt_with_memory_for_execution.push_str(&anchor_context_block);
     }
     if execution_view.recent_turns_full != "<none>" {
         chat_prompt_context.push_str("\n\n");
@@ -1626,6 +1636,7 @@ mod tests {
                     recent_related_events: Vec::new(),
                 },
                 runtime_context: "<none>".to_string(),
+                active_execution_anchor_context: "<none>".to_string(),
                 session_alias_context: "<none>".to_string(),
                 recent_turns_full: "### RECENT_TURNS_FULL\n[TURN -2]\nUser: 请记住测试编号 client-like-continuous-1\nAssistant: 已记住\n[/TURN]".to_string(),
                 last_turn_full: "### LAST_TURN_FULL\n[TURN -1]\nUser: other\nAssistant: other\n[/TURN]".to_string(),
@@ -1667,6 +1678,7 @@ mod tests {
                     recent_related_events: Vec::new(),
                 },
                 runtime_context: "### RUNTIME_CONTEXT\ncurrent_process_cwd: /tmp/workspace\nworkspace_root: /tmp/workspace".to_string(),
+                active_execution_anchor_context: "<none>".to_string(),
                 session_alias_context: "<none>".to_string(),
                 recent_turns_full: "<none>".to_string(),
                 last_turn_full: "<none>".to_string(),
@@ -1709,6 +1721,7 @@ mod tests {
                     recent_related_events: Vec::new(),
                 },
                 runtime_context: "<none>".to_string(),
+                active_execution_anchor_context: "<none>".to_string(),
                 session_alias_context: "<none>".to_string(),
                 recent_turns_full: "<none>".to_string(),
                 last_turn_full: "<none>".to_string(),
@@ -1735,6 +1748,55 @@ mod tests {
     }
 
     #[test]
+    fn execution_context_adds_active_ordered_anchor_to_planner_prompts() {
+        let bundle = TaskContextBundle {
+            raw_sources: TaskContextRawSources::default(),
+            planner_view: PlannerContextView::default(),
+            route_view: None,
+            execution_view: Some(ExecutionContextView {
+                budget_tier: crate::task_context_builder::ExecutionContextBudgetTier::Light,
+                memory_ctx: crate::memory::service::PromptMemoryContext {
+                    prompt_with_memory: String::new(),
+                    chat_prompt_context: String::new(),
+                    long_term_summary: None,
+                    preferences: Vec::new(),
+                    recalled: Vec::new(),
+                    similar_triggers: Vec::new(),
+                    relevant_facts: Vec::new(),
+                    recent_related_events: Vec::new(),
+                },
+                runtime_context: "<none>".to_string(),
+                active_execution_anchor_context:
+                    "### ACTIVE_EXECUTION_ANCHOR\nfollowup_bound_target: /tmp/rustclaw/crates\nfollowup_ordered_entries: 1:claw-core | 2:clawcli | 3:clawd | 4:feishud | 5:larkd"
+                        .to_string(),
+                session_alias_context: "<none>".to_string(),
+                recent_turns_full: "<none>".to_string(),
+                last_turn_full: "<none>".to_string(),
+                recent_execution_anchor: "<none>".to_string(),
+                recent_execution_context: "<none>".to_string(),
+                image_context: None,
+            }),
+        };
+        let mut chat_context = "### MEMORY_CONTEXT\n<none>".to_string();
+        let mut resolved = "获取 crates 目录下最后一个条目的路径和类型".to_string();
+        let mut execution = resolved.clone();
+
+        apply_execution_context_to_prompts(
+            &bundle,
+            &mut chat_context,
+            &mut resolved,
+            &mut execution,
+        );
+
+        assert!(resolved.contains("### ACTIVE_EXECUTION_ANCHOR"));
+        assert!(resolved.contains("followup_ordered_entries"));
+        assert!(resolved.contains("5:larkd"));
+        assert!(resolved.contains("Do not re-list, sort, or reinterpret"));
+        assert!(execution.contains("followup_bound_target: /tmp/rustclaw/crates"));
+        assert!(!chat_context.contains("### ACTIVE_EXECUTION_ANCHOR"));
+    }
+
+    #[test]
     fn execution_context_adds_session_alias_bindings_to_planner_prompts() {
         let bundle = TaskContextBundle {
             raw_sources: TaskContextRawSources::default(),
@@ -1753,6 +1815,7 @@ mod tests {
                     recent_related_events: Vec::new(),
                 },
                 runtime_context: "<none>".to_string(),
+                active_execution_anchor_context: "<none>".to_string(),
                 session_alias_context:
                     "### SESSION_ALIAS_BINDINGS\n- alias: 甲目录\n  target: /tmp/docs/archive\n- alias: 乙文件\n  target: /tmp/docs/release_checklist.md"
                         .to_string(),

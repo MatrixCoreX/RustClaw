@@ -311,7 +311,21 @@ pub(crate) fn verify_output_contract(
         OutputSemanticKind::ExistenceWithPath => {
             verify_existence_with_path(contract, trimmed_candidate)
         }
-        OutputSemanticKind::ScalarPathOnly => verify_scalar_path_only(contract, trimmed_candidate),
+        OutputSemanticKind::ScalarPathOnly
+            if matches!(contract.response_shape, OutputResponseShape::Scalar) =>
+        {
+            verify_scalar_path_only(contract, trimmed_candidate)
+        }
+        OutputSemanticKind::ScalarPathOnly => {
+            if contains_path_or_locator(trimmed_candidate, &contract.locator_hint) {
+                OutputContractVerdict::Pass
+            } else {
+                OutputContractVerdict::Reject {
+                    reason: "scalar_path_only: non-scalar candidate does not contain a path or locator token"
+                        .to_string(),
+                }
+            }
+        }
         OutputSemanticKind::HiddenEntriesCheck => {
             verify_hidden_entries_check(contract, trimmed_candidate)
         }
@@ -428,6 +442,20 @@ mod tests {
         };
         let v = verify_output_contract(&contract, "我不知道在哪", "?");
         assert!(matches!(v, OutputContractVerdict::Reject { .. }));
+    }
+
+    #[test]
+    fn strict_scalar_path_semantic_preserves_path_metadata_answer() {
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Strict,
+            semantic_kind: OutputSemanticKind::ScalarPathOnly,
+            ..IntentOutputContract::default()
+        };
+
+        let v = verify_output_contract(&contract, "/tmp/hello.sh file", "?");
+
+        assert_eq!(v, OutputContractVerdict::Pass);
     }
 
     #[test]
