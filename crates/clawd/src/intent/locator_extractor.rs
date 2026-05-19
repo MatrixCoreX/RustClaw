@@ -115,7 +115,7 @@ pub(crate) fn candidate_looks_like_dotted_version_number(candidate: &str) -> boo
 }
 
 fn trim_fallback_locator_token(token: &str) -> String {
-    token
+    let mut trimmed = token
         .trim_matches(|ch: char| {
             matches!(
                 ch,
@@ -142,7 +142,17 @@ fn trim_fallback_locator_token(token: &str) -> String {
                     | '》'
             )
         })
-        .to_string()
+        .to_string();
+    let lower = trimmed.to_ascii_lowercase();
+    if trimmed.ends_with('.')
+        && (trimmed.contains('/')
+            || trimmed.contains('\\')
+            || lower.starts_with("http://")
+            || lower.starts_with("https://"))
+    {
+        trimmed.pop();
+    }
+    trimmed
 }
 
 #[cfg(test)]
@@ -164,6 +174,20 @@ mod tests {
             "scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
         );
         assert_eq!(out.reason, "explicit_path_locator");
+    }
+
+    #[test]
+    fn strips_terminal_sentence_period_from_path_locator() {
+        let out = extract_explicit_locator_for_fallback(
+            "Remember that the note file means scripts/nl_tests/fixtures/device_local/docs/service_notes.md.",
+        )
+        .expect("path locator should be extracted");
+
+        assert_eq!(out.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(
+            out.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+        );
     }
 
     #[test]

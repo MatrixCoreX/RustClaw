@@ -195,6 +195,10 @@
     "target_task_policy": {
       "type": "string",
       "enum": ["", "reuse_active", "replace_active", "pause_and_queue", "standalone"]
+    },
+    "state_patch": {
+      "type": ["object", "null"],
+      "description": "Optional structured runtime/session patch to preserve when repairing malformed normalizer output. For active-task corrections, may include required_content_literals, forbidden_visible_literals, and replacement_pairs [{\"from\":\"old literal\",\"to\":\"new literal\"}] as exact current-turn content literals; output-control wording belongs in the intent/output contract, not required_content_literals."
     }
   }
 }

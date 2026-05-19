@@ -84,6 +84,86 @@ fn normalize_alias_target(raw_target: &str) -> Option<String> {
         .or_else(|| Some(trimmed.to_string()))
 }
 
+fn normalize_explicit_alias_target(raw_target: &str) -> Option<String> {
+    let trimmed = raw_target
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | '“' | '”' | '‘' | '’'))
+        .trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(trimmed);
+    crate::intent::locator_extractor::extract_explicit_locator_for_fallback(trimmed)
+        .map(|locator| locator.locator_hint)
+        .or_else(|| surface.single_filename_candidate().map(ToString::to_string))
+}
+
+fn normalized_alias_surface_for_match(raw: &str) -> String {
+    let mut out = String::new();
+    let mut pending_space = false;
+    for ch in raw.trim().chars() {
+        let mapped = if matches!(ch, '_' | '-') { ' ' } else { ch };
+        if mapped.is_whitespace() {
+            pending_space = !out.is_empty();
+            continue;
+        }
+        if pending_space && !out.ends_with(' ') {
+            out.push(' ');
+        }
+        for lower in mapped.to_lowercase() {
+            out.push(lower);
+        }
+        pending_space = false;
+    }
+    out.trim().to_string()
+}
+
+pub(crate) fn alias_surface_matches_prompt(prompt: &str, alias: &str) -> bool {
+    let alias = normalized_alias_surface_for_match(alias);
+    if alias.is_empty() {
+        return false;
+    }
+    normalized_alias_surface_for_match(prompt).contains(&alias)
+}
+
+pub(crate) fn single_alias_binding_mentioned_in_prompt<'a>(
+    bindings: &'a [SessionAliasBinding],
+    prompt: &str,
+) -> Option<&'a SessionAliasBinding> {
+    let mut matches = alias_bindings_mentioned_in_prompt(bindings, prompt);
+    if matches.is_empty() {
+        return None;
+    }
+    let target = matches[0].target.trim();
+    if matches.len() == 1
+        || matches
+            .iter()
+            .all(|binding| binding.target.trim() == target)
+    {
+        matches.sort_by_key(|binding| {
+            std::cmp::Reverse(
+                normalized_alias_surface_for_match(&binding.alias)
+                    .chars()
+                    .count(),
+            )
+        });
+        return Some(matches.remove(0));
+    }
+    None
+}
+
+pub(crate) fn alias_bindings_mentioned_in_prompt<'a>(
+    bindings: &'a [SessionAliasBinding],
+    prompt: &str,
+) -> Vec<&'a SessionAliasBinding> {
+    let mut matches = bindings
+        .iter()
+        .filter(|binding| alias_surface_matches_prompt(prompt, &binding.alias))
+        .collect::<Vec<_>>();
+    matches.dedup_by(|left, right| left.alias == right.alias && left.target == right.target);
+    matches
+}
+
 pub(crate) fn session_alias_bindings_from_state_patch(
     state_patch: Option<&Value>,
 ) -> Vec<SessionAliasBinding> {
@@ -132,11 +212,20 @@ pub(crate) fn session_alias_bindings_from_state_patch(
         return out;
     };
     for (key, value) in obj {
-        let Some(alias) = compatibility_alias_key(key) else {
-            continue;
-        };
-        let Some(target) = compatibility_alias_target(value).and_then(normalize_alias_target)
-        else {
+        let alias_and_target = compatibility_alias_key(key)
+            .and_then(|alias| {
+                compatibility_alias_target(value)
+                    .and_then(normalize_alias_target)
+                    .map(|target| (alias, target))
+            })
+            .or_else(|| {
+                direct_alias_map_key(key).and_then(|alias| {
+                    compatibility_alias_target(value)
+                        .and_then(normalize_explicit_alias_target)
+                        .map(|target| (alias, target))
+                })
+            });
+        let Some((alias, target)) = alias_and_target else {
             continue;
         };
         if out
@@ -188,6 +277,10 @@ pub(crate) fn state_patch_is_alias_bindings_only(state_patch: &Value) -> bool {
                 && compatibility_alias_target(value)
                     .and_then(normalize_alias_target)
                     .is_some()
+                || direct_alias_map_key(key).is_some()
+                    && compatibility_alias_target(value)
+                        .and_then(normalize_explicit_alias_target)
+                        .is_some()
         })
 }
 
@@ -209,6 +302,35 @@ fn compatibility_alias_key(key: &str) -> Option<String> {
         .trim_matches(|ch: char| ch == '_' || ch == '-' || ch.is_whitespace())
         .trim();
     (!alias.is_empty()).then(|| alias.to_string())
+}
+
+fn direct_alias_map_key(key: &str) -> Option<String> {
+    let trimmed = key.trim();
+    if trimmed.is_empty() || state_patch_schema_key(trimmed) {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn state_patch_schema_key(key: &str) -> bool {
+    matches!(
+        key,
+        "alias_bindings"
+            | "active_task_boundary"
+            | "audience"
+            | "constraints"
+            | "deictic_reference"
+            | "deliverable"
+            | "filename_only"
+            | "format"
+            | "ordered_entry_ref"
+            | "ordered_entry_reference"
+            | "output_format"
+            | "primary_task_update"
+            | "quantity_comparison"
+            | "scope"
+            | "target"
+    )
 }
 
 fn compatibility_alias_target(value: &Value) -> Option<&str> {
@@ -253,18 +375,140 @@ fn merge_alias_bindings_for_turn(
     resolved_prompt_for_execution: &str,
 ) -> Vec<SessionAliasBinding> {
     let mut alias_bindings = merge_alias_bindings(prior_state, turn_analysis);
-    let Some(binding) =
-        structural_alias_binding_from_prompt(prompt, route_result, resolved_prompt_for_execution)
-    else {
-        return alias_bindings;
-    };
-    alias_bindings.retain(|existing| existing.alias != binding.alias);
-    alias_bindings.push(binding);
+    for binding in structural_alias_bindings_from_prompt(
+        prior_state,
+        prompt,
+        route_result,
+        resolved_prompt_for_execution,
+    ) {
+        alias_bindings.retain(|existing| existing.alias != binding.alias);
+        alias_bindings.push(binding);
+    }
     if alias_bindings.len() > MAX_SESSION_ALIAS_BINDINGS {
         let start = alias_bindings.len() - MAX_SESSION_ALIAS_BINDINGS;
         alias_bindings = alias_bindings.split_off(start);
     }
     alias_bindings
+}
+
+fn structural_alias_bindings_from_prompt(
+    prior_state: Option<&ConversationState>,
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    resolved_prompt_for_execution: &str,
+) -> Vec<SessionAliasBinding> {
+    let mut out = Vec::new();
+    if let Some(binding) =
+        structural_alias_binding_from_prompt(prompt, route_result, resolved_prompt_for_execution)
+    {
+        out.push(binding);
+    }
+    let rebinds = structural_alias_rebinds_from_prompt(prior_state, prompt);
+    if !rebinds.is_empty() {
+        out.extend(rebinds);
+    } else if route_result.should_refresh_long_term_memory {
+        out.extend(structural_alias_bindings_from_single_locator_prefix(prompt));
+    }
+    out
+}
+
+pub(crate) fn structural_alias_rebind_from_prompt(
+    prior_state: Option<&ConversationState>,
+    prompt: &str,
+) -> Option<SessionAliasBinding> {
+    structural_alias_rebinds_from_prompt(prior_state, prompt)
+        .into_iter()
+        .next()
+}
+
+pub(crate) fn structural_alias_rebinds_from_prompt(
+    prior_state: Option<&ConversationState>,
+    prompt: &str,
+) -> Vec<SessionAliasBinding> {
+    let Some(prior) = prior_state else {
+        return Vec::new();
+    };
+    let target = match single_current_prompt_locator_target(prompt) {
+        Some(target) if !target.trim().is_empty() => target,
+        _ => return Vec::new(),
+    };
+    let now_ts = crate::now_ts_u64();
+    alias_bindings_mentioned_in_prompt(&prior.alias_bindings, prompt)
+        .into_iter()
+        .filter(|existing| existing.target != target)
+        .map(|existing| SessionAliasBinding {
+            alias: existing.alias.clone(),
+            target: target.clone(),
+            updated_at_ts: now_ts,
+        })
+        .collect()
+}
+
+fn structural_alias_bindings_from_single_locator_prefix(prompt: &str) -> Vec<SessionAliasBinding> {
+    let Some((surface, target)) = single_current_prompt_locator_surface_and_target(prompt) else {
+        return Vec::new();
+    };
+    let Some(idx) = prompt.find(&surface) else {
+        return Vec::new();
+    };
+    let prefix = prompt[..idx].trim();
+    let aliases = alias_suffix_candidates_from_prefix(prefix);
+    let now_ts = crate::now_ts_u64();
+    aliases
+        .into_iter()
+        .map(|alias| SessionAliasBinding {
+            alias,
+            target: target.clone(),
+            updated_at_ts: now_ts,
+        })
+        .collect()
+}
+
+fn single_current_prompt_locator_target(prompt: &str) -> Option<String> {
+    single_current_prompt_locator_surface_and_target(prompt).map(|(_, target)| target)
+}
+
+fn single_current_prompt_locator_surface_and_target(prompt: &str) -> Option<(String, String)> {
+    let mut locators =
+        crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(prompt);
+    locators.dedup_by(|left, right| left.locator_hint == right.locator_hint);
+    if locators.len() != 1 {
+        return None;
+    }
+    let surface = locators.remove(0).locator_hint;
+    let target = normalize_alias_target(&surface)?;
+    Some((surface, target))
+}
+
+fn alias_suffix_candidates_from_prefix(prefix: &str) -> Vec<String> {
+    let tokens = prefix
+        .split_whitespace()
+        .map(|token| {
+            token
+                .trim_matches(|ch: char| {
+                    ch.is_ascii_punctuation()
+                        || matches!(ch, '，' | '。' | '；' | '：' | '“' | '”' | '‘' | '’')
+                })
+                .trim()
+        })
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    if tokens.len() < 3 {
+        return Vec::new();
+    }
+    let base = &tokens[..tokens.len() - 1];
+    let mut out = Vec::new();
+    for len in 2..=base.len().min(4) {
+        let candidate = base[base.len() - len..].join(" ");
+        if structural_alias_candidate_is_safe(&candidate)
+            && !out
+                .iter()
+                .any(|existing: &String| existing.eq_ignore_ascii_case(&candidate))
+        {
+            out.push(candidate);
+        }
+    }
+    out
 }
 
 pub(crate) fn structural_alias_binding_from_prompt(
@@ -2131,9 +2375,115 @@ mod tests {
     }
 
     #[test]
-    fn state_patch_rejects_unstructured_alias_like_map() {
+    fn alias_surface_match_accepts_user_defined_separator_variants() {
+        let bindings = vec![SessionAliasBinding {
+            alias: "note_file".to_string(),
+            target: "/tmp/release_checklist.md".to_string(),
+            updated_at_ts: 1,
+        }];
+
+        let matched = super::single_alias_binding_mentioned_in_prompt(
+            &bindings,
+            "What does the note file refer to?",
+        )
+        .expect("alias should match across separator variants");
+
+        assert_eq!(matched.target, "/tmp/release_checklist.md");
+    }
+
+    #[test]
+    fn memory_turn_with_single_locator_derives_short_alias_suffixes() {
+        let mut route = route_result_for_test(crate::AskMode::direct_answer(), false);
+        route.should_refresh_long_term_memory = true;
+        let merged = super::merge_alias_bindings_for_turn(
+            None,
+            None,
+            "Remember that the note file means scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only confirmed.",
+            &route,
+            "",
+        );
+
+        assert!(merged.iter().any(|binding| {
+            binding.alias == "note file"
+                && binding.target == "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+        }));
+    }
+
+    #[test]
+    fn current_locator_rebinds_existing_alias_without_language_phrase_table() {
+        let prior = ConversationState {
+            alias_bindings: vec![SessionAliasBinding {
+                alias: "note file".to_string(),
+                target: "scripts/nl_tests/fixtures/device_local/docs/service_notes.md".to_string(),
+                updated_at_ts: 1,
+            }],
+            ..ConversationState::default()
+        };
+
+        let binding = super::structural_alias_rebind_from_prompt(
+            Some(&prior),
+            "Correction: the note file now means scripts/nl_tests/fixtures/device_local/docs/release_checklist.md. Reply only updated.",
+        )
+        .expect("existing alias should rebind to the current locator");
+
+        assert_eq!(binding.alias, "note file");
+        assert_eq!(
+            binding.target,
+            "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+        );
+    }
+
+    #[test]
+    fn current_locator_rebinds_all_mentioned_alias_surfaces() {
+        let prior = ConversationState {
+            alias_bindings: vec![
+                SessionAliasBinding {
+                    alias: "note file".to_string(),
+                    target: "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+                        .to_string(),
+                    updated_at_ts: 1,
+                },
+                SessionAliasBinding {
+                    alias: "the note file".to_string(),
+                    target: "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+                        .to_string(),
+                    updated_at_ts: 1,
+                },
+            ],
+            ..ConversationState::default()
+        };
+
+        let bindings = super::structural_alias_rebinds_from_prompt(
+            Some(&prior),
+            "Correction: the note file now means scripts/nl_tests/fixtures/device_local/docs/release_checklist.md. Reply only updated.",
+        );
+
+        assert_eq!(bindings.len(), 2);
+        assert!(bindings.iter().all(|binding| {
+            binding.target == "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+        }));
+    }
+
+    #[test]
+    fn state_patch_accepts_path_like_direct_alias_map() {
         let patch = json!({
             "甲文件": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+        });
+
+        assert!(super::state_patch_is_alias_bindings_only(&patch));
+        let bindings = super::session_alias_bindings_from_state_patch(Some(&patch));
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].alias, "甲文件");
+        assert_eq!(
+            bindings[0].target,
+            "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+        );
+    }
+
+    #[test]
+    fn state_patch_rejects_non_locator_direct_alias_map() {
+        let patch = json!({
+            "甲文件": "the checklist from before"
         });
 
         assert!(!super::state_patch_is_alias_bindings_only(&patch));

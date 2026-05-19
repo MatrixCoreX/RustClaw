@@ -109,6 +109,61 @@ fn synthesize_direct_observed_fallback_answer(
     .filter(|answer| !answer.is_empty())
 }
 
+fn deterministic_scalar_markdown_heading_answer(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    let route = agent_run_context?.route_result.as_ref()?;
+    if route.output_contract.response_shape != OutputResponseShape::Scalar
+        || route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::FileNames
+                | crate::OutputSemanticKind::DirectoryNames
+                | crate::OutputSemanticKind::FilePaths
+                | crate::OutputSemanticKind::DirectoryEntryGroups
+                | crate::OutputSemanticKind::ScalarCount
+                | crate::OutputSemanticKind::RawCommandOutput
+        )
+    {
+        return None;
+    }
+    let output = loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok())
+        .filter_map(|step| step.output.as_deref())
+        .find(|output| {
+            output.contains("\"read_range\"") || output.contains("\"read_text_range\"")
+        })?;
+    markdown_heading_from_read_output(output)
+}
+
+fn markdown_heading_from_read_output(output: &str) -> Option<String> {
+    let value = serde_json::from_str::<Value>(output.trim()).ok()?;
+    let text = value
+        .get("content")
+        .or_else(|| value.get("excerpt"))
+        .and_then(Value::as_str)?;
+    text.lines().find_map(markdown_heading_from_line)
+}
+
+fn markdown_heading_from_line(line: &str) -> Option<String> {
+    let mut trimmed = line.trim();
+    if let Some((prefix, rest)) = trimmed.split_once('|') {
+        if !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit()) {
+            trimmed = rest.trim();
+        }
+    }
+    let hashes = trimmed.chars().take_while(|ch| *ch == '#').count();
+    if !(1..=6).contains(&hashes) {
+        return None;
+    }
+    let rest = trimmed.get(hashes..)?.trim();
+    (!rest.is_empty()).then(|| rest.to_string())
+}
+
 fn synthesize_user_language_source<'a>(
     user_text: &'a str,
     agent_run_context: Option<&'a AgentRunContext>,
@@ -657,10 +712,10 @@ mod tests {
 
     use super::{
         classify_skill_failure_recovery, deterministic_observed_execution_status_answer,
-        strip_internal_execution_args, synthesize_answer_allows_direct_fallback,
-        synthesize_direct_observed_fallback_answer, synthesize_failure_observed_facts,
-        synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
-        unresolved_file_token_delivery_artifact,
+        deterministic_scalar_markdown_heading_answer, strip_internal_execution_args,
+        synthesize_answer_allows_direct_fallback, synthesize_direct_observed_fallback_answer,
+        synthesize_failure_observed_facts, synthesize_failure_should_replan,
+        synthesize_route_allows_direct_fallback, unresolved_file_token_delivery_artifact,
     };
     use crate::agent_engine::{AgentRunContext, LoopState};
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
@@ -1508,6 +1563,59 @@ mod tests {
     }
 
     #[test]
+    fn deterministic_scalar_markdown_heading_uses_structural_read_evidence() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_basic",
+            r##"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"/tmp/release_checklist.md"}"##,
+        ));
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: "extract one scalar from a markdown file".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "scalar markdown heading".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: "/tmp/release_checklist.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let ctx = AgentRunContext {
+            route_result: Some(route.clone()),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            deterministic_scalar_markdown_heading_answer(&loop_state, Some(&ctx)).as_deref(),
+            Some("Release Checklist")
+        );
+
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        let ctx = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+        assert!(deterministic_scalar_markdown_heading_answer(&loop_state, Some(&ctx)).is_none());
+    }
+
+    #[test]
     fn synthesize_route_allows_direct_fallback_for_plain_act_observed_read() {
         let route = crate::RouteResult {
             ask_mode: crate::AskMode::planner_execute_plain(),
@@ -2268,6 +2376,11 @@ pub(super) async fn handle_synthesize_answer_action(
                 synthesize_user_language_source(user_text, agent_run_context),
                 loop_state,
             ) {
+                return Ok(answer);
+            }
+            if let Some(answer) =
+                deterministic_scalar_markdown_heading_answer(loop_state, agent_run_context)
+            {
                 return Ok(answer);
             }
             let requires_synthesized_delivery = agent_run_context

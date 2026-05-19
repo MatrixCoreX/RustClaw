@@ -415,6 +415,17 @@ fn route_requests_scalar_path_only(route: &crate::RouteResult) -> bool {
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
 }
 
+fn route_allows_path_batch_scalar_path_observed_answer(route: &crate::RouteResult) -> bool {
+    route_requests_scalar_path_only(route)
+        && !route.output_contract.requires_content_evidence
+        && !route
+            .route_reason
+            .contains("execution_required_read_file_extract_scalar")
+        && !route
+            .route_reason
+            .contains("request_requires_fresh_file_observation_to_extract_title")
+}
+
 fn recent_file_path_candidate_for_scalar_path(
     loop_state: &LoopState,
     route: Option<&crate::RouteResult>,
@@ -483,6 +494,9 @@ fn route_scalar_has_plain_path_terminal_respond(
     loop_state: &LoopState,
 ) -> bool {
     route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+        && route.output_contract.locator_kind == crate::OutputLocatorKind::Path
+        && !route.output_contract.delivery_required
         && loop_state
             .last_user_visible_respond
             .as_deref()
@@ -4708,7 +4722,7 @@ fn extract_direct_answer_from_generic_output_impl(
                         }
                     } else if action == Some("path_batch_facts")
                         && route.is_some_and(|route| {
-                            route_requests_scalar_path_only(route)
+                            route_allows_path_batch_scalar_path_observed_answer(route)
                                 || route_scalar_has_plain_path_terminal_respond(route, loop_state)
                         })
                     {
@@ -5460,7 +5474,8 @@ mod tests {
         observed_output_entries, observed_request_language_hint, observed_response_style_hint,
         recent_generated_output_from_user_request,
         replace_internal_missing_sentinel_with_structured_observation,
-        route_observation_facts_entry, route_requires_synthesized_delivery,
+        route_allows_path_batch_scalar_path_observed_answer, route_observation_facts_entry,
+        route_requests_scalar_path_only, route_requires_synthesized_delivery,
         scalar_count_diagnostic_line_for_answer, scalar_route_prefers_structured_observed_answer,
         structured_observed_body, AgentRunContext, OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
     };
@@ -5562,6 +5577,19 @@ mod tests {
                 self_extension: crate::SelfExtensionContract::default(),
             },
         }
+    }
+
+    #[test]
+    fn scalar_path_observed_route_rejects_content_evidence_contract() {
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+        route.output_contract.requires_content_evidence = true;
+
+        assert!(route_requests_scalar_path_only(&route));
+        assert!(!route_allows_path_batch_scalar_path_observed_answer(&route));
+
+        route.output_contract.requires_content_evidence = false;
+        assert!(route_allows_path_batch_scalar_path_observed_answer(&route));
     }
 
     #[test]

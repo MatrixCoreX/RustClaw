@@ -1187,6 +1187,13 @@ fn observation_only_plan_can_finalize_from_direct_output(
     route_result: Option<&RouteResult>,
     actions: &[AgentAction],
 ) -> bool {
+    if route_result.is_some_and(|route| {
+        route.output_contract.requires_content_evidence
+            && route_expects_terminal_user_answer(route)
+            && structured_scalar_observation_units(actions) > 1
+    }) {
+        return false;
+    }
     last_executable_action(actions)
         .is_some_and(|action| action_supports_direct_observed_finalize(state, route_result, action))
 }
@@ -2131,6 +2138,91 @@ fn scalar_path_auto_locator_observation_plan(
     }])
 }
 
+fn route_requires_scalar_content_observation(route: &RouteResult) -> bool {
+    route.output_contract.requires_content_evidence
+        || route
+            .route_reason
+            .contains("execution_required_read_file_extract_scalar")
+        || route
+            .route_reason
+            .contains("request_requires_fresh_file_observation_to_extract_title")
+}
+
+fn scalar_content_auto_locator_observation_plan(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<Vec<AgentAction>> {
+    let route = route_result?;
+    if route.needs_clarify
+        || !route_requires_scalar_content_observation(route)
+        || route.output_contract.delivery_required
+        || !matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
+        )
+        || matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::RawCommandOutput
+                | crate::OutputSemanticKind::ScalarPathOnly
+                | crate::OutputSemanticKind::ScalarCount
+                | crate::OutputSemanticKind::FileNames
+                | crate::OutputSemanticKind::DirectoryNames
+                | crate::OutputSemanticKind::FilePaths
+                | crate::OutputSemanticKind::DirectoryEntryGroups
+        )
+    {
+        return None;
+    }
+    let path = auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (!hint.is_empty()).then_some(hint)
+        })?;
+    if !Path::new(path).is_file() {
+        return None;
+    }
+    Some(vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "read_text_range",
+                "path": path,
+                "mode": "head",
+                "n": 120
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ])
+}
+
+fn scalar_content_auto_locator_deterministic_plan_result(
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
+        return None;
+    }
+    let actions = scalar_content_auto_locator_observation_plan(route_result, auto_locator_path)?;
+    let actions = canonicalize_legacy_file_config_capabilities(actions);
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
 fn generic_directory_auto_locator_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
@@ -2202,6 +2294,62 @@ fn scalar_path_auto_locator_deterministic_plan_result(
         return None;
     }
     let actions = scalar_path_auto_locator_observation_plan(route_result, auto_locator_path)?;
+    let actions = canonicalize_legacy_file_config_capabilities(actions);
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn scalar_path_directory_locator_search_observation_plan(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+    current_user_text: &str,
+) -> Option<Vec<AgentAction>> {
+    let route = route_result?;
+    if route.needs_clarify
+        || route.output_contract.delivery_required
+        || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarPathOnly
+    {
+        return None;
+    }
+    let root = route_directory_locator_path(route, auto_locator_path)?;
+    if !Path::new(&root).is_dir() {
+        return None;
+    }
+    let target = single_name_target_for_directory_locator(route, current_user_text)?;
+    Some(vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "find_entries",
+            "root": root,
+            "pattern": target,
+            "target_kind": "any",
+            "max_results": 50,
+        }),
+    }])
+}
+
+fn scalar_path_directory_locator_search_deterministic_plan_result(
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+    current_user_text: &str,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
+        return None;
+    }
+    let actions = scalar_path_directory_locator_search_observation_plan(
+        route_result,
+        auto_locator_path,
+        current_user_text,
+    )?;
     let actions = canonicalize_legacy_file_config_capabilities(actions);
     let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
@@ -2363,6 +2511,138 @@ fn single_filename_target_for_directory_locator(
     }
     let filenames = crate::delivery_utils::extract_filename_candidates(&route.resolved_intent);
     (filenames.len() == 1).then(|| filenames[0].clone())
+}
+
+fn search_name_target_token_is_safe(candidate: &str) -> bool {
+    let trimmed = candidate.trim().trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\''
+                | '`'
+                | ','
+                | '，'
+                | '。'
+                | ':'
+                | '：'
+                | ';'
+                | '；'
+                | '('
+                | ')'
+                | '（'
+                | '）'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | '《'
+                | '》'
+        )
+    });
+    if trimmed.is_empty()
+        || trimmed.len() > 128
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || crate::worker::has_explicit_path_or_url_locator_hint(trimmed)
+        || crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(trimmed)
+    {
+        return false;
+    }
+    let mut has_ascii_alnum = false;
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() {
+            has_ascii_alnum = true;
+            continue;
+        }
+        if !matches!(ch, '_' | '-' | '.') {
+            return false;
+        }
+    }
+    has_ascii_alnum
+}
+
+fn push_unique_search_name_candidate(values: &mut Vec<String>, candidate: &str) {
+    let trimmed = candidate.trim().trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\''
+                | '`'
+                | ','
+                | '，'
+                | '。'
+                | ':'
+                | '：'
+                | ';'
+                | '；'
+                | '('
+                | ')'
+                | '（'
+                | '）'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | '《'
+                | '》'
+        )
+    });
+    if search_name_target_token_is_safe(trimmed)
+        && !values
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+    {
+        values.push(trimmed.to_string());
+    }
+}
+
+fn single_quoted_search_name_target(text: &str) -> Option<String> {
+    static QUOTED_RE: OnceLock<Regex> = OnceLock::new();
+    let re = QUOTED_RE.get_or_init(|| {
+        Regex::new(r#""([^"\n]+)"|'([^'\n]+)'|`([^`\n]+)`"#).expect("quoted search name regex")
+    });
+    let mut candidates = Vec::new();
+    for caps in re.captures_iter(text) {
+        let candidate = caps
+            .get(1)
+            .or_else(|| caps.get(2))
+            .or_else(|| caps.get(3))
+            .map(|m| m.as_str())
+            .unwrap_or_default();
+        push_unique_search_name_candidate(&mut candidates, candidate);
+    }
+    (candidates.len() == 1).then(|| candidates.remove(0))
+}
+
+fn single_identifier_search_name_target_outside_locators(text: &str) -> Option<String> {
+    let mut remaining = text.to_string();
+    for locator in
+        crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(text)
+    {
+        remaining = remaining.replace(&locator.locator_hint, " ");
+    }
+    for filename in crate::delivery_utils::extract_filename_candidates(text) {
+        remaining = remaining.replace(&filename, " ");
+    }
+    let mut candidates = Vec::new();
+    for token in
+        remaining.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')))
+    {
+        push_unique_search_name_candidate(&mut candidates, token);
+    }
+    (candidates.len() == 1).then(|| candidates.remove(0))
+}
+
+fn single_name_target_for_directory_locator(
+    route: &RouteResult,
+    current_user_text: &str,
+) -> Option<String> {
+    single_filename_target_for_directory_locator(route, current_user_text)
+        .or_else(|| single_quoted_search_name_target(current_user_text))
+        .or_else(|| single_quoted_search_name_target(&route.resolved_intent))
+        .or_else(|| single_identifier_search_name_target_outside_locators(current_user_text))
 }
 
 fn existence_with_path_locator_deterministic_plan_result(
@@ -3598,10 +3878,154 @@ fn explicit_command_followup_tail(tail: &str) -> Option<&str> {
     Some(tail[boundary + delimiter_len..].trim())
 }
 
+fn whole_explicit_command_tail(tail: &str) -> Option<&str> {
+    let tail = trim_leading_command_separators_preserve_quotes(tail).trim();
+    if tail.is_empty() || tail.contains('\n') {
+        return None;
+    }
+    if tail
+        .chars()
+        .any(|ch| matches!(ch, '|' | ';' | '&' | '>' | '<'))
+    {
+        return Some(tail);
+    }
+    let mut tokens = tail.split_whitespace();
+    let first = tokens.next()?;
+    if tokens.clone().next().is_none() {
+        return Some(first);
+    }
+    tokens
+        .all(structural_command_argument_token)
+        .then_some(tail)
+}
+
+fn markdown_code_span_command_segment(text: &str) -> Option<&str> {
+    let text = text.trim();
+    let rest = text.strip_prefix('`')?;
+    let close = rest.find('`')?;
+    let command = rest[..close].trim();
+    if command.is_empty() {
+        return None;
+    }
+    let suffix = rest[close + '`'.len_utf8()..].trim();
+    if suffix.chars().all(|ch| {
+        matches!(
+            ch,
+            '.' | '。' | '!' | '！' | '?' | '？' | ',' | '，' | ';' | '；'
+        )
+    }) {
+        Some(command)
+    } else {
+        None
+    }
+}
+
+fn structural_command_argument_token(token: &str) -> bool {
+    let token = token.trim_matches(|ch: char| {
+        ch.is_ascii_punctuation() && !matches!(ch, '-' | '_' | '.' | '/' | '\\' | '~' | '=')
+    });
+    if token.is_empty() {
+        return false;
+    }
+    let quoted = (token.starts_with('"') && token.ends_with('"'))
+        || (token.starts_with('\'') && token.ends_with('\''));
+    let flag = token.starts_with('-') && token.chars().any(|ch| ch.is_ascii_alphanumeric());
+    let path_like = token.starts_with('/')
+        || token.starts_with("./")
+        || token.starts_with("../")
+        || token.starts_with("~/")
+        || token.contains('/')
+        || token.contains('\\')
+        || token.contains('.');
+    let assignment = token
+        .split_once('=')
+        .is_some_and(|(name, value)| !name.is_empty() && !value.is_empty());
+    quoted || flag || path_like || assignment
+}
+
+fn configured_standalone_command_token(runtime: &crate::CommandIntentRuntime, token: &str) -> bool {
+    runtime.standalone_commands.iter().any(|candidate| {
+        if candidate.is_ascii() && token.is_ascii() {
+            candidate.eq_ignore_ascii_case(token)
+        } else {
+            candidate == token
+        }
+    })
+}
+
+fn standalone_command_segment_before_freeform_tail<'a>(
+    runtime: &crate::CommandIntentRuntime,
+    tail: &'a str,
+) -> Option<&'a str> {
+    let tail = trim_leading_command_separators_preserve_quotes(tail).trim();
+    if tail.is_empty() || tail.contains('\n') {
+        return None;
+    }
+
+    let mut tokens = tail.split_whitespace();
+    let first = tokens.next()?;
+    let first_start = tail.find(first)?;
+    let first_end = first_start + first.len();
+    let first_token =
+        first.trim_matches(|ch: char| ch.is_ascii_punctuation() && !matches!(ch, '_' | '-' | '.'));
+    if !simple_bare_command_token(first_token)
+        || !configured_standalone_command_token(runtime, first_token)
+    {
+        return None;
+    }
+    let mut end = first_end;
+    let mut search_from = first_end;
+
+    for raw_token in tokens {
+        let token_start = tail[search_from..].find(raw_token)? + search_from;
+        let token_end = token_start + raw_token.len();
+        if structural_command_argument_token(raw_token) {
+            end = token_end;
+            search_from = token_end;
+            continue;
+        }
+        return Some(tail[..end].trim());
+    }
+
+    None
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ExplicitCommandCandidate {
     command: String,
     single_step_safe: bool,
+}
+
+fn configured_explicit_command_candidate_from_text(
+    runtime: &crate::CommandIntentRuntime,
+    text: &str,
+    allow_whole_tail: bool,
+) -> Option<ExplicitCommandCandidate> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    runtime
+        .execute_prefixes
+        .iter()
+        .filter_map(|prefix| strip_configured_command_prefix(text, prefix))
+        .filter_map(|tail| {
+            let segment = explicit_command_segment_before_followup(tail).or_else(|| {
+                allow_whole_tail.then(|| {
+                    markdown_code_span_command_segment(tail)
+                        .or_else(|| whole_explicit_command_tail(tail))
+                        .or_else(|| standalone_command_segment_before_freeform_tail(runtime, tail))
+                })?
+            })?;
+            let segment = markdown_code_span_command_segment(segment).unwrap_or(segment);
+            let command = crate::bootstrap::config_loaders::trim_command_text(segment.to_string());
+            looks_like_concrete_command_tail(&command).then(|| ExplicitCommandCandidate {
+                command,
+                single_step_safe: explicit_command_followup_tail(tail)
+                    .map_or(true, |followup| followup.is_empty()),
+            })
+        })
+        .next()
 }
 
 fn configured_explicit_command_candidate(
@@ -3612,20 +4036,14 @@ fn configured_explicit_command_candidate(
     if request.is_empty() {
         return None;
     }
-    runtime
-        .execute_prefixes
-        .iter()
-        .filter_map(|prefix| strip_configured_command_prefix(request, prefix))
-        .filter_map(|tail| {
-            let segment = explicit_command_segment_before_followup(tail)?;
-            let command = crate::bootstrap::config_loaders::trim_command_text(segment.to_string());
-            looks_like_concrete_command_tail(&command).then(|| ExplicitCommandCandidate {
-                command,
-                single_step_safe: explicit_command_followup_tail(tail)
-                    .map_or(true, |followup| followup.is_empty()),
+    configured_explicit_command_candidate_from_text(runtime, request, true).or_else(|| {
+        request
+            .split(|ch| matches!(ch, ',' | '，' | ';' | '；' | '。' | '\n'))
+            .filter_map(|clause| {
+                configured_explicit_command_candidate_from_text(runtime, clause, true)
             })
-        })
-        .next()
+            .next()
+    })
 }
 
 fn configured_explicit_command_segment(
@@ -3709,12 +4127,67 @@ fn shellish_literal_command_segment(request: &str) -> Option<String> {
         })
 }
 
+fn simple_bare_command_token(token: &str) -> bool {
+    !token.is_empty()
+        && !token.starts_with('-')
+        && token
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+        && token.chars().any(|ch| ch.is_ascii_alphabetic())
+        && token
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric())
+            .count()
+            >= 2
+}
+
+fn command_token_resolves_in_path(token: &str, path_env: Option<&std::ffi::OsStr>) -> bool {
+    let Some(path_env) = path_env else {
+        return false;
+    };
+    std::env::split_paths(path_env).any(|dir| dir.join(token).is_file())
+}
+
+fn leading_shellish_command_sequence_segment_with_path_env(
+    request: &str,
+    path_env: Option<&std::ffi::OsStr>,
+) -> Option<String> {
+    let request = request.trim_start();
+    if request.is_empty() {
+        return None;
+    }
+    let ascii_end = request
+        .char_indices()
+        .find_map(|(idx, ch)| (!ch.is_ascii()).then_some(idx))
+        .unwrap_or(request.len());
+    let ascii_prefix = request[..ascii_end].trim();
+    if ascii_prefix.is_empty() {
+        return None;
+    }
+    let mut commands = Vec::new();
+    for raw_token in ascii_prefix.split_whitespace() {
+        let token = raw_token
+            .trim_matches(|ch: char| ch.is_ascii_punctuation() && !matches!(ch, '_' | '-' | '.'));
+        if !simple_bare_command_token(token) || !command_token_resolves_in_path(token, path_env) {
+            break;
+        }
+        commands.push(token.to_string());
+    }
+    (commands.len() >= 3).then(|| commands.join("; "))
+}
+
+fn leading_shellish_command_sequence_segment(request: &str) -> Option<String> {
+    let path_env = std::env::var_os("PATH");
+    leading_shellish_command_sequence_segment_with_path_env(request, path_env.as_deref())
+}
+
 pub(super) fn explicit_command_segment(
     runtime: &crate::CommandIntentRuntime,
     request: &str,
 ) -> Option<String> {
     configured_explicit_command_segment(runtime, request)
         .or_else(|| shellish_literal_command_segment(request))
+        .or_else(|| leading_shellish_command_sequence_segment(request))
 }
 
 fn explicit_command_single_step_segment(
@@ -3725,6 +4198,7 @@ fn explicit_command_single_step_segment(
         return candidate.single_step_safe.then_some(candidate.command);
     }
     shellish_literal_command_segment(request)
+        .or_else(|| leading_shellish_command_sequence_segment(request))
 }
 
 fn route_allows_explicit_command_preservation(route_result: Option<&RouteResult>) -> bool {
@@ -11331,6 +11805,31 @@ pub(super) async fn plan_round_actions(
         }
     }
     if !explicit_command_request {
+        if let Some(plan_result) = scalar_path_directory_locator_search_deterministic_plan_result(
+            goal,
+            route_result,
+            loop_state,
+            auto_locator_path,
+            &original_user_text_for_policy,
+        ) {
+            info!(
+                "plan_deterministic_scalar_path_directory_locator_search task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
+        if let Some(plan_result) = scalar_content_auto_locator_deterministic_plan_result(
+            goal,
+            route_result,
+            loop_state,
+            auto_locator_path,
+        ) {
+            info!(
+                "plan_deterministic_scalar_content_auto_locator task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
         if let Some(plan_result) = scalar_path_auto_locator_deterministic_plan_result(
             goal,
             route_result,
@@ -11538,6 +12037,31 @@ pub(super) async fn plan_round_actions(
     );
     let parsed_actions = parse_single_plan_actions(&plan_raw, state, task).await;
     let initial_actions = parsed_actions
+        .or_else(|| {
+            let fallback = scalar_path_directory_locator_search_observation_plan(
+                route_result,
+                auto_locator_path,
+                &original_user_text_for_policy,
+            );
+            if fallback.is_some() {
+                warn!(
+                    "plan_parse_failed_using_scalar_path_directory_locator_search_plan task_id={} round={}",
+                    task.task_id, loop_state.round_no
+                );
+            }
+            fallback
+        })
+        .or_else(|| {
+            let fallback =
+                scalar_content_auto_locator_observation_plan(route_result, auto_locator_path);
+            if fallback.is_some() {
+                warn!(
+                    "plan_parse_failed_using_scalar_content_auto_locator_plan task_id={} round={}",
+                    task.task_id, loop_state.round_no
+                );
+            }
+            fallback
+        })
         .or_else(|| {
             let fallback =
                 scalar_path_auto_locator_observation_plan(route_result, auto_locator_path);
@@ -11880,9 +12404,11 @@ mod tests {
         rewrite_terminal_placeholder_respond_to_synthesize_answer,
         rewrite_terminal_synthesis_placeholder_respond,
         rewrite_unresolved_template_arg_multi_file_read_plan, round1_prompt_spec_for_class,
+        scalar_content_auto_locator_deterministic_plan_result,
         scalar_path_auto_locator_deterministic_plan_result,
-        scalar_path_auto_locator_observation_plan, should_force_actionable_plan_repair,
-        strip_directory_read_range_after_inventory_dir,
+        scalar_path_auto_locator_observation_plan,
+        scalar_path_directory_locator_search_deterministic_plan_result,
+        should_force_actionable_plan_repair, strip_directory_read_range_after_inventory_dir,
         strip_file_lines_count_before_tail_read_range,
         strip_intermediate_synthesize_before_later_execution,
         strip_terminal_discussion_for_direct_skill_passthrough,
@@ -16183,6 +16709,89 @@ version = "0.1.7"
     }
 
     #[test]
+    fn explicit_configured_command_inside_clause_is_detected() {
+        let mut state = test_state_with_enabled_skills(&["run_cmd"]);
+        state.policy.command_intent.execute_prefixes =
+            vec!["请执行".to_string(), "执行".to_string()];
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+        route.output_contract.requires_content_evidence = true;
+        let loop_state = LoopState::new(1);
+        let request = "先别管方案，请执行 pwd，只输出命令结果。";
+
+        assert_eq!(
+            super::explicit_command_segment(&state.policy.command_intent, request).as_deref(),
+            Some("pwd")
+        );
+        let plan = explicit_command_deterministic_plan_result(
+            &state,
+            "run explicit command",
+            Some(&route),
+            &loop_state,
+            request,
+        )
+        .expect("configured command in a later clause should produce run_cmd plan");
+
+        assert_eq!(plan.steps.len(), 1);
+        assert_eq!(plan.steps[0].skill, "run_cmd");
+        assert_eq!(
+            plan.steps[0].args.get("command").and_then(Value::as_str),
+            Some("pwd")
+        );
+    }
+
+    #[test]
+    fn leading_shellish_command_sequence_uses_path_commands() {
+        let root = TempDirGuard::new("leading_shellish_command_sequence");
+        for command in ["pwd", "whoami", "hostname"] {
+            fs::write(root.path.join(command), "").expect("write command marker");
+        }
+
+        assert_eq!(
+            super::leading_shellish_command_sequence_segment_with_path_env(
+                "pwd whoami hostname 三个结果每个一行",
+                Some(root.path.as_os_str()),
+            )
+            .as_deref(),
+            Some("pwd; whoami; hostname")
+        );
+    }
+
+    #[test]
+    fn leading_shellish_command_sequence_rejects_plain_status_words() {
+        let root = TempDirGuard::new("leading_shellish_command_sequence_reject_status");
+        for command in ["pwd", "whoami", "hostname"] {
+            fs::write(root.path.join(command), "").expect("write command marker");
+        }
+
+        assert!(
+            super::leading_shellish_command_sequence_segment_with_path_env(
+                "show status",
+                Some(root.path.as_os_str()),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn leading_shellish_command_sequence_rejects_command_with_argument_shape() {
+        let root = TempDirGuard::new("leading_shellish_command_sequence_reject_arg");
+        fs::write(root.path.join("ls"), "").expect("write command marker");
+
+        assert!(
+            super::leading_shellish_command_sequence_segment_with_path_env(
+                "ls scripts 结果每行一个",
+                Some(root.path.as_os_str()),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
     fn explicit_prefixed_shellish_code_span_keeps_single_step_fast_path() {
         let mut state = test_state_with_enabled_skills(&["run_cmd"]);
         state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
@@ -16566,6 +17175,52 @@ version = "0.1.7"
             Some(&root_path),
         )
         .is_none());
+    }
+
+    #[test]
+    fn scalar_path_directory_locator_search_uses_structural_name_target() {
+        let root = TempDirGuard::new("scalar_auto_locator_search_target");
+        fs::write(root.path.join("ABCD.txt"), "hello").expect("write report");
+        let root_path = root.path.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = root_path.clone();
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let plan = scalar_path_directory_locator_search_deterministic_plan_result(
+            "find a named item inside the resolved directory",
+            Some(&route),
+            &loop_state,
+            Some(&root_path),
+            &format!("去 {root_path} 找 abcd，只输出路径"),
+        )
+        .expect("directory-scoped scalar path lookup should not need LLM planning");
+
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        assert_eq!(plan.steps.len(), 1);
+        match &plan.steps[0].to_agent_action() {
+            Some(AgentAction::CallTool { tool, args }) => {
+                assert_eq!(tool, "fs_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("find_entries")
+                );
+                assert_eq!(
+                    args.get("root").and_then(Value::as_str),
+                    Some(root_path.as_str())
+                );
+                assert_eq!(args.get("pattern").and_then(Value::as_str), Some("abcd"));
+                assert_eq!(args.get("target_kind").and_then(Value::as_str), Some("any"));
+            }
+            other => panic!("expected fs_basic find_entries action, got {other:?}"),
+        }
     }
 
     #[test]
@@ -17050,6 +17705,71 @@ version = "0.1.7"
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn scalar_content_auto_locator_does_not_read_path_only_contract() {
+        let root = TempDirGuard::new("scalar_content_auto_locator");
+        let note = root.path.join("service_notes.md");
+        fs::write(&note, "# Reading Notes\n\nService status is healthy.").expect("write note");
+        let note_path = note.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        assert!(scalar_content_auto_locator_deterministic_plan_result(
+            "extract scalar from resolved file content",
+            Some(&route),
+            &loop_state,
+            Some(&note_path),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn scalar_content_auto_locator_reads_generic_scalar_content_contract() {
+        let root = TempDirGuard::new("scalar_content_auto_locator_generic");
+        let note = root.path.join("service_notes.md");
+        fs::write(&note, "# Reading Notes\n\nService status is healthy.").expect("write note");
+        let note_path = note.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let plan = scalar_content_auto_locator_deterministic_plan_result(
+            "extract scalar from resolved file content",
+            Some(&route),
+            &loop_state,
+            Some(&note_path),
+        )
+        .expect("generic content-evidence scalar contracts should read the resolved file");
+
+        assert_eq!(plan.steps.len(), 3);
+        assert!(matches!(
+            plan.steps[0].to_agent_action(),
+            Some(AgentAction::CallTool { ref tool, ref args })
+                if tool == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("read_text_range")
+                    && args.get("path").and_then(Value::as_str) == Some(note_path.as_str())
+        ));
+        assert!(matches!(
+            plan.steps[1].to_agent_action(),
+            Some(AgentAction::SynthesizeAnswer { .. })
+        ));
     }
 
     #[test]
@@ -18110,6 +18830,120 @@ version = "0.1.7"
             AgentAction::CallSkill { skill, args }
                 if skill == "run_cmd"
                     && args.get("command").and_then(Value::as_str) == Some("ls scripts")
+        ));
+    }
+
+    #[test]
+    fn explicit_command_extracts_configured_standalone_command_before_freeform_tail() {
+        let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
+        state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
+        state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
+
+        assert_eq!(
+            super::explicit_command_segment(
+                &state.policy.command_intent,
+                "Run pwd and output only the raw result."
+            )
+            .as_deref(),
+            Some("pwd")
+        );
+        assert_eq!(
+            super::explicit_command_segment(
+                &state.policy.command_intent,
+                "Run cargo test and output only the raw result."
+            )
+            .as_deref(),
+            None
+        );
+    }
+
+    #[test]
+    fn explicit_command_rewrite_preserves_configured_standalone_command_before_freeform_tail() {
+        let mut state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
+        state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
+        state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+        route.output_contract.locator_kind = OutputLocatorKind::None;
+        let loop_state = LoopState::new(1);
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "inventory_dir",
+                "path": "/workspace",
+                "names_only": true,
+            }),
+        }];
+
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "Get current working directory path",
+            Some("Run pwd and output only the raw result."),
+            None,
+            actions,
+        );
+
+        assert!(matches!(
+            &normalized[0],
+            AgentAction::CallSkill { skill, args }
+                if skill == "run_cmd"
+                    && args.get("command").and_then(Value::as_str) == Some("pwd")
+        ));
+    }
+
+    #[test]
+    fn multi_structured_scalar_observations_append_terminal_synthesis() {
+        let state = test_state_with_enabled_skills(&["config_basic"]);
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        let loop_state = LoopState::new(1);
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "read_field",
+                    "path": "/workspace/package.json",
+                    "field_path": "name",
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "read_field",
+                    "path": "/workspace/crates/clawd/Cargo.toml",
+                    "field_path": "package.name",
+                }),
+            },
+        ];
+
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "read two package names and say whether they match",
+            None,
+            None,
+            actions,
+        );
+
+        assert!(matches!(
+            normalized.get(normalized.len().saturating_sub(2)),
+            Some(AgentAction::SynthesizeAnswer { evidence_refs })
+                if evidence_refs == &vec!["step_1".to_string(), "step_2".to_string()]
+        ));
+        assert!(matches!(
+            normalized.last(),
+            Some(AgentAction::Respond { content }) if content == "{{last_output}}"
         ));
     }
 

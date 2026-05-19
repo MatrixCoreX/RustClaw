@@ -312,6 +312,8 @@ struct ContractRepairJudgeOut {
     turn_type: String,
     #[serde(default)]
     target_task_policy: String,
+    #[serde(default)]
+    state_patch: Option<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -1136,6 +1138,18 @@ fn normalize_state_patch_text_token(text: &str) -> String {
     text.trim().to_ascii_lowercase().replace(['-', ' '], "_")
 }
 
+fn request_uses_filename_only_schema_token(req: &str) -> bool {
+    let normalized = normalize_schema_token(req);
+    [
+        "filename_only",
+        "file_name_only",
+        "basename_only",
+        "output_filename_only",
+    ]
+    .iter()
+    .any(|token| normalized.contains(token))
+}
+
 fn state_patch_requests_filename_only_output(state_patch: Option<&Value>) -> bool {
     fn value_requests_filename_only(value: &Value) -> bool {
         match value {
@@ -1863,17 +1877,17 @@ fn downgrade_executionless_route_to_direct_answer(
 fn apply_explicit_command_execution_contract_repair(
     command_runtime: &crate::CommandIntentRuntime,
     current_user_request: &str,
-    needs_clarify: bool,
+    needs_clarify: &mut bool,
+    clarify_question: &mut String,
     output_contract: &mut IntentOutputContract,
     first_layer_decision: &mut FirstLayerDecision,
     execution_finalize_style: &mut ActFinalizeStyle,
 ) -> Option<&'static str> {
-    if needs_clarify
-        || crate::agent_engine::explicit_command_segment_for_policy(
-            command_runtime,
-            current_user_request,
-        )
-        .is_none()
+    if crate::agent_engine::explicit_command_segment_for_policy(
+        command_runtime,
+        current_user_request,
+    )
+    .is_none()
     {
         return None;
     }
@@ -1886,6 +1900,8 @@ fn apply_explicit_command_execution_contract_repair(
     {
         return None;
     }
+    *needs_clarify = false;
+    clarify_question.clear();
     output_contract.requires_content_evidence = true;
     output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
     output_contract.locator_kind = OutputLocatorKind::None;
@@ -3055,6 +3071,8 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("If ACTIVE_TASK is <none>, do not use task_append, task_correct, or task_scope_update. Classify a fresh user goal as task_request or leave turn_type empty for pure chat/memory/status turns.".to_string());
     parts.push("A complete current REQUEST with its own deliverable, topic, object, audience, scope, or factual constraints is standalone unless it semantically modifies the active deliverable. Shared chat identity, similar task type, same product name, or nearby memory is not enough to merge independent tasks.".to_string());
     parts.push("If ACTIVE_TASK or LAST shows an active writing/drafting/planning task and REQUEST only adds audience, tone, length, body-only, wording, count, format, scope, or presentation constraints, keep it attached: turn_type=\"task_append\", target_task_policy=\"reuse_active\", decision=\"direct_answer\", execution_recipe.kind=\"none\", requires_content_evidence=false, locator_kind=\"none\". Do not route such presentation-only follow-ups to planner_execute unless the REQUEST explicitly requires fresh local/system/file/web evidence.".to_string());
+    parts.push("If ACTIVE_TASK/LAST shows a low-risk writing/drafting/planning clarification was already asked and REQUEST adds more constraints without answering every optional detail, prefer a best-effort generic draft over repeating clarification: decision=\"direct_answer\", turn_type=\"task_append\" or \"task_scope_update\", target_task_policy=\"reuse_active\", no evidence/delivery.".to_string());
+    parts.push("ACTIVE_TASK_PATCH: for active-task corrections/refinements, put exact current-turn content values that must remain visible in state_patch.required_content_literals. For concrete visible replacements, set state_patch.replacement_pairs=[{\"from\":\"old literal\",\"to\":\"new literal\"}] and state_patch.forbidden_visible_literals for old/rejected literals that must disappear. Use exact content literals from the request; do not include generic output-control wording, length limits, body-only/output-only constraints, tone, count, or format instructions.".to_string());
     parts.push("Do not treat a bare acknowledgement request as active-task output refinement. If REQUEST only asks for a short acknowledgement/confirmation and does not explicitly reference ACTIVE_TASK/LAST/the prior answer/result/rewrite target, use standalone chat with no state_patch; answer the acknowledgement itself, not the active task output.".to_string());
     parts.push("If REQUEST's apparent missing topic is only the generic acknowledgement/short-reply target itself, do not ask what topic to answer. Use standalone chat, needs_clarify=false, empty turn_type/target_task_policy, no evidence/delivery, and put the minimal acknowledgement/short reply in answer_candidate when inferable from REQUEST. This is semantic, not phrase-list based.".to_string());
     parts.push("If the same active writing/drafting task is still missing its topic or core subject, keep the new constraint in resolved_user_intent and ask one concise clarification with decision=\"clarify\"; never force planner_execute for a presentation-only constraint.".to_string());
@@ -3066,6 +3084,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("Do not import a prior directory/path scope from RECENT/MEMORY into the current REQUEST when the current REQUEST names its own file/dir target. Reuse prior scope only for explicit follow-ups like same directory, that file, or previous result.".to_string());
     parts.push("If REQUEST asks for observable local/system/workspace state, filesystem inspection, command output, file content, directory listing, counts, or extracting a value, choose decision=\"planner_execute\". Do not claim the assistant cannot execute; the runtime has tools and the AUTH block describes permission.".to_string());
     parts.push("If REQUEST asks about the assistant/runtime's current unfinished task queue, running tasks, queued tasks, or canceling those tasks, use the existing task_control capability with its default current-user/current-chat scope; do not ask the user to choose a queue type just because no separate system name was supplied.".to_string());
+    parts.push("If REQUEST only asks whether this assistant is currently waiting for user approval, answer from runtime invariants with decision=\"direct_answer\", turn_type=\"status_query\", execution_recipe.kind=\"none\", no evidence/delivery, and state_patch.runtime_status_query={\"kind\":\"approval_wait\",\"scope\":\"current_task\"}; leave answer_candidate empty unless that runtime fact is provided as structured context.".to_string());
     parts.push("Never ask the user to paste local file contents when REQUEST names a local file/dir/workspace target; route the request for tool execution. Capability refusals are only valid after an actual tool failure, not inside this normalizer.".to_string());
     parts.push("Always include output_contract as a JSON object, never as a string token. It is the final answer contract, not a place to invent a task-specific schema. Put exact scalar recall/direct-answer values in answer_candidate as a string only when the current request itself asks for that exact value; never put answer_candidate as an object or inside output_contract. If unsure, still emit the full default output_contract object with response_shape=\"free\", requires_content_evidence=false, delivery_required=false, locator_kind=\"none\", delivery_intent=\"none\", semantic_kind=\"none\", locator_hint=\"\", and self_extension set to none.".to_string());
     parts.push("Allowed output_contract keys only: response_shape, exact_sentence_count, requires_content_evidence, delivery_required, locator_kind, delivery_intent, semantic_kind, locator_hint, self_extension. Do not emit exact_format, required_evidence, fields, examples, post_processing, or custom keys.".to_string());
@@ -3073,7 +3092,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("Allowed response_shape: free, one_sentence, strict, scalar, file_token. Allowed locator_kind: none, path, current_workspace, url, filename. Allowed delivery_intent: none, file_single, directory_lookup, directory_batch_files.".to_string());
     parts.push("Allowed semantic_kind: none, raw_command_output, service_status, hidden_entries_check, file_names, directory_names, directory_entry_groups, file_paths, directory_purpose_summary, content_excerpt_summary, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, execution_failed_step, generated_file_delivery, scalar_path_only, existence_with_path, existence_with_path_summary, recent_scalar_equality_check, git_commit_subject, structured_keys, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment, sqlite_schema_version, archive_list, archive_pack, archive_unpack, docker_ps, docker_images, docker_logs, docker_container_lifecycle.".to_string());
     parts.push("Allowed turn_type: task_request, task_append, task_replace, task_correct, task_scope_update, run_control, approval_decision, status_query, feedback_or_error, preference_or_memory, or empty string. clarify is a decision, never a turn_type or resume_behavior.".to_string());
-    parts.push("state_patch must be a JSON object or null. Use null when there is no structured update; never output an empty string for state_patch. For ordered-entry follow-ups against an active ordered list, set state_patch.ordered_entry_ref to {\"index\":N,\"index_base\":1} for absolute item selection or {\"relative_offset\":K} for signed relative selection. When a standalone current REQUEST creates a new user-visible deliverable that later short corrections should edit, set state_patch.primary_task_update=\"replace\" and state_patch.active_task_boundary=\"new_deliverable\". For a clear deictic reference, set state_patch.deictic_reference={\"target\":\"current_action_result\"|\"current_turn_locator\"|\"comparison_result\"|\"unresolved_prior_object\"|\"missing_locator\"|\"ambiguous_locator\"}; unresolved/missing/ambiguous targets mean safe clarify. The runtime consumes structured numbers/targets, not language-specific ordinal words, pronouns, or connectors.".to_string());
+    parts.push("state_patch must be a JSON object or null. Use null when there is no structured update; never output an empty string for state_patch. For ordered-entry follow-ups against an active ordered list, set state_patch.ordered_entry_ref to {\"index\":N,\"index_base\":1} for absolute item selection or {\"relative_offset\":K} for signed relative selection. When a standalone current REQUEST creates a new user-visible deliverable that later short corrections should edit, set state_patch.primary_task_update=\"replace\" and state_patch.active_task_boundary=\"new_deliverable\". For active-task visible corrections, set required_content_literals / replacement_pairs / forbidden_visible_literals as structured exact content literals, not language-specific phrase markers. Keep output-only/body-only/length/tone/count/format constraints in resolved_user_intent and output_contract, not in required_content_literals. For a clear deictic reference, set state_patch.deictic_reference={\"target\":\"current_action_result\"|\"current_turn_locator\"|\"comparison_result\"|\"unresolved_prior_object\"|\"missing_locator\"|\"ambiguous_locator\"}; unresolved/missing/ambiguous targets mean safe clarify. For runtime self-state questions about whether this assistant is waiting for user approval, set state_patch.runtime_status_query={\"kind\":\"approval_wait\",\"scope\":\"current_task\"}. The runtime consumes structured numbers/targets/status tokens, not language-specific ordinal words, pronouns, connectors, or status wording.".to_string());
     parts.push("Every enum field must be exactly one listed schema token. Do not output aliases, combined values, or explanatory prose in decision/output_contract/execution_recipe/turn_type/target_task_policy.".to_string());
     parts.push("Boolean fields must be JSON true/false, not prose. self_extension must be an object with mode/trigger/execute_now; use {\"mode\":\"none\",\"trigger\":\"none\",\"execute_now\":false} unless the user explicitly asks for self-extension. If locator_kind=\"none\", locator_hint must be \"\".".to_string());
     parts.push("If the user asks to observe/list/read first but only return a scalar result, set response_shape=\"scalar\" and use a matching semantic_kind only when one applies: scalar_count for generic counts, hidden_entries_check for hidden/dot-prefixed entry counts, scalar_path_only only for a path/current-directory/workspace-location answer, sqlite_schema_version for SQLite schema-version metadata. For config field values, package names, usernames, hostnames, titles, IDs, or other non-path scalar values, keep semantic_kind=\"none\" unless another specific enum applies. If the final answer must include both a structured field/key/path identifier and its value, it is not a scalar-only value response: use response_shape=\"strict\" and preserve the key/value shape in resolved_user_intent. If the request requires an exact non-scalar output format with fixed count, body-only delivery, one-line fixed format, placeholder format, or no-extra-output delivery, set response_shape=\"strict\" and preserve the exact format in resolved_user_intent. For any exact counted-sentence requirement, also set exact_sentence_count to that positive integer; use response_shape=\"strict\" when the count is greater than 1. Never put natural-language format descriptions in response_shape.".to_string());
@@ -3156,22 +3175,33 @@ fn render_compact_intent_normalizer_prompt(
         260,
     ));
     parts.push(compact_prompt_slot("RUNTIME", &runtime_context, 260));
-    parts.push("LOCAL_EXEC: local file/dir/command/count/metadata/read/list/summarize => decision=\"planner_execute\"; no cannot-access-FS reply; do not ask user to paste local files; current target beats prior directory.".to_string());
-    parts.push("SUMMARY_RECALL: summary != ID recall; answer_candidate empty unless exact scalar requested; memory scores are metadata.".to_string());
-    // Keep the immediate structured follow-up anchor next to REQUEST so
-    // ordinal/deictic resolution does not fall back to older memory or prose
-    // when a provider truncates the middle context.
-    parts.push("FOLLOWUP_ANCHOR_PRIORITY: ANCHOR is the latest structured execution state and overrides MEMORY/ASSISTANT/RECENT for ordinal or deictic follow-ups unless REQUEST names a new target.".to_string());
-    parts.push("ACTIVE_TASK_PRIORITY: if REQUEST semantically refines the active writing/drafting/planning deliverable, ACTIVE_TASK overrides MEMORY/ASSISTANT scalar recall candidates unless REQUEST explicitly asks to recall that exact scalar.".to_string());
+    parts.push("LOCAL_EXEC: local file/dir/command/count/metadata/read/list/summarize => planner_execute; no cannot-access-FS reply; never ask user to paste local files.".to_string());
+    parts.push("SUMMARY_RECALL: summary != ID recall; answer_candidate only for exact scalar request; memory scores are metadata. RUNTIME_STATUS approval_wait=>direct_answer status_query. FOLLOWUP_ANCHOR_PRIORITY: ANCHOR/ACTIVE_TASK beat MEMORY for ordinal/deictic or active writing refinements unless REQUEST asks scalar recall.".to_string());
+    parts.push(compact_prompt_slot("RUNTIME", &runtime_context, 240));
+    // Keep memory, assistant replies, active-task state, and the request in the
+    // compact tail together; small-context providers often preserve only
+    // head+tail around the final request.
+    parts.push(compact_prompt_slot(
+        "MEMORY",
+        &route_view.memory_context,
+        560,
+    ));
+    // Keep recent assistant replies after memory so exact scalar recall can use
+    // the assistant's visible answer rather than memory scores.
+    parts.push(compact_prompt_slot(
+        "ASSISTANT",
+        &route_view.recent_assistant_replies,
+        240,
+    ));
     parts.push(compact_prompt_slot(
         "ACTIVE_TASK",
         &route_view.active_task_context,
-        360,
+        320,
     ));
     parts.push(compact_prompt_slot(
         "ANCHOR",
         &route_view.active_execution_anchor_context,
-        360,
+        280,
     ));
     parts.push(compact_prompt_slot("REQUEST", req, 480));
     parts.join("\n")
@@ -3311,6 +3341,11 @@ fn contract_repair_report_from_before_after(before: &Value, after: &Value) -> Co
     let before_recipe = before_obj.and_then(|obj| obj.get("execution_recipe"));
     if execution_recipe_value_declares_command_payload(before_recipe) {
         report.add("command_payload", "execution_recipe_command_payload");
+    } else if execution_recipe_value_declares_structured_read_observation(before_recipe) {
+        report.add(
+            "structured_recipe",
+            "execution_recipe_structured_read_observation",
+        );
     } else if output_recipe_value_declares_execution(before_recipe) {
         report.add("enum_alias", "execution_recipe_enum");
     } else if execution_recipe_value_has_untrusted_text(before_recipe) {
@@ -3919,6 +3954,18 @@ fn output_contract_scalar_looks_like_schema_token(raw: &str) -> bool {
             | "raw_json"
             | "structured"
             | "structured_data"
+            | "text_plain"
+            | "text/plain"
+            | "text_markdown"
+            | "text/markdown"
+            | "application_json"
+            | "application/json"
+            | "application_xml"
+            | "application/xml"
+            | "text_csv"
+            | "text/csv"
+            | "text_html"
+            | "text/html"
     ) || matches!(
         normalize_output_response_shape_for_schema(&token),
         "one_sentence" | "strict" | "scalar" | "file_token"
@@ -4497,7 +4544,7 @@ fn normalize_decision_from_executable_output_contract(obj: &mut serde_json::Map<
     }
 }
 
-fn normalize_execution_recipe_for_schema(obj: &mut serde_json::Map<String, Value>, _req: &str) {
+fn normalize_execution_recipe_for_schema(obj: &mut serde_json::Map<String, Value>, req: &str) {
     promote_misnested_turn_analysis_from_execution_recipe(obj);
     if normalizer_object_declares_tool_action_payload(obj) {
         mark_output_contract_requires_content_evidence(obj);
@@ -4509,6 +4556,17 @@ fn normalize_execution_recipe_for_schema(obj: &mut serde_json::Map<String, Value
         mark_output_contract_requires_content_evidence(obj);
         let locator_hint = execution_recipe_value_locator_hint(execution_recipe);
         normalize_output_contract_for_command_payload(obj, locator_hint.as_deref());
+        mark_decision_planner_execute_from_execution_recipe(obj);
+    } else if execution_recipe_value_declares_structured_read_observation(execution_recipe) {
+        let locator_hint = execution_recipe_value_structured_locator_hint(execution_recipe);
+        let scalar_extraction =
+            execution_recipe_value_declares_structured_scalar_extraction(execution_recipe);
+        normalize_output_contract_for_structured_read_recipe(
+            obj,
+            locator_hint.as_deref(),
+            scalar_extraction,
+            request_uses_filename_only_schema_token(req),
+        );
         mark_decision_planner_execute_from_execution_recipe(obj);
     } else if output_recipe_value_declares_execution(obj.get("execution_recipe")) {
         mark_output_contract_requires_content_evidence(obj);
@@ -4552,6 +4610,152 @@ fn output_recipe_value_declares_execution(value: Option<&Value>) -> bool {
         return false;
     }
     execution_recipe_value_has_text(value, schema_text_declares_execution_recipe)
+}
+
+fn execution_recipe_value_declares_structured_read_observation(value: Option<&Value>) -> bool {
+    execution_recipe_value_structured_locator_hint(value).is_some()
+        && execution_recipe_value_declares_structured_read_action(value)
+}
+
+fn execution_recipe_value_declares_structured_read_action(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Object(map)) => map.iter().any(|(key, value)| {
+            let key = normalize_schema_token(key);
+            (matches!(
+                key.as_str(),
+                "kind" | "action" | "operation" | "op" | "tool"
+            ) && value_has_schema_token(value, schema_token_is_read_observation_action))
+                || execution_recipe_value_declares_structured_read_action(Some(value))
+        }),
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|value| execution_recipe_value_declares_structured_read_action(Some(value))),
+        _ => false,
+    }
+}
+
+fn execution_recipe_value_declares_structured_scalar_extraction(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Object(map)) => map.iter().any(|(key, value)| {
+            let key = normalize_schema_token(key);
+            (matches!(
+                key.as_str(),
+                "action"
+                    | "kind"
+                    | "operation"
+                    | "op"
+                    | "method"
+                    | "extract"
+                    | "extraction"
+                    | "extractor"
+                    | "schema"
+                    | "output"
+                    | "content"
+            ) && value_has_schema_token(value, schema_token_is_scalar_extraction_action))
+                || execution_recipe_value_declares_structured_scalar_extraction(Some(value))
+        }),
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|value| execution_recipe_value_declares_structured_scalar_extraction(Some(value))),
+        _ => false,
+    }
+}
+
+fn value_has_schema_token(value: &Value, predicate: fn(&str) -> bool) -> bool {
+    match value {
+        Value::String(raw) => predicate(&normalize_schema_token(raw)),
+        Value::Array(items) => items
+            .iter()
+            .any(|value| value_has_schema_token(value, predicate)),
+        Value::Object(map) => map
+            .values()
+            .any(|value| value_has_schema_token(value, predicate)),
+        other => scalar_json_value_text(other)
+            .is_some_and(|text| predicate(&normalize_schema_token(&text))),
+    }
+}
+
+fn schema_token_is_read_observation_action(token: &str) -> bool {
+    matches!(
+        token,
+        "read"
+            | "file_read"
+            | "read_file"
+            | "read_text"
+            | "read_range"
+            | "read_text_range"
+            | "file_read_title"
+            | "file_read_extract_title"
+            | "read_file_title"
+            | "read_file_extract_title"
+            | "read_file_and_extract_title"
+    )
+}
+
+fn schema_token_is_scalar_extraction_action(token: &str) -> bool {
+    matches!(
+        token,
+        "extract_scalar"
+            | "scalar"
+            | "file_read_title"
+            | "file_read_extract_title"
+            | "read_file_title"
+            | "read_file_extract_title"
+            | "read_file_and_extract_title"
+            | "extract_title"
+            | "title"
+            | "title_only"
+            | "first_heading_line"
+            | "markdown_heading"
+    )
+}
+
+fn execution_recipe_value_structured_locator_hint(value: Option<&Value>) -> Option<String> {
+    let mut hints = Vec::new();
+    collect_execution_recipe_locator_hints(value?, &mut hints);
+    hints.sort();
+    hints.dedup();
+    (hints.len() == 1).then(|| hints.remove(0))
+}
+
+fn collect_execution_recipe_locator_hints(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, value) in map {
+                let normalized_key = normalize_schema_token(key);
+                if matches!(
+                    normalized_key.as_str(),
+                    "target"
+                        | "path"
+                        | "file_path"
+                        | "target_path"
+                        | "input_path"
+                        | "source_path"
+                        | "read_path"
+                        | "filepath"
+                ) {
+                    if let Some(hint) = scalar_json_value_text(value)
+                        .and_then(|text| {
+                            crate::intent::locator_extractor::extract_explicit_locator_for_fallback(
+                                &text,
+                            )
+                            .map(|locator| locator.locator_hint)
+                        })
+                        .filter(|hint| !hint.trim().is_empty())
+                    {
+                        out.push(hint);
+                    }
+                }
+                collect_execution_recipe_locator_hints(value, out);
+            }
+        }
+        Value::Array(items) => {
+            for value in items {
+                collect_execution_recipe_locator_hints(value, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn execution_recipe_value_explicitly_declares_none_kind(value: Option<&Value>) -> bool {
@@ -4690,6 +4894,60 @@ fn mark_output_contract_requires_content_evidence(obj: &mut serde_json::Map<Stri
     }
     if let Some(contract) = value.as_object_mut() {
         contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
+    }
+}
+
+fn normalize_output_contract_for_structured_read_recipe(
+    obj: &mut serde_json::Map<String, Value>,
+    locator_hint_from_recipe: Option<&str>,
+    scalar_extraction: bool,
+    request_declares_filename_only_schema_token: bool,
+) {
+    let value = obj
+        .entry("output_contract".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !value.is_object() {
+        coerce_output_contract_value_for_schema(value);
+    }
+    let Some(contract) = value.as_object_mut() else {
+        return;
+    };
+
+    contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
+    contract.insert("delivery_required".to_string(), Value::Bool(false));
+    contract.insert(
+        "delivery_intent".to_string(),
+        Value::String("none".to_string()),
+    );
+    let model_only_filename_semantic = !request_declares_filename_only_schema_token
+        && contract
+            .get("semantic_kind")
+            .and_then(scalar_json_value_text)
+            .is_some_and(|value| {
+                parse_output_semantic_kind(&value) == OutputSemanticKind::FileNames
+            });
+
+    if scalar_extraction || model_only_filename_semantic {
+        contract.insert(
+            "response_shape".to_string(),
+            Value::String("scalar".to_string()),
+        );
+    }
+    if model_only_filename_semantic {
+        contract.insert(
+            "semantic_kind".to_string(),
+            Value::String(OutputSemanticKind::None.as_str().to_string()),
+        );
+    }
+    if let Some(hint) = locator_hint_from_recipe
+        .map(str::trim)
+        .filter(|hint| !hint.is_empty())
+    {
+        contract.insert(
+            "locator_kind".to_string(),
+            Value::String("path".to_string()),
+        );
+        contract.insert("locator_hint".to_string(), Value::String(hint.to_string()));
     }
 }
 
@@ -5414,6 +5672,13 @@ fn apply_contract_repair_judge_output(
     out.wants_file_delivery = repaired_contract_wants_file_delivery(&output_contract);
     out.output_contract = Some(output_contract);
     out.execution_recipe = Some(execution_recipe);
+    if repair
+        .state_patch
+        .as_ref()
+        .is_some_and(is_meaningful_state_patch)
+    {
+        out.state_patch = repair.state_patch;
+    }
     out.confidence = repair.confidence.clamp(0.0, 1.0);
     let repaired_turn_type = normalize_schema_token(&repair.turn_type);
     if repaired_turn_type.is_empty() {
@@ -5849,7 +6114,8 @@ pub(crate) async fn run_intent_normalizer(
         let explicit_command_execution_repair = apply_explicit_command_execution_contract_repair(
             &state.policy.command_intent,
             req,
-            needs_clarify,
+            &mut needs_clarify,
+            &mut clarify_question,
             &mut output_contract,
             &mut first_layer_decision,
             &mut execution_finalize_style,
@@ -7255,6 +7521,246 @@ mod tests {
     }
 
     #[test]
+    fn structured_read_recipe_with_explicit_locator_repairs_content_contract() {
+        let raw = r#"{
+          "resolved_user_intent":"read_title_of_note_file",
+          "needs_clarify":false,
+          "decision":"planner_execute",
+          "output_contract":{"format":"plain_text","schema":"title"},
+          "execution_recipe":{
+            "steps":[
+              {"action":"read_file","target":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md"},
+              {"action":"extract_title","method":"first_heading_line"},
+              {"action":"output","content":"title"}
+            ]
+          }
+        }"#;
+
+        let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+            raw,
+            "Read the note file title and output only the title.",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+        assert_eq!(
+            value.get("decision").and_then(|value| value.as_str()),
+            Some("planner_execute")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/response_shape")
+                .and_then(|value| value.as_str()),
+            Some("scalar")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/requires_content_evidence")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/locator_kind")
+                .and_then(|value| value.as_str()),
+            Some("path")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/locator_hint")
+                .and_then(|value| value.as_str()),
+            Some("scripts/nl_tests/fixtures/device_local/docs/service_notes.md")
+        );
+        assert!(report
+            .detail_csv()
+            .contains("execution_recipe_structured_read_observation"));
+    }
+
+    #[test]
+    fn compact_read_file_title_recipe_repairs_to_scalar_contract() {
+        let raw = r#"{
+          "resolved_user_intent":"read_title_of_note_file",
+          "needs_clarify":false,
+          "decision":"planner_execute",
+          "output_contract":{"format":"text","content":"title_only"},
+          "execution_recipe":{
+            "kind":"read_file_title",
+            "target":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+            "extraction":"title",
+            "output":"title_only"
+          }
+        }"#;
+
+        let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+            raw,
+            "Read the note file title and output only the title.",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+        assert_eq!(
+            value
+                .pointer("/output_contract/response_shape")
+                .and_then(|value| value.as_str()),
+            Some("scalar")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/requires_content_evidence")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/locator_kind")
+                .and_then(|value| value.as_str()),
+            Some("path")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/locator_hint")
+                .and_then(|value| value.as_str()),
+            Some("scripts/nl_tests/fixtures/device_local/docs/service_notes.md")
+        );
+        assert!(report
+            .detail_csv()
+            .contains("execution_recipe_structured_read_observation"));
+    }
+
+    #[test]
+    fn compact_file_read_title_recipe_repairs_to_scalar_contract() {
+        let raw = r#"{
+          "resolved_user_intent":"read file and extract title",
+          "needs_clarify":false,
+          "decision":"planner_execute",
+          "output_contract":null,
+          "execution_recipe":{
+            "kind":"file_read_title",
+            "target_path":"scripts/nl_tests/fixtures/device_local/docs/service_notes.md",
+            "extract":"title_only"
+          }
+        }"#;
+
+        let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+            raw,
+            "Read the note file title and output only the title.",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+        assert_eq!(
+            value
+                .pointer("/output_contract/response_shape")
+                .and_then(|value| value.as_str()),
+            Some("scalar")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/requires_content_evidence")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/locator_kind")
+                .and_then(|value| value.as_str()),
+            Some("path")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/locator_hint")
+                .and_then(|value| value.as_str()),
+            Some("scripts/nl_tests/fixtures/device_local/docs/service_notes.md")
+        );
+        assert!(report
+            .detail_csv()
+            .contains("execution_recipe_structured_read_observation"));
+    }
+
+    #[test]
+    fn file_read_recipe_does_not_trust_model_only_filename_semantic() {
+        let raw = r#"{
+          "resolved_user_intent":"Read the file and output a scalar value",
+          "needs_clarify":false,
+          "decision":"planner_execute",
+          "output_contract":"filename_only",
+          "execution_recipe":{
+            "kind":"file_read",
+            "target":"scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+            "output":"filename_only"
+          }
+        }"#;
+
+        let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+            raw,
+            "Process the referenced document.",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+        assert_eq!(
+            value
+                .pointer("/output_contract/response_shape")
+                .and_then(|value| value.as_str()),
+            Some("scalar")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/semantic_kind")
+                .and_then(|value| value.as_str()),
+            Some("none")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/requires_content_evidence")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/locator_hint")
+                .and_then(|value| value.as_str()),
+            Some("scripts/nl_tests/fixtures/device_local/docs/release_checklist.md")
+        );
+        assert!(report
+            .detail_csv()
+            .contains("execution_recipe_structured_read_observation"));
+    }
+
+    #[test]
+    fn file_read_recipe_preserves_explicit_filename_only_schema_request() {
+        let raw = r#"{
+          "resolved_user_intent":"Read the file and output filename only",
+          "needs_clarify":false,
+          "decision":"planner_execute",
+          "output_contract":"filename_only",
+          "execution_recipe":{
+            "kind":"file_read",
+            "target":"scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+            "output":"filename_only"
+          }
+        }"#;
+
+        let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+            raw,
+            "Return filename_only for the referenced document.",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+        assert_eq!(
+            value
+                .pointer("/output_contract/semantic_kind")
+                .and_then(|value| value.as_str()),
+            Some("file_names")
+        );
+        assert_ne!(
+            value
+                .pointer("/output_contract/response_shape")
+                .and_then(|value| value.as_str()),
+            Some("scalar")
+        );
+        assert!(report
+            .detail_csv()
+            .contains("execution_recipe_structured_read_observation"));
+    }
+
+    #[test]
     fn contract_repair_report_still_repairs_unknown_semantic_contracts() {
         let raw = r#"{
           "resolved_user_intent":"检查当前目录状态",
@@ -7584,6 +8090,7 @@ mod tests {
             }),
             turn_type: "task_request".to_string(),
             target_task_policy: "standalone".to_string(),
+            state_patch: None,
         };
 
         assert!(super::apply_contract_repair_judge_output(&mut out, repair));
@@ -7596,6 +8103,7 @@ mod tests {
         assert_eq!(contract.semantic_kind, OutputSemanticKind::FileNames);
         assert!(contract.requires_content_evidence);
         assert_eq!(contract.locator_hint, "document");
+        assert!(out.state_patch.is_none());
     }
 
     #[test]
@@ -7659,6 +8167,7 @@ mod tests {
             }),
             turn_type: String::new(),
             target_task_policy: String::new(),
+            state_patch: None,
         };
 
         assert!(super::apply_contract_repair_judge_output(&mut out, repair));
@@ -7757,6 +8266,7 @@ mod tests {
             execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
             turn_type: String::new(),
             target_task_policy: String::new(),
+            state_patch: None,
         };
 
         assert!(!super::apply_contract_repair_judge_output(&mut out, repair));
@@ -9255,6 +9765,49 @@ mod tests {
     }
 
     #[test]
+    fn normalizer_schema_normalization_treats_mime_output_contract_as_schema_token() {
+        let raw = r#"{
+          "resolved_user_intent":"修改目标用户为开发者，仅输出修正后的正文",
+          "answer_candidate":"",
+          "resume_behavior":"none",
+          "schedule_kind":"none",
+          "schedule_intent":"none",
+          "wants_file_delivery":false,
+          "should_refresh_long_term_memory":false,
+          "agent_display_name_hint":"",
+          "needs_clarify":false,
+          "clarify_question":"",
+          "reason":"direct chat output",
+          "confidence":0.95,
+          "decision":"direct_answer",
+          "output_contract":"text/plain",
+          "execution_recipe":{"kind":"none"},
+          "turn_type":"",
+          "target_task_policy":"",
+          "should_interrupt_active_run":false,
+          "state_patch":null,
+          "attachment_processing_required":false
+        }"#;
+        let normalized = super::normalize_intent_normalizer_raw_for_schema(
+            raw,
+            "不对，目标用户改成开发者，不是老板。只输出修正后的正文。",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+        assert_eq!(
+            value
+                .get("answer_candidate")
+                .and_then(|value| value.as_str()),
+            Some("")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/response_shape")
+                .and_then(|value| value.as_str()),
+            Some("free")
+        );
+    }
+
+    #[test]
     fn normalizer_schema_normalization_recovers_object_answer_candidate_and_ignores_json_contract()
     {
         let raw = r#"{
@@ -10308,6 +10861,7 @@ mod tests {
         let compact_tail = crate::providers::utf8_safe_suffix(&prompt, 1485);
 
         assert!(compact_tail.contains("FOLLOWUP_ANCHOR_PRIORITY"));
+        assert!(compact_tail.contains("RUNTIME_STATUS"));
         assert!(compact_tail.contains("followup_ordered_entries"));
         assert!(compact_tail.contains("2:clawd.log"));
         assert!(compact_tail.contains("REQUEST: inspect the second item from the latest list"));
@@ -11287,11 +11841,14 @@ mod tests {
         let runtime = crate::CommandIntentRuntime {
             all_result_suffixes: vec![],
             execute_prefixes: vec!["请执行".to_string()],
+            standalone_commands: vec![],
             default_locale: "zh-CN".to_string(),
             verify_enforce_enabled: true,
         };
         let mut decision = FirstLayerDecision::PlannerExecute;
         let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+        let mut needs_clarify = false;
+        let mut clarify_question = String::new();
         let mut contract = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
@@ -11304,7 +11861,8 @@ mod tests {
         let repair = super::apply_explicit_command_execution_contract_repair(
             &runtime,
             "请执行 git rev-parse --abbrev-ref HEAD，只输出命令结果",
-            false,
+            &mut needs_clarify,
+            &mut clarify_question,
             &mut contract,
             &mut decision,
             &mut finalize_style,
@@ -11323,6 +11881,8 @@ mod tests {
         assert_eq!(downgrade, None);
         assert_eq!(decision, FirstLayerDecision::PlannerExecute);
         assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+        assert!(!needs_clarify);
+        assert!(clarify_question.is_empty());
         assert!(contract.requires_content_evidence);
         assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
         assert_eq!(contract.locator_kind, OutputLocatorKind::None);
@@ -11334,11 +11894,14 @@ mod tests {
         let runtime = crate::CommandIntentRuntime {
             all_result_suffixes: vec![],
             execute_prefixes: vec!["execute".to_string()],
+            standalone_commands: vec![],
             default_locale: "en-US".to_string(),
             verify_enforce_enabled: true,
         };
         let mut decision = FirstLayerDecision::DirectAnswer;
         let mut finalize_style = crate::ActFinalizeStyle::Plain;
+        let mut needs_clarify = false;
+        let mut clarify_question = String::new();
         let mut contract = IntentOutputContract {
             exact_sentence_count: None,
             response_shape: OutputResponseShape::Free,
@@ -11348,7 +11911,8 @@ mod tests {
         let repair = super::apply_explicit_command_execution_contract_repair(
             &runtime,
             "execute ls -la: explain what this command means, do not run it",
-            false,
+            &mut needs_clarify,
+            &mut clarify_question,
             &mut contract,
             &mut decision,
             &mut finalize_style,
@@ -11357,8 +11921,52 @@ mod tests {
         assert_eq!(repair, None);
         assert_eq!(decision, FirstLayerDecision::DirectAnswer);
         assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+        assert!(!needs_clarify);
+        assert!(clarify_question.is_empty());
         assert!(!contract.requires_content_evidence);
         assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+        assert!(contract.locator_hint.is_empty());
+    }
+
+    #[test]
+    fn explicit_command_execution_repair_clears_spurious_clarify() {
+        let runtime = crate::CommandIntentRuntime {
+            all_result_suffixes: vec![],
+            execute_prefixes: vec!["请执行".to_string(), "执行".to_string()],
+            standalone_commands: vec![],
+            default_locale: "zh-CN".to_string(),
+            verify_enforce_enabled: true,
+        };
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+        let mut needs_clarify = true;
+        let mut clarify_question = "请提供要读取或检查的具体文件、目录或路径。".to_string();
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Scalar,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            ..IntentOutputContract::default()
+        };
+
+        let repair = super::apply_explicit_command_execution_contract_repair(
+            &runtime,
+            "请执行 pwd，只输出命令结果",
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut contract,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(repair, Some("explicit_command_requires_fresh_execution"));
+        assert!(!needs_clarify);
+        assert!(clarify_question.is_empty());
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
         assert_eq!(contract.locator_kind, OutputLocatorKind::None);
         assert!(contract.locator_hint.is_empty());
     }

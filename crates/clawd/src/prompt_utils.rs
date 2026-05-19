@@ -994,6 +994,7 @@ fn canonicalize_contract_repair_judge_object(
         "execution_recipe",
         "turn_type",
         "target_task_policy",
+        "state_patch",
     ];
     map.retain(|key, _| allowed_keys.contains(&key.as_str()));
     let mut normalized = map.len() != original_len;
