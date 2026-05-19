@@ -77,7 +77,9 @@ enum GroupField {
     Model,
     Lens,
     FocalLength,
+    Year,
     YearMonth,
+    Date,
 }
 
 impl GroupField {
@@ -87,7 +89,9 @@ impl GroupField {
             Self::Model => "model",
             Self::Lens => "lens",
             Self::FocalLength => "focal_length",
+            Self::Year => "year",
             Self::YearMonth => "year_month",
+            Self::Date => "date",
         }
     }
 
@@ -97,7 +101,9 @@ impl GroupField {
             Self::Model => "photo_organize.msg.group_field.model",
             Self::Lens => "photo_organize.msg.group_field.lens",
             Self::FocalLength => "photo_organize.msg.group_field.focal_length",
+            Self::Year => "photo_organize.msg.group_field.year",
             Self::YearMonth => "photo_organize.msg.group_field.year_month",
+            Self::Date => "photo_organize.msg.group_field.date",
         }
     }
 
@@ -107,7 +113,9 @@ impl GroupField {
             "model" | "camera_model" => Some(Self::Model),
             "lens" | "lens_model" => Some(Self::Lens),
             "focal" | "focal_length" | "focal_len" => Some(Self::FocalLength),
-            "date" | "month" | "year_month" | "capture_month" => Some(Self::YearMonth),
+            "year" | "capture_year" | "yyyy" => Some(Self::Year),
+            "month" | "year_month" | "capture_month" | "yyyy_mm" => Some(Self::YearMonth),
+            "date" | "day" | "capture_date" | "year_month_day" | "yyyy_mm_dd" => Some(Self::Date),
             _ => None,
         }
     }
@@ -126,8 +134,23 @@ impl GroupField {
 #[derive(Debug, Clone)]
 struct OrganizeOptions {
     group_by: Vec<GroupField>,
+    capture_year: Option<String>,
     capture_month: Option<String>,
+    capture_date: Option<String>,
     selected_brands: Vec<String>,
+    selected_models: Vec<String>,
+    selected_lenses: Vec<String>,
+}
+
+impl OrganizeOptions {
+    fn has_filters(&self) -> bool {
+        self.capture_year.is_some()
+            || self.capture_month.is_some()
+            || self.capture_date.is_some()
+            || !self.selected_brands.is_empty()
+            || !self.selected_models.is_empty()
+            || !self.selected_lenses.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,7 +192,9 @@ struct PhotoPlan {
     camera_model: Option<String>,
     lens_model: Option<String>,
     focal_length: Option<String>,
+    capture_year: Option<String>,
     year_month: Option<String>,
+    capture_date: Option<String>,
     camera_label: String,
     lens_label: String,
     classification_rel: String,
@@ -380,6 +405,14 @@ fn default_i18n_dict() -> HashMap<String, String> {
         "No photos taken in {capture_month} were found under `{path}`.".to_string(),
     );
     m.insert(
+        "photo_organize.err.no_photos_for_brands".to_string(),
+        "No photos matching brands {brands} were found under `{path}`.".to_string(),
+    );
+    m.insert(
+        "photo_organize.err.no_photos_for_filters".to_string(),
+        "No photos matching filter `{filter_desc}` were found under `{path}`.".to_string(),
+    );
+    m.insert(
         "photo_organize.err.no_exif_operable_photos".to_string(),
         "Photo files were found under `{path}`, but none had readable EXIF metadata, so no operation was performed.".to_string(),
     );
@@ -416,8 +449,16 @@ fn default_i18n_dict() -> HashMap<String, String> {
         "focal length".to_string(),
     );
     m.insert(
+        "photo_organize.msg.group_field.year".to_string(),
+        "year".to_string(),
+    );
+    m.insert(
         "photo_organize.msg.group_field.year_month".to_string(),
         "year-month".to_string(),
+    );
+    m.insert(
+        "photo_organize.msg.group_field.date".to_string(),
+        "date".to_string(),
     );
     m.insert(
         "photo_organize.msg.filter.none".to_string(),
@@ -426,6 +467,26 @@ fn default_i18n_dict() -> HashMap<String, String> {
     m.insert(
         "photo_organize.msg.filter.capture_month".to_string(),
         "only photos shot in {capture_month}".to_string(),
+    );
+    m.insert(
+        "photo_organize.msg.filter.capture_year".to_string(),
+        "only photos shot in {capture_year}".to_string(),
+    );
+    m.insert(
+        "photo_organize.msg.filter.capture_date".to_string(),
+        "only photos shot on {capture_date}".to_string(),
+    );
+    m.insert(
+        "photo_organize.msg.filter.selected_brands".to_string(),
+        "only photos with brands {brands}".to_string(),
+    );
+    m.insert(
+        "photo_organize.msg.filter.selected_models".to_string(),
+        "only photos with camera models {models}".to_string(),
+    );
+    m.insert(
+        "photo_organize.msg.filter.selected_lenses".to_string(),
+        "only photos with lenses {lenses}".to_string(),
     );
     m.insert(
         "photo_organize.msg.no_external_candidates".to_string(),
@@ -559,6 +620,13 @@ fn group_by_display(cat: &TextCatalog, fields: &[GroupField]) -> String {
 
 fn filter_display(cat: &TextCatalog, options: &OrganizeOptions) -> String {
     let mut parts = Vec::new();
+    if let Some(capture_year) = &options.capture_year {
+        parts.push(tr_with(
+            cat,
+            "photo_organize.msg.filter.capture_year",
+            &[("capture_year", capture_year.clone())],
+        ));
+    }
     if let Some(capture_month) = &options.capture_month {
         parts.push(tr_with(
             cat,
@@ -566,11 +634,32 @@ fn filter_display(cat: &TextCatalog, options: &OrganizeOptions) -> String {
             &[("capture_month", capture_month.clone())],
         ));
     }
+    if let Some(capture_date) = &options.capture_date {
+        parts.push(tr_with(
+            cat,
+            "photo_organize.msg.filter.capture_date",
+            &[("capture_date", capture_date.clone())],
+        ));
+    }
     if !options.selected_brands.is_empty() {
         parts.push(tr_with(
             cat,
             "photo_organize.msg.filter.selected_brands",
             &[("brands", options.selected_brands.join(" / "))],
+        ));
+    }
+    if !options.selected_models.is_empty() {
+        parts.push(tr_with(
+            cat,
+            "photo_organize.msg.filter.selected_models",
+            &[("models", options.selected_models.join(" / "))],
+        ));
+    }
+    if !options.selected_lenses.is_empty() {
+        parts.push(tr_with(
+            cat,
+            "photo_organize.msg.filter.selected_lenses",
+            &[("lenses", options.selected_lenses.join(" / "))],
         ));
     }
     if parts.is_empty() {
@@ -600,7 +689,13 @@ fn build_no_matches_error(
             base
         };
     }
-    if !options.selected_brands.is_empty() {
+    if !options.selected_brands.is_empty()
+        && options.capture_year.is_none()
+        && options.capture_month.is_none()
+        && options.capture_date.is_none()
+        && options.selected_models.is_empty()
+        && options.selected_lenses.is_empty()
+    {
         return tr_with(
             cat,
             "photo_organize.err.no_photos_for_brands",
@@ -611,12 +706,29 @@ fn build_no_matches_error(
         );
     }
     if let Some(capture_month) = &options.capture_month {
+        if options.capture_year.is_none()
+            && options.capture_date.is_none()
+            && options.selected_brands.is_empty()
+            && options.selected_models.is_empty()
+            && options.selected_lenses.is_empty()
+        {
+            return tr_with(
+                cat,
+                "photo_organize.err.no_photos_for_month",
+                &[
+                    ("path", source_dir.display().to_string()),
+                    ("capture_month", capture_month.clone()),
+                ],
+            );
+        }
+    }
+    if options.has_filters() {
         return tr_with(
             cat,
-            "photo_organize.err.no_photos_for_month",
+            "photo_organize.err.no_photos_for_filters",
             &[
                 ("path", source_dir.display().to_string()),
-                ("capture_month", capture_month.clone()),
+                ("filter_desc", filter_display(cat, options)),
             ],
         );
     }
@@ -812,6 +924,9 @@ fn handle_organize(obj: &Map<String, Value>, cat: &TextCatalog) -> Result<SkillO
                 "camera": plan.camera_label,
                 "lens": plan.lens_label,
                 "classification_path": plan.classification_rel,
+                "capture_year": plan.capture_year,
+                "capture_month": plan.year_month,
+                "capture_date": plan.capture_date,
             })
         })
         .collect::<Vec<_>>();
@@ -863,8 +978,12 @@ fn handle_organize(obj: &Map<String, Value>, cat: &TextCatalog) -> Result<SkillO
                 .iter()
                 .map(|field| field.as_arg_str())
                 .collect::<Vec<_>>(),
+            "capture_year": options.capture_year,
             "capture_month": options.capture_month,
+            "capture_date": options.capture_date,
             "selected_brands": options.selected_brands,
+            "selected_models": options.selected_models,
+            "selected_lenses": options.selected_lenses,
             "non_exif_files": build_result.non_exif_files,
             "preview": preview,
         })),
@@ -1012,6 +1131,13 @@ fn resolve_organize_options(obj: &Map<String, Value>) -> OrganizeOptions {
     let group_by = parse_group_by_value(obj.get("group_by"))
         .filter(|fields| !fields.is_empty())
         .unwrap_or_else(GroupField::defaults);
+    let capture_year = obj
+        .get("capture_year")
+        .or_else(|| obj.get("year"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(normalize_capture_year);
     let capture_month = obj
         .get("capture_month")
         .or_else(|| obj.get("month"))
@@ -1019,6 +1145,13 @@ fn resolve_organize_options(obj: &Map<String, Value>) -> OrganizeOptions {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(normalize_capture_month);
+    let capture_date = obj
+        .get("capture_date")
+        .or_else(|| obj.get("date"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(normalize_capture_date);
     let selected_brands = parse_string_list(
         obj.get("selected_brands")
             .or_else(|| obj.get("brands"))
@@ -1027,10 +1160,24 @@ fn resolve_organize_options(obj: &Map<String, Value>) -> OrganizeOptions {
     .into_iter()
     .filter_map(|brand| canonical_brand_name(&brand))
     .collect::<Vec<_>>();
+    let selected_models = parse_selector_list(
+        obj.get("selected_models")
+            .or_else(|| obj.get("models"))
+            .or_else(|| obj.get("camera_models")),
+    );
+    let selected_lenses = parse_selector_list(
+        obj.get("selected_lenses")
+            .or_else(|| obj.get("lenses"))
+            .or_else(|| obj.get("lens_models")),
+    );
     OrganizeOptions {
         group_by,
+        capture_year,
         capture_month,
+        capture_date,
         selected_brands,
+        selected_models,
+        selected_lenses,
     }
 }
 
@@ -1069,8 +1216,70 @@ fn push_unique_group_field(out: &mut Vec<GroupField>, field: GroupField) {
     }
 }
 
+fn normalize_capture_year(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let year = trimmed.chars().take(4).collect::<String>();
+    if year.len() == 4 && year.chars().all(|ch| ch.is_ascii_digit()) {
+        year
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn normalize_capture_month(raw: &str) -> String {
-    raw.trim().replace('/', "-").replace('.', "-")
+    let normalized = raw.trim().replace('/', "-").replace('.', "-");
+    if normalized.len() == 6 && normalized.chars().all(|ch| ch.is_ascii_digit()) {
+        return format!("{}-{}", &normalized[0..4], &normalized[4..6]);
+    }
+    let parts = normalized.split('-').collect::<Vec<_>>();
+    if parts.len() >= 2
+        && parts[0].len() == 4
+        && parts[0].chars().all(|ch| ch.is_ascii_digit())
+        && !parts[1].is_empty()
+        && parts[1].len() <= 2
+        && parts[1].chars().all(|ch| ch.is_ascii_digit())
+    {
+        if let Ok(month) = parts[1].parse::<u8>() {
+            if (1..=12).contains(&month) {
+                return format!("{}-{month:02}", parts[0]);
+            }
+        }
+    }
+    normalized
+}
+
+fn normalize_capture_date(raw: &str) -> String {
+    let normalized = raw
+        .trim()
+        .replace('/', "-")
+        .replace('.', "-")
+        .replace(':', "-");
+    if normalized.len() == 8 && normalized.chars().all(|ch| ch.is_ascii_digit()) {
+        return format!(
+            "{}-{}-{}",
+            &normalized[0..4],
+            &normalized[4..6],
+            &normalized[6..8]
+        );
+    }
+    let parts = normalized.split('-').collect::<Vec<_>>();
+    if parts.len() >= 3
+        && parts[0].len() == 4
+        && parts[0].chars().all(|ch| ch.is_ascii_digit())
+        && !parts[1].is_empty()
+        && parts[1].len() <= 2
+        && parts[1].chars().all(|ch| ch.is_ascii_digit())
+        && !parts[2].is_empty()
+        && parts[2].len() <= 2
+        && parts[2].chars().all(|ch| ch.is_ascii_digit())
+    {
+        if let (Ok(month), Ok(day)) = (parts[1].parse::<u8>(), parts[2].parse::<u8>()) {
+            if (1..=12).contains(&month) && (1..=31).contains(&day) {
+                return format!("{}-{month:02}-{day:02}", parts[0]);
+            }
+        }
+    }
+    normalized
 }
 
 fn parse_string_list(value: Option<&Value>) -> Vec<String> {
@@ -1081,6 +1290,35 @@ fn parse_string_list(value: Option<&Value>) -> Vec<String> {
     match value {
         Value::String(text) => {
             for token in text.split([',', '|', '/', '、', '，', ' ']) {
+                let trimmed = token.trim();
+                if !trimmed.is_empty() {
+                    out.push(trimmed.to_string());
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                if let Some(text) = item.as_str() {
+                    let trimmed = text.trim();
+                    if !trimmed.is_empty() {
+                        out.push(trimmed.to_string());
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+fn parse_selector_list(value: Option<&Value>) -> Vec<String> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    match value {
+        Value::String(text) => {
+            for token in text.split([',', '|', '、', '，']) {
                 let trimmed = token.trim();
                 if !trimmed.is_empty() {
                     out.push(trimmed.to_string());
@@ -1141,6 +1379,20 @@ fn brand_matches(camera_make: &str, selected_brands: &[String]) -> bool {
                 "leica" => make_lower.contains("leica") || make_lower.contains("徕卡"),
                 _ => false,
             }
+    })
+}
+
+fn text_matches_any(value: Option<&str>, selectors: &[String]) -> bool {
+    if selectors.is_empty() {
+        return true;
+    }
+    let Some(value) = value else {
+        return false;
+    };
+    let value_lower = value.to_ascii_lowercase();
+    selectors.iter().any(|selector| {
+        let selector_lower = selector.trim().to_ascii_lowercase();
+        !selector_lower.is_empty() && value_lower.contains(&selector_lower)
     })
 }
 
@@ -1249,9 +1501,19 @@ fn build_photo_plans(
             .and_then(|meta| meta.get("focal_length"))
             .and_then(Value::as_str)
             .map(str::to_string);
+        let capture_year = metadata
+            .as_ref()
+            .and_then(|meta| meta.get("capture_year"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
         let year_month = metadata
             .as_ref()
             .and_then(|meta| meta.get("year_month"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let capture_date = metadata
+            .as_ref()
+            .and_then(|meta| meta.get("capture_date"))
             .and_then(Value::as_str)
             .map(str::to_string);
         if let Some(make_text) = make.as_deref() {
@@ -1261,8 +1523,24 @@ fn build_photo_plans(
         } else if !options.selected_brands.is_empty() {
             continue;
         }
+        if !text_matches_any(model.as_deref(), &options.selected_models) {
+            continue;
+        }
+        if !text_matches_any(lens_model.as_deref(), &options.selected_lenses) {
+            continue;
+        }
+        if let Some(capture_year_filter) = &options.capture_year {
+            if capture_year.as_deref() != Some(capture_year_filter.as_str()) {
+                continue;
+            }
+        }
         if let Some(capture_month) = &options.capture_month {
             if year_month.as_deref() != Some(capture_month.as_str()) {
+                continue;
+            }
+        }
+        if let Some(capture_date_filter) = &options.capture_date {
+            if capture_date.as_deref() != Some(capture_date_filter.as_str()) {
                 continue;
             }
         }
@@ -1279,10 +1557,18 @@ fn build_photo_plans(
                 .map(sanitize_component)
                 .unwrap_or_else(|| "unknown_model".to_string())
         };
+        let year_dir = capture_year
+            .as_deref()
+            .map(sanitize_component)
+            .unwrap_or_else(|| "undated_year".to_string());
         let date_dir = year_month
             .as_deref()
             .map(sanitize_component)
             .unwrap_or_else(|| "undated".to_string());
+        let day_dir = capture_date
+            .as_deref()
+            .map(sanitize_component)
+            .unwrap_or_else(|| "undated_day".to_string());
         let lens_dir = lens_model
             .as_deref()
             .map(sanitize_component)
@@ -1300,7 +1586,9 @@ fn build_photo_plans(
                 GroupField::Model => &model_dir,
                 GroupField::Lens => &lens_dir,
                 GroupField::FocalLength => &focal_dir,
+                GroupField::Year => &year_dir,
                 GroupField::YearMonth => &date_dir,
+                GroupField::Date => &day_dir,
             };
             destination_dir = destination_dir.join(value);
             classification_parts.push(value.clone());
@@ -1339,7 +1627,9 @@ fn build_photo_plans(
             camera_model: model,
             lens_model,
             focal_length,
+            capture_year,
             year_month,
+            capture_date,
             camera_label,
             lens_label,
             classification_rel,
@@ -1401,7 +1691,9 @@ fn build_plan_output(
                 "model": plan.camera_model,
                 "lens": plan.lens_model,
                 "focal_length": plan.focal_length,
+                "capture_year": plan.capture_year,
                 "year_month": plan.year_month,
+                "capture_date": plan.capture_date,
                 "classification_path": plan.classification_rel,
             })
         })
@@ -1473,8 +1765,12 @@ fn build_plan_output(
                 .iter()
                 .map(|field| field.as_arg_str())
                 .collect::<Vec<_>>(),
+            "capture_year": options.capture_year,
             "capture_month": options.capture_month,
+            "capture_date": options.capture_date,
             "selected_brands": options.selected_brands,
+            "selected_models": options.selected_models,
+            "selected_lenses": options.selected_lenses,
             "non_exif_files": non_exif_files,
             "top_camera_groups": top_groups,
             "top_lens_groups": top_lens_groups,
@@ -1608,14 +1904,19 @@ fn read_camera_metadata(path: &Path) -> Option<Value> {
     let capture_time = exif_string(&exif, Tag::DateTimeOriginal)
         .or_else(|| exif_string(&exif, Tag::DateTimeDigitized))
         .or_else(|| exif_string(&exif, Tag::DateTime));
-    let year_month = capture_time.as_deref().and_then(parse_year_month);
+    let (capture_year, year_month, capture_date) = capture_time
+        .as_deref()
+        .map(parse_capture_date_parts)
+        .unwrap_or_default();
     Some(json!({
         "make": make,
         "model": model,
         "lens_model": lens_model,
         "focal_length": focal_length,
         "captured_at": capture_time,
+        "capture_year": capture_year,
         "year_month": year_month,
+        "capture_date": capture_date,
     }))
 }
 
@@ -1626,16 +1927,29 @@ fn exif_string(exif: &exif::Exif, tag: Tag) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn parse_year_month(raw: &str) -> Option<String> {
-    let date_part = raw.split_whitespace().next()?;
-    let mut parts = date_part.split(':');
-    let year = parts.next()?;
-    let month = parts.next()?;
-    if year.len() == 4 && month.len() == 2 {
-        Some(format!("{year}-{month}"))
+fn parse_capture_date_parts(raw: &str) -> (Option<String>, Option<String>, Option<String>) {
+    let Some(date_part) = raw.split_whitespace().next() else {
+        return (None, None, None);
+    };
+    let parts = date_part.split([':', '-', '/', '.']).collect::<Vec<_>>();
+    let year = parts.first().copied().unwrap_or_default();
+    let month = parts.get(1).copied().unwrap_or_default();
+    let day = parts.get(2).copied().unwrap_or_default();
+    if year.len() != 4
+        || !year.chars().all(|ch| ch.is_ascii_digit())
+        || month.len() != 2
+        || !month.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return (None, None, None);
+    }
+    let capture_year = Some(year.to_string());
+    let year_month = Some(format!("{year}-{month}"));
+    let capture_date = if day.len() == 2 && day.chars().all(|ch| ch.is_ascii_digit()) {
+        Some(format!("{year}-{month}-{day}"))
     } else {
         None
-    }
+    };
+    (capture_year, year_month, capture_date)
 }
 
 fn normalize_focal_value(raw: &str, is_35mm_equivalent: bool) -> String {
@@ -2126,5 +2440,55 @@ mod tests {
             Some(OrganizeMode::Move)
         );
         assert_eq!(default_mode_for_action_alias("organize"), None);
+    }
+
+    #[test]
+    fn structured_group_by_accepts_year_and_date_fields() {
+        let fields = parse_group_by_value(Some(&json!(["year", "date", "model", "year"])))
+            .expect("expected parsed fields");
+        assert_eq!(
+            fields
+                .iter()
+                .map(|field| field.as_arg_str())
+                .collect::<Vec<_>>(),
+            vec!["year", "date", "model"]
+        );
+    }
+
+    #[test]
+    fn structured_date_filters_normalize_common_machine_shapes() {
+        assert_eq!(normalize_capture_year("2026-04-03"), "2026");
+        assert_eq!(normalize_capture_month("202604"), "2026-04");
+        assert_eq!(normalize_capture_month("2026/4"), "2026-04");
+        assert_eq!(normalize_capture_date("20260403"), "2026-04-03");
+        assert_eq!(normalize_capture_date("2026/4/3"), "2026-04-03");
+    }
+
+    #[test]
+    fn selector_list_preserves_multi_word_camera_models() {
+        assert_eq!(
+            parse_selector_list(Some(&json!("EOS R6, α7 IV"))),
+            vec!["EOS R6".to_string(), "α7 IV".to_string()]
+        );
+        assert!(text_matches_any(
+            Some("Canon EOS R6 Mark II"),
+            &["eos r6".to_string()]
+        ));
+        assert!(!text_matches_any(
+            Some("Canon EOS R5"),
+            &["eos r6".to_string()]
+        ));
+    }
+
+    #[test]
+    fn capture_date_parts_include_year_month_and_day() {
+        assert_eq!(
+            parse_capture_date_parts("2026:04:03 12:34:56"),
+            (
+                Some("2026".to_string()),
+                Some("2026-04".to_string()),
+                Some("2026-04-03".to_string())
+            )
+        );
     }
 }

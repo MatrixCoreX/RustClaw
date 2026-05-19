@@ -14,7 +14,7 @@
 - 当前已显式支持 `macOS`、常规 `Linux` 与树莓派常见挂载点发现与路径提示；macOS 会发现 `/Volumes/<disk>` 并过滤系统根卷；Linux 会优先读取真实挂载点，并兼容 `/media/<user>/<disk>`、`/media/pi/<disk>`、`/mnt/<disk>`、`/mnt/usb0` 等路径；其他平台仍可手动传入绝对路径使用。
 - 默认安全模式是 `plan`，只做预览，不直接改动文件。
 - 整理层级默认是：`品牌 / 机型 / 镜头 / 焦段 / 年月`。
-- 支持按需求动态改变目录层级：由 planner / LLM 将用户语义归一到结构化参数，如 `mode`、`group_by`、`capture_month`、`selected_brands`、`include_subdirs`、`preview_limit`。
+- 支持按需求动态改变目录层级：由 planner / LLM 将用户语义归一到结构化参数，如 `mode`、`group_by`、`capture_year`、`capture_month`、`capture_date`、`selected_brands`、`selected_models`、`selected_lenses`、`include_subdirs`、`preview_limit`。
 - 技能内部不再维护自然语言语义词表；`args` 字符串或 object 里的 `text|prompt|input|instruction|query` 只作为兼容入口，用于提取显式路径或外接盘候选名。其他语义必须由 planner 传入结构化字段。
 - 输出语言由 `configs/photo_organize.toml` 和 `configs/i18n/photo_organize.<locale>.toml` 控制，也可被 `args.locale/lang` 或 `context.locale/lang` 覆盖。
 
@@ -37,9 +37,13 @@
 | `organize` | `mode` / `organize_mode` | no | string | `plan` | `plan|copy|move`。`plan` 只预览；`copy` 复制到整理目录；`move` 直接移动原文件。 |
 | `plan` / `preview` / `dry_run` / `copy` / `move` | all `organize` params | conditional | object fields | action-derived mode | 兼容 planner 把预览或复制/移动意图放进 `action` 字段的结构化写法；仍建议优先使用 `action="organize"` + `mode`。 |
 | `organize` | `output_dir` | no | string(path) | `<source_dir>/_organized_by_camera` | 整理后的输出目录。相对路径按 `source_dir` 解析。 |
-| `organize` | `group_by` | no | string/string[] | `["brand","model","lens","focal_length","year_month"]` | 目录层级顺序。支持 `brand`、`model`、`lens`、`focal_length`、`year_month`。 |
-| `organize` | `capture_month` | no | string | - | 仅整理指定月份拍摄的照片，格式建议 `YYYY-MM`。 |
+| `organize` | `group_by` | no | string/string[] | `["brand","model","lens","focal_length","year_month"]` | 目录层级顺序。支持 `brand`、`model`、`lens`、`focal_length`、`year`、`year_month`、`date`。 |
+| `organize` | `capture_year` | no | string | - | 仅整理指定年份拍摄的照片，格式建议 `YYYY`。 |
+| `organize` | `capture_month` | no | string | - | 仅整理指定月份拍摄的照片，格式建议 `YYYY-MM`；兼容 `YYYYMM`、`YYYY/M`、`YYYY.M` 等结构化日期写法。 |
+| `organize` | `capture_date` | no | string | - | 仅整理指定日期拍摄的照片，格式建议 `YYYY-MM-DD`；兼容 `YYYYMMDD`、`YYYY/M/D`、`YYYY.M.D` 等结构化日期写法。 |
 | `organize` | `selected_brands` / `brands` | no | string/string[] | - | 仅整理指定品牌的照片；接受品牌名字符串或品牌名数组，其他品牌不动。 |
+| `organize` | `selected_models` / `models` / `camera_models` | no | string/string[] | - | 仅整理指定机型的照片；按 EXIF `Model` 做大小写不敏感包含匹配。 |
+| `organize` | `selected_lenses` / `lenses` / `lens_models` | no | string/string[] | - | 仅整理指定镜头的照片；按 EXIF `LensModel` / lens fallback 字段做大小写不敏感包含匹配。 |
 | `organize` | `include_subdirs` | no | bool | `true` | 是否递归扫描子目录。 |
 | `organize` | `preview_limit` | no | integer | `12` | 返回的预览条目上限。 |
 | all | `locale` / `lang` / `language` | no | string | config default | 输出语言，如 `zh-CN`、`en-US`。 |
@@ -53,8 +57,9 @@
 - `source_dir` 不存在、不可访问或不是目录时返回可读 `error_text`。
 - 指定目录下没有照片文件时返回可读 `error_text`。
 - 若目录里有照片，但都读不到可识别 EXIF，会明确返回“本次不做操作”错误。
-- 若指定了 `capture_month` 但该月份没有匹配照片，会返回明确的“该月份无照片”错误。
+- 若指定了 `capture_year` / `capture_month` / `capture_date` 但没有匹配照片，会返回明确的“筛选条件无照片”错误；只有单独指定 `capture_month` 时保留兼容的“该月份无照片”错误。
 - 若指定了 `selected_brands` 但没有匹配品牌的照片，会返回明确的“该品牌无照片”错误。
+- 若指定了 `selected_models` / `selected_lenses` 但没有匹配照片，会返回明确的“筛选条件无照片”错误。
 - 自由文本里若未能唯一解析目录，且无法唯一发现外接盘，保持保守行为，继续要求用户明确指定目录；不要在技能内根据自然语言词表猜测整理模式或筛选条件。
 - 执行 `copy|move` 时若发生部分失败，返回明确的失败统计和首条错误。
 
@@ -127,6 +132,16 @@ Request:
 Response:
 ```json
 {"request_id":"demo-7","status":"ok","text":"已完成照片整理预览：...","extra":{"action":"organize","selected_brands":["Canon","Sony"],"non_exif_files":["MISC/IMG_9999.JPG"]},"error_text":null}
+```
+
+### Example 8 — 按年份 / 日期 / 机型 / 镜头结构化分类筛选
+Request:
+```json
+{"request_id":"demo-8","args":{"action":"organize","source_dir":"/Volumes/SDCARD/DCIM","mode":"plan","group_by":["year","date","model"],"capture_year":"2026","selected_models":["EOS R6"],"selected_lenses":["RF24-70mm"]}}
+```
+Response:
+```json
+{"request_id":"demo-8","status":"ok","text":"已完成照片整理预览：...","extra":{"action":"organize","mode":"plan","group_by":["year","date","model"],"capture_year":"2026","selected_models":["EOS R6"],"selected_lenses":["RF24-70mm"],"preview":[{"classification_path":"2026/2026-04-03/EOS R6"}]},"error_text":null}
 ```
 
 ## Output Contract

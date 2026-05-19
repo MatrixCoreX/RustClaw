@@ -12,7 +12,11 @@
 - It is safety-first: draft mode is the default and publish must be explicitly requested.
 
 ## Config Entry Points (from interface)
-- No dedicated config entry points declared.
+- File config: `configs/x.toml`
+- Env overrides: `X_USE_XURL`, `XURL_BIN`, `XURL_APP`, `XURL_AUTH`, `XURL_USERNAME`, `XURL_TIMEOUT_SECONDS`, `X_REQUIRE_EXPLICIT_SEND`, `X_MAX_TEXT_CHARS`
+- Runtime dependency: publishing uses a local `xurl` executable and its local OAuth/user login state.
+- Setup requirement: complete `xurl auth oauth2` with `tweet.write` scope before real publishing.
+- This is not a static API-key-only skill; `xurl_bin` must resolve to an executable command in `PATH` or an executable file path.
 
 ## Actions (from interface)
 - No action field is required.
@@ -42,7 +46,27 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"draft prepared","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"x skill dry_run=1, preview post: Daily market note","error_text":null}
+```
+
+### Example 2
+Request:
+```json
+{"request_id":"demo-2","args":{"text":"Daily market note","send":true,"dry_run":false}}
+```
+Response:
+```json
+{"request_id":"demo-2","status":"ok","text":"x post success via xurl: id=1234567890 text=Daily market note","error_text":null}
+```
+
+### Example 3
+Request:
+```json
+{"request_id":"demo-3","args":{"text":"Daily market note","send":true,"dry_run":true}}
+```
+Response:
+```json
+{"request_id":"demo-3","status":"error","text":"","error_text":"x skill args are invalid: send=true conflicts with dry_run=true"}
 ```
 
 ## Output Contract
