@@ -331,7 +331,7 @@
       "default": false
     },
     "state_patch": {
-      "description": "Optional structured state/task patch payload for corrections, appended constraints, approvals, temporary alias_bindings, ordered_entry_ref ({\"index\":N,\"index_base\":1} or {\"relative_offset\":K}), primary_task_update=\"replace\" with active_task_boundary=\"new_deliverable\" for a standalone new deliverable that should become the editable active task, deictic_reference ({\"target\":\"current_action_result\"|\"current_turn_locator\"|\"comparison_result\"|\"unresolved_prior_object\"|\"missing_locator\"|\"ambiguous_locator\"}), and similar turn-level updates.",
+      "description": "Optional structured state/task patch payload for corrections, appended constraints, approvals, temporary alias_bindings, ordered_entry_ref ({\"index\":N,\"index_base\":1} or {\"relative_offset\":K}), required_content_literals ([exact current-turn replacement/added content literals that must visibly remain in an active-task rewrite; not output-control wording]), forbidden_visible_literals ([exact current-turn old/rejected content literals to omit from an active-task rewrite]), replacement_pairs ([{\"from\":\"old literal\",\"to\":\"new literal\"}]), primary_task_update=\"replace\" with active_task_boundary=\"new_deliverable\" for a standalone new deliverable that should become the editable active task, deictic_reference ({\"target\":\"current_action_result\"|\"current_turn_locator\"|\"comparison_result\"|\"unresolved_prior_object\"|\"missing_locator\"|\"ambiguous_locator\"}), and similar turn-level updates.",
       "type": ["object", "null"],
       "default": null
     },

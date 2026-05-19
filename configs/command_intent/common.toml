@@ -1,0 +1,7 @@
+# Language-neutral command policy shared by all configured execute prefixes.
+
+# Shell commands that can be treated as a complete command token before a
+# free-form instruction tail after a configured execute prefix.
+standalone_commands = [
+  "pwd",
+]

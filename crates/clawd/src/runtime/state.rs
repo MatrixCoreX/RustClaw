@@ -247,6 +247,7 @@ impl PolicyConfig {
             command_intent: CommandIntentRuntime {
                 all_result_suffixes: Vec::new(),
                 execute_prefixes: Vec::new(),
+                standalone_commands: Vec::new(),
                 default_locale: locale.to_string(),
                 verify_enforce_enabled: false,
             },

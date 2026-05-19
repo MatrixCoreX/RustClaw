@@ -11,6 +11,7 @@ pub(super) struct PreparedAskExecutionContext {
     pub(super) chat_prompt_context: String,
     pub(super) resolved_prompt_for_execution: String,
     pub(super) prompt_with_memory_for_execution: String,
+    pub(super) memory_context_for_execution: String,
     pub(super) recent_execution_context: String,
 }
 
@@ -424,6 +425,7 @@ pub(super) async fn prepare_ask_execution_context(
         chat_prompt_context,
         resolved_prompt_for_execution,
         prompt_with_memory_for_execution,
+        memory_context_for_execution: prompt_with_memory,
         recent_execution_context,
     })
 }
@@ -907,6 +909,17 @@ fn preserve_active_clarify_output_contract_for_locator_reply(
     }
 
     let current_requested_file_delivery = route_requests_file_delivery(route_result);
+    if current_requested_file_delivery
+        && !prior_non_file_contract_should_override_current_file_delivery(
+            prior_shape,
+            prior_semantic,
+        )
+    {
+        route_result
+            .route_reason
+            .push_str("; keep_current_file_delivery_over_weak_active_clarify_shape");
+        return;
+    }
     if current_requested_file_delivery {
         route_result.wants_file_delivery = false;
         route_result.output_contract.delivery_required = false;
@@ -933,6 +946,19 @@ fn preserve_active_clarify_output_contract_for_locator_reply(
     route_result
         .route_reason
         .push_str("; preserve_active_clarify_output_contract");
+}
+
+fn prior_non_file_contract_should_override_current_file_delivery(
+    prior_shape: Option<crate::OutputResponseShape>,
+    prior_semantic: Option<crate::OutputSemanticKind>,
+) -> bool {
+    if prior_semantic.is_some() {
+        return true;
+    }
+    matches!(
+        prior_shape,
+        Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Strict)
+    )
 }
 
 fn structural_locator_kind_from_reply(locator: &str) -> crate::OutputLocatorKind {
@@ -1862,6 +1888,88 @@ mod tests {
         assert!(route
             .route_reason
             .contains("preserve_active_clarify_output_contract"));
+    }
+
+    #[test]
+    fn clarify_locator_reply_keeps_current_file_delivery_over_weak_prior_shape() {
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: "Deliver the existing file as a file token".to_string(),
+            needs_clarify: false,
+            route_reason: "llm_semantic_contract_repair".to_string(),
+            route_confidence: Some(0.95),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            clarify_question: String::new(),
+            schedule_intent: None,
+            wants_file_delivery: true,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::FileToken,
+                requires_content_evidence: true,
+                delivery_required: true,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: "scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
+                    .to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: Some(crate::clarify_state::ClarifyState {
+                missing_slot: crate::clarify_state::ClarifyMissingSlot::Locator,
+                pending_question: "Which configuration file?".to_string(),
+                candidate_targets: Vec::new(),
+                delivery_required: false,
+                output_shape: Some(crate::OutputResponseShape::Scalar.as_str().to_string()),
+                semantic_kind: None,
+                source_request: "Send that local config without pasting the body".to_string(),
+                source_task_id: "task-1".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+            }),
+            active_observed_facts: None,
+        };
+        let resolution =
+            crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
+                crate::clarify_followup::ClarifyLocatorReplyRewrite {
+                    resolved_intent:
+                        "Continue the previous request that was waiting for clarification: Send that local config without pasting the body\nUser now provides the missing target/content: scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
+                            .to_string(),
+                    prior_user_text: "Send that local config without pasting the body".to_string(),
+                    current_user_text:
+                        "scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
+                            .to_string(),
+                    reason: crate::clarify_followup::ClarifyRewriteReason::ClarifyLocatorReply,
+                },
+            );
+
+        preserve_active_clarify_output_contract_for_locator_reply(
+            &mut route,
+            &resolution,
+            &snapshot,
+        );
+
+        assert!(route.wants_file_delivery);
+        assert!(route.output_contract.delivery_required);
+        assert_eq!(
+            route.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::FileSingle
+        );
+        assert_eq!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        );
+        assert!(route
+            .route_reason
+            .contains("keep_current_file_delivery_over_weak_active_clarify_shape"));
     }
 
     #[test]

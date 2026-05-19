@@ -660,6 +660,41 @@ fn intercept_file_delivery_contract_uses_planner_locator_hint_for_filename_scan(
     assert_eq!(messages, vec![expected]);
 }
 
+#[test]
+fn file_delivery_contract_rewrites_bare_relative_path_answer_to_file_token() {
+    let mut state = test_state_with_i18n(&[]);
+    let isolated = TempDirGuard::new("file_delivery_rewrites_bare_path");
+    state.skill_rt.workspace_root = isolated.path().to_path_buf();
+    state.skill_rt.default_locator_search_dir = isolated.path().to_path_buf();
+    let target = isolated.path().join("configs/app_config.toml");
+    write_text_file(&target);
+    let canonical = target.canonicalize().expect("canonical target");
+    let relative = "configs/app_config.toml";
+
+    let contract = IntentOutputContract {
+        exact_sentence_count: None,
+        delivery_required: true,
+        response_shape: OutputResponseShape::FileToken,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: relative.to_string(),
+        delivery_intent: OutputDeliveryIntent::FileSingle,
+        ..IntentOutputContract::default()
+    };
+
+    let (text, messages) = intercept_response_payload_for_delivery(
+        &state,
+        relative,
+        true,
+        &contract,
+        relative.to_string(),
+        vec![relative.to_string()],
+    );
+
+    let expected = format!("FILE:{}", canonical.display());
+    assert_eq!(text, expected);
+    assert_eq!(messages, vec![expected]);
+}
+
 // Single-file delivery resolution rules.
 #[test]
 fn rule1_explicit_file_path_hits_system_root() {

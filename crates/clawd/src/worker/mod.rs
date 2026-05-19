@@ -260,11 +260,16 @@ pub(crate) async fn process_ask_task(
             Some(trimmed.to_string())
         }
     };
+    let session_alias_bindings =
+        crate::conversation_state::load_active_conversation_state(state, task)
+            .map(|conversation_state| conversation_state.alias_bindings)
+            .unwrap_or_default();
     let agent_run_context = Some(crate::agent_engine::AgentRunContext {
         route_result: Some(prepared_flow.route_result.clone()),
         execution_recipe_hint: prepared_flow.execution_recipe_hint,
         turn_analysis: prepared_flow.turn_analysis.clone(),
         context_bundle_summary: Some(prepared_flow.context_bundle_summary.clone()),
+        session_alias_bindings,
         auto_locator_path: prepared_flow.auto_locator_path.clone(),
         has_authoritative_deictic_anchor: prepared_flow.has_authoritative_deictic_anchor,
         fuzzy_locator_suggestions: prepared_flow.fuzzy_locator_suggestions.clone(),
@@ -274,6 +279,15 @@ pub(crate) async fn process_ask_task(
         // observed synthesis can fall back to stale raw phrasing and let memory override the
         // current session state.
         user_request: Some(prepared_flow.resolved_prompt_for_execution.clone()),
+        semantic_answer_candidate_draft: prepared_flow.semantic_answer_candidate_draft.clone(),
+        memory_context_for_execution: {
+            let trimmed = prepared_flow.memory_context_for_execution.trim();
+            if trimmed.is_empty() || trimmed == "<none>" {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        },
         cross_turn_recent_execution_context,
     });
 

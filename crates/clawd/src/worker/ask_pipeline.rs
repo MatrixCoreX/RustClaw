@@ -15,6 +15,8 @@ pub(super) struct PreparedAskFlow {
     pub(super) chat_prompt_context: String,
     pub(super) resolved_prompt_for_execution: String,
     pub(super) prompt_with_memory_for_execution: String,
+    pub(super) memory_context_for_execution: String,
+    pub(super) semantic_answer_candidate_draft: Option<String>,
     pub(super) recent_execution_context: String,
     pub(super) agent_mode: bool,
     /// Final runtime ask mode copied from PreparedAskRouting.
@@ -231,6 +233,83 @@ fn structured_missing_locator_clarify_context(
     Some(lines.join("\n"))
 }
 
+fn structured_missing_locator_default_question(
+    state: &AppState,
+    language_hint: &str,
+    route_result: &crate::RouteResult,
+    fuzzy_locator_suggestions: &[String],
+) -> Option<String> {
+    if !route_result.needs_clarify
+        || !fuzzy_locator_suggestions.is_empty()
+        || !route_result.output_contract.locator_hint.trim().is_empty()
+    {
+        return None;
+    }
+    let prefer_english =
+        crate::fallback::fallback_prefers_english_for_language_hint(state, language_hint);
+    let (key, zh, en) = if matches!(
+        route_result.output_contract.delivery_intent,
+        crate::OutputDeliveryIntent::DirectoryLookup
+    ) {
+        (
+            "clawd.msg.clarify.missing_directory_locator",
+            "请提供要查看的目录完整路径。",
+            "Please provide the full path of the directory to inspect.",
+        )
+    } else if matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::SqliteTableListing
+            | crate::OutputSemanticKind::SqliteTableNamesOnly
+            | crate::OutputSemanticKind::SqliteDatabaseKindJudgment
+            | crate::OutputSemanticKind::SqliteSchemaVersion
+    ) {
+        (
+            "clawd.msg.clarify.missing_sqlite_locator",
+            "请提供要查询的 SQLite 数据库文件路径。",
+            "Please provide the path of the SQLite database file to query.",
+        )
+    } else if matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ScalarCount
+    ) {
+        (
+            "clawd.msg.clarify.missing_count_target",
+            "请提供要统计的文件或目录完整路径。",
+            "Please provide the full path of the file or directory to count.",
+        )
+    } else if matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ServiceStatus
+    ) {
+        (
+            "clawd.msg.clarify.missing_service_target",
+            "请说明要查询的服务或进程名称。",
+            "Please specify the service or process name to check.",
+        )
+    } else if route_result.output_contract.delivery_required {
+        (
+            "clawd.msg.clarify.missing_file_delivery_locator",
+            "请提供要发送的文件完整路径。",
+            "Please provide the full path of the file to send.",
+        )
+    } else if route_result.output_contract.requires_content_evidence {
+        (
+            "clawd.msg.clarify.missing_read_target",
+            "请提供要读取或检查的具体文件、目录或路径。",
+            "Please provide the specific file, directory, or path to read or inspect.",
+        )
+    } else {
+        return None;
+    };
+    Some(crate::app_helpers::bilingual_t_with_default(
+        state,
+        key,
+        zh,
+        en,
+        prefer_english,
+    ))
+}
+
 fn apply_ask_post_route(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -256,6 +335,22 @@ fn apply_ask_post_route(
         route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
         route_result.clarify_question = deictic_missing_locator_question(&route_result).to_string();
         append_route_reason(&mut route_result, "deictic_memory_only_requires_clarify");
+    }
+    if unbound_model_context_target_route_should_force_clarify(
+        state,
+        prompt,
+        &route_result,
+        turn_analysis,
+        &session_snapshot,
+    ) {
+        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
+        route_result.needs_clarify = true;
+        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.clarify_question.clear();
+        append_route_reason(
+            &mut route_result,
+            "unbound_model_context_target_requires_clarify",
+        );
     }
     prebind_workspace_child_locator_from_current_request(state, prompt, &mut route_result);
     prebind_clarify_workspace_child_locator_from_current_request(state, prompt, &mut route_result);
@@ -285,10 +380,63 @@ fn apply_ask_post_route(
         preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
         route_result.needs_clarify = true;
         route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
-        route_result.clarify_question = deictic_missing_locator_question(&route_result).to_string();
+        route_result.clarify_question.clear();
         append_route_reason(
             &mut route_result,
             "locatorless_observation_requires_clarify",
+        );
+    }
+    if unbound_targeted_evidence_route_should_force_clarify(
+        prompt,
+        &route_result,
+        &session_snapshot,
+    ) {
+        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
+        route_result.needs_clarify = true;
+        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.clarify_question.clear();
+        append_route_reason(
+            &mut route_result,
+            "unbound_targeted_evidence_requires_clarify",
+        );
+    }
+    if bare_topic_memory_expansion_route_should_force_clarify(
+        prompt,
+        &route_result,
+        turn_analysis,
+        &session_snapshot,
+    ) {
+        preserve_scalar_shape_from_normalizer_candidate_for_clarify(&mut route_result);
+        route_result.needs_clarify = true;
+        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.clarify_question.clear();
+        append_route_reason(
+            &mut route_result,
+            "bare_topic_context_expansion_requires_clarify",
+        );
+    }
+    if bare_topic_clarify_question_should_drop_context_target(prompt, &route_result) {
+        route_result.clarify_question.clear();
+        append_route_reason(&mut route_result, "bare_topic_contextual_clarify_sanitized");
+    }
+    if unbound_existing_file_delivery_route_should_force_clarify(
+        state,
+        prompt,
+        &route_result,
+        has_authoritative_deictic_anchor,
+    ) {
+        route_result.needs_clarify = true;
+        route_result.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route_result.clarify_question.clear();
+        route_result.wants_file_delivery = true;
+        route_result.output_contract.delivery_required = true;
+        route_result.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route_result.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route_result.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route_result.output_contract.locator_hint.clear();
+        append_route_reason(
+            &mut route_result,
+            "unbound_existing_file_delivery_requires_clarify",
         );
     }
     prebind_direct_file_delivery_locator_before_deictic_guard(
@@ -559,10 +707,7 @@ fn normalize_locator_identity_token(value: &str) -> String {
 }
 
 fn should_attempt_auto_locator(route_result: &crate::RouteResult) -> bool {
-    if route_result.needs_clarify
-        && route_result.output_contract.locator_kind != crate::OutputLocatorKind::CurrentWorkspace
-        && route_result.output_contract.locator_hint.trim().is_empty()
-    {
+    if route_result.needs_clarify && route_result.output_contract.locator_hint.trim().is_empty() {
         return false;
     }
     if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
@@ -639,6 +784,68 @@ fn deictic_memory_only_route_should_force_clarify(
         )
 }
 
+fn unbound_model_context_target_route_should_force_clarify(
+    state: &AppState,
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> bool {
+    if !route_result.is_execute_gate()
+        || !route_result.output_contract.requires_content_evidence
+        || !route_result.output_contract.locator_hint.trim().is_empty()
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        || current_request_has_structural_locator_surface_for_route(state, prompt, route_result)
+        || state_patch_allows_deictic_locator_guard_bypass(turn_analysis)
+        || session_has_authoritative_deictic_anchor(prompt, route_result, session_snapshot)
+        || active_session_has_structured_observation_anchor(session_snapshot)
+    {
+        return false;
+    }
+    if semantic_kind_can_execute_without_locator(route_result.output_contract.semantic_kind)
+        && !(route_result.output_contract.semantic_kind
+            == crate::OutputSemanticKind::RawCommandOutput
+            && !raw_command_output_has_explicit_command(state, prompt))
+    {
+        return false;
+    }
+    route_introduces_unmentioned_distinctive_context_target(prompt, route_result)
+}
+
+fn unbound_targeted_evidence_route_should_force_clarify(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> bool {
+    if current_request_has_concrete_locator_surface(prompt)
+        || session_has_authoritative_deictic_anchor(prompt, route_result, session_snapshot)
+        || route_result.needs_clarify
+        || !route_result.output_contract.locator_hint.trim().is_empty()
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
+        )
+    {
+        return false;
+    }
+    if route_result.output_contract.requires_content_evidence
+        && !semantic_kind_can_execute_without_locator(route_result.output_contract.semantic_kind)
+    {
+        return true;
+    }
+    matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ScalarCount
+    ) || matches!(
+        route_result.output_contract.delivery_intent,
+        crate::OutputDeliveryIntent::DirectoryLookup
+            | crate::OutputDeliveryIntent::DirectoryBatchFiles
+    )
+}
+
 fn current_request_has_concrete_locator_surface(prompt: &str) -> bool {
     let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
     surface.has_explicit_path_or_url()
@@ -647,6 +854,46 @@ fn current_request_has_concrete_locator_surface(prompt: &str) -> bool {
         || surface.locator_target_pair.is_some()
         || surface.has_delivery_token_reference()
         || surface.is_structural_locator_only_reply()
+}
+
+fn route_requires_existing_file_delivery(route_result: &crate::RouteResult) -> bool {
+    if matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::GeneratedFileDelivery
+    ) {
+        return false;
+    }
+    route_result.wants_file_delivery
+        || route_result.output_contract.delivery_required
+        || matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+        || matches!(
+            route_result.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::FileSingle
+        )
+}
+
+fn current_request_has_file_delivery_locator_binding(state: &AppState, prompt: &str) -> bool {
+    current_request_has_concrete_locator_surface(prompt)
+        || current_request_resolves_workspace_child_locator(state, prompt).is_some()
+}
+
+fn unbound_existing_file_delivery_route_should_force_clarify(
+    state: &AppState,
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    has_authoritative_deictic_anchor: bool,
+) -> bool {
+    if route_result.needs_clarify
+        || has_authoritative_deictic_anchor
+        || !route_requires_existing_file_delivery(route_result)
+        || current_request_has_file_delivery_locator_binding(state, prompt)
+    {
+        return false;
+    }
+    true
 }
 
 fn current_request_resolves_workspace_child_locator(
@@ -946,6 +1193,14 @@ fn semantic_kind_can_execute_without_locator(kind: crate::OutputSemanticKind) ->
     )
 }
 
+fn raw_command_output_has_explicit_command(state: &AppState, prompt: &str) -> bool {
+    crate::agent_engine::explicit_command_segment_for_policy(
+        &state.policy.command_intent,
+        prompt.trim(),
+    )
+    .is_some()
+}
+
 fn locatorless_observation_route_should_force_clarify(
     state: &AppState,
     prompt: &str,
@@ -961,12 +1216,126 @@ fn locatorless_observation_route_should_force_clarify(
         || state_patch_allows_deictic_locator_guard_bypass(turn_analysis)
         || session_has_authoritative_deictic_anchor(prompt, route_result, session_snapshot)
         || active_session_has_structured_observation_anchor(session_snapshot)
-        || semantic_kind_can_execute_without_locator(route_result.output_contract.semantic_kind)
     {
         return false;
     }
+    if semantic_kind_can_execute_without_locator(route_result.output_contract.semantic_kind) {
+        return route_result.output_contract.semantic_kind
+            == crate::OutputSemanticKind::RawCommandOutput
+            && !raw_command_output_has_explicit_command(state, prompt);
+    }
 
     true
+}
+
+fn bare_topic_memory_expansion_route_should_force_clarify(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> bool {
+    if !is_bare_topic_only_prompt(prompt)
+        || !route_result.is_execute_gate()
+        || !route_result.output_contract.requires_content_evidence
+        || !matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::RawCommandOutput
+        )
+        || route_result.output_contract.locator_kind != crate::OutputLocatorKind::None
+        || !route_result.output_contract.locator_hint.trim().is_empty()
+        || state_patch_allows_deictic_locator_guard_bypass(turn_analysis)
+        || session_has_authoritative_deictic_anchor(prompt, route_result, session_snapshot)
+        || active_session_has_structured_observation_anchor(session_snapshot)
+    {
+        return false;
+    }
+    route_introduces_unmentioned_distinctive_context_target(prompt, route_result)
+}
+
+fn is_bare_topic_only_prompt(prompt: &str) -> bool {
+    let trimmed = prompt.trim();
+    if trimmed.is_empty()
+        || trimmed.split_whitespace().count() != 1
+        || trimmed.contains(['/', '\\', '.', ':'])
+        || !trimmed
+            .chars()
+            .any(|ch| ch.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(&ch))
+        || !trimmed.chars().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || ('\u{4e00}'..='\u{9fff}').contains(&ch)
+                || matches!(ch, '-' | '_')
+        })
+    {
+        return false;
+    }
+    let signal_chars = trimmed
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(ch))
+        .count();
+    if trimmed.is_ascii() {
+        return signal_chars <= 32;
+    }
+    signal_chars <= 4
+}
+
+fn route_introduces_unmentioned_distinctive_context_target(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+) -> bool {
+    let mut text = String::new();
+    text.push_str(&route_result.resolved_intent);
+    text.push('\n');
+    text.push_str(&route_result.route_reason);
+    text.push('\n');
+    text.push_str(&route_result.clarify_question);
+    distinctive_context_tokens(&text)
+        .into_iter()
+        .any(|token| !distinctive_token_present_in_request(prompt, &token))
+}
+
+fn distinctive_context_tokens(text: &str) -> Vec<String> {
+    text.split(|ch: char| {
+        !(ch.is_ascii_alphanumeric()
+            || ('\u{4e00}'..='\u{9fff}').contains(&ch)
+            || matches!(ch, '_' | '-' | '/' | '.' | ':'))
+    })
+    .map(|token| token.trim_matches(|ch: char| matches!(ch, '_' | '-' | '/' | '.' | ':')))
+    .filter(|token| distinctive_context_token(token))
+    .map(ToOwned::to_owned)
+    .collect()
+}
+
+fn distinctive_context_token(token: &str) -> bool {
+    let signal_chars = token
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(ch))
+        .count();
+    let has_identifier_separator = token.contains(['_', '/', '.', ':']);
+    let has_digit = token.chars().any(|ch| ch.is_ascii_digit());
+    (signal_chars >= 4 && has_identifier_separator)
+        || (signal_chars >= 8 && has_digit)
+        || signal_chars >= 16
+}
+
+fn distinctive_token_present_in_request(request: &str, token: &str) -> bool {
+    let request = request.to_ascii_lowercase();
+    let token = token.to_ascii_lowercase();
+    if request.contains(&token) {
+        return true;
+    }
+    token
+        .split(['_', '-', '/', '.', ':'])
+        .filter(|part| part.len() >= 3)
+        .any(|part| request.contains(part))
+}
+
+fn bare_topic_clarify_question_should_drop_context_target(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+) -> bool {
+    is_bare_topic_only_prompt(prompt)
+        && route_result.needs_clarify
+        && route_introduces_unmentioned_distinctive_context_target(prompt, route_result)
 }
 
 fn preserve_scalar_shape_from_normalizer_candidate_for_clarify(
@@ -1158,7 +1527,8 @@ fn session_has_authoritative_deictic_anchor(
             state.alias_bindings.iter().any(|binding| {
                 let alias = binding.alias.trim();
                 let target = binding.target.trim();
-                (!alias.is_empty() && prompt.contains(alias))
+                (!alias.is_empty()
+                    && crate::conversation_state::alias_surface_matches_prompt(prompt, alias))
                     || (!target.is_empty()
                         && (route_result.resolved_intent.contains(target)
                             || route_result.output_contract.locator_hint.contains(target)))
@@ -1297,6 +1667,12 @@ fn locator_hint_is_relative_path_like(locator_hint: &str) -> bool {
 
 fn deictic_missing_locator_question(route_result: &crate::RouteResult) -> &'static str {
     if matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ScalarCount
+    ) {
+        return "请提供要计数的具体目录或路径。";
+    }
+    if matches!(
         route_result.output_contract.delivery_intent,
         crate::OutputDeliveryIntent::FileSingle
             | crate::OutputDeliveryIntent::DirectoryLookup
@@ -1330,6 +1706,9 @@ pub(super) async fn prepare_ask_flow(
     source: &str,
 ) -> Result<PreparedAskFlow> {
     let prepared_routing = super::prepare_ask_routing(state, task, payload, prompt, source).await;
+    let semantic_answer_candidate_draft =
+        embedded_normalizer_answer_candidate(&prepared_routing.route_result.resolved_intent)
+            .map(ToOwned::to_owned);
     let prepared_execution = super::prepare_ask_execution_context(
         state,
         task,
@@ -1365,6 +1744,8 @@ pub(super) async fn prepare_ask_flow(
         chat_prompt_context: prepared_execution.chat_prompt_context,
         resolved_prompt_for_execution: applied_post_route.resolved_prompt_for_execution,
         prompt_with_memory_for_execution: applied_post_route.prompt_with_memory_for_execution,
+        memory_context_for_execution: prepared_execution.memory_context_for_execution,
+        semantic_answer_candidate_draft,
         recent_execution_context: prepared_execution.recent_execution_context,
         agent_mode: prepared_routing.agent_mode,
         ask_mode: prepared_routing.ask_mode.clone(),
@@ -1436,6 +1817,19 @@ pub(super) async fn execute_ask_dispatch(
         } else {
             None
         };
+        let request_language_hint =
+            crate::language_policy::task_response_language_hint(state, task, prompt);
+        let structured_default_question = preferred_clarify_question.is_none().then(|| {
+            structured_missing_locator_default_question(
+                state,
+                &request_language_hint,
+                route_result,
+                fuzzy_locator_suggestions,
+            )
+        });
+        let structured_default_question = structured_default_question.flatten();
+        let preferred_clarify_question =
+            preferred_clarify_question.or(structured_default_question.as_deref());
         let structured_context_requires_llm =
             structured_clarify_context.is_some() && preferred_clarify_question.is_none();
         let clarify_policy = if structured_context_requires_llm
@@ -1607,7 +2001,9 @@ pub(super) async fn execute_ask_dispatch(
 #[cfg(test)]
 mod tests {
     use super::{
-        background_only_locator_route_should_force_clarify, clarify_fallback_source_or_default,
+        background_only_locator_route_should_force_clarify,
+        bare_topic_clarify_question_should_drop_context_target,
+        bare_topic_memory_expansion_route_should_force_clarify, clarify_fallback_source_or_default,
         current_workspace_locator_resolution, deictic_bare_locator_should_force_clarify,
         deictic_memory_only_route_should_force_clarify, deictic_missing_locator_question,
         direct_answer_from_structured_anchor_requires_evidence, effective_auto_locator_kind,
@@ -1621,7 +2017,10 @@ mod tests {
         promote_structured_anchor_direct_answer_to_evidence, should_attempt_auto_locator,
         should_preserve_original_inline_structured_input, should_reuse_route_clarify_question,
         should_suppress_recent_execution_in_clarify_context,
-        structured_missing_locator_clarify_context,
+        structured_missing_locator_clarify_context, structured_missing_locator_default_question,
+        unbound_existing_file_delivery_route_should_force_clarify,
+        unbound_model_context_target_route_should_force_clarify,
+        unbound_targeted_evidence_route_should_force_clarify,
     };
     use crate::{AgentRuntimeConfig, AppState, SkillViewsSnapshot};
     use claw_core::config::{AgentConfig, ToolsConfig};
@@ -1869,6 +2268,120 @@ mod tests {
     }
 
     #[test]
+    fn unbound_current_workspace_count_requires_clarify_without_anchor() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(unbound_targeted_evidence_route_should_force_clarify(
+            "count the requested target's direct children and output only the number",
+            &route,
+            &snapshot,
+        ));
+        assert_eq!(
+            deictic_missing_locator_question(&route),
+            "请提供要计数的具体目录或路径。"
+        );
+    }
+
+    #[test]
+    fn bound_current_workspace_count_does_not_trigger_unbound_fallback_guard() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint = "/tmp/rustclaw".to_string();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(!unbound_targeted_evidence_route_should_force_clarify(
+            "count direct children in the current workspace and output only the number",
+            &route,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn unbound_scalar_count_without_locator_requires_clarify() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(unbound_targeted_evidence_route_should_force_clarify(
+            "count direct children and output only the number",
+            &route,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn unbound_current_workspace_file_summary_requires_clarify_without_anchor() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(unbound_targeted_evidence_route_should_force_clarify(
+            "read the beginning of the requested documentation and summarize it in one sentence",
+            &route,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn unbound_current_workspace_project_summary_still_allows_execution() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(!unbound_targeted_evidence_route_should_force_clarify(
+            "summarize the current workspace structure in one sentence",
+            &route,
+            &snapshot,
+        ));
+    }
+
+    #[test]
     fn background_only_locator_rewrite_requires_clarify_without_session_anchor() {
         let state = test_state_with_root(make_temp_root("background_locator_requires_clarify"));
         let mut route = executable_filename_route();
@@ -1890,6 +2403,124 @@ mod tests {
             &state,
             "读一下那个文件前 3 行",
             &route.resolved_intent,
+            &route,
+            None,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn model_supplied_manifest_locator_from_deictic_prompt_requires_clarify() {
+        let root = make_temp_root("background_manifest_locator_requires_clarify");
+        std::fs::write(root.join("Cargo.toml"), "[package]\nname = \"demo\"\n").expect("manifest");
+        let state = test_state_with_root(root);
+        let mut route = executable_filename_route();
+        route.resolved_intent =
+            "Extract the name field from the package manifest (Cargo.toml).".to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "Cargo.toml".to_string();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(background_only_locator_route_should_force_clarify(
+            &state,
+            "extract name from that package file",
+            &route.resolved_intent,
+            &route,
+            None,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn unbound_model_context_target_requires_clarify_before_planner_guess() {
+        let state = test_state_with_root(make_temp_root("unbound_model_context_target"));
+        let mut route = executable_filename_route();
+        route.resolved_intent =
+            "Extract the name field from the package manifest (Cargo.toml).".to_string();
+        route.route_reason =
+            "User requests the package name from the package file; Cargo.toml can be read directly."
+                .to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(unbound_model_context_target_route_should_force_clarify(
+            &state,
+            "extract name from that package file",
+            &route,
+            None,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn unbound_model_context_target_allows_configured_raw_command_without_locator() {
+        let mut state = test_state_with_root(make_temp_root("unbound_model_context_raw_command"));
+        state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
+        state.policy.command_intent.standalone_commands = vec!["pwd".to_string()];
+        let mut route = executable_filename_route();
+        route.resolved_intent = "Get current working directory path".to_string();
+        route.route_reason = "command_payload_requires_raw_output_execution".to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(!unbound_model_context_target_route_should_force_clarify(
+            &state,
+            "Run pwd and output only the raw result.",
+            &route,
+            None,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn unbound_model_context_target_allows_current_turn_locator() {
+        let root = make_temp_root("unbound_model_context_current_locator");
+        let readme = root.join("README.md");
+        std::fs::write(&readme, "# Demo\n").expect("readme");
+        let state = test_state_with_root(root);
+        let mut route = executable_filename_route();
+        route.resolved_intent = "Read README.md and summarize it.".to_string();
+        route.route_reason = "README.md is the requested target.".to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(!unbound_model_context_target_route_should_force_clarify(
+            &state,
+            "README.md",
             &route,
             None,
             &snapshot,
@@ -2307,7 +2938,8 @@ mod tests {
 
     #[test]
     fn locatorless_raw_command_output_still_allows_execution() {
-        let state = test_state_with_root(make_temp_root("locatorless_raw_command"));
+        let mut state = test_state_with_root(make_temp_root("locatorless_raw_command"));
+        state.policy.command_intent.execute_prefixes = vec!["execute ".to_string()];
         let mut route = executable_filename_route();
         route.output_contract.locator_kind = crate::OutputLocatorKind::None;
         route.output_contract.locator_hint.clear();
@@ -2322,10 +2954,102 @@ mod tests {
 
         assert!(!locatorless_observation_route_should_force_clarify(
             &state,
-            "执行 pwd，然后用一句话解释这个路径代表什么",
+            "execute pwd, then explain what the path means in one sentence",
             &route,
             None,
             &snapshot,
+        ));
+    }
+
+    #[test]
+    fn locatorless_raw_command_without_explicit_command_requires_clarify() {
+        let state = test_state_with_root(make_temp_root("locatorless_raw_without_command"));
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(locatorless_observation_route_should_force_clarify(
+            &state,
+            "list directory contents",
+            &route,
+            None,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn bare_topic_raw_command_with_unmentioned_context_target_forces_clarify() {
+        let mut route = executable_filename_route();
+        route.resolved_intent = "View logs from the ops_http_repair test suite".to_string();
+        route.route_reason = "User typed a bare topic and route context mentioned scripts/nl_suite_logs/ops_http_repair".to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(bare_topic_memory_expansion_route_should_force_clarify(
+            "logs", &route, None, &snapshot,
+        ));
+    }
+
+    #[test]
+    fn bare_topic_raw_command_without_unmentioned_context_target_stays_executable() {
+        let mut route = executable_filename_route();
+        route.resolved_intent = "execute pwd command".to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(!bare_topic_memory_expansion_route_should_force_clarify(
+            "pwd", &route, None, &snapshot,
+        ));
+    }
+
+    #[test]
+    fn bare_topic_clarify_question_with_unmentioned_context_target_is_sanitized() {
+        let mut route = executable_filename_route();
+        route.needs_clarify = true;
+        route.resolved_intent = "View logs".to_string();
+        route.clarify_question =
+            "Which logs: ops_http_repair, a specific file path, or current process logs?"
+                .to_string();
+
+        assert!(bare_topic_clarify_question_should_drop_context_target(
+            "logs", &route
+        ));
+    }
+
+    #[test]
+    fn chinese_deictic_delivery_sentence_is_not_treated_as_bare_topic() {
+        let mut route = executable_filename_route();
+        route.needs_clarify = true;
+        route.resolved_intent = "把最近提到的文件发给用户".to_string();
+        route.clarify_question = "请提供目标文件或目录的具体路径。".to_string();
+
+        assert!(!bare_topic_clarify_question_should_drop_context_target(
+            "把那个文件发给我",
+            &route
         ));
     }
 
@@ -2574,6 +3298,123 @@ mod tests {
     }
 
     #[test]
+    fn unbound_existing_file_delivery_with_model_locator_forces_clarify() {
+        let root = make_temp_root("unbound_delivery_model_locator");
+        let state = test_state_with_root(root.clone());
+        let mut route = executable_filename_route();
+        route.ask_mode = crate::AskMode::planner_execute_plain();
+        route.wants_file_delivery = true;
+        route.output_contract.requires_content_evidence = false;
+        route.output_contract.delivery_required = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "configs/config.toml".to_string();
+
+        assert!(unbound_existing_file_delivery_route_should_force_clarify(
+            &state,
+            "please send the referenced local configuration as a file",
+            &route,
+            false,
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unbound_existing_file_delivery_allows_current_request_locator() {
+        let root = make_temp_root("delivery_current_locator");
+        let state = test_state_with_root(root.clone());
+        let mut route = executable_filename_route();
+        route.ask_mode = crate::AskMode::planner_execute_plain();
+        route.wants_file_delivery = true;
+        route.output_contract.requires_content_evidence = false;
+        route.output_contract.delivery_required = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "configs/config.toml".to_string();
+
+        assert!(!unbound_existing_file_delivery_route_should_force_clarify(
+            &state,
+            "please send configs/config.toml as a file",
+            &route,
+            false,
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unbound_existing_file_delivery_allows_authoritative_anchor() {
+        let root = make_temp_root("delivery_authoritative_anchor");
+        let state = test_state_with_root(root.clone());
+        let mut route = executable_filename_route();
+        route.ask_mode = crate::AskMode::planner_execute_plain();
+        route.wants_file_delivery = true;
+        route.output_contract.requires_content_evidence = false;
+        route.output_contract.delivery_required = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "configs/config.toml".to_string();
+
+        assert!(!unbound_existing_file_delivery_route_should_force_clarify(
+            &state,
+            "please send it as a file",
+            &route,
+            true,
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unbound_existing_file_delivery_allows_generated_file_delivery() {
+        let root = make_temp_root("delivery_generated_file");
+        let state = test_state_with_root(root.clone());
+        let mut route = executable_filename_route();
+        route.ask_mode = crate::AskMode::planner_execute_plain();
+        route.wants_file_delivery = true;
+        route.output_contract.requires_content_evidence = false;
+        route.output_contract.delivery_required = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
+
+        assert!(!unbound_existing_file_delivery_route_should_force_clarify(
+            &state,
+            "generate a small report and send it as a file",
+            &route,
+            false,
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unbound_existing_file_delivery_allows_resolved_workspace_child() {
+        let root = make_temp_root("delivery_workspace_child");
+        std::fs::create_dir_all(root.join("document")).expect("document dir");
+        let state = test_state_with_root(root.clone());
+        let mut route = executable_filename_route();
+        route.ask_mode = crate::AskMode::planner_execute_plain();
+        route.wants_file_delivery = true;
+        route.output_contract.requires_content_evidence = false;
+        route.output_contract.delivery_required = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "document".to_string();
+
+        assert!(!unbound_existing_file_delivery_route_should_force_clarify(
+            &state,
+            "please send document as a file",
+            &route,
+            false,
+        ));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn structured_anchor_direct_answer_with_derived_candidate_requires_evidence() {
         let snapshot = crate::conversation_state::ActiveSessionSnapshot {
             conversation_state: Some(crate::conversation_state::ConversationState {
@@ -2766,7 +3607,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_locator_attempts_for_clarify_with_resolvable_workspace_scope() {
+    fn auto_locator_skips_clarify_with_unbound_workspace_scope() {
         let mut route = crate::RouteResult {
             ask_mode: crate::AskMode::clarify(),
             resolved_intent: "检查当前目录".to_string(),
@@ -2789,7 +3630,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        assert!(should_attempt_auto_locator(&route));
+        assert!(!should_attempt_auto_locator(&route));
 
         route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
         route.output_contract.locator_hint = "docs".to_string();
@@ -3185,6 +4026,54 @@ mod tests {
             .expect("structured clarify context");
         assert!(context.contains("clarify_case: missing_file_locator"));
         assert!(context.contains("delivery_required: true"));
+    }
+
+    #[test]
+    fn structured_missing_file_locator_default_question_is_specific() {
+        let root = make_temp_root("missing_file_question");
+        let state = test_state_with_root(root.clone());
+        let mut route = clarify_route(crate::OutputLocatorKind::Filename);
+        route.clarify_question.clear();
+        route.output_contract.requires_content_evidence = false;
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route.output_contract.delivery_required = true;
+        route.wants_file_delivery = true;
+
+        let question = structured_missing_locator_default_question(&state, "zh-CN", &route, &[])
+            .expect("structured default question");
+
+        assert!(question.contains("文件完整路径"));
+        assert!(!question.contains("没看出"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn structured_missing_sqlite_locator_default_question_uses_semantic_kind() {
+        let root = make_temp_root("missing_sqlite_question");
+        let state = test_state_with_root(root.clone());
+        let mut route = clarify_route(crate::OutputLocatorKind::Path);
+        route.clarify_question.clear();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
+
+        let question = structured_missing_locator_default_question(&state, "en", &route, &[])
+            .expect("structured default question");
+
+        assert!(question.contains("SQLite database file"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn structured_missing_locator_default_question_skips_fuzzy_candidates() {
+        let root = make_temp_root("missing_fuzzy_question");
+        let state = test_state_with_root(root.clone());
+        let route = clarify_route(crate::OutputLocatorKind::Filename);
+        let candidates = vec!["/tmp/a/Cargo.toml".to_string()];
+
+        assert!(
+            structured_missing_locator_default_question(&state, "en", &route, &candidates)
+                .is_none()
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

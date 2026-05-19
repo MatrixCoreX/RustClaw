@@ -29,7 +29,8 @@ pub(crate) fn load_command_intent_runtime(
     let rules_dir = workspace_root.join(cfg.rules_dir.trim());
     let mut all_result_suffixes = Vec::new();
     let mut execute_prefixes = Vec::new();
-    for locale in ["zh-CN", "en-US"] {
+    let mut standalone_commands = Vec::new();
+    for locale in ["common", "zh-CN", "en-US"] {
         let path = rules_dir.join(format!("{locale}.toml"));
         match std::fs::read_to_string(&path) {
             Ok(raw) => match toml::from_str::<CommandIntentRules>(&raw) {
@@ -39,6 +40,9 @@ pub(crate) fn load_command_intent_runtime(
                     }
                     for value in rules.execute_prefixes {
                         push_unique_trimmed(&mut execute_prefixes, value);
+                    }
+                    for value in rules.standalone_commands {
+                        push_unique_trimmed(&mut standalone_commands, value);
                     }
                 }
                 Err(err) => {
@@ -60,6 +64,7 @@ pub(crate) fn load_command_intent_runtime(
     CommandIntentRuntime {
         all_result_suffixes,
         execute_prefixes,
+        standalone_commands,
         default_locale,
         verify_enforce_enabled: cfg.verify_enforce_enabled,
     }

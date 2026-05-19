@@ -436,11 +436,17 @@ pub(crate) struct AgentRunContext {
     pub(crate) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     pub(crate) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
     pub(crate) context_bundle_summary: Option<String>,
+    pub(crate) session_alias_bindings: Vec<crate::conversation_state::SessionAliasBinding>,
     pub(crate) auto_locator_path: Option<String>,
     pub(crate) has_authoritative_deictic_anchor: bool,
     pub(crate) fuzzy_locator_suggestions: Vec<String>,
     pub(crate) original_user_request: Option<String>,
     pub(crate) user_request: Option<String>,
+    pub(crate) semantic_answer_candidate_draft: Option<String>,
+    /// Memory context rendered before the current request is appended.
+    /// This is used only for runtime-bound scalar checks; it must not include
+    /// model-produced answer candidates from the current turn.
+    pub(crate) memory_context_for_execution: Option<String>,
     /// Cross-turn recent execution context (rendered by routing_context::build_recent_execution_context).
     /// Used by runtime synthesis/planning so the LLM can see prior turns' outputs (file content,
     /// list_dir results, alias bindings, etc.) when the current turn references "上一个文件 / 上上个 /

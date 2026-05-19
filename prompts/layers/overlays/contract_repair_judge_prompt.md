@@ -50,6 +50,8 @@ Canonical turn binding:
 - Use `turn_type="task_append"`, `task_correct`, `task_scope_update`, or `task_replace` with `target_task_policy="reuse_active"` / `replace_active` when the current request semantically continues, corrects, reformats, narrows, expands, or replaces an active generated deliverable.
 - Use empty strings for pure chat, memory, generic acknowledgement, or routes not bound to an active task.
 - If malformed fields express active-task continuation with non-canonical wording, normalize to these canonical enum tokens instead of dropping the active binding.
+- For active-task corrections/refinements, preserve concrete user-visible replacement or added content values in `state_patch.required_content_literals` as exact literals from the current request. When a visible value is replaced, preserve `state_patch.replacement_pairs=[{"from":"old literal","to":"new literal"}]`, and put old/rejected values that should disappear in `state_patch.forbidden_visible_literals`. Do not include generic output-control wording, length limits, body-only/output-only instructions, tone, count, or format. This gives runtime a language-neutral visibility invariant instead of forcing phrase-specific fallback logic.
+- For runtime self-state questions that only ask whether this assistant is waiting for user approval, repair to `decision="direct_answer"`, `turn_type="status_query"`, `target_task_policy=""`, no evidence/delivery, `execution_recipe.kind="none"`, and `state_patch.runtime_status_query={"kind":"approval_wait","scope":"current_task"}`. Do not use prior assistant wording as the runtime fact.
 
 Input:
 Current user request:

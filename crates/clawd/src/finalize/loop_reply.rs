@@ -1348,6 +1348,24 @@ fn direct_scalar_observed_answer(
             },
         ));
     }
+    if let Some(answer) =
+        deterministic_scalar_markdown_heading_answer_from_loop(loop_state, agent_run_context)
+    {
+        return Some((
+            answer,
+            crate::task_journal::TaskJournalFinalizerSummary {
+                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                contract_ok: true,
+                completion_ok: Some(true),
+                grounded_ok: Some(true),
+                format_ok: Some(true),
+                needs_clarify: Some(false),
+                used_evidence_ids_count: 1,
+                ..Default::default()
+            },
+        ));
+    }
     let answer =
         if crate::agent_engine::observed_output::scalar_route_prefers_structured_observed_answer(
             route, loop_state,
@@ -1411,6 +1429,228 @@ fn direct_scalar_observed_answer(
             ..Default::default()
         },
     ))
+}
+
+fn deterministic_scalar_markdown_heading_answer_from_loop(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    if !route_allows_direct_scalar_observed_answer(route)
+        || route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::FileNames
+                | crate::OutputSemanticKind::DirectoryNames
+                | crate::OutputSemanticKind::FilePaths
+                | crate::OutputSemanticKind::DirectoryEntryGroups
+                | crate::OutputSemanticKind::ScalarCount
+                | crate::OutputSemanticKind::RawCommandOutput
+                | crate::OutputSemanticKind::ScalarPathOnly
+                | crate::OutputSemanticKind::ExistenceWithPath
+        )
+    {
+        return None;
+    }
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok())
+        .filter_map(|step| step.output.as_deref())
+        .find(|output| output.contains("\"read_range\"") || output.contains("\"read_text_range\""))
+        .and_then(markdown_heading_from_read_output)
+}
+
+fn route_allows_observed_markdown_heading_scalar_delivery(route: &crate::RouteResult) -> bool {
+    if route_allows_direct_scalar_observed_answer(route) {
+        return true;
+    }
+    route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
+        && matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Free
+                | crate::OutputResponseShape::Strict
+                | crate::OutputResponseShape::OneSentence
+        )
+        && matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+        )
+        && !matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        )
+}
+
+fn route_allows_observed_markdown_heading_body_reduction(route: &crate::RouteResult) -> bool {
+    route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
+        && matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar
+                | crate::OutputResponseShape::Strict
+                | crate::OutputResponseShape::OneSentence
+        )
+        && matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+        )
+        && !matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        )
+}
+
+fn observed_markdown_heading_scalar_answer_for_delivery(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    delivery: &str,
+) -> Option<String> {
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    if !route_allows_observed_markdown_heading_scalar_delivery(route)
+        || route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::FileNames
+                | crate::OutputSemanticKind::DirectoryNames
+                | crate::OutputSemanticKind::FilePaths
+                | crate::OutputSemanticKind::DirectoryEntryGroups
+                | crate::OutputSemanticKind::ScalarCount
+                | crate::OutputSemanticKind::RawCommandOutput
+                | crate::OutputSemanticKind::ScalarPathOnly
+                | crate::OutputSemanticKind::ExistenceWithPath
+                | crate::OutputSemanticKind::ExistenceWithPathSummary
+        )
+    {
+        return None;
+    }
+    let trimmed_delivery = delivery.trim();
+    if trimmed_delivery.is_empty() {
+        return None;
+    }
+    let observed_output = loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok())
+        .filter_map(|step| step.output.as_deref())
+        .find(|output| {
+            output.contains("\"read_range\"") || output.contains("\"read_text_range\"")
+        })?;
+    let observed_heading = markdown_heading_from_read_output(observed_output)?;
+    if trimmed_delivery.contains('\n') {
+        if route_allows_observed_markdown_heading_body_reduction(route)
+            && markdown_read_body_matches_delivery(observed_output, trimmed_delivery)
+        {
+            return Some(observed_heading);
+        }
+        return None;
+    }
+    if trimmed_delivery == observed_heading.trim() {
+        return Some(observed_heading);
+    }
+    let delivery_heading = markdown_heading_from_line(trimmed_delivery)?;
+    (delivery_heading.trim() == observed_heading.trim()).then_some(observed_heading)
+}
+
+fn replace_delivery_with_observed_markdown_heading_scalar(
+    task_id: &str,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    delivery_messages: &mut Vec<String>,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some(current_delivery) = delivery_messages.last().map(String::as_str) else {
+        return false;
+    };
+    let Some(answer) = observed_markdown_heading_scalar_answer_for_delivery(
+        loop_state,
+        agent_run_context,
+        current_delivery,
+    ) else {
+        return false;
+    };
+    if current_delivery.trim() == answer.trim() {
+        return false;
+    }
+    info!(
+        "delivery markdown_heading_scalar_from_observed task_id={} previous={} observed={}",
+        task_id,
+        crate::truncate_for_log(current_delivery),
+        crate::truncate_for_log(&answer)
+    );
+    delivery_messages.clear();
+    delivery_messages.push(answer.clone());
+    loop_state.last_user_visible_respond = Some(answer);
+    *finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+    true
+}
+
+fn markdown_heading_from_read_output(output: &str) -> Option<String> {
+    let text = markdown_text_from_read_output(output)?;
+    text.lines().find_map(markdown_heading_from_line)
+}
+
+fn markdown_read_body_matches_delivery(output: &str, delivery: &str) -> bool {
+    let Some(observed) = markdown_text_from_read_output(output) else {
+        return false;
+    };
+    normalize_markdown_body_for_compare(&observed) == normalize_markdown_body_for_compare(delivery)
+}
+
+fn markdown_text_from_read_output(output: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
+    let text = value
+        .get("content")
+        .or_else(|| value.get("excerpt"))
+        .and_then(serde_json::Value::as_str)?;
+    Some(
+        text.lines()
+            .map(strip_markdown_read_line_prefix)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+fn normalize_markdown_body_for_compare(text: &str) -> String {
+    text.lines()
+        .map(strip_markdown_read_line_prefix)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .replace("\r\n", "\n")
+}
+
+fn strip_markdown_read_line_prefix(line: &str) -> &str {
+    let trimmed = line.trim();
+    if let Some((prefix, rest)) = trimmed.split_once('|') {
+        if !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit()) {
+            return rest.trim();
+        }
+    }
+    line
+}
+
+fn markdown_heading_from_line(line: &str) -> Option<String> {
+    let trimmed = strip_markdown_read_line_prefix(line).trim();
+    let hashes = trimmed.chars().take_while(|ch| *ch == '#').count();
+    if !(1..=6).contains(&hashes) {
+        return None;
+    }
+    let rest = trimmed.get(hashes..)?.trim();
+    (!rest.is_empty()).then(|| rest.to_string())
 }
 
 fn latest_scalar_observed_answer_from_loop_contract(
@@ -1600,6 +1840,38 @@ fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
             .to_ascii_lowercase()
             .starts_with("en"),
     }
+}
+
+fn final_reply_language_hint(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    agent_run_context: Option<&AgentRunContext>,
+) -> String {
+    if let Some(original) = agent_run_context
+        .and_then(|ctx| ctx.original_user_request.as_deref())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        let hint = crate::language_policy::request_language_hint(original);
+        if hint != "config_default" {
+            return hint.to_string();
+        }
+    }
+    crate::language_policy::task_response_language_hint(state, task, user_text)
+}
+
+fn prefer_english_for_final_reply(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    let normalized = final_reply_language_hint(state, task, user_text, agent_run_context)
+        .trim()
+        .to_ascii_lowercase()
+        .to_string();
+    !(normalized.starts_with("zh") || normalized == "mixed")
 }
 
 fn route_resolved_intent(agent_run_context: Option<&AgentRunContext>) -> String {
@@ -2795,10 +3067,104 @@ fn should_attach_execution_summary(
     agent_run_context: Option<&AgentRunContext>,
     _user_text: Option<&str>,
 ) -> bool {
-    let _ = loop_state;
-    agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if route.output_contract.exact_sentence_count.is_some() {
+        return false;
+    }
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ScalarCount
+    ) {
+        return false;
+    }
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::RawCommandOutput
+    ) {
+        return false;
+    }
+    let has_publishable_synthesis = loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|text| !text.is_empty());
+    let publishable_synthesis_from_step = latest_publishable_synthesis_step_matches(loop_state);
+    if has_publishable_synthesis
+        && !publishable_synthesis_from_step
+        && route.output_contract.requires_content_evidence
+        && matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
+        )
+        && !matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::FileNames
+                | crate::OutputSemanticKind::DirectoryNames
+                | crate::OutputSemanticKind::FilePaths
+                | crate::OutputSemanticKind::DirectoryEntryGroups
+                | crate::OutputSemanticKind::ScalarPathOnly
+                | crate::OutputSemanticKind::ExistenceWithPath
+        )
+    {
+        return false;
+    }
+    if has_publishable_synthesis
+        && crate::agent_engine::observed_output::recent_structured_scalar_observation_count(
+            loop_state,
+        ) > 1
+    {
+        return false;
+    }
+    if deterministic_scalar_markdown_heading_answer_from_loop(loop_state, agent_run_context)
         .is_some()
+    {
+        return false;
+    }
+    if route_allows_direct_scalar_observed_answer(route)
+        && loop_has_count_inventory_observation(loop_state)
+    {
+        return false;
+    }
+    true
+}
+
+fn latest_publishable_synthesis_step_matches(loop_state: &LoopState) -> bool {
+    let Some(synthesis) = loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    else {
+        return false;
+    };
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find(|step| step.skill == "synthesize_answer" && step.is_ok())
+        .and_then(|step| step.output.as_deref())
+        .map(str::trim)
+        .is_some_and(|output| output == synthesis)
+}
+
+fn loop_has_count_inventory_observation(loop_state: &LoopState) -> bool {
+    loop_state.executed_step_results.iter().any(|step| {
+        if !step.is_ok() {
+            return false;
+        }
+        step.output
+            .as_deref()
+            .and_then(|output| serde_json::from_str::<serde_json::Value>(output.trim()).ok())
+            .and_then(|value| {
+                value
+                    .get("action")
+                    .and_then(|action| action.as_str())
+                    .map(|action| action == "count_inventory")
+            })
+            .unwrap_or(false)
+    })
 }
 
 fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
@@ -3189,6 +3555,12 @@ fn attach_execution_summary_to_delivery(
     user_text: Option<&str>,
     delivery_messages: &mut Vec<String>,
 ) {
+    if delivery_messages.last().is_some_and(|message| {
+        observed_markdown_heading_scalar_answer_for_delivery(loop_state, agent_run_context, message)
+            .is_some()
+    }) {
+        return;
+    }
     let summaries = build_execution_summary_messages(loop_state, agent_run_context, user_text);
     if summaries.is_empty() {
         return;
@@ -3317,24 +3689,24 @@ fn service_status_failure_answer(
 
 fn content_evidence_step_failure_default_answer(
     state: &AppState,
+    task: &ClaimedTask,
     user_text: &str,
+    loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
     failed_step: &crate::executor::StepExecutionResult,
     error: &str,
     permission_denied: bool,
 ) -> String {
-    let locator = agent_run_context
-        .and_then(|ctx| ctx.route_result.as_ref())
-        .map(|route| route.output_contract.locator_hint.trim())
-        .filter(|locator| !locator.is_empty());
-    let prefer_english = prefer_english_for_user_text(state, user_text);
-    let answer = match (prefer_english, locator) {
-        (true, Some(locator)) => {
-            format!("Tried to access `{locator}`, but execution failed: {error}.")
+    let target =
+        content_evidence_failed_step_target_label(loop_state, agent_run_context, failed_step);
+    let prefer_english = prefer_english_for_final_reply(state, task, user_text, agent_run_context);
+    let answer = match (prefer_english, target.as_deref()) {
+        (true, Some(target)) => {
+            format!("Tried to access `{target}`, but execution failed: {error}.")
         }
         (true, None) => format!("The `{}` step failed: {error}.", failed_step.skill.trim()),
-        (false, Some(locator)) => {
-            format!("已尝试访问 `{locator}`，但执行失败：{error}。")
+        (false, Some(target)) => {
+            format!("已尝试访问 `{target}`，但执行失败：{error}。")
         }
         (false, None) => format!("`{}` 步骤执行失败：{error}。", failed_step.skill.trim()),
     };
@@ -3346,6 +3718,83 @@ fn content_evidence_step_failure_default_answer(
         }
     } else {
         answer
+    }
+}
+
+fn content_evidence_failed_step_target_label(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    failed_step: &crate::executor::StepExecutionResult,
+) -> Option<String> {
+    agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .map(|route| route.output_contract.locator_hint.trim())
+        .filter(|locator| !locator.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            plan_step_for_execution(loop_state, failed_step)
+                .and_then(|plan_step| structured_target_label_from_args(&plan_step.args))
+        })
+        .or_else(|| structured_target_label_from_step_error(failed_step))
+}
+
+fn structured_target_label_from_step_error(
+    failed_step: &crate::executor::StepExecutionResult,
+) -> Option<String> {
+    let error = failed_step.error.as_deref()?.trim();
+    let structured = crate::skills::parse_structured_skill_error(error)?;
+    structured
+        .extra
+        .as_ref()
+        .and_then(structured_target_label_from_args)
+        .or(structured.service_name)
+}
+
+fn structured_target_label_from_args(args: &serde_json::Value) -> Option<String> {
+    let object = args.as_object()?;
+    for key in [
+        "path",
+        "resolved_path",
+        "file_path",
+        "target_path",
+        "dir",
+        "directory",
+        "root",
+        "service_name",
+        "unit",
+        "target",
+        "name",
+    ] {
+        if execution_summary_arg_is_sensitive(key) {
+            continue;
+        }
+        if let Some(label) = object
+            .get(key)
+            .and_then(structured_target_label_from_value)
+            .map(|value| truncate_with_ellipsis(&value, 180))
+        {
+            return Some(label);
+        }
+    }
+    None
+}
+
+fn structured_target_label_from_value(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => {
+            let value = value.trim();
+            (!value.is_empty()).then(|| value.to_string())
+        }
+        serde_json::Value::Array(items) => {
+            let labels = items
+                .iter()
+                .filter_map(structured_target_label_from_value)
+                .take(3)
+                .collect::<Vec<_>>();
+            (!labels.is_empty()).then(|| labels.join(", "))
+        }
+        serde_json::Value::Object(_) => structured_target_label_from_args(value),
+        _ => None,
     }
 }
 
@@ -3576,7 +4025,9 @@ async fn content_evidence_step_failure_answer(
             .unwrap_or_else(|| {
                 content_evidence_step_failure_default_answer(
                     state,
+                    task,
                     user_text,
+                    loop_state,
                     agent_run_context,
                     failed_step,
                     error,
@@ -3586,7 +4037,9 @@ async fn content_evidence_step_failure_answer(
     } else {
         content_evidence_step_failure_default_answer(
             state,
+            task,
             user_text,
+            loop_state,
             agent_run_context,
             failed_step,
             error,
@@ -3690,8 +4143,12 @@ async fn content_evidence_step_failure_reply_from_loop(
     let (error_answer, summary) =
         content_evidence_step_failure_answer(state, task, user_text, loop_state, agent_run_context)
             .await?;
-    let mut delivery_messages =
-        build_execution_summary_messages(loop_state, agent_run_context, Some(user_text));
+    let mut delivery_messages = if content_evidence_failure_suppresses_execution_summary(loop_state)
+    {
+        Vec::new()
+    } else {
+        build_execution_summary_messages(loop_state, agent_run_context, Some(user_text))
+    };
     delivery_messages.push(error_answer.clone());
     let delivery_consistent =
         crate::task_journal::delivery_payload_consistent(&error_answer, &delivery_messages);
@@ -3722,6 +4179,31 @@ async fn content_evidence_step_failure_reply_from_loop(
     } else {
         reply
     })
+}
+
+fn content_evidence_failure_suppresses_execution_summary(loop_state: &LoopState) -> bool {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find(|step| {
+            !step.is_ok()
+                && !matches!(
+                    step.skill.as_str(),
+                    "respond" | "synthesize_answer" | "think"
+                )
+        })
+        .and_then(|step| {
+            step.error
+                .as_deref()
+                .map(str::trim)
+                .filter(|error| !error.is_empty())
+                .map(|error| {
+                    error_looks_like_os_permission_denied(error)
+                        || crate::skills::is_observable_run_cmd_error(&step.skill, error)
+                })
+        })
+        .unwrap_or(false)
 }
 
 async fn pending_confirmation_resume_payload(
@@ -5650,6 +6132,13 @@ pub(crate) async fn finalize_loop_reply(
         &mut delivery_deduped,
         &mut finalizer_summary,
     );
+    replace_delivery_with_observed_markdown_heading_scalar(
+        &task.task_id,
+        &mut loop_state,
+        agent_run_context,
+        &mut delivery_deduped,
+        &mut finalizer_summary,
+    );
     let exact_delivery_requested = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .map(output_contract_requests_exact_delivery)
@@ -5769,7 +6258,8 @@ mod tests {
         replace_delivery_with_deterministic_execution_failed_step_answer,
         replace_delivery_with_deterministic_observed_execution_status_answer,
         replace_delivery_with_latest_tail_read_range_answer,
-        resolve_file_token_from_auto_locator_answer,
+        replace_delivery_with_observed_markdown_heading_scalar,
+        resolve_file_token_from_auto_locator_answer, should_attach_execution_summary,
         should_drop_passthrough_delivery_for_content_evidence,
         should_return_missing_file_delivery_reply, successful_delivery_final_status,
         verify_summary_requires_resume_confirmation,
@@ -6147,6 +6637,304 @@ mod tests {
     }
 
     #[test]
+    fn direct_scalar_observed_answer_extracts_markdown_heading_from_read_range() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
+        ));
+        let route = scalar_route_result();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+
+        let (answer, _) =
+            direct_scalar_observed_answer(None, &loop_state, Some(&ctx)).expect("heading answer");
+
+        assert_eq!(answer, "Release Checklist");
+        assert!(!should_attach_execution_summary(
+            &loop_state,
+            Some(&ctx),
+            Some("Read the note file title and output only the title.")
+        ));
+
+        let mut route = scalar_route_result();
+        route.output_contract.requires_content_evidence = false;
+        route.output_contract.locator_kind = OutputLocatorKind::None;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+        let (answer, _) =
+            direct_scalar_observed_answer(None, &loop_state, Some(&ctx)).expect("heading answer");
+        assert_eq!(answer, "Release Checklist");
+        assert!(!should_attach_execution_summary(
+            &loop_state,
+            Some(&ctx),
+            Some("Read the note file title and output only the title.")
+        ));
+    }
+
+    #[test]
+    fn observed_markdown_heading_scalar_replaces_repaired_strict_delivery() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
+        ));
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.route_reason =
+            "llm_semantic_contract_repair:malformed_contract_repairs_needed_but_conservative_route_valid"
+                .to_string();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint = "note file".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+        let mut delivery = vec!["# Release Checklist".to_string()];
+        let mut summary = None;
+
+        assert!(replace_delivery_with_observed_markdown_heading_scalar(
+            "task",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut summary,
+        ));
+
+        assert_eq!(delivery, vec!["Release Checklist".to_string()]);
+        assert!(summary.is_some());
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+        assert_eq!(delivery, vec!["Release Checklist".to_string()]);
+    }
+
+    #[test]
+    fn observed_markdown_heading_scalar_keeps_locatorless_strict_delivery() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
+        ));
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+        let mut delivery = vec!["# Release Checklist".to_string()];
+        let mut summary = None;
+
+        assert!(!replace_delivery_with_observed_markdown_heading_scalar(
+            "task",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut summary,
+        ));
+
+        assert_eq!(delivery, vec!["# Release Checklist".to_string()]);
+        assert!(summary.is_none());
+    }
+
+    #[test]
+    fn observed_markdown_heading_scalar_replaces_direct_answer_gate_delivery() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
+        ));
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.route_reason =
+            "executionless_route_downgraded_to_direct_answer; direct_answer_gate_execute"
+                .to_string();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "service_notes.md".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+        let mut delivery = vec!["# Service Notes".to_string()];
+        let mut summary = None;
+
+        assert!(replace_delivery_with_observed_markdown_heading_scalar(
+            "task",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut summary,
+        ));
+
+        assert_eq!(delivery, vec!["Service Notes".to_string()]);
+        assert!(summary.is_some());
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+        assert_eq!(delivery, vec!["Service Notes".to_string()]);
+    }
+
+    #[test]
+    fn observed_markdown_heading_scalar_replaces_one_sentence_locator_delivery() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
+        ));
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "service_notes.md".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+        let mut delivery = vec!["Service Notes".to_string()];
+        let mut summary = None;
+
+        assert!(!replace_delivery_with_observed_markdown_heading_scalar(
+            "task",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut summary,
+        ));
+
+        assert_eq!(delivery, vec!["Service Notes".to_string()]);
+        assert!(summary.is_none());
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+        assert_eq!(delivery, vec!["Service Notes".to_string()]);
+    }
+
+    #[test]
+    fn observed_markdown_heading_scalar_suppresses_summary_for_free_locator_delivery() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
+        ));
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "service_notes.md".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+        let mut delivery = vec!["Service Notes".to_string()];
+        let mut summary = None;
+
+        assert!(!replace_delivery_with_observed_markdown_heading_scalar(
+            "task",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut summary,
+        ));
+
+        assert_eq!(delivery, vec!["Service Notes".to_string()]);
+        assert!(summary.is_none());
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+        assert_eq!(delivery, vec!["Service Notes".to_string()]);
+    }
+
+    #[test]
+    fn observed_markdown_heading_scalar_reduces_strict_observed_markdown_body() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
+        ));
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "service_notes.md".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+        let mut delivery =
+            vec!["# Service Notes\n\nRustClaw test fixture service notes.".to_string()];
+        let mut summary = None;
+
+        assert!(replace_delivery_with_observed_markdown_heading_scalar(
+            "task",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut summary,
+        ));
+
+        assert_eq!(delivery, vec!["Service Notes".to_string()]);
+        assert!(summary.is_some());
+    }
+
+    #[test]
+    fn observed_markdown_heading_scalar_keeps_free_observed_markdown_body() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes.","path":"service_notes.md"}"#,
+        ));
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "service_notes.md".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+        let mut delivery =
+            vec!["# Service Notes\n\nRustClaw test fixture service notes.".to_string()];
+        let mut summary = None;
+
+        assert!(!replace_delivery_with_observed_markdown_heading_scalar(
+            "task",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut summary,
+        ));
+
+        assert_eq!(
+            delivery,
+            vec!["# Service Notes\n\nRustClaw test fixture service notes.".to_string()]
+        );
+        assert!(summary.is_none());
+    }
+
+    #[test]
     fn direct_structured_observed_answer_keeps_passthrough_without_synthesis_plan() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(ok_step_result(
@@ -6456,6 +7244,52 @@ mod tests {
             delivery.last().map(String::as_str),
             Some("rustclaw-nl-fixture")
         );
+    }
+
+    #[test]
+    fn execution_summary_suppressed_for_multi_structured_scalar_synthesis() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"name","value_text":"rustclaw-nl-fixture"}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"package.name","value_text":"clawd"}"#,
+        ));
+        loop_state.last_publishable_synthesis_output =
+            Some("rustclaw-nl-fixture and clawd are different.".to_string());
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
+    }
+
+    #[test]
+    fn execution_summary_suppressed_for_scalar_content_synthesis() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r##"{"action":"read_text_range","path":"/tmp/release_checklist.md","content":"# Release Checklist\n\n1. Verify config."}"##,
+        ));
+        loop_state.last_publishable_synthesis_output = Some("Release Checklist".to_string());
+        let mut route = scalar_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
     }
 
     #[test]
@@ -6960,7 +7794,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_summary_attaches_for_raw_command_output_route() {
+    fn execution_summary_skips_for_raw_command_output_route() {
         let mut route = free_route_result();
         route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
         let ctx = crate::agent_engine::AgentRunContext {
@@ -6974,10 +7808,7 @@ mod tests {
             "/home/guagua/rustclaw\n",
         ));
 
-        let summary = build_execution_summary_message(&loop_state, Some(&ctx), None)
-            .expect("raw command output should expose execution process");
-        assert!(summary.contains("**执行过程**"));
-        assert!(summary.contains("/home/guagua/rustclaw"));
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
     }
 
     #[test]
@@ -7079,6 +7910,83 @@ mod tests {
         assert!(delivery[0].contains("list_dir"));
         assert_eq!(delivery[1], "alpha.md\nbeta.md");
         assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_some());
+    }
+
+    #[test]
+    fn execution_summary_skips_for_exact_sentence_count_contract() {
+        let mut route = free_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+        route.output_contract.exact_sentence_count = Some(3);
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "doc_parse",
+            "RustClaw is a local Rust agent runtime centered on clawd.",
+        ));
+        let mut delivery = vec![
+            "RustClaw 是一个本地 Rust agent 运行时。它以 clawd 为核心。它面向多渠道任务执行。"
+                .to_string(),
+        ];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(delivery.len(), 1);
+        assert!(!crate::finalize::is_execution_summary_message(&delivery[0]));
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
+    }
+
+    #[test]
+    fn execution_summary_skips_for_scalar_count_contract() {
+        let mut route = scalar_route_result();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"count_inventory","counts":{"total":64}}"#,
+        ));
+        let mut delivery = vec!["64".to_string()];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(delivery, vec!["64"]);
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
+    }
+
+    #[test]
+    fn execution_summary_skips_for_scalar_count_inventory_observation() {
+        let mut route = scalar_route_result();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"count_inventory","counts":{"total":64}}"#,
+        ));
+        let mut delivery = vec!["64".to_string()];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(delivery, vec!["64"]);
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
     }
 
     #[test]
@@ -7551,6 +8459,77 @@ mod tests {
             summary.disposition,
             Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
         );
+    }
+
+    #[tokio::test]
+    async fn content_evidence_step_failure_answer_preserves_plan_path_without_locator_hint() {
+        let state = test_state();
+        let task = claimed_task("task-content-error-plan-target");
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_hint.clear();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            original_user_request: Some("读 /etc/shadow 第一行".to_string()),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "read protected file".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "fs_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": "read_range",
+                        "path": "/etc/shadow",
+                        "mode": "head",
+                        "n": 1
+                    }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: StepExecutionStatus::Error,
+            output: None,
+            error: Some(format!(
+                "__RC_SKILL_ERROR__:{}",
+                serde_json::json!({
+                    "skill": "fs_basic",
+                    "error_kind": "permission_denied",
+                    "error_text": "read operation failed: permission denied by the operating system",
+                    "platform": "linux"
+                })
+            )),
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        let (answer, summary) = content_evidence_step_failure_answer(
+            &state,
+            &task,
+            "Read the first line of /etc/shadow",
+            &loop_state,
+            Some(&agent_run_context),
+        )
+        .await
+        .expect("content evidence failure should preserve structured plan target");
+
+        assert!(answer.contains("`/etc/shadow`"));
+        assert!(answer.contains("permission denied"));
+        assert!(answer.contains("已尝试访问"));
+        assert!(!answer.contains("`fs_basic` 步骤执行失败"));
+        assert_eq!(summary.grounded_ok, Some(true));
+        assert_eq!(summary.completion_ok, Some(true));
     }
 
     #[tokio::test]
@@ -8682,10 +9661,7 @@ mod tests {
         assert!(reply.text.contains("permission denied"));
         assert!(reply.text.contains("`clawd` 进程当前没有 sudo/root 权限"));
         assert!(!reply.should_fail_task);
-        assert_eq!(reply.messages.len(), 2);
-        assert!(crate::finalize::is_execution_summary_message(
-            &reply.messages[0]
-        ));
+        assert_eq!(reply.messages.len(), 1);
         assert_eq!(reply.messages.last(), Some(&reply.text));
     }
 
@@ -8839,10 +9815,7 @@ mod tests {
             reply.text
         );
         assert!(!reply.text.contains("__RC_SKILL_ERROR__"));
-        assert_eq!(reply.messages.len(), 2);
-        assert!(crate::finalize::is_execution_summary_message(
-            &reply.messages[0]
-        ));
+        assert_eq!(reply.messages.len(), 1);
         assert_eq!(reply.messages.last(), Some(&reply.text));
     }
 
