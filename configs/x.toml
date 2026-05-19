@@ -13,7 +13,7 @@
 # Use xurl for user-context auth and posting.
 use_xurl = true
 xurl_bin = "xurl"
-xurl_app = ""
+xurl_app = "rustclawxurl"
 xurl_auth = "oauth2"
 xurl_username = ""
 xurl_timeout_seconds = 30
