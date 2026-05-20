@@ -19,20 +19,34 @@ pub(crate) fn inject_skill_memory_context(
         return Value::Object(obj);
     }
     let anchor = skill_memory_anchor(skill_name, &obj);
+    let decision = crate::memory::use_policy::decide_skill_memory_use_policy(state, skill_name);
+    if matches!(
+        decision.profile,
+        crate::memory::use_policy::MemoryUseProfile::Disabled
+    ) {
+        return Value::Object(obj);
+    }
+    let recent_limit = if decision.needs_recent_recall() {
+        state.policy.memory.recall_limit.max(1)
+    } else {
+        0
+    };
     let structured = crate::memory::service::recall_structured_memory_context(
         state,
         task.user_key.as_deref(),
         task.user_id,
         task.chat_id,
         &anchor,
-        state.policy.memory.recall_limit.max(1),
-        true,
-        true,
+        recent_limit,
+        decision.include_long_term_summary,
+        decision.include_preferences,
     );
+    let structured =
+        crate::memory::use_policy::filter_structured_memory_context(structured, &decision);
     let memory_context = crate::memory::service::structured_memory_context_block(
         &structured,
-        crate::memory::retrieval::MemoryContextMode::Skill,
-        state.policy.memory.skill_memory_max_chars.max(384),
+        decision.mode,
+        decision.max_chars,
     );
     let mut pref_map = serde_json::Map::new();
     for (k, v) in &structured.preferences {
@@ -57,7 +71,11 @@ pub(crate) fn inject_skill_memory_context(
             "long_term_summary": structured.long_term_summary.clone().unwrap_or_default(),
             "preferences": Value::Object(pref_map),
             "knowledge_docs": knowledge_docs,
-            "lang_hint": lang_hint
+            "lang_hint": lang_hint,
+            "use_policy": {
+                "profile": decision.profile.as_str(),
+                "reason": decision.reason,
+            }
         }),
     );
     Value::Object(obj)

@@ -1,6 +1,8 @@
 use crate::memory::retrieval::{MemoryContextMode, RetrievedMemoryItem, StructuredMemoryContext};
+use crate::memory::use_policy::{filter_structured_memory_context, MemoryUseDecision};
 use crate::memory::MEMORY_SAFETY_FLAG_INJECTION_LIKE;
 use serde::Deserialize;
+use serde_json::{json, Value};
 use tracing::info;
 
 use crate::{AppState, ClaimedTask, LlmProviderRuntime};
@@ -20,6 +22,8 @@ struct LongTermRefreshLlmOut {
     #[serde(default)]
     summary: String,
     #[serde(default)]
+    fact_candidates: Vec<KnowledgeCandidateLlmOut>,
+    #[serde(default)]
     knowledge_candidates: Vec<KnowledgeCandidateLlmOut>,
 }
 
@@ -37,19 +41,32 @@ struct KnowledgeCandidateLlmOut {
     confidence: f32,
     #[serde(default)]
     reason: String,
+    #[serde(default)]
+    fact_key: String,
+    #[serde(default)]
+    fact_value: String,
+    #[serde(default)]
+    conflict_group: String,
+    #[serde(default)]
+    expires_at_ts: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
 struct ValidKnowledgeCandidate {
     namespace: &'static str,
-    retrieval_kind: &'static str,
+    fact_key: String,
+    fact_value: String,
     fact: String,
-    source_ref: String,
+    reason: String,
+    confidence: f32,
+    conflict_group: Option<String>,
+    expires_at_ts: Option<i64>,
 }
 
 pub(crate) struct PromptMemoryContext {
     pub(crate) prompt_with_memory: String,
     pub(crate) chat_prompt_context: String,
+    pub(crate) memory_trace: Option<Value>,
     pub(crate) long_term_summary: Option<String>,
     pub(crate) preferences: Vec<(String, String)>,
     pub(crate) recalled: Vec<(String, String)>,
@@ -58,6 +75,7 @@ pub(crate) struct PromptMemoryContext {
     pub(crate) recent_related_events: Vec<RetrievedMemoryItem>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PromptMemoryBudgetMode {
     Full,
@@ -87,13 +105,39 @@ pub(crate) fn prepare_prompt_with_memory_for_mode(
     chat_memory_budget_chars: usize,
     mode: PromptMemoryBudgetMode,
 ) -> PromptMemoryContext {
-    let recent_limit = match mode {
-        PromptMemoryBudgetMode::Full => state.policy.memory.prompt_recall_limit.max(1),
-        PromptMemoryBudgetMode::Light => 1,
-    };
-    let include_long_term = true;
-    let include_preferences = matches!(mode, PromptMemoryBudgetMode::Full);
-    let include_indexed = matches!(mode, PromptMemoryBudgetMode::Full);
+    let planner_budget = planner_memory_budget_chars(state, mode);
+    let chat_budget = chat_memory_budget_for_mode(state, chat_memory_budget_chars, mode);
+    let planner_decision = MemoryUseDecision::planner_scoped(
+        planner_budget,
+        "legacy_prompt_memory_mode_planner_policy",
+    );
+    let chat_decision = MemoryUseDecision::chat_scoped(
+        chat_budget,
+        matches!(mode, PromptMemoryBudgetMode::Full),
+        "legacy_prompt_memory_mode_chat_policy",
+    );
+    prepare_prompt_with_memory_for_policy(state, task, prompt, &planner_decision, &chat_decision)
+}
+
+pub(crate) fn prepare_prompt_with_memory_for_policy(
+    state: &AppState,
+    task: &ClaimedTask,
+    prompt: &str,
+    planner_decision: &MemoryUseDecision,
+    chat_decision: &MemoryUseDecision,
+) -> PromptMemoryContext {
+    let recent_limit =
+        if planner_decision.needs_recent_recall() || chat_decision.needs_recent_recall() {
+            state.policy.memory.prompt_recall_limit.max(1)
+        } else {
+            0
+        };
+    let include_long_term =
+        planner_decision.include_long_term_summary || chat_decision.include_long_term_summary;
+    let include_preferences =
+        planner_decision.include_preferences || chat_decision.include_preferences;
+    let include_indexed =
+        planner_decision.needs_indexed_recall() || chat_decision.needs_indexed_recall();
     let structured = recall_structured_memory_context_with_options(
         state,
         task.user_key.as_deref(),
@@ -105,7 +149,146 @@ pub(crate) fn prepare_prompt_with_memory_for_mode(
         include_preferences,
         include_indexed,
     );
-    let planner_budget = match mode {
+    let planner_structured = filter_structured_memory_context(structured.clone(), planner_decision);
+    let chat_structured = filter_structured_memory_context(structured, chat_decision);
+    let prompt_with_memory = render_policy_memory_block(&planner_structured, planner_decision);
+    let chat_prompt_context = render_policy_memory_block(&chat_structured, chat_decision);
+    let memory_trace = Some(memory_trace_for_structured_context(
+        "execution",
+        chat_decision,
+        &chat_structured,
+        &chat_prompt_context,
+    ));
+    PromptMemoryContext {
+        chat_prompt_context,
+        memory_trace,
+        long_term_summary: planner_structured
+            .long_term_summary
+            .clone()
+            .or_else(|| chat_structured.long_term_summary.clone()),
+        preferences: merge_preferences(
+            &planner_structured.preferences,
+            &chat_structured.preferences,
+        ),
+        recalled: crate::memory::retrieval::legacy_pairs_from_structured(&chat_structured),
+        similar_triggers: merge_items(
+            &planner_structured.similar_triggers,
+            &chat_structured.similar_triggers,
+        ),
+        relevant_facts: merge_items(
+            &planner_structured.relevant_facts,
+            &chat_structured.relevant_facts,
+        ),
+        recent_related_events: merge_items(
+            &planner_structured.recent_related_events,
+            &chat_structured.recent_related_events,
+        ),
+        prompt_with_memory,
+    }
+}
+
+pub(crate) fn memory_trace_for_structured_context(
+    stage: &str,
+    decision: &MemoryUseDecision,
+    structured: &StructuredMemoryContext,
+    rendered_block: &str,
+) -> Value {
+    let mut recalled = Vec::new();
+    if structured.long_term_summary.is_some() {
+        recalled.push(json!({
+            "source_kind": "long_term_summary",
+            "source_ref": "long_term_summary",
+            "score": null,
+            "included": true,
+            "reason": decision.reason.as_str(),
+        }));
+    }
+    for (key, _) in &structured.preferences {
+        recalled.push(json!({
+            "source_kind": "preference",
+            "source_ref": key,
+            "score": null,
+            "included": true,
+            "reason": decision.reason.as_str(),
+        }));
+    }
+    push_memory_trace_items(
+        &mut recalled,
+        "similar_trigger",
+        &structured.similar_triggers,
+        decision,
+    );
+    push_memory_trace_items(&mut recalled, "fact", &structured.relevant_facts, decision);
+    push_memory_trace_items(
+        &mut recalled,
+        "knowledge_doc",
+        &structured.knowledge_docs,
+        decision,
+    );
+    push_memory_trace_items(
+        &mut recalled,
+        "recent_event",
+        &structured.recent_related_events,
+        decision,
+    );
+    push_memory_trace_items(
+        &mut recalled,
+        "assistant_result",
+        &structured.assistant_results,
+        decision,
+    );
+    push_memory_trace_items(
+        &mut recalled,
+        "unfinished_goal",
+        &structured.unfinished_goals,
+        decision,
+    );
+    for (role, _) in &structured.recalled_recent {
+        recalled.push(json!({
+            "source_kind": "recent_snippet",
+            "source_ref": role,
+            "score": null,
+            "included": true,
+            "reason": decision.reason.as_str(),
+        }));
+    }
+    let used_chars = if rendered_block.trim() == "<none>" {
+        0
+    } else {
+        rendered_block.chars().count()
+    };
+    json!({
+        "stage": stage,
+        "use_policy": decision.profile.as_str(),
+        "mode": format!("{:?}", decision.mode).to_ascii_lowercase(),
+        "reason": decision.reason.as_str(),
+        "recalled": recalled,
+        "budget": {
+            "max_chars": decision.max_chars,
+            "used_chars": used_chars,
+        },
+    })
+}
+
+fn push_memory_trace_items(
+    out: &mut Vec<Value>,
+    source_kind: &str,
+    items: &[RetrievedMemoryItem],
+    decision: &MemoryUseDecision,
+) {
+    for item in items {
+        out.push(json!({
+            "source_kind": source_kind,
+            "source_ref": item.source_label.as_deref().unwrap_or(source_kind),
+            "score": item.score,
+            "included": true,
+            "reason": decision.reason.as_str(),
+        }));
+    }
+}
+
+fn planner_memory_budget_chars(state: &AppState, mode: PromptMemoryBudgetMode) -> usize {
+    match mode {
         PromptMemoryBudgetMode::Full => state
             .policy
             .memory
@@ -119,8 +302,15 @@ pub(crate) fn prepare_prompt_with_memory_for_mode(
             .max(512)
             .min(768)
             .min(state.policy.memory.prompt_max_chars.max(512)),
-    };
-    let chat_budget = match mode {
+    }
+}
+
+fn chat_memory_budget_for_mode(
+    state: &AppState,
+    chat_memory_budget_chars: usize,
+    mode: PromptMemoryBudgetMode,
+) -> usize {
+    match mode {
         PromptMemoryBudgetMode::Full => chat_memory_budget_chars
             .max(384)
             .min(state.policy.memory.prompt_max_chars.max(384)),
@@ -128,21 +318,53 @@ pub(crate) fn prepare_prompt_with_memory_for_mode(
             .max(384)
             .min(640)
             .min(state.policy.memory.prompt_max_chars.max(384)),
-    };
-    let prompt_with_memory =
-        structured_memory_context_block(&structured, MemoryContextMode::Planner, planner_budget);
-    let chat_prompt_context =
-        structured_memory_context_block(&structured, MemoryContextMode::Chat, chat_budget);
-    PromptMemoryContext {
-        chat_prompt_context,
-        long_term_summary: structured.long_term_summary.clone(),
-        preferences: structured.preferences.clone(),
-        recalled: crate::memory::retrieval::legacy_pairs_from_structured(&structured),
-        similar_triggers: structured.similar_triggers.clone(),
-        relevant_facts: structured.relevant_facts.clone(),
-        recent_related_events: structured.recent_related_events.clone(),
-        prompt_with_memory,
     }
+}
+
+fn render_policy_memory_block(
+    structured: &StructuredMemoryContext,
+    decision: &MemoryUseDecision,
+) -> String {
+    let block = structured_memory_context_block(structured, decision.mode, decision.max_chars);
+    if block == "<none>" {
+        block
+    } else {
+        format!("{}\n\n{}", decision.prompt_header(), block)
+    }
+}
+
+fn merge_preferences(
+    left: &[(String, String)],
+    right: &[(String, String)],
+) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (key, value) in left.iter().chain(right.iter()) {
+        if out
+            .iter()
+            .any(|(existing_key, _): &(String, String)| existing_key == key)
+        {
+            continue;
+        }
+        out.push((key.clone(), value.clone()));
+    }
+    out
+}
+
+fn merge_items(
+    left: &[RetrievedMemoryItem],
+    right: &[RetrievedMemoryItem],
+) -> Vec<RetrievedMemoryItem> {
+    let mut out = Vec::new();
+    for item in left.iter().chain(right.iter()) {
+        if out
+            .iter()
+            .any(|existing: &RetrievedMemoryItem| existing.text == item.text)
+        {
+            continue;
+        }
+        out.push(item.clone());
+    }
+    out
 }
 
 pub(crate) fn recall_structured_memory_context(
@@ -532,8 +754,14 @@ pub(crate) async fn maybe_refresh_long_term_summary(
         latest_id,
     )
     .map_err(|err| format!("write long-term summary failed: {err}"))?;
-    persist_valid_knowledge_candidates(state, task, latest_id, &parsed.knowledge_candidates)
-        .map_err(|err| format!("write knowledge candidates failed: {err}"))?;
+    persist_valid_knowledge_candidates(
+        state,
+        task,
+        latest_id,
+        &parsed.fact_candidates,
+        &parsed.knowledge_candidates,
+    )
+    .map_err(|err| format!("write knowledge candidates failed: {err}"))?;
     Ok(())
 }
 
@@ -569,6 +797,7 @@ fn parse_long_term_refresh_llm_out_legacy(raw: &str) -> LongTermRefreshLlmOut {
         .and_then(normalize_long_term_refresh_llm_out)
         .unwrap_or_else(|| LongTermRefreshLlmOut {
             summary: raw.trim().to_string(),
+            fact_candidates: Vec::new(),
             knowledge_candidates: Vec::new(),
         })
 }
@@ -583,6 +812,7 @@ fn persist_valid_knowledge_candidates(
     state: &AppState,
     task: &ClaimedTask,
     latest_id: i64,
+    fact_candidates: &[KnowledgeCandidateLlmOut],
     candidates: &[KnowledgeCandidateLlmOut],
 ) -> anyhow::Result<()> {
     let Some(user_key) = task
@@ -593,7 +823,7 @@ fn persist_valid_knowledge_candidates(
     else {
         return Ok(());
     };
-    if candidates.is_empty() {
+    if fact_candidates.is_empty() && candidates.is_empty() {
         return Ok(());
     }
     let db = state
@@ -601,18 +831,38 @@ fn persist_valid_knowledge_candidates(
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    for candidate in candidates {
-        let Some(valid) = validate_knowledge_candidate(user_key, latest_id, candidate) else {
+    let effective_candidates = if fact_candidates.is_empty() {
+        candidates
+    } else {
+        fact_candidates
+    };
+    let source_memory_ids = [latest_id];
+    for candidate in effective_candidates {
+        let Some(valid) = validate_knowledge_candidate(latest_id, candidate) else {
             continue;
         };
-        crate::memory::indexing::upsert_knowledge_fact(
+        let source_ref = format!(
+            "long_term_summary:{latest_id}:{:x}",
+            stable_hash64(&valid.fact)
+        );
+        let mut fact = crate::memory::facts::MemoryFactUpsert::from_long_term_summary(
+            valid.namespace,
+            &valid.fact_key,
+            &valid.fact_value,
+            &valid.fact,
+            valid.confidence,
+            &source_ref,
+            &source_memory_ids,
+            &valid.reason,
+            valid.conflict_group.as_deref(),
+        );
+        fact.expires_at_ts = valid.expires_at_ts;
+        crate::memory::facts::upsert_memory_fact_card(
             &db,
             task.user_id,
+            task.chat_id,
             user_key,
-            valid.namespace,
-            valid.retrieval_kind,
-            &valid.source_ref,
-            &valid.fact,
+            &fact,
             crate::now_ts_u64() as i64,
         )?;
     }
@@ -620,7 +870,6 @@ fn persist_valid_knowledge_candidates(
 }
 
 fn validate_knowledge_candidate(
-    user_key: &str,
     _latest_id: i64,
     candidate: &KnowledgeCandidateLlmOut,
 ) -> Option<ValidKnowledgeCandidate> {
@@ -631,6 +880,9 @@ fn validate_knowledge_candidate(
     let namespace = candidate.namespace.trim();
     let fact = candidate.fact.trim();
     let reason = candidate.reason.trim();
+    let fact_key = normalize_fact_key(candidate.fact_key.trim());
+    let fact_value = candidate.fact_value.trim();
+    let explicit_conflict_group = candidate.conflict_group.trim();
     if fact.is_empty()
         || kind.is_empty()
         || namespace.is_empty()
@@ -651,21 +903,43 @@ fn validate_knowledge_candidate(
         }
         _ => return None,
     };
-    let retrieval_kind = crate::memory::RETRIEVAL_KIND_SEMANTIC_FACT;
-    let persisted_fact = if reason.is_empty() {
-        fact.to_string()
+    let conflict_group = if !explicit_conflict_group.is_empty() {
+        Some(explicit_conflict_group.to_string())
+    } else if !fact_key.is_empty() {
+        Some(format!("{normalized_namespace}:{fact_key}"))
     } else {
-        format!("{fact}\nReason: {reason}")
+        None
     };
-    let source_ref = knowledge_source_ref(user_key, kind, normalized_namespace, fact);
     Some(ValidKnowledgeCandidate {
         namespace: normalized_namespace,
-        retrieval_kind,
-        fact: persisted_fact,
-        source_ref,
+        fact_key,
+        fact_value: fact_value.to_string(),
+        fact: fact.to_string(),
+        reason: reason.to_string(),
+        confidence: candidate.confidence,
+        conflict_group,
+        expires_at_ts: candidate.expires_at_ts,
     })
 }
 
+fn normalize_fact_key(raw: &str) -> String {
+    raw.trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || ch == '.' {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+#[cfg(test)]
 fn knowledge_source_ref(user_key: &str, kind: &str, namespace: &str, fact: &str) -> String {
     let basis = format!(
         "{}\u{1f}{}\u{1f}{}\u{1f}{}",
@@ -822,7 +1096,7 @@ mod tests {
             .get("properties")
             .and_then(|v| v.as_object())
             .expect("schema.properties must be an object");
-        for field in ["summary", "knowledge_candidates"] {
+        for field in ["summary", "fact_candidates", "knowledge_candidates"] {
             assert!(
                 properties.contains_key(field),
                 "schema missing parser field `{field}` under properties — sync prompts/schemas/long_term_summary.schema.json with LongTermRefreshLlmOut",
@@ -830,11 +1104,11 @@ mod tests {
         }
 
         let candidate_props = properties
-            .get("knowledge_candidates")
+            .get("fact_candidates")
             .and_then(|v| v.get("items"))
             .and_then(|v| v.get("properties"))
             .and_then(|v| v.as_object())
-            .expect("knowledge_candidates.items.properties must be an object");
+            .expect("fact_candidates.items.properties must be an object");
         for field in [
             "should_persist",
             "kind",
@@ -842,6 +1116,10 @@ mod tests {
             "fact",
             "confidence",
             "reason",
+            "fact_key",
+            "fact_value",
+            "conflict_group",
+            "expires_at_ts",
         ] {
             assert!(
                 candidate_props.contains_key(field),
@@ -890,16 +1168,21 @@ mod tests {
 
         let probe = serde_json::json!({
             "summary": "durable summary",
-            "knowledge_candidates": [
+            "fact_candidates": [
                 {
                     "should_persist": true,
                     "kind": "user_profile_fact",
                     "namespace": "user_profile",
                     "fact": "用户长期偏好中文回复",
                     "confidence": 0.93,
-                    "reason": "explicit long-term preference"
+                    "reason": "explicit long-term preference",
+                    "fact_key": "response_language",
+                    "fact_value": "zh-CN",
+                    "conflict_group": "user_profile:response_language",
+                    "expires_at_ts": null
                 }
-            ]
+            ],
+            "knowledge_candidates": []
         });
         let validated = crate::prompt_utils::validate_against_schema::<Value>(
             &probe.to_string(),
@@ -909,7 +1192,7 @@ mod tests {
         assert_eq!(
             validated
                 .value
-                .pointer("/knowledge_candidates/0/kind")
+                .pointer("/fact_candidates/0/kind")
                 .and_then(|v| v.as_str()),
             Some("user_profile_fact")
         );
@@ -924,15 +1207,16 @@ mod tests {
             fact: "用户长期偏好中文回复".to_string(),
             confidence: 0.93,
             reason: "explicit long-term preference".to_string(),
+            fact_key: "response_language".to_string(),
+            fact_value: "zh-CN".to_string(),
+            conflict_group: "user_profile:response_language".to_string(),
+            expires_at_ts: None,
         };
-        let valid =
-            validate_knowledge_candidate("user-key", 42, &candidate).expect("candidate valid");
+        let valid = validate_knowledge_candidate(42, &candidate).expect("candidate valid");
         assert_eq!(valid.namespace, KNOWLEDGE_NAMESPACE_USER_PROFILE);
-        assert_eq!(
-            valid.retrieval_kind,
-            crate::memory::RETRIEVAL_KIND_SEMANTIC_FACT
-        );
         assert!(valid.fact.contains("用户长期偏好中文回复"));
+        assert!(!valid.fact.contains("Reason:"));
+        assert_eq!(valid.fact_key, "response_language");
     }
 
     #[test]
@@ -944,8 +1228,12 @@ mod tests {
             fact: "刚才命令失败了".to_string(),
             confidence: 0.99,
             reason: "temporary".to_string(),
+            fact_key: String::new(),
+            fact_value: String::new(),
+            conflict_group: String::new(),
+            expires_at_ts: None,
         };
-        assert!(validate_knowledge_candidate("user-key", 42, &transient).is_none());
+        assert!(validate_knowledge_candidate(42, &transient).is_none());
 
         let mismatched = KnowledgeCandidateLlmOut {
             should_persist: true,
@@ -954,8 +1242,12 @@ mod tests {
             fact: "这个项目固定用 cargo check".to_string(),
             confidence: 0.97,
             reason: "project-level rule".to_string(),
+            fact_key: String::new(),
+            fact_value: String::new(),
+            conflict_group: String::new(),
+            expires_at_ts: None,
         };
-        assert!(validate_knowledge_candidate("user-key", 42, &mismatched).is_none());
+        assert!(validate_knowledge_candidate(42, &mismatched).is_none());
 
         let valid_project = KnowledgeCandidateLlmOut {
             should_persist: true,
@@ -964,8 +1256,12 @@ mod tests {
             fact: "这个项目固定用 cargo check".to_string(),
             confidence: 0.97,
             reason: "project-level rule".to_string(),
+            fact_key: "check_command".to_string(),
+            fact_value: "cargo check".to_string(),
+            conflict_group: "project_facts:check_command".to_string(),
+            expires_at_ts: None,
         };
-        assert!(validate_knowledge_candidate("user-key", 42, &valid_project).is_some());
+        assert!(validate_knowledge_candidate(42, &valid_project).is_some());
     }
 
     #[test]
@@ -974,12 +1270,16 @@ mod tests {
             should_persist: true,
             kind: "project_fact".to_string(),
             namespace: KNOWLEDGE_NAMESPACE_PROJECT_FACTS.to_string(),
-            fact: "那个日志指 /tmp/device/app.log".to_string(),
+            fact: r#"{"deictic_reference":{"target":"unresolved_prior_object"},"locator":"/tmp/device/app.log"}"#.to_string(),
             confidence: 0.97,
             reason: "stale alias-like locator mapping".to_string(),
+            fact_key: String::new(),
+            fact_value: String::new(),
+            conflict_group: String::new(),
+            expires_at_ts: None,
         };
 
-        assert!(validate_knowledge_candidate("user-key", 42, &candidate).is_none());
+        assert!(validate_knowledge_candidate(42, &candidate).is_none());
     }
 
     #[test]

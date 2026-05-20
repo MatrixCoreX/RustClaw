@@ -454,6 +454,7 @@ pub(crate) struct TaskJournal {
     pub(crate) kind: Option<String>,
     pub(crate) input_text: String,
     pub(crate) context_bundle_summary: Option<String>,
+    pub(crate) memory_trace: Option<Value>,
     pub(crate) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
     pub(crate) route_result: Option<crate::RouteResult>,
     pub(crate) plan_result: Option<crate::PlanResult>,
@@ -522,6 +523,10 @@ impl TaskJournal {
 
     pub(crate) fn record_context_bundle_summary(&mut self, summary: impl Into<String>) {
         self.context_bundle_summary = Some(summary.into());
+    }
+
+    pub(crate) fn record_memory_trace(&mut self, trace: Value) {
+        self.memory_trace = Some(trace);
     }
 
     pub(crate) fn record_turn_analysis(
@@ -643,6 +648,9 @@ impl TaskJournal {
         if self.context_bundle_summary.is_none() {
             self.context_bundle_summary = other.context_bundle_summary.clone();
         }
+        if self.memory_trace.is_none() {
+            self.memory_trace = other.memory_trace.clone();
+        }
         if self.turn_analysis.is_none() {
             self.turn_analysis = other.turn_analysis.clone();
         }
@@ -720,6 +728,7 @@ impl TaskJournal {
             "final_status": self.final_status.map(TaskJournalFinalStatus::as_str),
             "input_text": crate::truncate_for_log(&self.input_text),
             "context_bundle_summary": self.context_bundle_summary.as_deref().map(crate::truncate_for_log),
+            "memory_trace": self.memory_trace.clone(),
             "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
             "route_result": self.route_result.as_ref().map(route_result_json),
             "latest_execution_recipe_summary": self
@@ -741,6 +750,7 @@ impl TaskJournal {
         json!({
             "task_id": self.task_id.as_deref(),
             "kind": self.kind.as_deref(),
+            "memory_trace": self.memory_trace.clone(),
             "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
             "rounds": self.rounds.iter().map(|round| {
                 json!({
@@ -999,6 +1009,47 @@ mod tests {
         let log = journal.to_log_json();
         assert_eq!(log.get("task_id").and_then(Value::as_str), Some("task-2"));
         assert_eq!(log.get("kind").and_then(Value::as_str), Some("ask"));
+    }
+
+    #[test]
+    fn trace_json_includes_memory_trace() {
+        let mut journal = TaskJournal::for_task("task-memory", "ask", "根据记忆回复");
+        journal.record_memory_trace(json!({
+            "stage": "execution",
+            "use_policy": "task_relevant",
+            "recalled": [
+                {
+                    "source_kind": "memory_fact",
+                    "source_ref": "memory_fact:1",
+                    "score": 0.91,
+                    "included": true,
+                    "reason": "task_relevant"
+                }
+            ],
+            "budget": {
+                "max_chars": 4000,
+                "used_chars": 128
+            }
+        }));
+
+        let summary = journal.to_summary_json();
+        let trace = journal.to_trace_json();
+
+        assert_eq!(
+            summary
+                .get("memory_trace")
+                .and_then(|v| v.get("use_policy"))
+                .and_then(Value::as_str),
+            Some("task_relevant")
+        );
+        assert_eq!(
+            trace
+                .get("memory_trace")
+                .and_then(|v| v.get("recalled"))
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
     }
 
     #[test]

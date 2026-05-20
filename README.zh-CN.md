@@ -193,6 +193,140 @@ flowchart TD
 - **最终交付 / 输出契约护栏**：在最终任务持久化前执行交付规范化与输出契约验证。
 - **收尾**：保存用户可见结果后，还可能启动后台记忆任务，包括长期摘要刷新，以及受 `configs/memory.toml` 控制的可选偏好抽取。
 
+## 自然语言契约边界
+
+RustClaw 的原则是：自然语言理解交给 LLM，运行时只消费结构化契约。意图归一化器和规划器可以阅读用户表达、示例、技能文档和多语言提示词，但进入 Rust 运行时前，语义必须已经落到稳定字段里。
+
+运行时允许依赖的确定性输入包括：
+
+- schema enum，例如 `semantic_kind = "package_manager_detection"`
+- action name，例如 `read_field`、`validate_config`、`transform_data`
+- registry metadata 与 `planner_capabilities`
+- `TaskContract` / `OutputContract`、结构化 locator、明确的 `field_path`
+- JSON/TOML/YAML 字段路径、文件扩展名、工具结构化输出、exit code、error kind、risk/effect metadata
+
+运行时不要为了某个中文、英文或其他语言样例通过而新增短语表、固定问法分支或 `prompt.contains(...)`。如果新的自然语言表达没有被理解，应优先改 normalizer/planner schema、registry capability metadata、`INTERFACE.md`、生成技能提示词或必要的 vendor prompt patch，让 LLM 在不同语言下输出同一套结构化契约。本地门禁是：
+
+```bash
+python3 scripts/check_no_nl_hardmatch.py
+```
+
+## 记忆系统
+
+RustClaw 记忆分为短期对话记录、结构化用户偏好、长期事实卡和检索索引。目标是让记忆能帮助当前任务，同时避免旧助手输出变成新的隐藏指令。
+
+### 写入路径
+
+`ask` 任务收尾后，RustClaw 可以持久化：
+
+- `memories` 短期记录：按 `user_key`、`user_id`、`chat_id`、角色、类型、显著性和安全标记分组
+- `user_preferences` 用户偏好：例如 `response_language`、`response_style`、`response_format`、`agent_display_name`
+- `memory_facts` 长期事实卡：包含来源、置信度、作用域、状态、冲突组、过期和 supersede 信息
+
+偏好和事实写入走结构化 memory intent contract。LLM 输出 `memory_actions`，例如 `upsert`、`delete`、`expire`、`noop`；运行时再校验 action enum、kind、scope、confidence、source evidence、TTL 和 safety 字段后才写入数据库。运行时不会通过匹配某一句自然语言来决定 durable preference。
+
+长期摘要刷新仍作为兜底摘要路径存在，但优先把可复用知识写成事实卡。事实卡保留 `fact_key`、`fact_value`、`fact_text`、`source_ref`、`source_memory_ids_json`、`reason`、`confidence`、`expires_at_ts`、`conflict_group` 和 `status`。同一冲突组的新 active fact 会 supersede 旧 fact；过期或删除的 fact 不再进入召回。
+
+### 召回与使用策略
+
+记忆召回会先构造成结构化上下文，再按当前阶段套用 memory use policy：
+
+- route：默认只给最小上下文，包括 active preferences、相关 facts 和 knowledge docs；不把旧助手结果塞进新任务
+- follow-up route：当会话状态显示用户正在延续之前任务时，可以加入 recent events、assistant results、similar triggers、unfinished goals 和 snippets
+- planner：可使用 unfinished goals、preferences、facts 和 knowledge docs，默认避开 fallback long-term summaries 和旧助手结果
+- chat：使用稳定 preferences 与 facts；只有当前会话状态相关时才带有限 recent context
+- skill：`_memory` 会按技能 registry 的 `memory_policy` 裁剪；没有显式策略的技能使用安全默认配置
+
+例如 `photo_organize` 技能声明了自己的 memory policy：允许 preferences、relevant facts 和 knowledge docs，但排除 long-term summaries、recent events、assistant results、similar triggers、unfinished goals 和 raw recent snippets。
+
+### 检索索引
+
+混合召回使用 `memory_retrieval_index` 和可选 FTS。索引行会记录 `source_kind`、`source_ref`、memory kind、metadata、salience、success state 和 embedding metadata：
+
+- `embedding_model`
+- `embedding_dims`
+- `embedding_version`
+
+默认 provider 是离线可用的 `local-hash-v1`。如果配置了不可用或不支持的 embedding provider，运行时会回退到 local hash。只有索引行的 embedding metadata 与当前 provider spec 匹配时才使用 cosine scoring；不匹配时会回退到词法、显著性、时间和成功状态评分。可以在 `configs/memory.toml` 设置 `reindex_on_startup = true`，或从空索引启动，来重建短期记录、偏好、事实卡和知识库快照的检索索引。
+
+### 用户控制
+
+浏览器控制台包含 Memory 页面。它会展示当前身份下的数量、偏好、事实卡和最近记录。用户可以：
+
+- 删除某条偏好、事实或最近记忆
+- 把事实卡标记为过期
+- 清空当前身份下的最近记录、偏好、事实或全部记忆
+- 通过 `configs/memory.toml` 开启或关闭长期记忆
+
+对应 HTTP API：
+
+```text
+GET    /v1/memory
+GET    /v1/memory/recent
+GET    /v1/memory/preferences
+GET    /v1/memory/facts
+DELETE /v1/memory/:id
+POST   /v1/memory/:id/expire
+POST   /v1/memory/clear
+POST   /v1/memory/settings
+```
+
+带 safety 标记的 recent records 默认不会在 UI 中展示。事实卡的 reason、source、conflict group 等细节放在二级详情视图，而不是默认暴露原始 JSON。
+
+### 追踪与排障
+
+Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use policy、召回 source refs、纳入原因和字符预算，但不复制原始记忆文本，便于排查“为什么这次任务用了记忆”，同时降低敏感内容泄露风险。
+
+常用代码和配置入口：
+
+- `configs/memory.toml`
+- `crates/clawd/src/memory/intent.rs`
+- `crates/clawd/src/memory/apply.rs`
+- `crates/clawd/src/memory/facts.rs`
+- `crates/clawd/src/memory/use_policy.rs`
+- `crates/clawd/src/memory/retrieval.rs`
+- `crates/clawd/src/memory/indexing.rs`
+- `crates/clawd/src/memory/api.rs`
+
+### 记忆流程图
+
+```mermaid
+flowchart TD
+    User[用户请求] --> Task[POST /v1/tasks]
+    Task --> Worker[worker_once]
+    Worker --> Ask{kind=ask?}
+    Ask -->|是| Normalizer[意图归一化]
+    Ask -->|run_skill| DirectSkill[直接 run_skill 路径]
+    Normalizer --> Bundle[Ask 上下文包]
+    Bundle --> Recall[结构化记忆召回]
+    Recall --> Policy[Memory use policy]
+    Policy --> Route[路由提示词]
+    Policy --> Planner[规划提示词]
+    Policy --> Chat[聊天提示词]
+    Policy --> SkillArgs[技能 _memory 参数]
+    SkillArgs --> SkillPolicy[Registry memory_policy 裁剪]
+    SkillPolicy --> Runner[skill-runner / builtin / external skill]
+    Route --> Runtime[运行时 / 规划执行]
+    Planner --> Runtime
+    Chat --> Visible[用户可见答案]
+    Runtime --> Visible
+    Runner --> Runtime
+    Visible --> Finalize[任务收尾]
+    Finalize --> ShortTerm[(memories)]
+    Finalize -. 可选 .-> Intent[Memory intent extractor]
+    Intent --> Validate[运行时 schema / scope / safety 校验]
+    Validate --> Prefs[(user_preferences)]
+    Validate --> Facts[(memory_facts)]
+    Finalize -. 可选 .-> Summary[长期摘要刷新]
+    Summary --> Facts
+    Prefs --> Index[(memory_retrieval_index)]
+    Facts --> Index
+    ShortTerm --> Index
+    Index --> Recall
+    Policy --> Journal[Task journal memory_trace]
+    Runtime --> Journal
+```
+
 ## 主要组件
 
 - `crates/clawd`：核心运行时、HTTP API、任务队列、路由、记忆、鉴权、调度

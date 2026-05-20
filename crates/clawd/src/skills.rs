@@ -1272,10 +1272,36 @@ mod tests {
     use rusqlite::params;
     use serde_json::json;
     use std::collections::{HashMap, HashSet};
-
+    use std::fs;
+    use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex, RwLock};
 
     static STRICT_ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    struct TempDirGuard {
+        path: PathBuf,
+    }
+
+    impl TempDirGuard {
+        fn new(prefix: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "rustclaw_{prefix}_{}",
+                uuid::Uuid::new_v4().simple()
+            ));
+            fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
 
     fn test_state(locale: &str) -> AppState {
         let agents_by_id = HashMap::from([(
@@ -1321,6 +1347,162 @@ mod tests {
             reload_ctx: crate::ReloadContext::default(),
             ask_states: crate::AskStateRegistry::default(),
         }
+    }
+
+    fn install_real_registry(state: &mut AppState) {
+        let registry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../configs/skills_registry.toml")
+            .canonicalize()
+            .expect("canonicalize registry path");
+        let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)
+            .expect("load real skills registry");
+        let enabled: HashSet<String> = registry.enabled_names().into_iter().collect();
+        *state.core.skill_views_snapshot.write().unwrap() = Arc::new(SkillViewsSnapshot {
+            registry: Some(Arc::new(registry)),
+            skills_list: Arc::new(enabled),
+        });
+    }
+
+    fn make_echo_skill_runner(root: &Path) -> PathBuf {
+        let path = root.join("echo-skill-runner");
+        fs::write(
+            &path,
+            r#"#!/usr/bin/env bash
+python3 -c 'import json, sys; req=json.loads(sys.stdin.readline()); print(json.dumps({"request_id": req.get("request_id", ""), "status": "ok", "text": json.dumps(req.get("args", {}), ensure_ascii=False), "error_text": None}, ensure_ascii=False))'
+"#,
+        )
+        .expect("write fake skill runner");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&path)
+                .expect("fake runner metadata")
+                .permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&path, perms).expect("chmod fake runner");
+        }
+        path
+    }
+
+    fn insert_kb_doc_row(
+        db: &rusqlite::Connection,
+        user_key: &str,
+        source_ref: &str,
+        text: &str,
+        ts: i64,
+    ) {
+        db.execute(
+            "INSERT INTO memory_retrieval_index (
+                source_kind, source_memory_id, source_pref_key, source_ref, user_id, chat_id, user_key,
+                memory_kind, role, search_text, trigger_text, topic_tags, vector_json, metadata_json,
+                salience, success_state, tool_or_skill_name, created_at_ts, updated_at_ts
+             )
+             VALUES (?1, NULL, NULL, ?2, 0, 0, ?3, ?4, NULL, ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+            rusqlite::params![
+                crate::memory::RETRIEVAL_SOURCE_KB_DOC,
+                source_ref,
+                user_key,
+                crate::memory::RETRIEVAL_KIND_KNOWLEDGE_DOC,
+                text,
+                crate::memory::retrieval::build_topic_tags(text),
+                crate::memory::retrieval::vector_to_json(
+                    &crate::memory::embedding::embed_text_locally(text),
+                ),
+                r#"{"scope_kind":"user","namespace":"photo_docs","path":"photo_rules.md"}"#,
+                0.78_f32,
+                crate::memory::RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
+                crate::memory::RETRIEVAL_PRODUCER_KB,
+                ts,
+            ],
+        )
+        .expect("insert kb doc row");
+    }
+
+    fn seed_photo_organize_policy_memory(
+        state: &AppState,
+        user_id: i64,
+        chat_id: i64,
+        user_key: &str,
+    ) {
+        let db = state.core.db.get().expect("db pool");
+        db.execute_batch(crate::INIT_SQL).expect("init base schema");
+        crate::ensure_memory_schema(&db).expect("ensure memory schema");
+        crate::memory::indexing::ensure_retrieval_schema(&db).expect("ensure retrieval schema");
+        let ts = 1_775_301_800_i64;
+
+        db.execute(
+            "INSERT INTO user_preferences (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
+             VALUES (?1, ?2, ?3, 'photo_grouping', 'PHOTO_ALLOWED_PREF_by_year_month', 0.95, 'test', '1775301800', ?4)",
+            rusqlite::params![user_id, chat_id, user_key, ts],
+        )
+        .expect("insert preference");
+        db.execute(
+            "INSERT INTO long_term_memories (user_id, chat_id, user_key, summary, source_memory_id, created_at, updated_at, created_at_ts, updated_at_ts)
+             VALUES (?1, ?2, ?3, 'PHOTO_BLOCKED_LONG_TERM_SUMMARY', 1, '1775301800', '1775301800', ?4, ?4)",
+            rusqlite::params![user_id, chat_id, user_key, ts],
+        )
+        .expect("insert long term summary");
+
+        crate::memory::indexing::upsert_knowledge_fact(
+            &db,
+            user_id,
+            user_key,
+            "photo_profile",
+            crate::memory::RETRIEVAL_KIND_SEMANTIC_FACT,
+            "test:photo:allowed-fact",
+            "PHOTO_ALLOWED_FACT prefer grouping travel photos by capture date",
+            ts,
+        )
+        .expect("insert knowledge fact");
+        insert_kb_doc_row(
+            &db,
+            user_key,
+            "kb:test:photo:allowed-doc",
+            "PHOTO_ALLOWED_KB_DOC preserve original EXIF timestamp during organization",
+            ts,
+        );
+        crate::memory::indexing::index_memory_row(
+            &db,
+            user_id,
+            chat_id,
+            user_key,
+            101,
+            crate::memory::MEMORY_ROLE_USER,
+            "PHOTO_BLOCKED_RECENT_EVENT previous photo operation command",
+            crate::memory::MEMORY_TYPE_GENERIC,
+            0.9,
+            true,
+            ts + 1,
+        )
+        .expect("insert recent event memory");
+        crate::memory::indexing::index_memory_row(
+            &db,
+            user_id,
+            chat_id,
+            user_key,
+            102,
+            crate::memory::MEMORY_ROLE_ASSISTANT,
+            "PHOTO_BLOCKED_ASSISTANT_RESULT previous classified folder result",
+            crate::memory::MEMORY_TYPE_ASSISTANT_OUTCOME,
+            0.9,
+            false,
+            ts + 2,
+        )
+        .expect("insert assistant result memory");
+        crate::memory::indexing::index_memory_row(
+            &db,
+            user_id,
+            chat_id,
+            user_key,
+            103,
+            crate::memory::MEMORY_ROLE_USER,
+            "PHOTO_BLOCKED_UNFINISHED_GOAL continue moving all photos now",
+            crate::memory::MEMORY_TYPE_UNFINISHED_GOAL,
+            0.9,
+            false,
+            ts + 3,
+        )
+        .expect("insert unfinished goal memory");
     }
 
     fn test_task(payload: serde_json::Value) -> ClaimedTask {
@@ -1396,6 +1578,95 @@ mod tests {
             extract_task_request_text(&payload.to_string()).as_deref(),
             Some("set the config flag")
         );
+    }
+
+    #[tokio::test]
+    async fn run_skill_photo_organize_injects_registry_cropped_memory_args() {
+        let temp = TempDirGuard::new("skill_memory_echo_runner");
+        let mut state = test_state("zh-CN");
+        install_real_registry(&mut state);
+        state.skill_rt.skill_runner_path = make_echo_skill_runner(temp.path());
+        state.skill_rt.workspace_root = temp.path().to_path_buf();
+        state.skill_rt.skill_timeout_seconds = 5;
+
+        let user_id = 91;
+        let chat_id = 92;
+        let user_key = "user:photo-policy";
+        seed_photo_organize_policy_memory(&state, user_id, chat_id, user_key);
+        let task = ClaimedTask {
+            task_id: "task-photo-memory-policy".to_string(),
+            user_id,
+            chat_id,
+            user_key: Some(user_key.to_string()),
+            channel: "telegram".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "run_skill".to_string(),
+            payload_json: json!({
+                "skill_name": "photo_organize",
+                "args": {"action": "prepare", "text": "请准备照片整理候选目录"}
+            })
+            .to_string(),
+        };
+
+        let outcome = super::run_skill_with_runner_outcome(
+            &state,
+            &task,
+            "photo_organize",
+            json!({"action": "prepare", "text": "请准备照片整理候选目录"}),
+        )
+        .await
+        .expect("run fake photo_organize");
+        let echoed_args: serde_json::Value =
+            serde_json::from_str(&outcome.text).expect("echoed args json");
+        let memory = echoed_args
+            .get("_memory")
+            .expect("memory args should be injected");
+        let context = memory
+            .get("context")
+            .and_then(|value| value.as_str())
+            .expect("memory context string");
+
+        assert_eq!(
+            memory
+                .get("use_policy")
+                .and_then(|value| value.get("profile"))
+                .and_then(|value| value.as_str()),
+            Some("skill_scoped")
+        );
+        assert_eq!(
+            memory.get("lang_hint").and_then(|value| value.as_str()),
+            Some("zh-CN")
+        );
+        assert!(context.contains("PHOTO_ALLOWED_FACT"), "context: {context}");
+        assert!(
+            context.contains("PHOTO_ALLOWED_KB_DOC"),
+            "context: {context}"
+        );
+        assert_eq!(
+            memory
+                .get("preferences")
+                .and_then(|value| value.get("photo_grouping"))
+                .and_then(|value| value.as_str()),
+            Some("PHOTO_ALLOWED_PREF_by_year_month")
+        );
+        assert!(memory
+            .get("long_term_summary")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .is_empty());
+        let serialized = serde_json::to_string(memory).expect("serialize memory");
+        for blocked in [
+            "PHOTO_BLOCKED_LONG_TERM_SUMMARY",
+            "PHOTO_BLOCKED_RECENT_EVENT",
+            "PHOTO_BLOCKED_ASSISTANT_RESULT",
+            "PHOTO_BLOCKED_UNFINISHED_GOAL",
+        ] {
+            assert!(
+                !serialized.contains(blocked),
+                "blocked memory leaked: {blocked}; memory={serialized}"
+            );
+        }
     }
 
     #[test]

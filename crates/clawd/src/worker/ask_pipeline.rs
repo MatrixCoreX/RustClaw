@@ -6,6 +6,7 @@ use super::*;
 
 pub(super) struct PreparedAskFlow {
     pub(super) context_bundle_summary: String,
+    pub(super) memory_trace: Option<Value>,
     pub(super) route_result: crate::RouteResult,
     pub(super) execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
     pub(super) turn_analysis: Option<crate::intent_router::TurnAnalysis>,
@@ -1160,11 +1161,15 @@ fn background_only_locator_route_should_force_clarify(
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
 ) -> bool {
     if execute_route_without_input_locator_should_plan(route_result)
-        || current_request_has_structural_locator_surface_for_route(state, prompt, route_result)
         || state_patch_allows_deictic_locator_guard_bypass(turn_analysis)
         || session_has_authoritative_deictic_anchor(prompt, route_result, session_snapshot)
         || route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
         || !route_has_model_supplied_concrete_locator(route_result, resolved_prompt)
+    {
+        return false;
+    }
+    if !state_patch_requires_deictic_locator_clarify(turn_analysis)
+        && current_request_has_structural_locator_surface_for_route(state, prompt, route_result)
     {
         return false;
     }
@@ -1735,6 +1740,7 @@ pub(super) async fn prepare_ask_flow(
         && !prepared_routing.ask_mode.is_resume_discussion();
     Ok(PreparedAskFlow {
         context_bundle_summary: prepared_execution.context_bundle.summary(),
+        memory_trace: prepared_execution.context_bundle.memory_trace(),
         route_result: applied_post_route.execution_route_result,
         execution_recipe_hint: prepared_routing.execution_recipe_hint,
         turn_analysis: prepared_routing.turn_analysis,
@@ -2914,7 +2920,7 @@ mod tests {
         std::fs::create_dir_all(root.join("target")).expect("target dir");
         let state = test_state_with_root(root);
         let mut route = executable_filename_route();
-        route.resolved_intent = "查看那个 schema 里的 target enum".to_string();
+        route.resolved_intent = "Inspect schema target enum".to_string();
         route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
         route.output_contract.locator_hint = "target".to_string();
         route.output_contract.requires_content_evidence = true;
@@ -2925,13 +2931,14 @@ mod tests {
             active_clarify_state: None,
             active_observed_facts: None,
         };
+        let analysis = unresolved_deictic_analysis();
 
         assert!(background_only_locator_route_should_force_clarify(
             &state,
-            "查看那个 schema 里的 target enum",
+            "inspect schema target enum",
             &route.resolved_intent,
             &route,
-            None,
+            Some(&analysis),
             &snapshot,
         ));
     }

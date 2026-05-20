@@ -292,23 +292,19 @@ async fn missing_file_delivery_reply_text(
     )
 }
 
-fn spawn_memory_preference_llm_extraction(
-    state: &AppState,
-    task: &crate::ClaimedTask,
-    prompt: &str,
-) {
+fn spawn_memory_intent_llm_extraction(state: &AppState, task: &crate::ClaimedTask, prompt: &str) {
     let state = state.clone();
     let mut task = task.clone();
     let parent_task_id = task.task_id.clone();
-    task.task_id = format!("{parent_task_id}:memory_preference");
+    task.task_id = format!("{parent_task_id}:memory_intent");
     let metrics_task_id = task.task_id.clone();
     let prompt = prompt.to_string();
     tokio::spawn(async move {
         if let Err(err) =
-            crate::memory::maybe_extract_user_preferences_with_llm(&state, &task, &prompt).await
+            crate::memory::maybe_extract_memory_intent_with_llm(&state, &task, &prompt).await
         {
             warn!(
-                "memory preference llm extraction failed task_id={} parent_task_id={} err={}",
+                "memory intent llm extraction failed task_id={} parent_task_id={} err={}",
                 task.task_id, parent_task_id, err
             );
         }
@@ -332,7 +328,7 @@ fn insert_ask_memory_pair(
         task.user_key.as_deref(),
         agent_display_name_hint,
     );
-    spawn_memory_preference_llm_extraction(state, task, prompt);
+    spawn_memory_intent_llm_extraction(state, task, prompt);
     if should_skip_ask_memory_pair(state, answer_text, answer_messages) {
         return;
     }
@@ -682,6 +678,7 @@ pub(crate) async fn finalize_ask_result(
     payload: &Value,
     prompt: &str,
     context_bundle_summary: &str,
+    memory_trace: Option<&Value>,
     resolved_prompt_for_execution: &str,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
@@ -715,6 +712,9 @@ pub(crate) async fn finalize_ask_result(
         route_result.ask_mode.is_clarify_only(),
         crate::truncate_for_log(resolved_prompt_for_execution)
     ));
+    if let Some(memory_trace) = memory_trace {
+        journal.record_memory_trace(memory_trace.clone());
+    }
     match result {
         Ok(answer) => {
             if !repo::is_task_still_running(state, &task.task_id)? {

@@ -781,6 +781,12 @@ fn structured_scalar_observation_from_extract_item(
         return None;
     }
     let raw_value = value.get("value").unwrap_or(&serde_json::Value::Null);
+    if matches!(
+        raw_value,
+        serde_json::Value::Object(_) | serde_json::Value::Array(_)
+    ) {
+        return None;
+    }
     value
         .get("value_text")
         .and_then(|item| item.as_str())
@@ -802,8 +808,10 @@ fn structured_scalar_observation_from_step(
     }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     match value.get("action").and_then(|item| item.as_str()) {
-        Some("extract_field") => structured_scalar_observation_from_extract_item(&value),
-        Some("extract_fields") => {
+        Some("extract_field" | "read_field") => {
+            structured_scalar_observation_from_extract_item(&value)
+        }
+        Some("extract_fields" | "read_fields") => {
             let results = value.get("results")?.as_array()?;
             if results.len() != 1 {
                 return None;
@@ -1175,7 +1183,7 @@ fn system_basic_structured_doc_value(skill: &str, body: &str) -> Option<serde_js
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     matches!(
         value.get("action").and_then(|v| v.as_str()),
-        Some("extract_field" | "extract_fields" | "structured_keys")
+        Some("extract_field" | "extract_fields" | "read_field" | "read_fields" | "structured_keys")
     )
     .then_some(value)
 }
@@ -1183,7 +1191,7 @@ fn system_basic_structured_doc_value(skill: &str, body: &str) -> Option<serde_js
 fn system_basic_structured_doc_observed_body(skill: &str, body: &str) -> Option<String> {
     let value = system_basic_structured_doc_value(skill, body)?;
     match value.get("action").and_then(|v| v.as_str()) {
-        Some("extract_field") => {
+        Some("extract_field" | "read_field") => {
             let field_path = value
                 .get("resolved_field_path")
                 .and_then(|v| v.as_str())
@@ -1209,7 +1217,7 @@ fn system_basic_structured_doc_observed_body(skill: &str, body: &str) -> Option<
                 true,
             ))
         }
-        Some("extract_fields") => extract_fields_direct_answer_candidate(
+        Some("extract_fields" | "read_fields") => extract_fields_direct_answer_candidate(
             None,
             &value,
             Some(crate::OutputResponseShape::Free),
@@ -3250,7 +3258,7 @@ fn structured_scalar_candidate(
                 None
             }
         }
-        "extract_field" => {
+        "extract_field" | "read_field" => {
             if route.is_some_and(|route| {
                 route.output_contract.response_shape != crate::OutputResponseShape::Scalar
             }) {
@@ -3263,15 +3271,29 @@ fn structured_scalar_candidate(
             {
                 if route.is_some() && extract_field_has_non_exact_resolution(&value) {
                     if let Some(field_path) = json_trimmed_str(&value, "resolved_field_path") {
+                        let field_value = value.get("value").unwrap_or(&serde_json::Value::Null);
+                        if matches!(
+                            field_value,
+                            serde_json::Value::Object(_) | serde_json::Value::Array(_)
+                        ) {
+                            return None;
+                        }
                         return Some(structured_field_display_line(
                             state,
                             field_path,
-                            value.get("value").unwrap_or(&serde_json::Value::Null),
+                            field_value,
                             value.get("value_text").and_then(|v| v.as_str()),
                             true,
                             prefer_english,
                         ));
                     }
+                }
+                let field_value = value.get("value").unwrap_or(&serde_json::Value::Null);
+                if matches!(
+                    field_value,
+                    serde_json::Value::Object(_) | serde_json::Value::Array(_)
+                ) {
+                    return None;
                 }
                 let text = value
                     .get("value_text")
@@ -3443,7 +3465,10 @@ fn extract_fields_direct_answer_candidate(
     response_shape: Option<crate::OutputResponseShape>,
     prefer_english: bool,
 ) -> Option<String> {
-    if value.get("action").and_then(|v| v.as_str()) != Some("extract_fields") {
+    if !matches!(
+        value.get("action").and_then(|v| v.as_str()),
+        Some("extract_fields" | "read_fields")
+    ) {
         return None;
     }
     let results = value.get("results")?.as_array()?;
@@ -3492,7 +3517,10 @@ fn extract_field_direct_answer_candidate(
     response_shape: Option<crate::OutputResponseShape>,
     prefer_english: bool,
 ) -> Option<String> {
-    if value.get("action").and_then(|v| v.as_str()) != Some("extract_field") {
+    if !matches!(
+        value.get("action").and_then(|v| v.as_str()),
+        Some("extract_field" | "read_field")
+    ) {
         return None;
     }
     if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
@@ -4684,14 +4712,14 @@ fn extract_direct_answer_from_generic_output_impl(
                             response_shape,
                             prefers_english_free_text,
                         )
-                    } else if action == Some("extract_field") {
+                    } else if matches!(action, Some("extract_field" | "read_field")) {
                         extract_field_direct_answer_candidate(
                             state,
                             &value,
                             response_shape,
                             prefers_english_free_text,
                         )
-                    } else if action == Some("extract_fields") {
+                    } else if matches!(action, Some("extract_fields" | "read_fields")) {
                         extract_fields_direct_answer_candidate(
                             state,
                             &value,
@@ -5771,6 +5799,34 @@ mod tests {
     }
 
     #[test]
+    fn direct_scalar_reads_read_field_value_from_structured_output() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"read_field","exists":true,"field_path":"package.name","value_text":"react-example","value":"react-example","value_type":"string"}"#,
+        ));
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, None).as_deref(),
+            Some("react-example")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_defers_container_read_field_to_synthesis() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"read_field","exists":true,"field_path":"scripts","value":{"build":"echo build","dev":"echo dev"},"value_text":"{\"build\":\"echo build\",\"dev\":\"echo dev\"}","value_type":"object"}"#,
+        ));
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, None),
+            None
+        );
+    }
+
+    #[test]
     fn direct_scalar_preserves_resolved_extract_field_label_for_non_exact_match() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -5815,6 +5871,29 @@ mod tests {
             Some("run_cmd.planner_kind: tool")
         );
         assert!(has_observed_answer_candidates(&loop_state));
+    }
+
+    #[test]
+    fn direct_answer_reads_config_basic_read_fields_values() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"read_fields","path":"package.json","resolved_path":"/tmp/package.json","count":2,"results":[{"field_path":"name","exists":true,"value_type":"string","value_text":"react-example","value":"react-example"},{"field_path":"version","exists":true,"value_type":"string","value_text":"1.0.0","value":"1.0.0"}]}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint = "package.json".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("name: react-example\nversion: 1.0.0")
+        );
     }
 
     #[test]

@@ -10502,6 +10502,35 @@ mod tests {
     }
 
     #[test]
+    fn direct_scalar_finalize_uses_structured_read_field_missing_message() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "config_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                r#"{"action":"read_field","exists":false,"field_path":"package.name","value_text":"","value":null,"value_type":"null"}"#
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(scalar_route_result()),
+            ..Default::default()
+        };
+        let (answer, summary) =
+            direct_scalar_observed_answer(None, &loop_state, Some(&agent_run_context))
+                .expect("scalar fallback should succeed");
+        assert_eq!(answer, "未找到 package.name 字段");
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
     fn direct_structured_observed_answer_skips_multi_evidence_content_routes() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(StepExecutionResult {

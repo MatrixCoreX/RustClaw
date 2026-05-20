@@ -85,6 +85,13 @@ pub(crate) fn structurally_satisfies_answer_contract(
     if raw_command_answer_is_exact_single_successful_observation(journal, candidate_answer) {
         return true;
     }
+    if markdown_heading_answer_is_grounded_in_read_observation(
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
+        return true;
+    }
     if existence_with_path_answer_is_grounded_in_observation(
         route_result,
         journal,
@@ -93,6 +100,75 @@ pub(crate) fn structurally_satisfies_answer_contract(
         return true;
     }
     scalar_answer_is_grounded_in_successful_observation(route_result, journal, candidate_answer)
+}
+
+fn markdown_heading_answer_is_grounded_in_read_observation(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    if !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar
+                | crate::OutputResponseShape::Strict
+                | crate::OutputResponseShape::OneSentence
+        )
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        )
+    {
+        return false;
+    }
+    let Some(candidate_heading) = normalize_markdown_heading_answer(candidate_answer) else {
+        return false;
+    };
+    journal.step_results.iter().any(|step| {
+        step.status == crate::executor::StepExecutionStatus::Ok
+            && step.output_excerpt.as_deref().is_some_and(|output| {
+                markdown_heading_from_read_observation(output)
+                    .is_some_and(|heading| heading == candidate_heading)
+            })
+    })
+}
+
+fn normalize_markdown_heading_answer(answer: &str) -> Option<String> {
+    let answer = answer.trim();
+    if answer.is_empty() || answer.lines().count() > 1 {
+        return None;
+    }
+    let heading = answer.trim_start_matches('#').trim();
+    (!heading.is_empty()).then(|| heading.to_string())
+}
+
+fn markdown_heading_from_read_observation(output: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
+    let object = value.as_object()?;
+    let action = object.get("action").and_then(|value| value.as_str())?;
+    if !matches!(action, "read_range" | "read_text_range") {
+        return None;
+    }
+    let excerpt = object.get("excerpt").and_then(|value| value.as_str())?;
+    excerpt
+        .lines()
+        .map(strip_read_range_line_prefix)
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .find_map(normalize_markdown_heading_answer)
+}
+
+fn strip_read_range_line_prefix(line: &str) -> &str {
+    let Some((prefix, rest)) = line.split_once('|') else {
+        return line;
+    };
+    if !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit()) {
+        rest
+    } else {
+        line
+    }
 }
 
 fn route_requires_single_file_delivery(route: &RouteResult) -> bool {
@@ -716,6 +792,44 @@ mod tests {
 
         assert!(structurally_satisfies_answer_contract(
             &route, &journal, "3"
+        ));
+    }
+
+    #[test]
+    fn markdown_heading_answer_grounded_in_read_range_skips_llm_verifier() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-read-heading", "ask", "read it");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "fs_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    json!({
+                        "action": "read_range",
+                        "excerpt": "1|# RustClaw\n2|\n3|<img src=\"./RustClaw.png\" width=\"420\" />\n4|",
+                        "path": "README.md"
+                    })
+                    .to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route, &journal, "RustClaw"
+        ));
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "# RustClaw"
         ));
     }
 

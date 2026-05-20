@@ -207,6 +207,10 @@ A skill is considered available only when “mapping complete + compile pass + r
   Prefer incremental changes; avoid unrelated refactors.
 - 新增或强化技能选择时，优先改 registry metadata、`INTERFACE.md`、生成提示词或必要的 vendor patch；Rust 主流程只负责协议校验、resolver/verifier、权限安全、runner 派发和输出契约，不承载固定自然语言 case。
   When adding or improving skill selection, prefer registry metadata, `INTERFACE.md`, generated prompts, or necessary vendor patches; Rust main-flow code should own protocol validation, resolver/verifier, safety policy, runner dispatch, and output contracts, not fixed natural-language cases.
+- 不允许在运行时新增针对用户自然语言的硬匹配，例如 `prompt.contains(...)`、按语言维护短语数组，或为了某个中文/英文/日文/韩文样例通过而加分支。需要理解语义时，先让 normalizer / planner 输出结构化 enum、action、contract、locator 或 field path，Rust 只消费这些机器字段。
+  Do not add runtime hard matching against user natural language, such as `prompt.contains(...)`, language phrase arrays, or branches for one zh/en/ja/ko case. When semantics are needed, make the normalizer / planner emit structured enums, actions, contracts, locators, or field paths first; Rust should consume only those machine fields.
+- 改动自然语言路由、fallback、finalizer 或 planner 边界后，必须运行 `python3 scripts/check_no_nl_hardmatch.py`，并把新增语义能力落到 schema / registry / `INTERFACE.md` / generated prompts，而不是落到主流程短语判断。
+  After changing natural-language routing, fallback, finalizer, or planner boundaries, run `python3 scripts/check_no_nl_hardmatch.py`, and express new semantic capability in schema / registry / `INTERFACE.md` / generated prompts instead of main-flow phrase checks.
 - 先补协议与映射，再补提示词与 UI，最后跑编译。
   Implement protocol/mapping first, then prompts/UI, then compile checks.
 - 不改已有技能行为，除非需求明确要求。

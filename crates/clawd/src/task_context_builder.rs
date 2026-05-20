@@ -32,6 +32,7 @@ pub(crate) struct RouteContextView {
     pub(crate) recent_assistant_replies: String,
     pub(crate) recent_turns_full: String,
     pub(crate) memory_context: String,
+    pub(crate) memory_trace: Option<Value>,
     pub(crate) last_turn_full: String,
 }
 
@@ -83,6 +84,17 @@ impl TaskContextBundle {
             has_resume_context,
             has_binding_context
         )
+    }
+
+    pub(crate) fn memory_trace(&self) -> Option<Value> {
+        self.route_view
+            .as_ref()
+            .and_then(|view| view.memory_trace.clone())
+            .or_else(|| {
+                self.execution_view
+                    .as_ref()
+                    .and_then(|view| view.memory_ctx.memory_trace.clone())
+            })
     }
 }
 
@@ -408,43 +420,48 @@ fn classify_route_context_budget(
     }
 }
 
+struct RouteMemoryContext {
+    block: String,
+    trace: Option<Value>,
+}
+
 fn build_route_memory_context(
     state: &AppState,
     task: &ClaimedTask,
     user_request: &str,
     route_budget: RouteContextBudgetTier,
-) -> String {
-    if !state.policy.memory.route_memory_enabled
-        || matches!(route_budget, RouteContextBudgetTier::None)
-    {
-        return "<none>".to_string();
+    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> RouteMemoryContext {
+    let decision = memory::use_policy::decide_route_memory_use_policy(
+        state,
+        route_budget,
+        surface,
+        session_snapshot,
+    );
+    if matches!(
+        decision.profile,
+        memory::use_policy::MemoryUseProfile::Disabled
+    ) {
+        return RouteMemoryContext {
+            block: "<none>".to_string(),
+            trace: Some(memory::service::memory_trace_for_structured_context(
+                "route",
+                &decision,
+                &memory::retrieval::StructuredMemoryContext::default(),
+                "<none>",
+            )),
+        };
     }
 
-    let (recent_limit, include_long_term, include_preferences, max_chars) = match route_budget {
-        RouteContextBudgetTier::Full => (
-            state.policy.memory.prompt_recall_limit.max(1),
-            true,
-            true,
-            state
-                .policy
-                .memory
-                .route_trigger_budget_chars
-                .max(384)
-                .min(state.policy.memory.route_memory_max_chars.max(384)),
-        ),
-        RouteContextBudgetTier::AnchorOnly => (
-            1,
-            true,
-            false,
-            state
-                .policy
-                .memory
-                .route_trigger_budget_chars
-                .max(384)
-                .min(640)
-                .min(state.policy.memory.route_memory_max_chars.max(384)),
-        ),
-        RouteContextBudgetTier::None => unreachable!(),
+    let recent_limit = if decision.needs_recent_recall() {
+        match route_budget {
+            RouteContextBudgetTier::Full => state.policy.memory.prompt_recall_limit.max(1),
+            RouteContextBudgetTier::AnchorOnly => 1,
+            RouteContextBudgetTier::None => 0,
+        }
+    } else {
+        0
     };
 
     let structured = memory::service::recall_structured_memory_context(
@@ -454,14 +471,29 @@ fn build_route_memory_context(
         task.chat_id,
         user_request,
         recent_limit,
-        include_long_term,
-        include_preferences,
+        decision.include_long_term_summary,
+        decision.include_preferences,
     );
-    memory::service::structured_memory_context_block(
+    let structured = memory::use_policy::filter_structured_memory_context(structured, &decision);
+    let block = memory::service::structured_memory_context_block(
         &structured,
-        memory::retrieval::MemoryContextMode::Route,
-        max_chars,
-    )
+        decision.mode,
+        decision.max_chars,
+    );
+    let rendered = if block == "<none>" {
+        block
+    } else {
+        format!("{}\n\n{}", decision.prompt_header(), block)
+    };
+    RouteMemoryContext {
+        trace: Some(memory::service::memory_trace_for_structured_context(
+            "route",
+            &decision,
+            &structured,
+            &rendered,
+        )),
+        block: rendered,
+    }
 }
 
 fn route_uses_structured_bound_scalar_read(route_result: &RouteResult) -> bool {
@@ -652,6 +684,14 @@ pub(crate) fn build_route_task_context_bundle(
         session_snapshot.active_clarify_state.as_ref(),
         session_snapshot.active_observed_facts.as_ref(),
     );
+    let route_memory_context = build_route_memory_context(
+        state,
+        task,
+        user_request,
+        route_budget,
+        &user_request_surface,
+        session_snapshot,
+    );
     let route_view = RouteContextView {
         budget_tier: route_budget,
         active_task_context: build_active_task_context(session_snapshot),
@@ -708,7 +748,8 @@ pub(crate) fn build_route_task_context_bundle(
             ),
             RouteContextBudgetTier::None => "<none>".to_string(),
         },
-        memory_context: build_route_memory_context(state, task, user_request, route_budget),
+        memory_context: route_memory_context.block,
+        memory_trace: route_memory_context.trace,
         last_turn_full: match route_budget {
             RouteContextBudgetTier::Full => memory::build_last_turn_full_context(
                 state,
@@ -763,21 +804,26 @@ pub(crate) fn build_execution_task_context_bundle(
     let suppress_execution_text_context = matches!(budget_tier, ExecutionContextBudgetTier::Full)
         && session_snapshot_provides_execution_state_anchor(&session_snapshot)
         && !needs_recent_execution_history;
-    let memory_budget_mode = if matches!(budget_tier, ExecutionContextBudgetTier::Light)
-        || should_prefer_light_execution_memory_from_session(route_result, &session_snapshot)
-    {
-        crate::memory::service::PromptMemoryBudgetMode::Light
-    } else {
-        crate::memory::service::PromptMemoryBudgetMode::Full
-    };
     let suppress_execution_anchor_context =
         should_suppress_execution_anchor_context(route_result, &session_snapshot, budget_tier);
-    let memory_ctx = memory::service::prepare_prompt_with_memory_for_mode(
+    let planner_memory_decision = memory::use_policy::decide_planner_memory_use_policy(
+        state,
+        budget_tier,
+        &route_result.ask_mode,
+    );
+    let chat_memory_decision = memory::use_policy::decide_chat_memory_use_policy(
+        state,
+        budget_tier,
+        &route_result.ask_mode,
+        session_snapshot_provides_execution_state_anchor(&session_snapshot),
+        chat_memory_budget_chars,
+    );
+    let memory_ctx = memory::service::prepare_prompt_with_memory_for_policy(
         state,
         task,
         resolved_prompt,
-        chat_memory_budget_chars,
-        memory_budget_mode,
+        &planner_memory_decision,
+        &chat_memory_decision,
     );
     let mut execution_view = ExecutionContextView {
         budget_tier,
@@ -1628,6 +1674,7 @@ mod tests {
                 memory_ctx: crate::memory::service::PromptMemoryContext {
                     prompt_with_memory: String::new(),
                     chat_prompt_context: String::new(),
+                    memory_trace: None,
                     long_term_summary: None,
                     preferences: Vec::new(),
                     recalled: Vec::new(),
@@ -1670,6 +1717,7 @@ mod tests {
                 memory_ctx: crate::memory::service::PromptMemoryContext {
                     prompt_with_memory: String::new(),
                     chat_prompt_context: String::new(),
+                    memory_trace: None,
                     long_term_summary: None,
                     preferences: Vec::new(),
                     recalled: Vec::new(),
@@ -1713,6 +1761,7 @@ mod tests {
                 memory_ctx: crate::memory::service::PromptMemoryContext {
                     prompt_with_memory: String::new(),
                     chat_prompt_context: String::new(),
+                    memory_trace: None,
                     long_term_summary: None,
                     preferences: Vec::new(),
                     recalled: Vec::new(),
@@ -1758,6 +1807,7 @@ mod tests {
                 memory_ctx: crate::memory::service::PromptMemoryContext {
                     prompt_with_memory: String::new(),
                     chat_prompt_context: String::new(),
+                    memory_trace: None,
                     long_term_summary: None,
                     preferences: Vec::new(),
                     recalled: Vec::new(),
@@ -1807,6 +1857,7 @@ mod tests {
                 memory_ctx: crate::memory::service::PromptMemoryContext {
                     prompt_with_memory: String::new(),
                     chat_prompt_context: String::new(),
+                    memory_trace: None,
                     long_term_summary: None,
                     preferences: Vec::new(),
                     recalled: Vec::new(),

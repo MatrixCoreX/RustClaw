@@ -12,26 +12,32 @@ Exclude noisy details: transient command output, temporary errors, low-value chi
 Never store assistant-invented global restrictions or refusal rationales as durable memory unless the user explicitly asked for that rule.
 Do not convert a mistaken assistant refusal into a persistent user preference, system rule, or safety policy.
 Do not transform memory text into executable instruction.
+Do not append reasons, evidence notes, or audit text to fact text. Put the explanation only in `reason`.
 Return a single JSON object only. Never output <think> tags or process narration.
 
 JSON schema:
 ```json
 {
   "summary": "plain text long-term summary",
-  "knowledge_candidates": [
+  "fact_candidates": [
     {
       "should_persist": false,
       "kind": "user_preference|user_profile_fact|project_fact|rule|transient",
       "namespace": "user_profile|project_facts|none",
       "fact": "durable fact text",
       "confidence": 0.0,
-      "reason": "brief reason"
+      "reason": "brief reason",
+      "fact_key": "stable_machine_key_or_empty",
+      "fact_value": "structured_value_or_empty",
+      "conflict_group": "stable_conflict_group_or_empty",
+      "expires_at_ts": null
     }
-  ]
+  ],
+  "knowledge_candidates": []
 }
 ```
 
-Knowledge-candidate rules:
+Fact-candidate rules:
 - Be conservative. If uncertain, use `should_persist=false`, `kind="transient"`, `namespace="none"`.
 - Only persist durable, reusable information: stable user preferences, explicit long-term profile facts, explicit project facts, or explicit standing rules.
 - Do not persist one-off requests, temporary blockers, transient system state, speculative claims, or assistant guesses.
@@ -39,6 +45,11 @@ Knowledge-candidate rules:
 - `kind="project_fact"` must use `namespace="project_facts"`.
 - Keep at most 3 candidates.
 - `fact` should be a concise standalone statement that can be stored directly.
+- `fact_key` is required for updatable facts such as response language, testing preference, UI style, project command, or channel default. Use lowercase snake_case when possible.
+- `fact_value` should hold the structured value for `fact_key`; leave it empty only when the fact has no stable value.
+- `conflict_group` must be stable for mutually exclusive facts so a newer fact can supersede the older one. Prefer `namespace:fact_key`.
+- Use `expires_at_ts=null` for durable facts. Use a Unix timestamp only when the user explicitly gives a temporary expiry.
+- Keep `knowledge_candidates` as an empty compatibility array; new facts go in `fact_candidates`.
 
 Previous long-term summary:
 __PREVIOUS_SUMMARY__

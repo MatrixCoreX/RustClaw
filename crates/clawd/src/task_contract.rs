@@ -31,6 +31,7 @@ pub(crate) enum TaskTargetObject {
     Service,
     Process,
     Db,
+    System,
     Web,
     Unknown,
 }
@@ -44,6 +45,7 @@ impl TaskTargetObject {
             Self::Service => "service",
             Self::Process => "process",
             Self::Db => "db",
+            Self::System => "system",
             Self::Web => "web",
             Self::Unknown => "unknown",
         }
@@ -348,6 +350,7 @@ fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
         | OutputSemanticKind::SqliteDatabaseKindJudgment
         | OutputSemanticKind::SqliteSchemaVersion => return TaskTargetObject::Db,
         OutputSemanticKind::StructuredKeys => return TaskTargetObject::ConfigKey,
+        OutputSemanticKind::PackageManagerDetection => return TaskTargetObject::System,
         _ => {}
     }
     match route.output_contract.locator_kind {
@@ -385,6 +388,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
             TaskOperation::Modify
         }
         OutputSemanticKind::ServiceStatus
+        | OutputSemanticKind::PackageManagerDetection
         | OutputSemanticKind::HiddenEntriesCheck
         | OutputSemanticKind::ContentPresenceCheck
         | OutputSemanticKind::ScalarPathOnly
@@ -490,6 +494,7 @@ pub(crate) fn required_evidence_fields_for_output_contract(
             fields.insert("candidates");
         }
         OutputSemanticKind::ServiceStatus
+        | OutputSemanticKind::PackageManagerDetection
         | OutputSemanticKind::StructuredKeys
         | OutputSemanticKind::SqliteDatabaseKindJudgment
         | OutputSemanticKind::SqliteSchemaVersion

@@ -86,6 +86,28 @@ pub struct PlannerCapabilityMapping {
     pub preferred: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillMemoryPolicyProfile {
+    Disabled,
+    #[default]
+    SkillScoped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+pub struct SkillMemoryPolicyConfig {
+    #[serde(default)]
+    pub profile: SkillMemoryPolicyProfile,
+    #[serde(default)]
+    pub include: Vec<String>,
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    #[serde(default)]
+    pub max_chars: Option<usize>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
 /// Planner-facing capability layer. This is intentionally separate from
 /// [`SkillKind`]: `kind` describes execution shape (builtin/runner/external),
 /// while `planner_kind` describes how the agent should reason about the
@@ -372,6 +394,10 @@ pub struct SkillRegistryEntry {
     /// `capabilities`, which declares runtime/security resources.
     #[serde(default)]
     pub planner_capabilities: Vec<PlannerCapabilityMapping>,
+    /// Structured memory sources this skill may receive in its `_memory`
+    /// payload. This is runtime policy metadata, not natural-language routing.
+    #[serde(default)]
+    pub memory_policy: Option<SkillMemoryPolicyConfig>,
 
     // ---------- Phase 5: 执行配置 ----------
     /// Runner 技能：在 runner 侧的执行名；未设则用 name。
@@ -520,6 +546,68 @@ fn normalize_metadata_lines(values: &[String]) -> Vec<String> {
         out.push(line.to_string());
     }
     out
+}
+
+const SKILL_MEMORY_POLICY_SOURCE_TOKENS: &[&str] = &[
+    "preferences",
+    "long_term_summary",
+    "recent_related_events",
+    "assistant_results",
+    "similar_triggers",
+    "unfinished_goals",
+    "relevant_facts",
+    "knowledge_docs",
+    "recent_snippets",
+];
+
+fn normalize_skill_memory_source_tokens(
+    skill_name: &str,
+    path: &Path,
+    field: &str,
+    values: &[String],
+) -> Result<Vec<String>, String> {
+    let normalized = normalize_schema_tokens(values);
+    for token in &normalized {
+        if !SKILL_MEMORY_POLICY_SOURCE_TOKENS.contains(&token.as_str()) {
+            return Err(format!(
+                "parse memory_policy.{field} for skill `{skill_name}` in {}: unknown source token `{token}`",
+                path.display()
+            ));
+        }
+    }
+    Ok(normalized)
+}
+
+fn normalize_skill_memory_policy(
+    skill_name: &str,
+    path: &Path,
+    policy: &SkillMemoryPolicyConfig,
+) -> Result<SkillMemoryPolicyConfig, String> {
+    let include =
+        normalize_skill_memory_source_tokens(skill_name, path, "include", &policy.include)?;
+    let exclude =
+        normalize_skill_memory_source_tokens(skill_name, path, "exclude", &policy.exclude)?;
+    for token in &include {
+        if exclude.iter().any(|item| item == token) {
+            return Err(format!(
+                "parse memory_policy for skill `{skill_name}` in {}: source token `{token}` appears in both include and exclude",
+                path.display()
+            ));
+        }
+    }
+    if policy.max_chars == Some(0) {
+        return Err(format!(
+            "parse memory_policy.max_chars for skill `{skill_name}` in {}: value must be greater than 0",
+            path.display()
+        ));
+    }
+    Ok(SkillMemoryPolicyConfig {
+        profile: policy.profile,
+        include,
+        exclude,
+        max_chars: policy.max_chars,
+        reason: trim_optional_string(policy.reason.as_deref()),
+    })
 }
 
 fn normalize_matcher_value(value: &TomlValue) -> TomlValue {
@@ -687,6 +775,11 @@ impl SkillsRegistry {
             entry.platform_notes = normalize_metadata_lines(&entry.platform_notes);
             entry.planner_capabilities =
                 normalize_planner_capabilities(&entry.planner_capabilities);
+            entry.memory_policy = entry
+                .memory_policy
+                .as_ref()
+                .map(|policy| normalize_skill_memory_policy(&canonical, path, policy))
+                .transpose()?;
             // §P4.1 主体：把 capabilities_raw 翻译成强类型，未知 token 直接报错。
             // 排序 + dedup 让"声明顺序"不影响等价性，并避免重复声明在策略层
             // 引出二义性。
@@ -937,6 +1030,11 @@ impl SkillsRegistry {
             Some(entry) => entry.planner_capabilities.as_slice(),
             None => &[],
         }
+    }
+
+    pub fn memory_policy(&self, canonical_name: &str) -> Option<&SkillMemoryPolicyConfig> {
+        self.get(canonical_name)
+            .and_then(|entry| entry.memory_policy.as_ref())
     }
 
     /// §P4.1 主体：取该技能的强类型能力声明（已去重 + 排序）。
@@ -1648,6 +1746,62 @@ capabilities = ["llm", "wifi"]
         assert!(
             err.contains("wifi"),
             "error should mention bad token: {err}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn registry_loads_structured_skill_memory_policy() {
+        let toml = r#"
+[[skills]]
+name = "photo_organize"
+enabled = true
+kind = "runner"
+memory_policy = { profile = "skill_scoped", include = ["preferences", "relevant-facts", "knowledge_docs"], exclude = ["assistant_results"], max_chars = 900, reason = "photo_organize_structured_args_only" }
+"#;
+        let path = std::env::temp_dir().join("test_registry_memory_policy.toml");
+        std::fs::write(&path, toml).unwrap();
+        let reg = SkillsRegistry::load_from_path(&path).unwrap();
+        let policy = reg.memory_policy("photo_organize").expect("memory policy");
+        assert_eq!(policy.profile, SkillMemoryPolicyProfile::SkillScoped);
+        assert_eq!(
+            policy.include,
+            vec![
+                "preferences".to_string(),
+                "relevant_facts".to_string(),
+                "knowledge_docs".to_string()
+            ]
+        );
+        assert_eq!(policy.exclude, vec!["assistant_results".to_string()]);
+        assert_eq!(policy.max_chars, Some(900));
+        assert_eq!(
+            policy.reason.as_deref(),
+            Some("photo_organize_structured_args_only")
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn registry_rejects_unknown_skill_memory_policy_source() {
+        let toml = r#"
+[[skills]]
+name = "photo_organize"
+enabled = true
+kind = "runner"
+memory_policy = { include = ["preferences", "recent_chat_magic"] }
+"#;
+        let path = std::env::temp_dir().join("test_registry_memory_policy_bad.toml");
+        std::fs::write(&path, toml).unwrap();
+        let err = SkillsRegistry::load_from_path(&path)
+            .err()
+            .expect("expected load to fail on unknown memory source");
+        assert!(
+            err.contains("photo_organize"),
+            "error should mention skill name: {err}"
+        );
+        assert!(
+            err.contains("recent_chat_magic"),
+            "error should mention bad memory source token: {err}"
         );
         let _ = std::fs::remove_file(path);
     }

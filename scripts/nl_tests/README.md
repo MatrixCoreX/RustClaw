@@ -45,6 +45,15 @@ Runner output prints each user instruction and assistant answer as `PROMPT` / `R
 blocks by default. Use `--prompt-reply-only` when you want to suppress most
 diagnostic output and keep only those dialog blocks.
 
+Static runtime hard-match guard:
+
+- `python3 scripts/check_no_nl_hardmatch.py`
+- `python3 scripts/check_no_nl_hardmatch.py --self-test`
+
+The guard fails on new user-language phrase matching in runtime Rust code. Known
+legacy hits are reported with their owning plan item and should be removed by
+the structured-contract migration instead of expanded with more phrases.
+
 Client-like continuous regression:
 
 - Regenerate the safe aggregate case file:

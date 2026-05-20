@@ -24,6 +24,13 @@
 - `configs/skills_registry.toml`: runtime registry entry, aliases, prompt file, risk/confirmation metadata, and planner visibility.
 - No external account, API key, or model provider is required for the skill itself.
 
+## Memory Entry Points (from interface)
+- The skill memory policy is declared in `configs/skills_registry.toml` under `memory_policy`; runtime code must read that structured policy instead of matching request language.
+- `photo_organize` may use only stable memory sources: `preferences`, `relevant_facts`, `knowledge_docs`, and `_memory.lang_hint`.
+- `photo_organize` must not use `long_term_summary`, `recent_related_events`, `assistant_results`, `similar_triggers`, `unfinished_goals`, or `recent_snippets` as source directories, filters, modes, or grouping rules.
+- Skill args are the source of truth for `source_dir`, `output_dir`, `mode`, `group_by`, date filters, brand/model/lens filters, recursion, and preview limits.
+- Memory may influence stable user-facing defaults such as response language or durable project facts, but it must not override explicit args from the current call.
+
 ## Actions (from interface)
 - `prepare`
 - `organize`

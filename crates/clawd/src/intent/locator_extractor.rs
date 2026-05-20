@@ -1,5 +1,20 @@
 use crate::OutputLocatorKind;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StructuredLocatorTokenKind {
+    Path,
+    Url,
+    Filename,
+    DeliveryToken,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StructuredLocatorToken {
+    pub(crate) kind: StructuredLocatorTokenKind,
+    pub(crate) value: String,
+    pub(crate) reason: &'static str,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ExtractedLocator {
     pub(crate) locator_kind: OutputLocatorKind,
@@ -10,18 +25,31 @@ pub(crate) struct ExtractedLocator {
 pub(crate) fn extract_explicit_locator_for_fallback(
     user_request: &str,
 ) -> Option<ExtractedLocator> {
-    let explicit_path_or_url = extract_explicit_locator_candidates_for_fallback(user_request)
-        .into_iter()
-        .next();
-    if explicit_path_or_url.is_some() {
-        return explicit_path_or_url;
+    for token in structured_locator_tokens(user_request) {
+        match token.kind {
+            StructuredLocatorTokenKind::Path => {
+                return Some(ExtractedLocator {
+                    locator_kind: OutputLocatorKind::Path,
+                    locator_hint: token.value,
+                    reason: token.reason,
+                });
+            }
+            StructuredLocatorTokenKind::Url => {
+                return Some(ExtractedLocator {
+                    locator_kind: OutputLocatorKind::Url,
+                    locator_hint: token.value,
+                    reason: token.reason,
+                });
+            }
+            StructuredLocatorTokenKind::Filename | StructuredLocatorTokenKind::DeliveryToken => {}
+        }
     }
 
-    let mut filename_candidates =
-        crate::intent::surface_signals::analyze_prompt_surface(user_request)
-            .filename_candidates_excluding_field_selectors();
-    filename_candidates.retain(|candidate| !candidate_looks_like_dotted_version_number(candidate));
-    filename_candidates.sort();
+    let mut filename_candidates = structured_locator_tokens(user_request)
+        .into_iter()
+        .filter(|token| token.kind == StructuredLocatorTokenKind::Filename)
+        .map(|token| token.value)
+        .collect::<Vec<_>>();
     if filename_candidates.len() == 1 {
         return Some(ExtractedLocator {
             locator_kind: OutputLocatorKind::Filename,
@@ -30,6 +58,61 @@ pub(crate) fn extract_explicit_locator_for_fallback(
         });
     }
     None
+}
+
+pub(crate) fn structured_locator_tokens(user_request: &str) -> Vec<StructuredLocatorToken> {
+    let mut out = Vec::new();
+    for locator in extract_explicit_locator_candidates_for_fallback(user_request) {
+        let kind = match locator.locator_kind {
+            OutputLocatorKind::Path => StructuredLocatorTokenKind::Path,
+            OutputLocatorKind::Url => StructuredLocatorTokenKind::Url,
+            _ => continue,
+        };
+        push_structured_locator_token(
+            &mut out,
+            StructuredLocatorToken {
+                kind,
+                value: locator.locator_hint,
+                reason: locator.reason,
+            },
+        );
+    }
+    for filename in crate::delivery_utils::extract_filename_candidates(user_request) {
+        if candidate_looks_like_dotted_version_number(&filename) {
+            continue;
+        }
+        push_structured_locator_token(
+            &mut out,
+            StructuredLocatorToken {
+                kind: StructuredLocatorTokenKind::Filename,
+                value: filename,
+                reason: "explicit_filename_locator",
+            },
+        );
+    }
+    for token in crate::extract_delivery_file_tokens(user_request) {
+        push_structured_locator_token(
+            &mut out,
+            StructuredLocatorToken {
+                kind: StructuredLocatorTokenKind::DeliveryToken,
+                value: token,
+                reason: "delivery_token_locator",
+            },
+        );
+    }
+    out
+}
+
+fn push_structured_locator_token(
+    out: &mut Vec<StructuredLocatorToken>,
+    token: StructuredLocatorToken,
+) {
+    if !out
+        .iter()
+        .any(|existing| existing.kind == token.kind && existing.value == token.value)
+    {
+        out.push(token);
+    }
 }
 
 pub(crate) fn extract_explicit_locator_candidates_for_fallback(
@@ -159,6 +242,7 @@ fn trim_fallback_locator_token(token: &str) -> String {
 mod tests {
     use super::{
         extract_explicit_locator_candidates_for_fallback, extract_explicit_locator_for_fallback,
+        structured_locator_tokens, StructuredLocatorTokenKind,
     };
     use crate::OutputLocatorKind;
 
@@ -233,5 +317,24 @@ mod tests {
         assert_eq!(out[0].locator_hint, "/tmp/a.md");
         assert_eq!(out[1].locator_kind, OutputLocatorKind::Path);
         assert_eq!(out[1].locator_hint, "/tmp/b.md");
+    }
+
+    #[test]
+    fn structured_locator_tokens_keep_only_structural_locator_shapes() {
+        let out = structured_locator_tokens(
+            "read docs/report.md and README.md, but not README\nFILE:/tmp/out.txt",
+        );
+        assert!(out
+            .iter()
+            .any(|token| token.kind == StructuredLocatorTokenKind::Path
+                && token.value == "docs/report.md"));
+        assert!(out
+            .iter()
+            .any(|token| token.kind == StructuredLocatorTokenKind::Filename
+                && token.value == "README.md"));
+        assert!(out
+            .iter()
+            .any(|token| token.kind == StructuredLocatorTokenKind::DeliveryToken));
+        assert!(!out.iter().any(|token| token.value == "README"));
     }
 }

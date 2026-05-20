@@ -156,6 +156,15 @@ capabilities = ["fs.read"]
 preferred_over_run_cmd = true
 supported_os = ["linux", "macos"]
 platform_notes = ["Virtual planner tool; runtime read actions delegate to system_basic and RustClaw config guard."]
+planner_capabilities = [
+  { name = "config.read_field", action = "read_field", effect = "observe", required = ["path", "field_path"], risk_level = "low", preferred = true },
+  { name = "config.read_fields", action = "read_fields", effect = "observe", required = ["path", "field_paths"], risk_level = "low", preferred = true },
+  { name = "config.list_keys", action = "list_keys", effect = "observe", required = ["path"], optional = ["max_keys"], risk_level = "low", preferred = true },
+  { name = "config.validate", action = "validate", effect = "validate", required = ["path"], optional = ["validation_profile"], risk_level = "low", preferred = true },
+  { name = "config.guard_rustclaw_config", action = "guard_rustclaw_config", effect = "validate", required = ["path"], risk_level = "low", preferred = true },
+]
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["read_field", "read_fields", "list_keys", "validate", "guard_rustclaw_config"] }, path = { type = "string" }, field_path = { type = "string" }, field_paths = { anyOf = [ { type = "string" }, { type = "array", items = { type = "string" } } ] }, format = { type = "string" }, validation_profile = { type = "string", enum = ["syntax_only", "rustclaw_semantic_guard"] }, max_keys = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "config_edit"
@@ -304,6 +313,13 @@ supported_os = ["linux", "macos"]
 required_bins = ["sh", "id"]
 optional_bins = ["apt-get", "apt", "dnf", "yum", "pacman", "apk", "zypper", "brew", "sudo"]
 platform_notes = ["macOS prefers Homebrew; Linux prefers native distro package managers before Homebrew fallback."]
+semantic_tags = ["package_manager_detection"]
+preferred_over_run_cmd = true
+planner_capabilities = [
+  { name = "package.detect_manager", action = "detect", effect = "observe", optional = ["manager"], risk_level = "low", preferred = true },
+  { name = "package.install", action = "install", effect = "mutate", required = ["package"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high" },
+  { name = "package.uninstall", action = "uninstall", effect = "mutate", required = ["package"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high" },
+]
 
 [[skills]]
 name = "archive_basic"
@@ -710,6 +726,7 @@ prompt_file = "prompts/skills/photo_organize.md"
 output_kind = "text"
 description = "Front-door routing contract: photo organization without source_dir is executable, not a clarification. Call photo_organize with action=organize and mode=plan so the skill can discover external drive / USB candidates and preview a unique candidate or return observed candidates."
 semantic_tags = ["photo_organization", "exif_classification", "external_drive_discovery", "source_dir_optional_discovery"]
+memory_policy = { profile = "skill_scoped", include = ["preferences", "relevant_facts", "knowledge_docs"], exclude = ["long_term_summary", "recent_related_events", "assistant_results", "similar_triggers", "unfinished_goals", "recent_snippets"], max_chars = 900, reason = "photo_organize_structured_args_stable_memory_only" }
 risk_level = "high"
 auto_invocable = false
 requires_confirmation = true
@@ -717,8 +734,16 @@ side_effect = true
 retryable = false
 confirmation_exempt_when = [
   { action = "prepare" },
+  { action = "preview" },
+  { action = "plan" },
+  { action = "dry_run" },
   { action = "organize", mode = "plan" },
   { action = "organize", organize_mode = "plan" },
+]
+planner_capabilities = [
+  { name = "photo.preview_organization", action = "preview", effect = "observe", optional = ["source_dir", "mode", "organize_mode", "group_by", "capture_year", "capture_month", "capture_date", "selected_brands", "selected_models", "selected_lenses", "include_subdirs", "preview_limit"], risk_level = "low", preferred = true },
+  { name = "photo.prepare_source_candidates", action = "prepare", effect = "observe", risk_level = "low", preferred = true },
+  { name = "photo.apply_organization", action = "organize", effect = "mutate", required = ["source_dir"], optional = ["mode", "organize_mode", "group_by", "capture_year", "capture_month", "capture_date", "selected_brands", "selected_models", "selected_lenses", "include_subdirs", "preview_limit"], risk_level = "high" },
 ]
 
 [[skills]]

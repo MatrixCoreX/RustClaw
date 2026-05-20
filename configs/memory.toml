@@ -67,7 +67,8 @@ write_filter_enabled = true
 write_min_chars = 4
 
 # 是否启用基于规则的用户偏好抽取。
-# Whether to enable rule-based user preference extraction.
+# 是否启用结构化记忆 intent 抽取。
+# Whether to enable structured memory-intent extraction.
 enable_preference_extraction = true
 
 # 是否在规则未抽到偏好时启用 LLM 偏好抽取 fallback。
@@ -182,6 +183,14 @@ route_trigger_budget_chars = 900
 # Embedding model identifier for memory indexing; local-hash-v1 means local hash vectors.
 embedding_model = "local-hash-v1"
 
+# embedding 向量维度。local-hash-v1 固定为 24。
+# Embedding vector dimensions. local-hash-v1 is fixed at 24.
+embedding_dims = 24
+
+# embedding 索引版本；变更 provider 或维度时应同步变更并重建索引。
+# Embedding index version; change it with provider/dimension changes and rebuild the index.
+embedding_version = "local-hash-v1"
+
 # embedding 批处理大小。
 # Batch size for embedding/indexing work.
 embedding_batch_size = 16
@@ -231,25 +240,3 @@ salience_boost_markers = [
     "from now on",
     "going forward",
 ]
-
-[rules.preferences]
-
-# 规则抽取：用户偏好中文回复的表达。
-# Rule extraction phrases for a user preference to reply in Chinese.
-language_zh = ["以后都用中文", "请用中文", "中文回复", "默认中文", "都说中文"]
-
-# 规则抽取：用户偏好英文回复的表达。
-# Rule extraction phrases for a user preference to reply in English.
-language_en = ["以后都用英文", "请用英文", "英文回复", "reply in english", "speak english"]
-
-# 规则抽取：用户偏好简洁回复的表达。
-# Rule extraction phrases for a concise-response preference.
-style_concise = ["简洁", "简短", "精简", "concise", "brief"]
-
-# 规则抽取：用户偏好详细回复的表达。
-# Rule extraction phrases for a detailed-response preference.
-style_detailed = ["详细", "展开", "细一点", "detailed", "step by step"]
-
-# 规则抽取：用户偏好纯文本/不用 Markdown 的表达。
-# Rule extraction phrases for a plain-text / no-Markdown response preference.
-format_plain_text = ["不要markdown", "别用markdown", "纯文本", "plain text", "no markdown"]

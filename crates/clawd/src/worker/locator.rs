@@ -9,9 +9,7 @@ pub(crate) fn has_concrete_locator_hint(text: &str) -> bool {
     }
     text.split_whitespace()
         .flat_map(locator_token_segments)
-        .any(|token| {
-            looks_like_filename_locator(&token) || looks_like_bare_filename_stem_locator(&token)
-        })
+        .any(|token| looks_like_filename_locator(&token))
 }
 
 pub(crate) fn has_explicit_path_or_url_locator_hint(text: &str) -> bool {
@@ -907,28 +905,6 @@ fn looks_like_filename_locator(token: &str) -> bool {
     ext.chars().all(|ch| ch.is_ascii_alphanumeric()) && ext.len() <= 12
 }
 
-fn looks_like_bare_filename_stem_locator(token: &str) -> bool {
-    if token.is_empty()
-        || token.contains('/')
-        || token.contains('\\')
-        || token.contains('.')
-        || token.starts_with("http://")
-        || token.starts_with("https://")
-    {
-        return false;
-    }
-    if token.chars().count() < 2 {
-        return false;
-    }
-    if !token
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
-    {
-        return false;
-    }
-    token.chars().any(|ch| ch.is_ascii_uppercase())
-}
-
 fn collect_files_for_locator_scan(root: &Path, max_depth: usize, max_files: usize) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![(root.to_path_buf(), 0usize)];
@@ -1123,10 +1099,7 @@ fn extract_filename_like_tokens(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for raw in text.split_whitespace() {
         for token in locator_token_segments(raw) {
-            if (looks_like_filename_locator(&token)
-                || looks_like_bare_filename_stem_locator(&token))
-                && !out.iter().any(|v| v == &token)
-            {
+            if looks_like_filename_locator(&token) && !out.iter().any(|v| v == &token) {
                 out.push(token);
             }
             if out.len() >= 8 {
@@ -1235,7 +1208,7 @@ mod tests {
         );
         assert!(tokens.iter().any(|v| v == "Config.toml"));
         assert!(tokens.iter().any(|v| v == "README.md"));
-        assert!(tokens.iter().any(|v| v == "README"));
+        assert!(!tokens.iter().any(|v| v == "README"));
     }
 
     #[test]

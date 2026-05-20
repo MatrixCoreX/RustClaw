@@ -4526,6 +4526,8 @@ fn normalize_planned_actions_with_original_and_context(
         auto_locator_path,
         actions,
     );
+    let actions =
+        strip_unrequested_config_edit_actions(route_result, user_text, original_user_text, actions);
     let actions = normalize_terminal_delivery_actions(
         state,
         route_result,
@@ -4638,13 +4640,8 @@ fn normalize_legacy_compatibility_actions(
     let actions =
         strip_terminal_discussion_for_direct_skill_passthrough(state, route_result, actions);
     let actions = normalize_action_schema_aliases(state, route_result, actions);
-    let actions = rewrite_rustclaw_config_validation_to_guard(
-        route_result,
-        user_text,
-        original_user_text,
-        auto_locator_path,
-        actions,
-    );
+    let actions =
+        rewrite_rustclaw_config_validation_to_guard(route_result, auto_locator_path, actions);
     let actions = rewrite_sqlite_table_listing_plan_to_db_basic(
         route_result,
         auto_locator_path,
@@ -4679,25 +4676,23 @@ fn normalize_legacy_compatibility_actions(
 
 fn rewrite_rustclaw_config_validation_to_guard(
     route_result: Option<&RouteResult>,
-    user_text: &str,
-    original_user_text: Option<&str>,
     auto_locator_path: Option<&str>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
-    if !is_rustclaw_config_guard_request(route_result, user_text, original_user_text) {
-        return actions;
-    }
     if actions.iter().any(is_config_guard_action) {
         return actions;
     }
     actions
         .into_iter()
         .map(|action| {
-            let Some((path, format)) =
+            let Some((path, format, profile)) =
                 config_validation_action_target(&action, route_result, auto_locator_path)
             else {
                 return action;
             };
+            if profile != ConfigValidationProfile::RustClawSemanticGuard {
+                return action;
+            }
             info!(
                 "plan_rewrite_rustclaw_config_validation_to_guard path={}",
                 crate::truncate_for_log(&path)
@@ -4719,46 +4714,6 @@ fn rewrite_rustclaw_config_validation_to_guard(
         .collect()
 }
 
-fn is_rustclaw_config_guard_request(
-    route_result: Option<&RouteResult>,
-    user_text: &str,
-    original_user_text: Option<&str>,
-) -> bool {
-    let mut text = String::new();
-    text.push_str(user_text);
-    if let Some(original) = original_user_text {
-        text.push('\n');
-        text.push_str(original);
-    }
-    if let Some(route) = route_result {
-        text.push('\n');
-        text.push_str(&route.resolved_intent);
-        text.push('\n');
-        text.push_str(&route.output_contract.locator_hint);
-    }
-    let lower = text.to_ascii_lowercase();
-    let has_config_scope =
-        lower.contains("config") || lower.contains("toml") || text.contains("配置");
-    let asks_for_guard = lower.contains("problem")
-        || lower.contains("issue")
-        || lower.contains("risk")
-        || lower.contains("misconfig")
-        || lower.contains("sanity")
-        || lower.contains("guard")
-        || text.contains("问题")
-        || text.contains("风险")
-        || text.contains("异常")
-        || text.contains("明显");
-    let syntax_only = lower.contains("syntax")
-        || lower.contains("parse only")
-        || lower.contains("format only")
-        || text.contains("只检查格式")
-        || text.contains("仅检查格式")
-        || text.contains("语法")
-        || text.contains("格式是否");
-    has_config_scope && asks_for_guard && !syntax_only
-}
-
 fn is_config_guard_action(action: &AgentAction) -> bool {
     let (skill, args) = match action {
         AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
@@ -4776,16 +4731,44 @@ fn is_config_guard_action(action: &AgentAction) -> bool {
         || skill.eq_ignore_ascii_case("config_guard")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigValidationProfile {
+    SyntaxOnly,
+    RustClawSemanticGuard,
+}
+
+fn parse_config_validation_profile(value: &str) -> Option<ConfigValidationProfile> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "syntax_only" => Some(ConfigValidationProfile::SyntaxOnly),
+        "rustclaw_semantic_guard" => Some(ConfigValidationProfile::RustClawSemanticGuard),
+        _ => None,
+    }
+}
+
+fn config_validation_profile_from_args(args: &Value) -> Option<ConfigValidationProfile> {
+    args.get("validation_profile")
+        .and_then(Value::as_str)
+        .and_then(parse_config_validation_profile)
+        .or_else(|| {
+            args.get("_clawd_validation")
+                .and_then(Value::as_object)
+                .and_then(|obj| obj.get("validation_profile"))
+                .and_then(Value::as_str)
+                .and_then(parse_config_validation_profile)
+        })
+}
+
 fn config_validation_action_target(
     action: &AgentAction,
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
-) -> Option<(String, Option<String>)> {
+) -> Option<(String, Option<String>, ConfigValidationProfile)> {
     let (skill, args) = match action {
         AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
         AgentAction::CallTool { tool, args } => (tool.as_str(), args),
         _ => return None,
     };
+    let profile = config_validation_profile_from_args(args)?;
     let action_name = args
         .get("action")
         .and_then(Value::as_str)
@@ -4825,7 +4808,7 @@ fn config_validation_action_target(
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .or_else(|| Some("toml".to_string()));
-    Some((path.to_string(), format))
+    Some((path.to_string(), format, profile))
 }
 
 fn is_rustclaw_main_config_path(path: &str) -> bool {
@@ -5209,6 +5192,149 @@ fn action_is_obvious_mutation(action: &AgentAction) -> bool {
         }
         _ => false,
     }
+}
+
+fn strip_unrequested_config_edit_actions(
+    route_result: Option<&RouteResult>,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if !actions.iter().any(action_targets_config_edit)
+        || current_turn_requests_config_edit(route_result, user_text, original_user_text, &actions)
+    {
+        return actions;
+    }
+    let before = actions.len();
+    let stripped = actions
+        .into_iter()
+        .filter(|action| !action_targets_config_edit(action))
+        .collect::<Vec<_>>();
+    let dropped = before.saturating_sub(stripped.len());
+    if dropped > 0 {
+        info!("plan_strip_unrequested_config_edit_actions dropped={dropped}");
+    }
+    stripped
+}
+
+fn current_turn_requests_config_edit(
+    route_result: Option<&RouteResult>,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    actions: &[AgentAction],
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if route.needs_clarify || !route.is_execute_gate() {
+        return false;
+    }
+    let request = original_user_text.unwrap_or(user_text).trim();
+    if request.is_empty() {
+        return false;
+    }
+
+    let config_actions = actions
+        .iter()
+        .filter(|action| action_targets_config_edit(action))
+        .collect::<Vec<_>>();
+    !config_actions.is_empty()
+        && config_actions
+            .iter()
+            .all(|action| config_edit_action_has_current_structural_anchor(action, request))
+}
+
+fn config_edit_action_has_current_structural_anchor(action: &AgentAction, request: &str) -> bool {
+    let (tool, args) = match action {
+        AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args } => {
+            (tool.as_str(), args)
+        }
+        _ => return true,
+    };
+    if !tool.eq_ignore_ascii_case("config_edit") {
+        return true;
+    }
+    let action_name = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if matches!(action_name, "guard_config" | "validate_config" | "validate") {
+        return config_edit_path_is_anchored(args, request).unwrap_or(false);
+    }
+
+    config_edit_path_is_anchored(args, request).unwrap_or(false)
+        && config_edit_field_is_anchored(args, request).unwrap_or(false)
+        && config_edit_value_is_anchored(args, request).unwrap_or(true)
+}
+
+fn config_edit_path_is_anchored(args: &Value, request: &str) -> Option<bool> {
+    let path = json_trimmed_string_arg(args, &["path", "file", "file_path", "config_path"])?;
+    let mut tokens = vec![path.clone(), path.replace('\\', "/")];
+    if let Some(file_name) = Path::new(&path).file_name().and_then(|name| name.to_str()) {
+        tokens.push(file_name.to_string());
+    }
+    Some(
+        tokens
+            .iter()
+            .any(|token| structural_token_present(request, token)),
+    )
+}
+
+fn config_edit_field_is_anchored(args: &Value, request: &str) -> Option<bool> {
+    let field_path = json_trimmed_string_arg(args, &["field_path", "field", "key"])?;
+    let mut tokens = vec![field_path.clone()];
+    if let Some(leaf) = field_path
+        .rsplit('.')
+        .next()
+        .filter(|leaf| !leaf.is_empty())
+    {
+        tokens.push(leaf.to_string());
+    }
+    Some(
+        tokens
+            .iter()
+            .any(|token| structural_token_present(request, token)),
+    )
+}
+
+fn config_edit_value_is_anchored(args: &Value, request: &str) -> Option<bool> {
+    let token = scalar_value_anchor_token(args.get("value")?)?;
+    Some(structural_token_present(request, &token))
+}
+
+fn json_trimmed_string_arg(args: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| args.get(*key).and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn scalar_value_anchor_token(value: &Value) -> Option<String> {
+    match value {
+        Value::Null => Some("null".to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::String(value) => {
+            let value = value.trim();
+            (!value.is_empty()).then(|| value.to_string())
+        }
+        Value::Array(_) | Value::Object(_) => None,
+    }
+}
+
+fn structural_token_present(text: &str, token: &str) -> bool {
+    let token = token
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`'))
+        .replace('\\', "/");
+    if token.is_empty() {
+        return false;
+    }
+    text.replace('\\', "/")
+        .to_ascii_lowercase()
+        .contains(&token.to_ascii_lowercase())
 }
 
 fn normalize_terminal_delivery_actions(
@@ -12371,7 +12497,7 @@ mod tests {
     use claw_core::skill_registry::SkillsRegistry;
 
     use super::{
-        actions_use_ad_hoc_command_without_route_preferred_skill,
+        action_targets_config_edit, actions_use_ad_hoc_command_without_route_preferred_skill,
         broaden_default_read_range_for_structured_text, build_lightweight_skill_playbooks_text,
         build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
         can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
@@ -13490,9 +13616,95 @@ mod tests {
     }
 
     #[test]
+    fn unrequested_config_edit_is_stripped_from_text_rewrite_followup() {
+        let state = test_state_with_enabled_skills(&["config_edit", "synthesize_answer"]);
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.resolved_intent = "rewrite_active_text_style_only".to_string();
+        route.route_reason = "style_transform_without_config_anchor".to_string();
+        let loop_state = LoopState::new(2);
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "config_edit".to_string(),
+                args: json!({
+                    "action": "plan_config_change",
+                    "path": "configs/config.toml",
+                    "field_path": "build-all.sh",
+                    "value": 1
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string()],
+            },
+            AgentAction::Respond {
+                content: "rewritten_text_body".to_string(),
+            },
+        ];
+
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "active_task_id=summary\nprevious_output=configs/config.toml build-all.sh 1\ncurrent_instruction=rewrite_style_only",
+            Some("rewrite_style_only"),
+            None,
+            actions,
+        );
+
+        assert!(
+            !normalized.iter().any(action_targets_config_edit),
+            "normalized actions: {normalized:?}"
+        );
+        assert!(matches!(
+            normalized.as_slice(),
+            [AgentAction::Respond { content }] if content == "rewritten_text_body"
+        ));
+    }
+
+    #[test]
+    fn requested_config_edit_plan_is_preserved_by_structural_anchors() {
+        let state = test_state_with_enabled_skills(&["config_edit"]);
+        let route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        let loop_state = LoopState::new(2);
+        let actions = vec![AgentAction::CallTool {
+            tool: "config_edit".to_string(),
+            args: json!({
+                "action": "plan_config_change",
+                "path": "configs/config.toml",
+                "field_path": "server.port",
+                "value": 8787
+            }),
+        }];
+
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &loop_state,
+            "configs/config.toml server.port 8787",
+            Some("configs/config.toml server.port 8787"),
+            None,
+            actions,
+        );
+
+        assert!(
+            normalized.iter().any(action_targets_config_edit),
+            "normalized actions: {normalized:?}"
+        );
+    }
+
+    #[test]
     fn rustclaw_config_problem_validation_rewrites_to_guard_config() {
         let mut route = base_route_result();
-        route.resolved_intent = "检查指定配置文件是否有明显配置问题".to_string();
+        route.resolved_intent =
+            "Validate the selected RustClaw config with semantic guard profile.".to_string();
         route.output_contract.requires_content_evidence = true;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
         route.output_contract.locator_hint = "configs/config.toml".to_string();
@@ -13502,16 +13714,11 @@ mod tests {
                 "action": "validate",
                 "path": "configs/config.toml",
                 "format": "toml",
+                "validation_profile": "rustclaw_semantic_guard",
             }),
         }];
 
-        let rewritten = rewrite_rustclaw_config_validation_to_guard(
-            Some(&route),
-            "检查 configs/config.toml 有没有明显配置问题，简短给我结论",
-            None,
-            None,
-            actions,
-        );
+        let rewritten = rewrite_rustclaw_config_validation_to_guard(Some(&route), None, actions);
 
         let args = expect_planned_call(&rewritten[0], "config_edit", "guard_config");
         assert_eq!(
@@ -13524,7 +13731,29 @@ mod tests {
     #[test]
     fn rustclaw_config_syntax_only_validation_keeps_validate_action() {
         let mut route = base_route_result();
-        route.resolved_intent = "检查 TOML 语法格式是否有效".to_string();
+        route.resolved_intent = "Validate TOML syntax only.".to_string();
+        route.output_contract.locator_hint = "configs/config.toml".to_string();
+        let actions = vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "validate",
+                "path": "configs/config.toml",
+                "format": "toml",
+                "validation_profile": "syntax_only",
+            }),
+        }];
+
+        let rewritten = rewrite_rustclaw_config_validation_to_guard(Some(&route), None, actions);
+
+        expect_planned_call(&rewritten[0], "config_basic", "validate");
+    }
+
+    #[test]
+    fn rustclaw_config_validation_without_profile_keeps_validate_action() {
+        let mut route = base_route_result();
+        route.resolved_intent =
+            "Legacy risk/problem wording in route text must not trigger runtime rewrites."
+                .to_string();
         route.output_contract.locator_hint = "configs/config.toml".to_string();
         let actions = vec![AgentAction::CallTool {
             tool: "config_basic".to_string(),
@@ -13535,13 +13764,25 @@ mod tests {
             }),
         }];
 
-        let rewritten = rewrite_rustclaw_config_validation_to_guard(
-            Some(&route),
-            "检查 configs/config.toml 格式是否有效",
-            None,
-            None,
-            actions,
-        );
+        let rewritten = rewrite_rustclaw_config_validation_to_guard(Some(&route), None, actions);
+
+        expect_planned_call(&rewritten[0], "config_basic", "validate");
+    }
+
+    #[test]
+    fn rustclaw_config_guard_profile_without_locator_keeps_validate_action() {
+        let mut route = base_route_result();
+        route.output_contract.locator_hint.clear();
+        let actions = vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "validate",
+                "format": "toml",
+                "validation_profile": "rustclaw_semantic_guard",
+            }),
+        }];
+
+        let rewritten = rewrite_rustclaw_config_validation_to_guard(Some(&route), None, actions);
 
         expect_planned_call(&rewritten[0], "config_basic", "validate");
     }

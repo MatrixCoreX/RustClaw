@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   BellRing,
+  Brain,
   Check,
   ChevronDown,
   Copy,
@@ -195,6 +196,85 @@ interface SkillsConfigResponse {
   skill_items?: SkillListItem[];
   effective_enabled_skills_preview: string[];
   runtime_enabled_skills: string[];
+  restart_required: boolean;
+}
+
+interface MemoryCounts {
+  recent: number;
+  preferences: number;
+  facts_active: number;
+  facts_total: number;
+  long_term_summaries: number;
+}
+
+interface MemoryOverviewResponse {
+  user_key: string;
+  user_id: number;
+  chat_id: number;
+  long_term_enabled: boolean;
+  hybrid_recall_enabled: boolean;
+  counts: MemoryCounts;
+}
+
+interface MemoryPreferenceItem {
+  id: string;
+  raw_id: number;
+  key: string;
+  value: string;
+  confidence: number;
+  source: string;
+  updated_at_ts: number;
+}
+
+interface MemoryFactItem {
+  id: string;
+  raw_id: number;
+  namespace: string;
+  fact_key: string;
+  fact_value: string;
+  fact_text: string;
+  confidence: number;
+  source_kind: string;
+  source_ref: string;
+  reason: string;
+  updated_at_ts: number;
+  expires_at_ts?: number | null;
+  conflict_group?: string | null;
+  status: string;
+}
+
+interface MemoryRecentItem {
+  id: string;
+  raw_id: number;
+  role: string;
+  memory_type: string;
+  content: string;
+  created_at_ts: number;
+  safety_flag: string;
+}
+
+interface MemoryDeleteResult {
+  id: string;
+  kind: string;
+  deleted: boolean;
+}
+
+interface MemoryExpireResult {
+  id: string;
+  kind: string;
+  expired: boolean;
+}
+
+interface MemoryClearResult {
+  scope: string;
+  recent_deleted: number;
+  preferences_deleted: number;
+  facts_deleted: number;
+}
+
+interface MemorySettingsResult {
+  config_path: string;
+  long_term_enabled: boolean;
   restart_required: boolean;
 }
 
@@ -472,8 +552,8 @@ interface ServiceActionNotice {
 }
 
 type ChannelName = "telegram" | "whatsapp" | "ui" | "wechat" | "feishu" | "lark";
-type ConsolePage = "dashboard" | "chat" | "nni" | "services" | "channels" | "models" | "skills" | "logs" | "tasks";
-const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "nni", "services", "channels", "models", "skills", "logs", "tasks"];
+type ConsolePage = "dashboard" | "chat" | "nni" | "services" | "channels" | "models" | "skills" | "memory" | "logs" | "tasks";
+const CONSOLE_PAGES: ConsolePage[] = ["dashboard", "chat", "nni", "services", "channels", "models", "skills", "memory", "logs", "tasks"];
 
 const UI_HIDDEN_SKILLS = new Set<string>(["chat"]);
 /** 基本技能（与后端 base_skill_names 一致），API 未返回时用此兜底 */
@@ -916,6 +996,16 @@ export default function App() {
   const [logText, setLogText] = useState("");
   const [logLastUpdated, setLogLastUpdated] = useState<number | null>(null);
   const [logFollowTail, setLogFollowTail] = useState(true);
+  const [memoryOverview, setMemoryOverview] = useState<MemoryOverviewResponse | null>(null);
+  const [memoryPreferences, setMemoryPreferences] = useState<MemoryPreferenceItem[]>([]);
+  const [memoryFacts, setMemoryFacts] = useState<MemoryFactItem[]>([]);
+  const [memoryRecent, setMemoryRecent] = useState<MemoryRecentItem[]>([]);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [memoryMessage, setMemoryMessage] = useState<string | null>(null);
+  const [memoryActionLoading, setMemoryActionLoading] = useState<string | null>(null);
+  const [memorySettingsSaving, setMemorySettingsSaving] = useState(false);
+  const [memoryClearScope, setMemoryClearScope] = useState<"recent" | "preferences" | "facts" | "all">("recent");
   const [currentPage, setCurrentPage] = useState<ConsolePage>(() => {
     const saved = window.localStorage.getItem(STORAGE_KEYS.currentPage);
     return saved && CONSOLE_PAGES.includes(saved as ConsolePage) ? (saved as ConsolePage) : "dashboard";
@@ -977,6 +1067,36 @@ export default function App() {
       second: "2-digit",
       hour12: false,
     }).format(date);
+  };
+  const formatUnixDateTime = (ts: number | null | undefined) => {
+    if (!ts || ts <= 0) return "--";
+    const date = new Date(ts * 1000);
+    if (Number.isNaN(date.getTime())) return "--";
+    return new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(date);
+  };
+  const memoryFactStatusLabel = (status: string) => {
+    const normalized = status.toLowerCase();
+    if (normalized === "active") return t("有效", "Active");
+    if (normalized === "expired") return t("已过期", "Expired");
+    if (normalized === "superseded") return t("已替换", "Superseded");
+    if (normalized === "deleted") return t("已删除", "Deleted");
+    return status || "--";
+  };
+  const memorySafetyLabel = (flag: string) => {
+    const normalized = flag.toLowerCase();
+    if (!normalized || normalized === "safe" || normalized === "normal") return t("普通", "Normal");
+    return t("已标记", "Flagged");
+  };
+  const shouldHideMemoryRecentContent = (flag: string) => {
+    const normalized = flag.toLowerCase();
+    return Boolean(normalized && normalized !== "safe" && normalized !== "normal");
   };
   const serviceDisplayName = (key: AdapterHealthRow["key"]) => {
     const labels: Record<AdapterHealthRow["key"], string> = {
@@ -1162,6 +1282,161 @@ export default function App() {
     activeUserKey || interactionUserId == null || interactionChatId == null
       ? {}
       : { user_id: interactionUserId, chat_id: interactionChatId };
+
+  const readApiBody = async <T,>(res: Response, label: string): Promise<T> => {
+    const body = (await res.json()) as ApiResponse<T>;
+    if (!res.ok || !body.ok || body.data === undefined) {
+      throw new Error(body.error || `${label} 请求失败 (${res.status})`);
+    }
+    return body.data;
+  };
+
+  const fetchMemoryData = async (silent = false) => {
+    if (!silent) {
+      setMemoryLoading(true);
+      setMemoryError(null);
+    }
+    try {
+      const [overviewRes, preferencesRes, factsRes, recentRes] = await Promise.all([
+        apiFetch("/v1/memory"),
+        apiFetch("/v1/memory/preferences"),
+        apiFetch("/v1/memory/facts"),
+        apiFetch("/v1/memory/recent"),
+      ]);
+      const [overview, preferences, facts, recent] = await Promise.all([
+        readApiBody<MemoryOverviewResponse>(overviewRes, "memory overview"),
+        readApiBody<MemoryPreferenceItem[]>(preferencesRes, "memory preferences"),
+        readApiBody<MemoryFactItem[]>(factsRes, "memory facts"),
+        readApiBody<MemoryRecentItem[]>(recentRes, "memory recent"),
+      ]);
+      setMemoryOverview(overview);
+      setMemoryPreferences(preferences);
+      setMemoryFacts(facts);
+      setMemoryRecent(recent);
+      setMemoryError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setMemoryError(message);
+    } finally {
+      if (!silent) {
+        setMemoryLoading(false);
+      }
+    }
+  };
+
+  const deleteMemoryItem = async (id: string) => {
+    const confirmed = window.confirm(
+      t("确定删除这条记忆吗？删除后不会再用于后续回复。", "Delete this memory item? It will no longer be used in future replies."),
+    );
+    if (!confirmed) return;
+    setMemoryActionLoading(`delete:${id}`);
+    setMemoryError(null);
+    setMemoryMessage(null);
+    try {
+      const res = await apiFetch(`/v1/memory/${encodeURIComponent(id)}`, { method: "DELETE" });
+      const data = await readApiBody<MemoryDeleteResult>(res, "delete memory");
+      setMemoryMessage(
+        data.deleted
+          ? t("已删除这条记忆。", "Memory item deleted.")
+          : t("没有找到这条记忆，可能已经被删除。", "Memory item was not found. It may already be deleted."),
+      );
+      await fetchMemoryData(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setMemoryError(message);
+    } finally {
+      setMemoryActionLoading(null);
+    }
+  };
+
+  const expireMemoryItem = async (id: string) => {
+    const confirmed = window.confirm(
+      t("确定把这条记忆标记为过期吗？过期后不会再主动用于回复。", "Mark this memory item as expired? Expired items will not be actively used in replies."),
+    );
+    if (!confirmed) return;
+    setMemoryActionLoading(`expire:${id}`);
+    setMemoryError(null);
+    setMemoryMessage(null);
+    try {
+      const res = await apiFetch(`/v1/memory/${encodeURIComponent(id)}/expire`, { method: "POST" });
+      const data = await readApiBody<MemoryExpireResult>(res, "expire memory");
+      setMemoryMessage(
+        data.expired
+          ? t("已把这条记忆标记为过期。", "Memory item marked as expired.")
+          : t("没有找到这条记忆，可能已经处理过。", "Memory item was not found. It may already have been handled."),
+      );
+      await fetchMemoryData(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setMemoryError(message);
+    } finally {
+      setMemoryActionLoading(null);
+    }
+  };
+
+  const clearMemoryScope = async () => {
+    const labelMap: Record<typeof memoryClearScope, string> = {
+      recent: t("近期记录", "recent memories"),
+      preferences: t("偏好", "preferences"),
+      facts: t("事实卡片", "fact cards"),
+      all: t("全部记忆", "all memory data"),
+    };
+    const confirmed = window.confirm(
+      t(
+        `确定清空${labelMap[memoryClearScope]}吗？这个操作会影响后续回复使用的记忆。`,
+        `Clear ${labelMap[memoryClearScope]}? This affects which memories are used in future replies.`,
+      ),
+    );
+    if (!confirmed) return;
+    setMemoryActionLoading(`clear:${memoryClearScope}`);
+    setMemoryError(null);
+    setMemoryMessage(null);
+    try {
+      const res = await apiFetch("/v1/memory/clear", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: memoryClearScope }),
+      });
+      const data = await readApiBody<MemoryClearResult>(res, "clear memory");
+      setMemoryMessage(
+        t(
+          `清理完成：近期 ${data.recent_deleted} 条，偏好 ${data.preferences_deleted} 条，事实 ${data.facts_deleted} 条。`,
+          `Cleared: ${data.recent_deleted} recent, ${data.preferences_deleted} preferences, ${data.facts_deleted} facts.`,
+        ),
+      );
+      await fetchMemoryData(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setMemoryError(message);
+    } finally {
+      setMemoryActionLoading(null);
+    }
+  };
+
+  const updateMemoryLongTermEnabled = async (enabled: boolean) => {
+    setMemorySettingsSaving(true);
+    setMemoryError(null);
+    setMemoryMessage(null);
+    try {
+      const res = await apiFetch("/v1/memory/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ long_term_enabled: enabled }),
+      });
+      const data = await readApiBody<MemorySettingsResult>(res, "memory settings");
+      setMemoryOverview((prev) => (prev ? { ...prev, long_term_enabled: data.long_term_enabled } : prev));
+      setMemoryMessage(
+        data.restart_required
+          ? t("记忆设置已保存。重启 RustClaw 后生效。", "Memory setting saved. Restart RustClaw for it to take effect.")
+          : t("记忆设置没有变化。", "Memory setting is unchanged."),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("未知错误", "Unknown error");
+      setMemoryError(message);
+    } finally {
+      setMemorySettingsSaving(false);
+    }
+  };
 
   const applyIdentity = (identity: AuthIdentityResponse) => {
     setAuthIdentity(identity);
@@ -3223,6 +3498,13 @@ export default function App() {
 
   useEffect(() => {
     if (!uiAuthReady) return;
+    if (currentPage !== "memory") return;
+    void fetchMemoryData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, apiBase, uiAuthReady]);
+
+  useEffect(() => {
+    if (!uiAuthReady) return;
     if (currentPage !== "logs") return;
     void fetchLatestLog();
     const timer = window.setInterval(() => {
@@ -3985,6 +4267,10 @@ export default function App() {
         title: t("工具与技能设置", "Tool and Skill Settings"),
         desc: t("这里管理固定开启的工具能力，以及可按需开启的技能。", "Manage always-on tool capabilities and skills that can be enabled as needed."),
       },
+      memory: {
+        title: t("记忆管理", "Memory"),
+        desc: t("查看 RustClaw 记住了什么，按需要删除、过期或清空。", "Review what RustClaw remembers, and delete, expire, or clear items when needed."),
+      },
       logs: {
         title: t("查看日志", "Logs"),
         desc: t("当服务异常时再来看这里。正常使用时可以先不用碰。", "Come here when something breaks. In normal use, you usually do not need this page first."),
@@ -4039,6 +4325,12 @@ export default function App() {
         label: t("工具与技能", "Tools & Skills"),
         hint: t("管理能力", "manage capabilities"),
         icon: <Wrench className="h-4 w-4" />,
+      },
+      {
+        id: "memory" as const,
+        label: t("记忆管理", "Memory"),
+        hint: t("可删除", "review"),
+        icon: <Brain className="h-4 w-4" />,
       },
       {
         id: "logs" as const,
@@ -6566,6 +6858,297 @@ export default function App() {
                     </div>
                   );
                 })()}
+              </div>
+            </section>
+          ) : null}
+
+          {currentPage === "memory" ? (
+            <section className="space-y-4">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.28em] text-white/45">
+                      {t("记忆管理", "Memory Control")}
+                    </p>
+                    <h3 className="mt-2 text-base font-semibold text-white">
+                      {t("查看和管理 RustClaw 会用于回复的记忆。", "Review and manage the memory RustClaw can use in replies.")}
+                    </h3>
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">
+                      {t(
+                        "这里展示当前账号与会话下的近期记录、偏好和长期事实卡片。删除或过期后，后续回复不会再主动使用这些内容。",
+                        "This page shows recent records, preferences, and long-term fact cards for the current account and chat. Deleted or expired items will not be actively used in future replies.",
+                      )}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void fetchMemoryData()}
+                    disabled={memoryLoading}
+                    className="theme-topbar-btn px-3 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {memoryLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                    {t("刷新", "Refresh")}
+                  </button>
+                </div>
+
+                {memoryError ? (
+                  <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                    {memoryError}
+                  </p>
+                ) : null}
+                {memoryMessage ? (
+                  <p className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                    {memoryMessage}
+                  </p>
+                ) : null}
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                  {[
+                    { label: t("近期记录", "Recent"), value: memoryOverview?.counts.recent ?? 0 },
+                    { label: t("偏好", "Preferences"), value: memoryOverview?.counts.preferences ?? 0 },
+                    { label: t("有效事实", "Active facts"), value: memoryOverview?.counts.facts_active ?? 0 },
+                    { label: t("事实总数", "Total facts"), value: memoryOverview?.counts.facts_total ?? 0 },
+                    { label: t("长期摘要", "Summaries"), value: memoryOverview?.counts.long_term_summaries ?? 0 },
+                  ].map((item) => (
+                    <div key={item.label} className="rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
+                      <p className="text-[10px] uppercase tracking-widest text-white/45">{item.label}</p>
+                      <p className="mt-2 text-2xl font-semibold text-white">{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-white">{t("偏好", "Preferences")}</h4>
+                      <p className="mt-1 text-xs leading-5 text-white/55">
+                        {t("偏好用于保持长期个人化设置，例如输出风格、默认路径或常用选择。", "Preferences keep long-lived personal settings, such as output style, default paths, or common choices.")}
+                      </p>
+                    </div>
+                    <span className="theme-meta-pill !rounded-xl !px-2.5 !py-1 text-[11px]">
+                      {memoryPreferences.length}
+                    </span>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    {memoryPreferences.map((item) => (
+                      <div key={item.id} className="rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold text-white">{item.key}</p>
+                            <p className="mt-1 break-words text-sm leading-6 text-white/70">{item.value}</p>
+                            <p className="mt-2 text-[11px] text-white/40">
+                              {t("来源", "Source")}: {item.source || "--"} · {t("置信度", "Confidence")}: {Math.round(item.confidence * 100)}% · {formatUnixDateTime(item.updated_at_ts)}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void deleteMemoryItem(item.id)}
+                            disabled={memoryActionLoading === `delete:${item.id}`}
+                            className="inline-flex items-center gap-1 rounded-lg border border-red-500/25 bg-red-500/10 px-2 py-1 text-[11px] text-red-100 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {memoryActionLoading === `delete:${item.id}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                            {t("删除", "Delete")}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {!memoryLoading && memoryPreferences.length === 0 ? (
+                      <p className="rounded-xl border border-white/10 bg-[#12151f] px-4 py-3 text-sm text-white/50">
+                        {t("当前没有偏好记忆。", "No preference memories yet.")}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
+                    <h4 className="text-sm font-semibold text-white">{t("长期记忆开关", "Long-Term Memory")}</h4>
+                    <p className="mt-2 text-xs leading-5 text-white/55">
+                      {t("关闭后不再写入和使用长期记忆；保存配置后需要重启 RustClaw 才会生效。", "When off, long-term memory is no longer written or used. Restart RustClaw after saving for the change to take effect.")}
+                    </p>
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <span
+                        className={
+                          memoryOverview?.long_term_enabled
+                            ? "inline-flex items-center gap-1 rounded-full border border-emerald-500/35 bg-emerald-500/12 px-2 py-1 text-[11px] font-medium text-emerald-200"
+                            : "inline-flex items-center gap-1 rounded-full border border-amber-500/35 bg-amber-500/12 px-2 py-1 text-[11px] font-medium text-amber-200"
+                        }
+                      >
+                        <span className={memoryOverview?.long_term_enabled ? "h-1.5 w-1.5 rounded-full bg-emerald-300" : "h-1.5 w-1.5 rounded-full bg-amber-300"} />
+                        {memoryOverview?.long_term_enabled ? t("已开启", "On") : t("已关闭", "Off")}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void updateMemoryLongTermEnabled(!(memoryOverview?.long_term_enabled ?? false))}
+                        disabled={memorySettingsSaving || !memoryOverview}
+                        className="theme-secondary-btn px-3 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {memorySettingsSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Database className="h-3.5 w-3.5" />}
+                        {memoryOverview?.long_term_enabled ? t("关闭长期记忆", "Turn off") : t("开启长期记忆", "Turn on")}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
+                    <h4 className="text-sm font-semibold text-white">{t("批量清理", "Bulk Clear")}</h4>
+                    <p className="mt-2 text-xs leading-5 text-white/55">
+                      {t("只在确认记忆明显错误、过期或需要重置会话时使用。", "Use this only when memories are clearly wrong, outdated, or the chat needs a reset.")}
+                    </p>
+                    <div className="mt-4 grid gap-2">
+                      <select
+                        className="theme-input"
+                        value={memoryClearScope}
+                        onChange={(e) => setMemoryClearScope(e.target.value as "recent" | "preferences" | "facts" | "all")}
+                      >
+                        <option value="recent">{t("只清空近期记录", "Clear recent records only")}</option>
+                        <option value="preferences">{t("只清空偏好", "Clear preferences only")}</option>
+                        <option value="facts">{t("只清空事实卡片", "Clear fact cards only")}</option>
+                        <option value="all">{t("清空全部记忆", "Clear all memory")}</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => void clearMemoryScope()}
+                        disabled={Boolean(memoryActionLoading?.startsWith("clear:"))}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-100 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {memoryActionLoading?.startsWith("clear:") ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        {t("执行清理", "Clear")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-white">{t("事实卡片", "Fact Cards")}</h4>
+                    <p className="mt-1 text-xs leading-5 text-white/55">
+                      {t("事实卡片是结构化长期记忆，适合保存稳定信息。可以把错误事实标记为过期或删除。", "Fact cards are structured long-term memories for stable information. Incorrect facts can be expired or deleted.")}
+                    </p>
+                  </div>
+                  <span className="theme-meta-pill !rounded-xl !px-2.5 !py-1 text-[11px]">
+                    {memoryFacts.length}
+                  </span>
+                </div>
+                <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                  {memoryFacts.map((item) => {
+                    const isActive = item.status.toLowerCase() === "active";
+                    return (
+                      <div key={item.id} className="rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={
+                                  isActive
+                                    ? "rounded-full border border-emerald-500/35 bg-emerald-500/12 px-2 py-0.5 text-[10px] text-emerald-200"
+                                    : "rounded-full border border-white/15 bg-white/5 px-2 py-0.5 text-[10px] text-white/55"
+                                }
+                              >
+                                {memoryFactStatusLabel(item.status)}
+                              </span>
+                              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/45">
+                                {item.namespace || "default"}
+                              </span>
+                              <span className="text-[10px] text-white/35">{Math.round(item.confidence * 100)}%</span>
+                            </div>
+                            <p className="mt-2 break-words text-sm leading-6 text-white/80">{item.fact_text || item.fact_value}</p>
+                            <p className="mt-2 text-[11px] text-white/40">
+                              {item.fact_key} · {t("更新", "Updated")}: {formatUnixDateTime(item.updated_at_ts)}
+                              {item.expires_at_ts ? ` · ${t("过期", "Expires")}: ${formatUnixDateTime(item.expires_at_ts)}` : ""}
+                            </p>
+                            <details className="mt-2 text-[11px] text-white/45">
+                              <summary className="cursor-pointer select-none text-white/55">{t("查看依据", "Show details")}</summary>
+                              <div className="mt-2 space-y-1 rounded-lg border border-white/10 bg-black/20 p-2">
+                                <p>{t("来源", "Source")}: {item.source_kind || "--"} / {item.source_ref || "--"}</p>
+                                <p>{t("原因", "Reason")}: {item.reason || "--"}</p>
+                                {item.conflict_group ? <p>{t("冲突组", "Conflict group")}: {item.conflict_group}</p> : null}
+                              </div>
+                            </details>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => void expireMemoryItem(item.id)}
+                              disabled={!isActive || memoryActionLoading === `expire:${item.id}`}
+                              className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-100 hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              {memoryActionLoading === `expire:${item.id}` ? t("处理中", "Working") : t("过期", "Expire")}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void deleteMemoryItem(item.id)}
+                              disabled={memoryActionLoading === `delete:${item.id}`}
+                              className="rounded-lg border border-red-500/25 bg-red-500/10 px-2 py-1 text-[11px] text-red-100 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {memoryActionLoading === `delete:${item.id}` ? t("删除中", "Deleting") : t("删除", "Delete")}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!memoryLoading && memoryFacts.length === 0 ? (
+                    <p className="rounded-xl border border-white/10 bg-[#12151f] px-4 py-3 text-sm text-white/50 lg:col-span-2">
+                      {t("当前没有事实卡片。", "No fact cards yet.")}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-white">{t("近期记录", "Recent Records")}</h4>
+                    <p className="mt-1 text-xs leading-5 text-white/55">
+                      {t("近期记录帮助 RustClaw 理解当前对话上下文。带安全标记的内容默认隐藏。", "Recent records help RustClaw understand the current chat context. Safety-flagged content is hidden by default.")}
+                    </p>
+                  </div>
+                  <span className="theme-meta-pill !rounded-xl !px-2.5 !py-1 text-[11px]">
+                    {memoryRecent.length}
+                  </span>
+                </div>
+                <div className="mt-4 space-y-2">
+                  {memoryRecent.map((item) => {
+                    const hidden = shouldHideMemoryRecentContent(item.safety_flag);
+                    return (
+                      <div key={item.id} className="rounded-xl border border-white/10 bg-[#12151f] px-4 py-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/55">{item.role}</span>
+                              <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/45">{item.memory_type}</span>
+                              <span className={hidden ? "rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-100" : "rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/45"}>
+                                {memorySafetyLabel(item.safety_flag)}
+                              </span>
+                              <span className="text-[10px] text-white/35">{formatUnixDateTime(item.created_at_ts)}</span>
+                            </div>
+                            <p className="mt-2 line-clamp-3 break-words text-sm leading-6 text-white/70">
+                              {hidden ? t("这条记录带有安全标记，内容已隐藏。", "This record is safety-flagged, so its content is hidden.") : item.content}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void deleteMemoryItem(item.id)}
+                            disabled={memoryActionLoading === `delete:${item.id}`}
+                            className="inline-flex items-center gap-1 rounded-lg border border-red-500/25 bg-red-500/10 px-2 py-1 text-[11px] text-red-100 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {memoryActionLoading === `delete:${item.id}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                            {t("删除", "Delete")}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!memoryLoading && memoryRecent.length === 0 ? (
+                    <p className="rounded-xl border border-white/10 bg-[#12151f] px-4 py-3 text-sm text-white/50">
+                      {t("当前没有近期记录。", "No recent records yet.")}
+                    </p>
+                  ) : null}
+                </div>
               </div>
             </section>
           ) : null}

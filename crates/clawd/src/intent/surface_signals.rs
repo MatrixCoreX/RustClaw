@@ -139,7 +139,7 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
         structural_locator_only_reply.then_some(LocatorReplyPromptShape::LocatorOnly);
     let delivery_token_reference = prompt_contains_delivery_token_reference(trimmed);
     let locator_target_pair = detect_locator_target_pair_shape(trimmed);
-    let deictic_reference = prompt_has_deictic_reference(trimmed);
+    let deictic_reference = prompt_has_structured_deictic_reference(trimmed);
     PromptSurfaceSignals {
         token_count,
         inline_json_shape,
@@ -157,107 +157,89 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
 }
 
 pub(crate) fn inline_json_transform_request(prompt: &str) -> bool {
-    prompt_contains_inline_json_records(prompt) && prompt_has_transform_operation_surface(prompt)
-}
-
-pub(crate) fn package_manager_detection_request(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    let mentions_package_manager = lower.contains("package manager")
-        || lower.contains("package-manager")
-        || lower.contains("pkg manager")
-        || lower.contains("pkg_manager")
-        || prompt.contains("包管理器");
-    if !mentions_package_manager {
-        return false;
-    }
-    if lower.contains("install")
-        || lower.contains("uninstall")
-        || prompt.contains("安装")
-        || prompt.contains("卸载")
-    {
-        return false;
-    }
-    lower.contains("detect")
-        || lower.contains("detected")
-        || lower.contains("available")
-        || lower.contains("installed")
-        || lower.contains("current")
-        || lower.contains("machine")
-        || lower.contains("which")
-        || lower.contains("what")
-        || prompt.contains("当前")
-        || prompt.contains("机器")
-        || prompt.contains("识别")
-        || prompt.contains("看看")
-        || prompt.contains("有哪些")
-        || prompt.contains("哪个")
-        || prompt.contains("用哪个")
-}
-
-fn prompt_contains_inline_json_records(prompt: &str) -> bool {
     let Some(raw) = crate::extract_first_json_value_any(prompt) else {
         return false;
     };
     serde_json::from_str::<serde_json::Value>(&raw)
         .ok()
-        .and_then(|value| value.as_array().cloned())
+        .is_some_and(|value| value_has_structured_transform_request(&value))
+}
+
+fn value_has_structured_transform_request(value: &serde_json::Value) -> bool {
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+    if obj.get("skill").and_then(|item| item.as_str()) == Some("transform") {
+        return obj
+            .get("args")
+            .is_some_and(value_has_structured_transform_request);
+    }
+    let action = obj
+        .get("action")
+        .or_else(|| obj.get("operation"))
+        .and_then(|item| item.as_str());
+    let action_requests_transform = matches!(action, Some("transform_data" | "transform"));
+    let has_structural_ops = obj
+        .get("ops")
+        .and_then(|item| item.as_array())
+        .is_some_and(|ops| !ops.is_empty() && ops.iter().all(value_is_structured_transform_op));
+    action_requests_transform && has_structural_ops && value_has_inline_transform_input(obj)
+}
+
+fn value_has_inline_transform_input(obj: &serde_json::Map<String, serde_json::Value>) -> bool {
+    obj.get("data")
+        .or_else(|| obj.get("records"))
+        .or_else(|| obj.get("input"))
+        .and_then(|item| item.as_array())
         .is_some_and(|items| !items.is_empty() && items.iter().any(serde_json::Value::is_object))
 }
 
-fn prompt_has_transform_operation_surface(prompt: &str) -> bool {
-    let lower = prompt.to_ascii_lowercase();
-    [
-        "sort",
-        "filter",
-        "dedup",
-        "deduplicate",
-        "project",
-        "group",
-        "aggregate",
-        "markdown table",
-        "md table",
-        "csv",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
-        || [
-            "排序",
-            "筛选",
-            "过滤",
-            "去重",
-            "分组",
-            "聚合",
-            "投影",
-            "表格",
-            "从高到低",
-            "从低到高",
-        ]
-        .iter()
-        .any(|marker| prompt.contains(marker))
+fn value_is_structured_transform_op(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(op) => matches!(
+            op.as_str(),
+            "sort" | "filter" | "dedup" | "project" | "group" | "aggregate" | "format"
+        ),
+        serde_json::Value::Object(obj) => obj
+            .get("op")
+            .or_else(|| obj.get("action"))
+            .and_then(|item| item.as_str())
+            .is_some_and(|op| {
+                matches!(
+                    op,
+                    "sort" | "filter" | "dedup" | "project" | "group" | "aggregate" | "format"
+                )
+            }),
+        _ => false,
+    }
 }
 
-fn prompt_has_deictic_reference(prompt: &str) -> bool {
-    let trimmed = prompt.trim();
-    if trimmed.is_empty() {
+fn prompt_has_structured_deictic_reference(prompt: &str) -> bool {
+    let Some(raw) = crate::extract_first_json_value_any(prompt) else {
         return false;
-    }
-    if [
-        "那个", "这个", "那份", "这份", "那条", "这条", "那篇", "这篇", "那张", "这张",
-    ]
-    .iter()
-    .any(|marker| trimmed.contains(marker))
-    {
-        return true;
-    }
-    trimmed
-        .split(|ch: char| !ch.is_ascii_alphanumeric())
-        .map(|token| token.to_ascii_lowercase())
-        .any(|token| {
-            matches!(
-                token.as_str(),
-                "it" | "its" | "that" | "this" | "those" | "these"
-            )
-        })
+    };
+    serde_json::from_str::<serde_json::Value>(&raw)
+        .ok()
+        .is_some_and(|value| value_has_structured_deictic_reference(&value))
+}
+
+fn value_has_structured_deictic_reference(value: &serde_json::Value) -> bool {
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+    let direct = obj.get("deictic_reference");
+    let nested = obj
+        .get("state_patch")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|patch| patch.get("deictic_reference"));
+    [direct, nested]
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_object)
+        .filter_map(|reference| reference.get("target"))
+        .filter_map(serde_json::Value::as_str)
+        .map(str::trim)
+        .any(|target| !target.is_empty() && target != "none")
 }
 
 fn classify_locator_hint_prompt_shape(
@@ -545,8 +527,8 @@ pub(crate) fn extract_field_selector_mentions(prompt: &str) -> Vec<String> {
 mod tests {
     use super::{
         analyze_prompt_surface, extract_dotted_field_selector, extract_field_selector_mentions,
-        package_manager_detection_request, prompt_contains_delivery_token_reference,
-        InlineJsonShape, LocatorHintPromptShape, LocatorReplyPromptShape,
+        inline_json_transform_request, prompt_contains_delivery_token_reference, InlineJsonShape,
+        LocatorHintPromptShape, LocatorReplyPromptShape,
     };
 
     #[test]
@@ -611,16 +593,30 @@ mod tests {
     }
 
     #[test]
-    fn detects_package_manager_detection_request() {
-        assert!(package_manager_detection_request(
-            "看看当前机器识别到的包管理器，再一句话说最可能日常会用哪个"
+    fn inline_json_transform_requires_structured_payload() {
+        assert!(inline_json_transform_request(
+            r#"{"action":"transform_data","data":[{"name":"alpha","score":7}],"ops":[{"op":"sort","by":"score"}]}"#
         ));
-        assert!(package_manager_detection_request(
-            "Which package manager is available on this machine?"
+        assert!(inline_json_transform_request(
+            r#"{"skill":"transform","args":{"action":"transform_data","records":[{"name":"alpha","score":7}],"ops":["sort"]}}"#
         ));
-        assert!(!package_manager_detection_request(
-            "Use the package manager to install jq"
+        assert!(!inline_json_transform_request(
+            r#"sort this JSON array by score descending: [{"name":"alpha","score":7}]"#
         ));
+        assert!(!inline_json_transform_request(
+            r#"{"action":"read_field","path":"package.json","field_path":"name"}"#
+        ));
+    }
+
+    #[test]
+    fn deictic_reference_comes_from_structured_state_patch_only() {
+        let signals = analyze_prompt_surface(
+            r#"{"state_patch":{"deictic_reference":{"target":"unresolved_prior_object"}}}"#,
+        );
+        assert!(signals.has_deictic_reference());
+
+        let natural = analyze_prompt_surface("read that file");
+        assert!(!natural.has_deictic_reference());
     }
 
     #[test]
