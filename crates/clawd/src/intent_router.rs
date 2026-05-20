@@ -550,6 +550,20 @@ fn parse_output_response_shape(s: &str) -> OutputResponseShape {
     }
 }
 
+fn semantic_kind_token_requests_scalar_response_shape(s: &str) -> bool {
+    matches!(
+        normalize_schema_token(s).as_str(),
+        "scalar"
+            | "scalar_value"
+            | "scalar_only"
+            | "value"
+            | "value_only"
+            | "single_value"
+            | "field_value"
+            | "file_field_value"
+    )
+}
+
 fn parse_output_locator_kind(s: &str) -> OutputLocatorKind {
     match s.trim().to_ascii_lowercase().as_str() {
         "path" => OutputLocatorKind::Path,
@@ -759,6 +773,8 @@ fn parse_output_contract(
 ) -> IntentOutputContract {
     let mut contract = IntentOutputContract::default();
     if let Some(raw) = out {
+        let semantic_token_requests_scalar_shape =
+            semantic_kind_token_requests_scalar_response_shape(&raw.semantic_kind);
         contract.response_shape = parse_output_response_shape(&raw.response_shape);
         contract.exact_sentence_count = raw
             .exact_sentence_count
@@ -770,6 +786,12 @@ fn parse_output_contract(
         contract.delivery_intent = parse_output_delivery_intent(&raw.delivery_intent);
         contract.semantic_kind = parse_output_semantic_kind(&raw.semantic_kind);
         contract.locator_hint = raw.locator_hint.trim().to_string();
+        if semantic_token_requests_scalar_shape
+            && !matches!(contract.response_shape, OutputResponseShape::FileToken)
+        {
+            contract.response_shape = OutputResponseShape::Scalar;
+            contract.semantic_kind = OutputSemanticKind::None;
+        }
         if let Some(self_extension) = raw.self_extension {
             contract.self_extension = SelfExtensionContract {
                 mode: parse_self_extension_mode(&self_extension.mode),
@@ -8320,6 +8342,83 @@ mod tests {
             crate::prompt_utils::PromptSchemaId::ContractRepairJudge,
         )
         .expect("contract repair judge payload should validate");
+    }
+
+    #[test]
+    fn contract_repair_judge_scalar_semantic_token_normalizes_to_scalar_contract() {
+        let raw = r#"{
+          "apply": true,
+          "reason": "memory_only_answer_candidate_conflict_with_current_file_read_request",
+          "confidence": 0.91,
+          "decision": "planner_execute",
+          "needs_clarify": false,
+          "clarify_question": "",
+          "resolved_user_intent": "read package.json name field",
+          "output_contract": {
+            "response_shape": "strict",
+            "exact_sentence_count": null,
+            "requires_content_evidence": true,
+            "delivery_required": false,
+            "locator_kind": "path",
+            "delivery_intent": "none",
+            "semantic_kind": "scalar",
+            "locator_hint": "scripts/nl_tests/fixtures/device_local/package.json",
+            "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
+          },
+          "execution_recipe": {
+            "kind": "structured_read",
+            "profile": "read_only",
+            "target_scope": "explicit_path"
+          },
+          "turn_type": "task_request",
+          "target_task_policy": "standalone"
+        }"#;
+
+        let validated =
+            crate::prompt_utils::validate_against_schema::<super::ContractRepairJudgeOut>(
+                raw,
+                crate::prompt_utils::PromptSchemaId::ContractRepairJudge,
+            )
+            .expect("contract repair judge payload should validate");
+
+        let mut out = super::IntentNormalizerOut {
+            resolved_user_intent: "read package.json name field".to_string(),
+            answer_candidate: "rustclaw-nl-fixture".to_string(),
+            resume_behavior: "none".to_string(),
+            schedule_kind: "none".to_string(),
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            reason: "direct answer candidate lacked current evidence".to_string(),
+            confidence: 0.5,
+            decision: "direct_answer".to_string(),
+            schedule_intent: None,
+            output_contract: Some(super::IntentOutputContractOut::default()),
+            execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+            turn_type: "task_request".to_string(),
+            target_task_policy: "standalone".to_string(),
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+
+        assert!(super::apply_contract_repair_judge_output(
+            &mut out,
+            validated.value
+        ));
+
+        assert_eq!(out.decision, "planner_execute");
+        let contract = super::parse_output_contract(out.output_contract, false);
+        assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(
+            contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/package.json"
+        );
     }
 
     #[test]

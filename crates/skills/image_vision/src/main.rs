@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use claw_core::prompt_layers;
+use regex::Regex;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -298,7 +299,7 @@ fn execute(
         return Err("no vendor configured".to_string());
     }
 
-    let mut last_err = String::new();
+    let mut attempt_errors = Vec::new();
     for vendor in vendors {
         let prompt = build_prompt(
             workspace_root,
@@ -309,15 +310,12 @@ fn execute(
             response_language.as_deref(),
             user_instruction,
         );
-        let config_default_model = first_model_candidate(
-            cfg.image_vision.default_model.as_deref(),
-            vendor_models(&cfg.image_vision, vendor),
-            cfg.image_vision.models.as_ref(),
-        );
+        let config_default_model =
+            select_model_override(&cfg.image_vision, vendor, requested_model);
         match call_vendor_vision(
             vendor,
             cfg,
-            requested_model.or(config_default_model),
+            config_default_model,
             timeout_seconds,
             &prompt,
             &images,
@@ -352,26 +350,44 @@ fn execute(
                 }
                 return Ok((text, extra));
             }
-            Err(err) => last_err = err,
+            Err(err) => {
+                attempt_errors.push(format!("{}: {}", vendor_name(vendor), truncate(&err, 300)));
+            }
         }
     }
 
-    Err(format!("all providers failed: {last_err}"))
+    Err(format!(
+        "all providers failed: {}",
+        attempt_errors.join("; ")
+    ))
 }
 
-fn first_model_candidate<'a>(
-    default_model: Option<&'a str>,
-    vendor_models: Option<&'a Vec<String>>,
-    models: Option<&'a Vec<String>>,
+fn select_model_override<'a>(
+    cfg: &'a ImageSkillConfig,
+    vendor: VendorKind,
+    requested_model: Option<&'a str>,
 ) -> Option<&'a str> {
-    if let Some(v) = default_model.map(str::trim).filter(|v| !v.is_empty()) {
+    if let Some(v) = requested_model.map(str::trim).filter(|v| !v.is_empty()) {
         return Some(v);
     }
-    if let Some(v) =
-        vendor_models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
-    {
+    if let Some(v) = first_model_from_list(vendor_models(cfg, vendor)) {
         return Some(v);
     }
+    if cfg.default_vendor.as_deref().and_then(parse_vendor) == Some(vendor) {
+        if let Some(v) = cfg
+            .default_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            return Some(v);
+        }
+        return first_model_from_list(cfg.models.as_ref());
+    }
+    None
+}
+
+fn first_model_from_list(models: Option<&Vec<String>>) -> Option<&str> {
     models.and_then(|list| list.iter().map(|s| s.trim()).find(|v| !v.is_empty()))
 }
 
@@ -961,7 +977,8 @@ fn infer_language_from_memory_snippets_llm(
         if model.is_empty() {
             continue;
         }
-        if let Ok(out) = openai_compat_chat_rewrite(vcfg, model, &prompt, t, vk == VendorKind::Mimo)
+        if let Ok(out) =
+            openai_compat_chat_rewrite(&vcfg, model, &prompt, t, vk == VendorKind::Mimo)
         {
             if let Some(lang) = parse_language_choice_from_llm(&out) {
                 return Some(lang);
@@ -1109,7 +1126,7 @@ fn maybe_rewrite_image_vision_text_for_target_language(
             continue;
         }
         if let Ok(out) = openai_compat_chat_rewrite(
-            vcfg,
+            &vcfg,
             model,
             &prompt,
             rewrite_timeout,
@@ -1286,7 +1303,7 @@ fn call_vendor_vision(
                 ))
                 .build()
                 .map_err(|err| format!("build openai client failed: {err}"))?;
-            let text = openai_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
+            let text = openai_vision(&client, &vcfg, &model, prompt, images, max_input_bytes)?;
             Ok((text, model, "native"))
         }
         VendorKind::Google => {
@@ -1297,7 +1314,7 @@ fn call_vendor_vision(
                 ))
                 .build()
                 .map_err(|err| format!("build google client failed: {err}"))?;
-            let text = google_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
+            let text = google_vision(&client, &vcfg, &model, prompt, images, max_input_bytes)?;
             Ok((text, model, "native"))
         }
         VendorKind::Anthropic => {
@@ -1308,7 +1325,7 @@ fn call_vendor_vision(
                 ))
                 .build()
                 .map_err(|err| format!("build anthropic client failed: {err}"))?;
-            let text = anthropic_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
+            let text = anthropic_vision(&client, &vcfg, &model, prompt, images, max_input_bytes)?;
             Ok((text, model, "native"))
         }
         VendorKind::Grok | VendorKind::DeepSeek => {
@@ -1324,7 +1341,16 @@ fn call_vendor_vision(
                 ))
                 .build()
                 .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
-            let text = openai_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
+            let text = openai_compat_vision(
+                &client,
+                &vcfg,
+                &model,
+                prompt,
+                images,
+                max_input_bytes,
+                vendor_name,
+                false,
+            )?;
             Ok((text, model, "compat"))
         }
         VendorKind::Mimo => {
@@ -1341,7 +1367,7 @@ fn call_vendor_vision(
                 ))
                 .build()
                 .map_err(|err| format!("build mimo client failed: {err}"))?;
-            let text = mimo_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
+            let text = mimo_vision(&client, &vcfg, &model, prompt, images, max_input_bytes)?;
             Ok((text, model, "compat"))
         }
         VendorKind::MiniMax => {
@@ -1358,7 +1384,7 @@ fn call_vendor_vision(
                 ))
                 .build()
                 .map_err(|err| format!("build minimax client failed: {err}"))?;
-            let text = openai_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
+            let text = minimax_vision(&client, &vcfg, &model, prompt, images, max_input_bytes)?;
             Ok((text, model, "compat"))
         }
         VendorKind::Qwen => {
@@ -1375,7 +1401,16 @@ fn call_vendor_vision(
                         .to_string(),
                 );
             }
-            let text = openai_vision(&client, vcfg, &model, prompt, images, max_input_bytes)?;
+            let text = openai_compat_vision(
+                &client,
+                &vcfg,
+                &model,
+                prompt,
+                images,
+                max_input_bytes,
+                vendor_name,
+                false,
+            )?;
             Ok((text, model, "compat"))
         }
     }
@@ -1416,6 +1451,60 @@ fn openai_vision(
     )
 }
 
+fn minimax_vision(
+    client: &Client,
+    cfg: &VendorConfig,
+    model: &str,
+    prompt: &str,
+    images: &[ImageSource],
+    max_input_bytes: usize,
+) -> Result<String, String> {
+    let mut content = String::from(prompt);
+    for (idx, image) in images.iter().enumerate() {
+        let encoded = image_base64_payload(image, max_input_bytes)?;
+        content.push_str("\n\nimage ");
+        content.push_str(&(idx + 1).to_string());
+        content.push_str(":\n[图片base64:");
+        content.push_str(&encoded);
+        content.push(']');
+    }
+    let body = json!({
+        "model": model,
+        "messages": [{"role":"user","content":content}],
+        "temperature": 0.2
+    });
+    let url = format!("{}/chat/completions", trim_trailing_slash(&cfg.base_url));
+    let resp = client
+        .post(url)
+        .bearer_auth(&cfg.api_key)
+        .json(&body)
+        .send()
+        .map_err(|err| format!("minimax request failed: {err}"))?;
+    let status = resp.status().as_u16();
+    let v: Value = resp
+        .json()
+        .map_err(|err| format!("parse minimax response failed: {err}"))?;
+    if status >= 300 {
+        return Err(format!(
+            "minimax error status={status}: {}",
+            provider_error_excerpt(&v, 400)
+        ));
+    }
+    if let Some(s) = v
+        .get("choices")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("content"))
+        .and_then(|v| v.as_str())
+    {
+        return Ok(s.to_string());
+    }
+    Err(format!(
+        "minimax response missing text: {}",
+        provider_error_excerpt(&v, 400)
+    ))
+}
+
 fn mimo_vision(
     client: &Client,
     cfg: &VendorConfig,
@@ -1434,6 +1523,20 @@ fn mimo_vision(
         "mimo",
         true,
     )
+}
+
+fn image_base64_payload(image: &ImageSource, max_input_bytes: usize) -> Result<String, String> {
+    match image {
+        ImageSource::Url(s) => Ok(s.to_string()),
+        ImageSource::Path(p) => {
+            let bytes = std::fs::read(p).map_err(|err| format!("read image failed: {err}"))?;
+            if bytes.len() > max_input_bytes {
+                return Err(format!("image too large: {} bytes", bytes.len()));
+            }
+            Ok(STANDARD.encode(bytes))
+        }
+        ImageSource::Base64(s) => Ok(strip_base64_data_url(s).to_string()),
+    }
 }
 
 fn openai_compat_vision(
@@ -1483,7 +1586,7 @@ fn openai_compat_vision(
     if status >= 300 {
         return Err(format!(
             "{error_label} error status={status}: {}",
-            truncate(&v.to_string(), 400)
+            provider_error_excerpt(&v, 400)
         ));
     }
     if let Some(s) = v
@@ -1497,7 +1600,7 @@ fn openai_compat_vision(
     }
     Err(format!(
         "{error_label} response missing text: {}",
-        truncate(&v.to_string(), 400)
+        provider_error_excerpt(&v, 400)
     ))
 }
 
@@ -1548,7 +1651,7 @@ fn google_vision(
     if status >= 300 {
         return Err(format!(
             "google error status={status}: {}",
-            truncate(&v.to_string(), 400)
+            provider_error_excerpt(&v, 400)
         ));
     }
     let mut out = String::new();
@@ -1571,7 +1674,7 @@ fn google_vision(
     if out.is_empty() {
         return Err(format!(
             "google response missing text: {}",
-            truncate(&v.to_string(), 400)
+            provider_error_excerpt(&v, 400)
         ));
     }
     Ok(out)
@@ -1631,7 +1734,7 @@ fn anthropic_vision(
     if status >= 300 {
         return Err(format!(
             "anthropic error status={status}: {}",
-            truncate(&v.to_string(), 400)
+            provider_error_excerpt(&v, 400)
         ));
     }
     let mut out = String::new();
@@ -1648,7 +1751,7 @@ fn anthropic_vision(
     if out.is_empty() {
         return Err(format!(
             "anthropic response missing text: {}",
-            truncate(&v.to_string(), 400)
+            provider_error_excerpt(&v, 400)
         ));
     }
     Ok(out)
@@ -1800,9 +1903,6 @@ fn vendor_order(
             }
         }
     }
-    if !out.is_empty() {
-        return out;
-    }
     for v in [
         VendorKind::OpenAI,
         VendorKind::Google,
@@ -1847,60 +1947,72 @@ fn vendor_name(v: VendorKind) -> &'static str {
     }
 }
 
-fn resolve_vendor_config<'a>(
-    cfg: &'a RootConfig,
+fn provider_config_with_shared_key(
+    provider: Option<&VendorConfig>,
+    shared: Option<&VendorConfig>,
+) -> Option<VendorConfig> {
+    match (provider, shared) {
+        (Some(provider), Some(shared)) => {
+            let mut merged = provider.clone();
+            if check_api_key("", &merged.api_key).is_err()
+                && check_api_key("", &shared.api_key).is_ok()
+            {
+                merged.api_key = shared.api_key.clone();
+            }
+            Some(merged)
+        }
+        (Some(provider), None) => Some(provider.clone()),
+        (None, Some(shared)) => Some(shared.clone()),
+        (None, None) => None,
+    }
+}
+
+fn resolve_vendor_config(
+    cfg: &RootConfig,
     vendor: VendorKind,
-) -> Result<(&'static str, &'a VendorConfig), String> {
+) -> Result<(&'static str, VendorConfig), String> {
     let section = &cfg.image_vision.providers;
     match vendor {
-        VendorKind::OpenAI => section
-            .openai
-            .as_ref()
-            .or(cfg.llm.openai.as_ref())
-            .map(|v| ("openai", v))
-            .ok_or_else(|| "openai config missing".to_string()),
-        VendorKind::Google => section
-            .google
-            .as_ref()
-            .or(cfg.llm.google.as_ref())
-            .map(|v| ("google", v))
-            .ok_or_else(|| "google config missing".to_string()),
-        VendorKind::Anthropic => section
-            .anthropic
-            .as_ref()
-            .or(cfg.llm.anthropic.as_ref())
-            .map(|v| ("anthropic", v))
-            .ok_or_else(|| "anthropic config missing".to_string()),
-        VendorKind::Grok => section
-            .grok
-            .as_ref()
-            .or(cfg.llm.grok.as_ref())
-            .map(|v| ("grok", v))
-            .ok_or_else(|| "grok config missing".to_string()),
-        VendorKind::DeepSeek => section
-            .deepseek
-            .as_ref()
-            .or(cfg.llm.deepseek.as_ref())
-            .map(|v| ("deepseek", v))
-            .ok_or_else(|| "deepseek config missing".to_string()),
-        VendorKind::Qwen => section
-            .qwen
-            .as_ref()
-            .or(cfg.llm.qwen.as_ref())
-            .map(|v| ("qwen", v))
-            .ok_or_else(|| "qwen config missing".to_string()),
-        VendorKind::MiniMax => section
-            .minimax
-            .as_ref()
-            .or(cfg.llm.minimax.as_ref())
-            .map(|v| ("minimax", v))
-            .ok_or_else(|| "minimax config missing".to_string()),
-        VendorKind::Mimo => section
-            .mimo
-            .as_ref()
-            .or(cfg.llm.mimo.as_ref())
-            .map(|v| ("mimo", v))
-            .ok_or_else(|| "mimo config missing".to_string()),
+        VendorKind::OpenAI => {
+            provider_config_with_shared_key(section.openai.as_ref(), cfg.llm.openai.as_ref())
+                .map(|v| ("openai", v))
+                .ok_or_else(|| "openai config missing".to_string())
+        }
+        VendorKind::Google => {
+            provider_config_with_shared_key(section.google.as_ref(), cfg.llm.google.as_ref())
+                .map(|v| ("google", v))
+                .ok_or_else(|| "google config missing".to_string())
+        }
+        VendorKind::Anthropic => {
+            provider_config_with_shared_key(section.anthropic.as_ref(), cfg.llm.anthropic.as_ref())
+                .map(|v| ("anthropic", v))
+                .ok_or_else(|| "anthropic config missing".to_string())
+        }
+        VendorKind::Grok => {
+            provider_config_with_shared_key(section.grok.as_ref(), cfg.llm.grok.as_ref())
+                .map(|v| ("grok", v))
+                .ok_or_else(|| "grok config missing".to_string())
+        }
+        VendorKind::DeepSeek => {
+            provider_config_with_shared_key(section.deepseek.as_ref(), cfg.llm.deepseek.as_ref())
+                .map(|v| ("deepseek", v))
+                .ok_or_else(|| "deepseek config missing".to_string())
+        }
+        VendorKind::Qwen => {
+            provider_config_with_shared_key(section.qwen.as_ref(), cfg.llm.qwen.as_ref())
+                .map(|v| ("qwen", v))
+                .ok_or_else(|| "qwen config missing".to_string())
+        }
+        VendorKind::MiniMax => {
+            provider_config_with_shared_key(section.minimax.as_ref(), cfg.llm.minimax.as_ref())
+                .map(|v| ("minimax", v))
+                .ok_or_else(|| "minimax config missing".to_string())
+        }
+        VendorKind::Mimo => {
+            provider_config_with_shared_key(section.mimo.as_ref(), cfg.llm.mimo.as_ref())
+                .map(|v| ("mimo", v))
+                .ok_or_else(|| "mimo config missing".to_string())
+        }
     }
 }
 
@@ -1954,8 +2066,51 @@ fn split_image_data(raw: &str) -> (String, String) {
     ("image/png".to_string(), t.to_string())
 }
 
+fn strip_base64_data_url(raw: &str) -> &str {
+    let t = raw.trim();
+    if let Some((_, data)) = t.split_once(',') {
+        data
+    } else {
+        t
+    }
+}
+
 fn trim_trailing_slash(v: &str) -> String {
     v.trim_end_matches('/').to_string()
+}
+
+fn provider_error_excerpt(value: &Value, max: usize) -> String {
+    truncate(&redact_sensitive_inline(&value.to_string()), max)
+}
+
+fn redact_sensitive_inline(text: &str) -> String {
+    static SECRET_ASSIGNMENT_RE: OnceLock<Regex> = OnceLock::new();
+    static BEARER_RE: OnceLock<Regex> = OnceLock::new();
+    static OPENAI_STYLE_KEY_RE: OnceLock<Regex> = OnceLock::new();
+
+    let out = SECRET_ASSIGNMENT_RE
+        .get_or_init(|| {
+            Regex::new(
+                r#"(?i)("?(?:api[_-]?key|api[_-]?secret|access[_-]?token|refresh[_-]?token|authorization|client[_-]?secret|secret|token)"?\s*(?::|=)\s*"?)[A-Za-z0-9_./+=*\-]{8,}"?"#,
+            )
+            .expect("secret assignment redaction regex compiles")
+        })
+        .replace_all(text, "${1}[REDACTED]")
+        .to_string();
+    let out = BEARER_RE
+        .get_or_init(|| {
+            Regex::new(r#"(?i)(bearer\s+)[A-Za-z0-9_./+=*\-]{8,}"#)
+                .expect("bearer redaction regex compiles")
+        })
+        .replace_all(&out, "${1}[REDACTED]")
+        .to_string();
+    OPENAI_STYLE_KEY_RE
+        .get_or_init(|| {
+            Regex::new(r#"sk-[A-Za-z0-9_*\-]{6,}"#)
+                .expect("openai-style key redaction regex compiles")
+        })
+        .replace_all(&out, "[REDACTED_API_KEY]")
+        .to_string()
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -1979,10 +2134,161 @@ mod tests {
     }
 
     #[test]
+    fn vendor_order_keeps_defaults_then_appends_fallbacks() {
+        let order = vendor_order(None, Some("mimo"), Some("minimax"));
+
+        assert_eq!(order.first(), Some(&VendorKind::Mimo));
+        assert_eq!(order.get(1), Some(&VendorKind::MiniMax));
+        assert!(order.contains(&VendorKind::Qwen));
+        assert_eq!(order.len(), 8);
+    }
+
+    #[test]
+    fn vendor_order_honors_explicit_request_only() {
+        assert_eq!(
+            vendor_order(Some("qwen"), Some("mimo"), Some("minimax")),
+            vec![VendorKind::Qwen]
+        );
+    }
+
+    #[test]
     fn split_data_url() {
         let (mime, data) = split_image_data("data:image/jpeg;base64,abc");
         assert_eq!(mime, "image/jpeg");
         assert_eq!(data, "abc");
+    }
+
+    #[test]
+    fn strip_base64_data_url_returns_payload_only() {
+        assert_eq!(
+            strip_base64_data_url("data:image/png;base64,abc123"),
+            "abc123"
+        );
+        assert_eq!(strip_base64_data_url(" raw123 "), "raw123");
+    }
+
+    #[test]
+    fn provider_error_excerpt_redacts_secret_like_values() {
+        let fake_openai_key = ["sk", "proj", "secret123456789"].join("-");
+        let fake_plain_key = ["plain", "secret", "token"].join("-");
+        let value = json!({
+            "error": {
+                "message": format!("Incorrect API key provided: {fake_openai_key}"),
+                "api_key": fake_plain_key
+            }
+        });
+
+        let excerpt = provider_error_excerpt(&value, 1000);
+
+        assert!(!excerpt.contains(&fake_openai_key), "{excerpt}");
+        assert!(
+            !excerpt.contains(
+                value
+                    .pointer("/error/api_key")
+                    .and_then(Value::as_str)
+                    .expect("fake api key")
+            ),
+            "{excerpt}"
+        );
+        assert!(excerpt.contains("[REDACTED_API_KEY]"), "{excerpt}");
+        assert!(excerpt.contains("[REDACTED]"), "{excerpt}");
+    }
+
+    #[test]
+    fn select_model_override_prefers_vendor_pool_over_global_default() {
+        let mut cfg = ImageSkillConfig {
+            default_vendor: Some("mimo".to_string()),
+            default_model: Some("mimo-v2.5".to_string()),
+            models: Some(vec!["mimo-v2.5".to_string()]),
+            ..ImageSkillConfig::default()
+        };
+        cfg.minimax_models = Some(vec!["MiniMax-Text-01".to_string()]);
+
+        assert_eq!(
+            select_model_override(&cfg, VendorKind::MiniMax, None),
+            Some("MiniMax-Text-01")
+        );
+    }
+
+    #[test]
+    fn select_model_override_does_not_leak_default_model_to_other_vendor() {
+        let cfg = ImageSkillConfig {
+            default_vendor: Some("mimo".to_string()),
+            default_model: Some("mimo-v2.5".to_string()),
+            models: Some(vec!["mimo-v2.5".to_string(), "mimo-v2-omni".to_string()]),
+            ..ImageSkillConfig::default()
+        };
+
+        assert_eq!(
+            select_model_override(&cfg, VendorKind::DeepSeek, None),
+            None
+        );
+    }
+
+    #[test]
+    fn select_model_override_honors_explicit_request() {
+        let cfg = ImageSkillConfig {
+            default_vendor: Some("mimo".to_string()),
+            default_model: Some("mimo-v2.5".to_string()),
+            minimax_models: Some(vec!["MiniMax-Text-01".to_string()]),
+            ..ImageSkillConfig::default()
+        };
+
+        assert_eq!(
+            select_model_override(&cfg, VendorKind::MiniMax, Some("custom-model")),
+            Some("custom-model")
+        );
+    }
+
+    fn vendor_cfg(base_url: &str, api_key: &str, model: &str) -> VendorConfig {
+        VendorConfig {
+            base_url: base_url.to_string(),
+            api_key: api_key.to_string(),
+            model: model.to_string(),
+            timeout_seconds: Some(30),
+        }
+    }
+
+    #[test]
+    fn resolve_vendor_config_inherits_shared_key_for_empty_provider_override() {
+        let mut cfg = RootConfig::default();
+        cfg.llm.minimax = Some(vendor_cfg(
+            "https://shared.example/v1",
+            "shared-minimax-key",
+            "shared-model",
+        ));
+        cfg.image_vision.providers.minimax =
+            Some(vendor_cfg("https://vision.example/v1", "", "vision-model"));
+
+        let (vendor, resolved) =
+            resolve_vendor_config(&cfg, VendorKind::MiniMax).expect("minimax config");
+
+        assert_eq!(vendor, "minimax");
+        assert_eq!(resolved.base_url, "https://vision.example/v1");
+        assert_eq!(resolved.model, "vision-model");
+        assert_eq!(resolved.api_key, "shared-minimax-key");
+    }
+
+    #[test]
+    fn resolve_vendor_config_keeps_dedicated_provider_key() {
+        let mut cfg = RootConfig::default();
+        cfg.llm.minimax = Some(vendor_cfg(
+            "https://shared.example/v1",
+            "shared-minimax-key",
+            "shared-model",
+        ));
+        cfg.image_vision.providers.minimax = Some(vendor_cfg(
+            "https://vision.example/v1",
+            "vision-minimax-key",
+            "vision-model",
+        ));
+
+        let (_, resolved) =
+            resolve_vendor_config(&cfg, VendorKind::MiniMax).expect("minimax config");
+
+        assert_eq!(resolved.api_key, "vision-minimax-key");
+        assert_eq!(resolved.base_url, "https://vision.example/v1");
+        assert_eq!(resolved.model, "vision-model");
     }
 
     #[test]

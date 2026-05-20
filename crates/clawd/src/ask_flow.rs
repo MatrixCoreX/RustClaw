@@ -566,6 +566,9 @@ fn parse_gate_semantic_kind(raw: &str) -> crate::OutputSemanticKind {
         "config_validation" | "structured_config_validation" => {
             crate::OutputSemanticKind::ConfigValidation
         }
+        "config_risk_assessment" | "config_risk" | "structured_config_risk" | "config_guard" => {
+            crate::OutputSemanticKind::ConfigRiskAssessment
+        }
         "sqlite_table_listing" => crate::OutputSemanticKind::SqliteTableListing,
         "sqlite_table_names_only" => crate::OutputSemanticKind::SqliteTableNamesOnly,
         "sqlite_database_kind_judgment" => crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
@@ -1336,6 +1339,15 @@ fn direct_answer_gate_contract_is_pure_chat(contract: &crate::IntentOutputContra
         )
 }
 
+fn direct_answer_gate_self_contained_inline_json_chat(current_user_request: &str) -> bool {
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    surface.inline_json_shape.is_some()
+        && !crate::intent::surface_signals::inline_json_transform_request(current_user_request)
+        && !surface.has_explicit_path_or_url()
+        && !surface.has_delivery_token_reference()
+        && surface.locator_target_pair.is_none()
+}
+
 fn direct_answer_gate_allows_contextual_chat_reference(
     current_user_request: &str,
     route: &crate::RouteResult,
@@ -1366,6 +1378,9 @@ fn direct_answer_gate_allows_contextual_chat_reference(
         return false;
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    if direct_answer_gate_self_contained_inline_json_chat(current_user_request) {
+        return true;
+    }
     !surface.has_concrete_locator_hint()
         && !surface.is_structural_locator_only_reply()
         && !surface.has_structured_target_refinement()
@@ -1399,7 +1414,24 @@ fn direct_answer_gate_candidate_needs_unbound_context_clarify(
         return false;
     }
     let Some(candidate) = candidate else {
+        let gate_contract = output_contract_from_direct_answer_gate(
+            gate.output_contract.clone(),
+            &route.output_contract,
+        );
+        if direct_answer_gate_self_contained_inline_json_chat(current_user_request)
+            && parse_direct_answer_gate_decision(&gate.decision)
+                == DirectAnswerGateDecision::DirectAnswer
+            && gate.clarify_question.trim().is_empty()
+            && !direct_answer_gate_reference_requires_clarify(&gate.reference_resolution)
+            && direct_answer_gate_contract_is_pure_chat(&route.output_contract)
+            && direct_answer_gate_contract_is_pure_chat(&gate_contract)
+        {
+            return false;
+        }
         if direct_answer_gate_allows_contextual_chat_reference(current_user_request, route, gate) {
+            return false;
+        }
+        if !current_request_has_context_binding_surface(current_user_request) {
             return false;
         }
         return direct_answer_route_introduces_unmentioned_distinctive_context_target(
@@ -1484,6 +1516,7 @@ fn direct_answer_gate_planner_needs_unbound_locator_clarify(
         || contract.delivery_required
         || !matches!(contract.locator_kind, crate::OutputLocatorKind::None)
         || !contract.locator_hint.trim().is_empty()
+        || !direct_answer_gate_reference_is_present(reference_resolution)
         || (direct_answer_gate_reference_is_present(reference_resolution)
             && !direct_answer_gate_reference_requires_clarify(reference_resolution))
         || current_request_has_direct_answer_gate_locator_surface(
@@ -1592,6 +1625,36 @@ fn promote_direct_answer_gate_to_planner(
     }
     append_route_reason(route, &format!("{reason_tag}:{}", gate.reason.trim()));
     DirectAnswerPreflight::PlannerExecute(ctx.clone())
+}
+
+fn promote_inline_json_transform_context_to_planner(
+    ctx: &mut crate::agent_engine::AgentRunContext,
+    current_user_request: &str,
+) -> bool {
+    let Some(route) = ctx.route_result.as_mut() else {
+        return false;
+    };
+    let mut contract = route.output_contract.clone();
+    contract.requires_content_evidence = true;
+    contract.delivery_required = false;
+    contract.locator_kind = crate::OutputLocatorKind::None;
+    contract.locator_hint.clear();
+    contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    contract.semantic_kind = crate::OutputSemanticKind::None;
+    if matches!(
+        contract.response_shape,
+        crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
+    ) {
+        contract.response_shape = crate::OutputResponseShape::Strict;
+    }
+    let finalize_style = planner_finalize_style_for_output_contract(&contract);
+    route.output_contract = contract;
+    route.set_planner_execute_finalize(finalize_style);
+    route.needs_clarify = false;
+    route.clarify_question.clear();
+    route.resolved_intent = current_user_request.trim().to_string();
+    append_route_reason(route, "inline_json_transform_structured_execute");
+    true
 }
 
 fn resolve_direct_answer_gate_contract_locator(
@@ -1749,6 +1812,9 @@ fn route_has_executionless_direct_downgrade(route: &crate::RouteResult) -> bool 
 }
 
 fn current_request_has_structural_execution_target(current_user_request: &str) -> bool {
+    if crate::intent::surface_signals::inline_json_transform_request(current_user_request) {
+        return true;
+    }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
     surface.has_explicit_path_or_url()
         || surface.locator_target_pair.is_some()
@@ -1756,6 +1822,103 @@ fn current_request_has_structural_execution_target(current_user_request: &str) -
         || surface.dotted_field_selector.is_some()
         || surface.has_delivery_token_reference()
         || surface.has_filename_candidates()
+}
+
+fn current_request_has_context_binding_surface(current_user_request: &str) -> bool {
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    surface.has_concrete_locator_hint()
+        || surface.has_structured_target_refinement()
+        || surface.has_delivery_token_reference()
+        || surface.has_filename_candidates()
+        || surface.locator_target_pair.is_some()
+        || surface.has_deictic_reference()
+}
+
+fn current_request_has_workspace_child_locator_surface(current_user_request: &str) -> bool {
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    surface.has_concrete_locator_hint()
+        || surface.has_structured_target_refinement()
+        || surface.has_delivery_token_reference()
+        || surface.has_filename_candidates()
+        || surface.locator_target_pair.is_some()
+        || surface.has_explicit_path_or_url()
+}
+
+fn current_request_resolves_workspace_child_locator(
+    state: &AppState,
+    current_user_request: &str,
+) -> Option<String> {
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    if surface.has_deictic_reference() && !surface.has_explicit_path_or_url() {
+        return None;
+    }
+    crate::worker::try_resolve_workspace_child_locator_from_text(
+        &state.skill_rt.workspace_root,
+        &state.skill_rt.default_locator_search_dir,
+        current_user_request,
+    )
+}
+
+fn current_request_resolves_workspace_child_locator_surface(
+    state: &AppState,
+    current_user_request: &str,
+) -> Option<String> {
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
+    if surface.has_explicit_path_or_url() {
+        let resolved = crate::worker::try_resolve_implicit_locator_path(
+            state,
+            current_user_request,
+            "",
+            crate::OutputLocatorKind::Path,
+            None,
+        )
+        .and_then(|resolution| match resolution {
+            crate::worker::LocatorAutoResolution::Direct(path) => Some(path),
+            crate::worker::LocatorAutoResolution::Fuzzy(_) => None,
+        })?;
+        let resolved_path = Path::new(&resolved);
+        return (!paths_refer_to_same_existing_location(
+            resolved_path,
+            &state.skill_rt.workspace_root,
+        ))
+        .then_some(resolved);
+    }
+    let resolved = current_request_resolves_workspace_child_locator(state, current_user_request)?;
+    if current_request_has_workspace_child_locator_surface(current_user_request) {
+        return Some(resolved);
+    }
+    Path::new(&resolved).is_dir().then_some(resolved)
+}
+
+fn direct_answer_gate_promotes_workspace_child_context(
+    state: &AppState,
+    current_user_request: &str,
+    route: &crate::RouteResult,
+    contract: &mut crate::IntentOutputContract,
+) -> bool {
+    if route.needs_clarify
+        || route.is_execute_gate()
+        || route.wants_file_delivery
+        || route.should_refresh_long_term_memory
+        || !matches!(route.schedule_kind, crate::ScheduleKind::None)
+        || output_contract_requires_planner_execution(contract)
+        || !matches!(
+            contract.locator_kind,
+            crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        || !contract.locator_hint.trim().is_empty()
+    {
+        return false;
+    }
+    let Some(path) =
+        current_request_resolves_workspace_child_locator_surface(state, current_user_request)
+    else {
+        return false;
+    };
+    contract.requires_content_evidence = true;
+    contract.locator_kind = crate::OutputLocatorKind::Path;
+    contract.locator_hint = path;
+    true
 }
 
 fn structural_session_alias_locator_for_target(
@@ -1897,6 +2060,8 @@ fn apply_direct_answer_gate_outcome(
     if route_has_executionless_direct_downgrade(route)
         && decision == DirectAnswerGateDecision::PlannerExecute
         && !current_request_has_structural_execution_target(current_user_request)
+        && current_request_resolves_workspace_child_locator_surface(state, current_user_request)
+            .is_none()
         && !has_structural_session_alias_target
     {
         append_route_reason(route, "direct_answer_gate_executionless_promotion_blocked");
@@ -1964,6 +2129,13 @@ fn apply_direct_answer_gate_outcome(
                     "direct_answer_gate_package_manager_detect_execute",
                 );
             }
+            let promoted_workspace_child_context =
+                direct_answer_gate_promotes_workspace_child_context(
+                    state,
+                    current_user_request,
+                    route,
+                    &mut contract,
+                );
             let promoted_artifact_listing =
                 promote_artifact_listing_candidate_contract(&resolved_prompt, &mut contract);
             let promoted_recent_file_context =
@@ -2045,6 +2217,8 @@ fn apply_direct_answer_gate_outcome(
                     "direct_answer_gate_recent_file_context_execute"
                 } else if promoted_artifact_listing {
                     "direct_answer_gate_artifact_listing_execute"
+                } else if promoted_workspace_child_context {
+                    "direct_answer_gate_workspace_child_context_execute"
                 } else {
                     "direct_answer_gate_contract_execute"
                 };
@@ -3512,6 +3686,38 @@ pub(crate) async fn execute_ask_routed(
                 task,
                 &current_turn_user_request,
             );
+            if transform_skill_available_for_plan(state)
+                && crate::intent::surface_signals::inline_json_transform_request(
+                    &current_turn_user_request,
+                )
+            {
+                if let Some(mut promoted_ctx) = agent_run_context.clone() {
+                    if promote_inline_json_transform_context_to_planner(
+                        &mut promoted_ctx,
+                        &current_turn_user_request,
+                    ) {
+                        tracing::info!(
+                            "{} worker_once: ask inline_json_transform_promoted_to_planner task_id={}",
+                            crate::highlight_tag("routing"),
+                            task.task_id
+                        );
+                        let promoted_prompt_with_memory = format!(
+                            "{}\n\nStructured inline transform request:\n{}",
+                            prompt_with_memory.trim(),
+                            current_turn_user_request.trim()
+                        );
+                        return execute_via_planner_loop(
+                            state,
+                            task,
+                            &promoted_prompt_with_memory,
+                            execution_user_request,
+                            &crate::AskMode::planner_execute_chat_wrapped(),
+                            Some(promoted_ctx),
+                        )
+                        .await;
+                    }
+                }
+            }
             if let Some(reply) =
                 state_patch_alias_bindings_ack(agent_run_context.as_ref(), &request_language_hint)
             {
@@ -3779,8 +3985,8 @@ mod tests {
         ensure_active_task_required_visible_literals, forbidden_visible_literals_from_state_patch,
         locator_hint_mentions_current_request, normalizer_chat_direct_answer_candidate,
         output_contract_from_direct_answer_gate, preferred_route_clarify_question,
-        recent_count_comparison_direct_answer, replacement_pairs_from_state_patch,
-        required_visible_literals_from_state_patch,
+        promote_inline_json_transform_context_to_planner, recent_count_comparison_direct_answer,
+        replacement_pairs_from_state_patch, required_visible_literals_from_state_patch,
         resolved_intent_declares_structured_scalar_extraction,
         route_contract_requests_filename_only_output, route_structured_clarify_context,
         runtime_approval_wait_status_direct_answer_candidate,
@@ -4100,6 +4306,110 @@ mod tests {
         );
 
         assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    }
+
+    #[test]
+    fn direct_answer_gate_promotes_resolved_workspace_child_context() {
+        let root = TempDirGuard::new("gate_workspace_child_context");
+        std::fs::create_dir_all(root.path.join("document")).expect("document dir");
+        std::fs::write(
+            root.path.join("document").join("sample.png"),
+            "not a real png",
+        )
+        .expect("sample image placeholder");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = root.path.clone();
+        state.skill_rt.default_locator_search_dir = root.path.clone();
+
+        let mut route = chat_route_for_gate();
+        route.resolved_intent = concat!(
+            "Explain how to classify images within a document without moving files\n",
+            "answer_candidate: use metadata labels"
+        )
+        .to_string();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
+
+        let outcome = apply_direct_answer_gate_outcome(
+            &state,
+            &mut ctx,
+            "Preview how images under document could be categorized. Do not move files.",
+            gate,
+        );
+
+        assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_execute_gate());
+        assert!(route.output_contract.requires_content_evidence);
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+        );
+        assert!(route.output_contract.locator_hint.ends_with("document"));
+        assert!(route
+            .route_reason
+            .contains("direct_answer_gate_workspace_child_context_execute"));
+    }
+
+    #[test]
+    fn direct_answer_gate_does_not_promote_product_name_that_matches_workspace_child() {
+        let root = TempDirGuard::new("gate_product_name_child_context");
+        std::fs::write(root.path.join("rustclaw"), "#!/usr/bin/env bash\n").expect("script");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = root.path.clone();
+        state.skill_rt.default_locator_search_dir = root.path.clone();
+
+        let mut route = chat_route_for_gate();
+        route.resolved_intent =
+            "Explain RustClaw natural language contract boundaries in two sentences.".to_string();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
+
+        let outcome = apply_direct_answer_gate_outcome(
+            &state,
+            &mut ctx,
+            "用两句话解释 RustClaw 的自然语言契约边界，不要读取文件。",
+            gate,
+        );
+
+        assert!(matches!(outcome, DirectAnswerPreflight::DirectAnswer));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_chat_gate());
+        assert!(!route
+            .route_reason
+            .contains("direct_answer_gate_workspace_child_context_execute"));
+    }
+
+    #[test]
+    fn direct_answer_gate_keeps_pure_chat_direct_despite_unbound_reference_label() {
+        let mut route = chat_route_for_gate();
+        route.resolved_intent =
+            "Explain why memory should not become hidden instructions.".to_string();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
+        gate.reference_resolution.target = "unresolved_prior_object".to_string();
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        let outcome = apply_direct_answer_gate_outcome(
+            &state,
+            &mut ctx,
+            "Explain in two sentences why memory should not become hidden instructions. Do not read files.",
+            gate,
+        );
+
+        assert!(matches!(outcome, DirectAnswerPreflight::DirectAnswer));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_chat_gate());
+        assert!(!route.needs_clarify);
     }
 
     #[test]
@@ -4570,6 +4880,45 @@ mod tests {
     }
 
     #[test]
+    fn direct_answer_gate_allows_locatorless_targetless_planner_request() {
+        let route = chat_route_for_gate();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let gate = gate_out("planner_execute", gate_contract(true, "none", "none"));
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let contract = output_contract_from_direct_answer_gate(
+            gate.output_contract.clone(),
+            &crate::IntentOutputContract::default(),
+        );
+
+        assert!(!direct_answer_gate_planner_needs_unbound_locator_clarify(
+            &state,
+            "detect the current runtime package manager",
+            &contract,
+            &gate.reference_resolution,
+            None,
+            false,
+        ));
+
+        let outcome = apply_direct_answer_gate_outcome(
+            &state,
+            &mut ctx,
+            "detect the current runtime package manager",
+            gate,
+        );
+
+        assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_execute_gate());
+        assert!(!route.needs_clarify);
+        assert!(!route
+            .route_reason
+            .contains("direct_answer_gate_unbound_deictic_clarify"));
+    }
+
+    #[test]
     fn direct_answer_gate_clarifies_unbound_path_candidate_for_delivery_and_preserves_contract() {
         let mut route = chat_route_for_gate();
         route.resolved_intent = concat!(
@@ -4864,6 +5213,36 @@ mod tests {
     }
 
     #[test]
+    fn inline_json_transform_context_promotion_uses_strict_execution_contract() {
+        let mut route = chat_route_for_gate();
+        route.route_reason = "executionless_route_downgraded_to_direct_answer".to_string();
+        let request = r#"{"action":"transform_data","data":[{"city":"Tokyo","temp":22},{"city":"Osaka","temp":24}],"ops":[{"op":"project","fields":["city"]}]}"#;
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(promote_inline_json_transform_context_to_planner(
+            &mut ctx, request
+        ));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_execute_gate());
+        assert_eq!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Strict
+        );
+        assert!(route.output_contract.requires_content_evidence);
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        );
+        assert!(route
+            .route_reason
+            .contains("inline_json_transform_structured_execute"));
+        assert_eq!(route.resolved_intent, request);
+    }
+
+    #[test]
     fn direct_answer_gate_promotes_explicit_readme_summary_to_planner() {
         let root = TempDirGuard::new("gate_bare_readme_summary");
         std::fs::write(root.path.join("README.md"), "# Demo\n\nLocal readme body")
@@ -4961,6 +5340,38 @@ mod tests {
             direct_answer_gate_can_skip_for_self_contained_payload(request, Some(&route),),
             "surface={surface:?}"
         );
+    }
+
+    #[test]
+    fn direct_answer_gate_keeps_self_contained_inline_json_array_explanation_direct() {
+        let mut route = chat_route_for_gate();
+        route.resolved_intent = concat!(
+            "Explain the meaning and structure of the provided JSON array: ",
+            r#"[{"name":"alpha","score":7},{"name":"beta","score":12}]. "#,
+            "Preserve the original order as specified."
+        )
+        .to_string();
+        route.route_reason = "The request is for explanation/interpretation of embedded structured data. The user explicitly specifies no sorting. This is a pure discussion task requiring no external retrieval, execution, or workspace inspection.".to_string();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
+        gate.resolved_user_intent =
+            "Explain the meaning and structure of the provided JSON array.".to_string();
+        gate.reason =
+            "Self-contained embedded structured data; no external retrieval is needed.".to_string();
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let request = r#"Explain what this JSON represents without sorting it: [{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
+
+        let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
+
+        assert!(matches!(outcome, DirectAnswerPreflight::DirectAnswer));
+        let route = ctx.route_result.expect("route");
+        assert!(!route.needs_clarify);
+        assert!(!route
+            .route_reason
+            .contains("direct_answer_gate_unbound_deictic_clarify"));
     }
 
     #[test]

@@ -116,6 +116,7 @@
             "git_commit_subject",
             "structured_keys",
             "config_validation",
+            "config_risk_assessment",
             "package_manager_detection",
             "sqlite_table_listing",
             "sqlite_table_names_only",
