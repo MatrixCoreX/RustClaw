@@ -1832,13 +1832,13 @@ fn delivery_message_is_json_object(message: &str) -> bool {
 fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
     match crate::language_policy::request_language_hint(user_text) {
         "zh-CN" => false,
-        "en" => true,
-        _ => state
+        "config_default" => state
             .policy
             .command_intent
             .default_locale
             .to_ascii_lowercase()
             .starts_with("en"),
+        _ => true,
     }
 }
 
@@ -2018,7 +2018,10 @@ fn execution_recipe_profile_closeout_label(
 }
 
 fn prefer_english_for_user_text_without_state(user_text: &str) -> bool {
-    crate::language_policy::request_language_hint(user_text) == "en"
+    !matches!(
+        crate::language_policy::request_language_hint(user_text),
+        "zh-CN" | "config_default"
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3561,6 +3564,14 @@ fn attach_execution_summary_to_delivery(
     user_text: Option<&str>,
     delivery_messages: &mut Vec<String>,
 ) {
+    if delivery_contract_suppresses_execution_summary(
+        loop_state,
+        agent_run_context,
+        delivery_messages,
+    ) {
+        delivery_messages.retain(|message| !crate::finalize::is_execution_summary_message(message));
+        return;
+    }
     if delivery_messages.last().is_some_and(|message| {
         observed_markdown_heading_scalar_answer_for_delivery(loop_state, agent_run_context, message)
             .is_some()
@@ -3577,6 +3588,173 @@ fn attach_execution_summary_to_delivery(
         }
         delivery_messages.insert(0, summary);
     }
+}
+
+fn delivery_contract_suppresses_execution_summary(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    delivery_messages: &[String],
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if delivery_matches_latest_structured_scalar_observation(loop_state, route, delivery_messages) {
+        return true;
+    }
+    if delivery_matches_config_guard_answer(loop_state, delivery_messages) {
+        return true;
+    }
+    if delivery_matches_latest_transform_observation(loop_state, delivery_messages) {
+        return true;
+    }
+    if delivery_has_synthesized_answer_result(loop_state, route, delivery_messages) {
+        return true;
+    }
+    if delivery_matches_synthesized_content_answer(loop_state, route, delivery_messages) {
+        return true;
+    }
+    if route.output_contract.response_shape != crate::OutputResponseShape::Scalar {
+        return false;
+    }
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::None {
+        return false;
+    }
+    delivery_messages.iter().any(|message| {
+        let message = message.trim();
+        !message.is_empty() && !crate::finalize::is_execution_summary_message(message)
+    })
+}
+
+fn single_publishable_delivery_message(delivery_messages: &[String]) -> Option<&str> {
+    let mut publishable = delivery_messages
+        .iter()
+        .map(|message| message.trim())
+        .filter(|message| !message.is_empty())
+        .filter(|message| !crate::finalize::is_execution_summary_message(message));
+    let first = publishable.next()?;
+    publishable.next().is_none().then_some(first)
+}
+
+fn delivery_matches_latest_structured_scalar_observation(
+    loop_state: &LoopState,
+    route: &crate::RouteResult,
+    delivery_messages: &[String],
+) -> bool {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::StructuredKeys {
+        return false;
+    }
+    let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
+        return false;
+    };
+    crate::agent_engine::observed_output::latest_structured_scalar_observation_text(loop_state)
+        .is_some_and(|observed_text| delivery_text == observed_text.trim())
+}
+
+fn delivery_matches_synthesized_content_answer(
+    loop_state: &LoopState,
+    route: &crate::RouteResult,
+    delivery_messages: &[String],
+) -> bool {
+    if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
+        return false;
+    }
+    if !matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
+    ) {
+        return false;
+    }
+    if !matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None | crate::OutputSemanticKind::ContentExcerptSummary
+    ) {
+        return false;
+    }
+    let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
+        return false;
+    };
+    if crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+        delivery_text,
+        loop_state,
+    ) {
+        return false;
+    }
+    loop_state.executed_step_results.iter().any(|step| {
+        step.is_ok()
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+            && step
+                .output
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|output| !output.is_empty())
+    })
+}
+
+fn delivery_has_synthesized_answer_result(
+    loop_state: &LoopState,
+    route: &crate::RouteResult,
+    delivery_messages: &[String],
+) -> bool {
+    if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
+        return false;
+    }
+    let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
+        return false;
+    };
+    if crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+        delivery_text,
+        loop_state,
+    ) {
+        return false;
+    }
+    loop_state.executed_step_results.iter().any(|step| {
+        step.is_ok()
+            && step.skill == "synthesize_answer"
+            && step
+                .output
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|output| !output.is_empty())
+    })
+}
+
+fn delivery_matches_latest_transform_observation(
+    loop_state: &LoopState,
+    delivery_messages: &[String],
+) -> bool {
+    let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
+        return false;
+    };
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && step.skill == "transform")
+        .filter_map(|step| step.output.as_deref())
+        .any(|output| {
+            crate::agent_engine::observed_output::transform_skill_formatted_output_candidate(output)
+                .is_some_and(|answer| answer.trim() == delivery_text)
+        })
+}
+
+fn delivery_matches_config_guard_answer(
+    loop_state: &LoopState,
+    delivery_messages: &[String],
+) -> bool {
+    let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
+        return false;
+    };
+    let outputs = config_edit_observed_outputs(loop_state);
+    if outputs.is_empty() {
+        return false;
+    }
+    [true, false].into_iter().any(|prefer_english| {
+        direct_config_edit_guard_answer(&outputs, prefer_english)
+            .is_some_and(|answer| answer.trim() == delivery_text)
+    })
 }
 
 fn final_answer_text_from_delivery(delivery_messages: &[String]) -> String {
@@ -4908,6 +5086,317 @@ pub(crate) fn direct_config_edit_observed_answer(
     Some((answer, config_edit_summary()))
 }
 
+fn direct_config_guard_observed_answer(
+    state: &AppState,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let outputs = config_edit_observed_outputs(loop_state);
+    if outputs.is_empty() {
+        return None;
+    }
+    let prefer_english = prefer_english_for_user_text(state, user_text);
+    direct_config_edit_guard_answer(&outputs, prefer_english).map(|answer| {
+        (
+            answer,
+            deterministic_observed_execution_status_summary(loop_state),
+        )
+    })
+}
+
+#[derive(Debug)]
+struct RustClawConfigFieldObservation {
+    path: String,
+    field_path: String,
+    exists: bool,
+    value: serde_json::Value,
+    value_text: Option<String>,
+}
+
+fn path_is_rustclaw_main_config(path: &str) -> bool {
+    let components = Path::new(path)
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => value.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    matches!(components.as_slice(), [.., "configs", "config.toml"])
+}
+
+fn rustclaw_config_path_label(path: &str) -> String {
+    if path_is_rustclaw_main_config(path) {
+        "configs/config.toml".to_string()
+    } else {
+        path.to_string()
+    }
+}
+
+fn config_output_path(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("resolved_path")
+        .or_else(|| value.get("path"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(ToString::to_string)
+}
+
+fn observed_config_field_path(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("resolved_field_path")
+        .or_else(|| value.get("field_path"))
+        .or_else(|| value.get("field"))
+        .or_else(|| value.get("key"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(ToString::to_string)
+}
+
+fn rustclaw_config_field_observation_from_value(
+    path: &str,
+    value: &serde_json::Value,
+) -> Option<RustClawConfigFieldObservation> {
+    let field_path = observed_config_field_path(value)?;
+    let field_value = value
+        .get("value")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let exists = value
+        .get("exists")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(!field_value.is_null());
+    let value_text = value
+        .get("value_text")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string);
+    Some(RustClawConfigFieldObservation {
+        path: path.to_string(),
+        field_path,
+        exists,
+        value: field_value,
+        value_text,
+    })
+}
+
+fn rustclaw_config_field_observations_from_output(
+    value: &serde_json::Value,
+) -> Vec<RustClawConfigFieldObservation> {
+    let Some(action) = value.get("action").and_then(|value| value.as_str()) else {
+        return Vec::new();
+    };
+    if !matches!(
+        action,
+        "extract_field" | "extract_fields" | "read_field" | "read_fields"
+    ) {
+        return Vec::new();
+    }
+    let Some(path) = config_output_path(value).filter(|path| path_is_rustclaw_main_config(path))
+    else {
+        return Vec::new();
+    };
+    if let Some(results) = value.get("results").and_then(|value| value.as_array()) {
+        return results
+            .iter()
+            .filter_map(|item| rustclaw_config_field_observation_from_value(&path, item))
+            .collect();
+    }
+    rustclaw_config_field_observation_from_value(&path, value)
+        .into_iter()
+        .collect()
+}
+
+fn rustclaw_config_field_observations(
+    loop_state: &crate::agent_engine::LoopState,
+) -> Vec<RustClawConfigFieldObservation> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| {
+            step.is_ok() && matches!(step.skill.as_str(), "config_basic" | "system_basic")
+        })
+        .filter_map(|step| step.output.as_deref())
+        .filter_map(|output| serde_json::from_str::<serde_json::Value>(output.trim()).ok())
+        .flat_map(|value| rustclaw_config_field_observations_from_output(&value))
+        .collect()
+}
+
+fn observed_field_value_text(observation: &RustClawConfigFieldObservation) -> Option<String> {
+    observation.value_text.clone().or_else(|| {
+        if observation.value.is_string() {
+            observation.value.as_str().map(ToString::to_string)
+        } else if observation.value.is_null() {
+            None
+        } else {
+            Some(execution_summary_value_to_string(&observation.value))
+        }
+    })
+}
+
+fn observed_field_is_true(observation: &RustClawConfigFieldObservation) -> bool {
+    observation.value.as_bool() == Some(true)
+        || observed_field_value_text(observation)
+            .is_some_and(|text| text.trim().eq_ignore_ascii_case("true") || text.trim() == "1")
+}
+
+fn observed_field_i64(observation: &RustClawConfigFieldObservation) -> Option<i64> {
+    observation.value.as_i64().or_else(|| {
+        observed_field_value_text(observation)?
+            .trim()
+            .parse::<i64>()
+            .ok()
+    })
+}
+
+fn observed_tools_allow_contains_wildcard(observation: &RustClawConfigFieldObservation) -> bool {
+    if observation
+        .value
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("*")))
+    {
+        return true;
+    }
+    observed_field_value_text(observation).is_some_and(|text| {
+        text.split(',')
+            .map(|part| part.trim().trim_matches('"').trim_matches('\''))
+            .any(|part| part == "*" || part == "[*]")
+    })
+}
+
+fn observed_server_listen_is_public(observation: &RustClawConfigFieldObservation) -> bool {
+    observed_field_value_text(observation)
+        .map(|text| text.trim().trim_matches('"').to_string())
+        .is_some_and(|text| text == "0.0.0.0" || text.starts_with("0.0.0.0:"))
+}
+
+fn quoted_string_label(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| format!("\"{value}\""))
+}
+
+fn rustclaw_config_known_risk_field(field_path: &str) -> bool {
+    [
+        "tools.allow",
+        "tools.allow_sudo",
+        "tools.allow_path_outside_workspace",
+        "telegram.sendfile.full_access",
+        "server.listen",
+        "self_extension.enabled",
+        "worker.task_timeout_seconds",
+    ]
+    .iter()
+    .any(|candidate| field_path.eq_ignore_ascii_case(candidate))
+}
+
+fn rustclaw_config_risk_label(observation: &RustClawConfigFieldObservation) -> Option<String> {
+    if !observation.exists {
+        return None;
+    }
+    let field_path = observation.field_path.trim();
+    if field_path.eq_ignore_ascii_case("tools.allow") {
+        return observed_tools_allow_contains_wildcard(observation)
+            .then(|| "tools.allow=[\"*\"]".to_string());
+    }
+    if field_path.eq_ignore_ascii_case("tools.allow_sudo") {
+        return observed_field_is_true(observation).then(|| "tools.allow_sudo=true".to_string());
+    }
+    if field_path.eq_ignore_ascii_case("tools.allow_path_outside_workspace") {
+        return observed_field_is_true(observation)
+            .then(|| "tools.allow_path_outside_workspace=true".to_string());
+    }
+    if field_path.eq_ignore_ascii_case("telegram.sendfile.full_access") {
+        return observed_field_is_true(observation)
+            .then(|| "telegram.sendfile.full_access=true".to_string());
+    }
+    if field_path.eq_ignore_ascii_case("server.listen") {
+        return observed_server_listen_is_public(observation).then(|| {
+            let value = observed_field_value_text(observation).unwrap_or_default();
+            format!(
+                "server.listen={}",
+                quoted_string_label(value.trim().trim_matches('"'))
+            )
+        });
+    }
+    if field_path.eq_ignore_ascii_case("self_extension.enabled") {
+        return observed_field_is_true(observation)
+            .then(|| "self_extension.enabled=true".to_string());
+    }
+    if field_path.eq_ignore_ascii_case("worker.task_timeout_seconds") {
+        let value = observed_field_i64(observation)?;
+        return (value > 3600).then(|| format!("worker.task_timeout_seconds={value}"));
+    }
+    None
+}
+
+fn direct_rustclaw_config_field_risk_answer(
+    state: &AppState,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let observations = rustclaw_config_field_observations(loop_state);
+    let mut known_fields = Vec::new();
+    let mut risks = Vec::new();
+    for observation in &observations {
+        if !rustclaw_config_known_risk_field(&observation.field_path) {
+            continue;
+        }
+        if !known_fields
+            .iter()
+            .any(|field: &String| field.eq_ignore_ascii_case(&observation.field_path))
+        {
+            known_fields.push(observation.field_path.clone());
+        }
+        if let Some(label) = rustclaw_config_risk_label(observation) {
+            if !risks.iter().any(|existing| existing == &label) {
+                risks.push(label);
+            }
+        }
+    }
+    if known_fields.len() < 2 {
+        return None;
+    }
+    let path = observations
+        .iter()
+        .find(|observation| rustclaw_config_known_risk_field(&observation.field_path))
+        .map(|observation| rustclaw_config_path_label(&observation.path))
+        .unwrap_or_else(|| "configs/config.toml".to_string());
+    let prefer_english = prefer_english_for_user_text(state, user_text);
+    let answer = if risks.is_empty() {
+        if prefer_english {
+            format!("No obvious config risks found in `{path}`.")
+        } else {
+            format!("`{path}` 未发现明显配置风险。")
+        }
+    } else if prefer_english {
+        format!(
+            "Found {} config risk(s) in `{path}`: {}.",
+            risks.len(),
+            risks.join("; ")
+        )
+    } else {
+        format!(
+            "`{path}` 发现 {} 个配置风险：{}。",
+            risks.len(),
+            risks.join("；")
+        )
+    };
+    Some((
+        answer,
+        deterministic_observed_execution_status_summary(loop_state),
+    ))
+}
+
+fn direct_rustclaw_config_risk_answer(
+    state: &AppState,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    direct_config_guard_observed_answer(state, user_text, loop_state)
+        .or_else(|| direct_rustclaw_config_field_risk_answer(state, user_text, loop_state))
+}
+
 fn path_display_label(value: &serde_json::Value, fallback: &str) -> String {
     let raw = value
         .get("path")
@@ -5163,6 +5652,420 @@ fn direct_quantity_comparison_from_compare_paths(
     ))
 }
 
+fn json_scalar_display(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Null => Some("null".to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::String(value) => {
+            let value = value.trim();
+            (!value.is_empty()).then(|| value.to_string())
+        }
+        _ => None,
+    }
+}
+
+fn compact_json_item_label(key: Option<&str>, value: &serde_json::Value) -> Option<String> {
+    let key = key.map(str::trim).filter(|key| !key.is_empty());
+    match (key, json_scalar_display(value)) {
+        (Some(key), Some(value)) => Some(format!("{key}={value}")),
+        (Some(key), None) => Some(key.to_string()),
+        (None, Some(value)) => Some(value),
+        (None, None) => None,
+    }
+}
+
+fn structured_container_summary_from_value(
+    field_path: &str,
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<String> {
+    let field_path = field_path.trim();
+    if field_path.is_empty() {
+        return None;
+    }
+    const MAX_PREVIEW_ITEMS: usize = 6;
+    match value {
+        serde_json::Value::Object(map) => {
+            if map.is_empty() {
+                return Some(if prefer_english {
+                    format!("`{field_path}` is an empty object.")
+                } else {
+                    format!("`{field_path}` 是一个空对象。")
+                });
+            }
+            let mut entries = map
+                .iter()
+                .filter_map(|(key, value)| compact_json_item_label(Some(key), value))
+                .take(MAX_PREVIEW_ITEMS)
+                .collect::<Vec<_>>();
+            if entries.is_empty() {
+                entries = map.keys().take(MAX_PREVIEW_ITEMS).cloned().collect();
+            }
+            let suffix = if map.len() > entries.len() {
+                if prefer_english {
+                    ", ..."
+                } else {
+                    "，..."
+                }
+            } else {
+                ""
+            };
+            if prefer_english {
+                Some(format!(
+                    "`{field_path}` contains {} entries: {}{}.",
+                    map.len(),
+                    entries.join(", "),
+                    suffix
+                ))
+            } else {
+                Some(format!(
+                    "`{field_path}` 包含 {} 项：{}{}。",
+                    map.len(),
+                    entries.join("、"),
+                    suffix
+                ))
+            }
+        }
+        serde_json::Value::Array(items) => {
+            if items.is_empty() {
+                return Some(if prefer_english {
+                    format!("`{field_path}` is an empty array.")
+                } else {
+                    format!("`{field_path}` 是一个空数组。")
+                });
+            }
+            let entries = items
+                .iter()
+                .filter_map(|value| compact_json_item_label(None, value))
+                .take(MAX_PREVIEW_ITEMS)
+                .collect::<Vec<_>>();
+            let suffix = if items.len() > entries.len() {
+                if prefer_english {
+                    ", ..."
+                } else {
+                    "，..."
+                }
+            } else {
+                ""
+            };
+            if entries.is_empty() {
+                return Some(if prefer_english {
+                    format!("`{field_path}` contains {} items.", items.len())
+                } else {
+                    format!("`{field_path}` 包含 {} 项。", items.len())
+                });
+            }
+            if prefer_english {
+                Some(format!(
+                    "`{field_path}` contains {} items: {}{}.",
+                    items.len(),
+                    entries.join(", "),
+                    suffix
+                ))
+            } else {
+                Some(format!(
+                    "`{field_path}` 包含 {} 项：{}{}。",
+                    items.len(),
+                    entries.join("、"),
+                    suffix
+                ))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn structured_container_from_extract_value(
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<String> {
+    if !matches!(
+        value.get("action").and_then(|value| value.as_str()),
+        Some("extract_field" | "read_field")
+    ) {
+        return None;
+    }
+    if !value
+        .get("exists")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let field_path = value
+        .get("resolved_field_path")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            value
+                .get("field_path")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })?;
+    structured_container_summary_from_value(field_path, value.get("value")?, prefer_english)
+}
+
+fn deterministic_structured_container_summary_answer(
+    state: &AppState,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
+        return None;
+    }
+    if !matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
+    ) {
+        return None;
+    }
+    if !matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None | crate::OutputSemanticKind::ContentExcerptSummary
+    ) {
+        return None;
+    }
+    let prefer_english = prefer_english_for_user_text(state, user_text);
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| {
+            step.is_ok() && matches!(step.skill.as_str(), "system_basic" | "config_basic")
+        })
+        .filter_map(|step| step.output.as_deref())
+        .filter_map(|output| serde_json::from_str::<serde_json::Value>(output).ok())
+        .find_map(|value| structured_container_from_extract_value(&value, prefer_english))
+}
+
+fn structured_file_format_for_path(path: &str) -> Option<&'static str> {
+    match Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("json") => Some("json"),
+        Some("toml") => Some("toml"),
+        _ => None,
+    }
+}
+
+fn broad_structured_read_range_from_value(value: &serde_json::Value) -> Option<(String, String)> {
+    if value.get("action").and_then(|value| value.as_str()) != Some("read_range") {
+        return None;
+    }
+    if !matches!(
+        value.get("mode").and_then(|value| value.as_str()),
+        Some("head" | "full" | "all")
+    ) {
+        return None;
+    }
+    if value
+        .get("requested_n")
+        .and_then(|value| value.as_u64())
+        .is_some_and(|requested_n| requested_n < 50)
+    {
+        return None;
+    }
+    let path = value
+        .get("resolved_path")
+        .or_else(|| value.get("path"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|path| !path.is_empty())?;
+    let format = value
+        .get("format")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|format| matches!(*format, "json" | "toml"))
+        .or_else(|| structured_file_format_for_path(path))?;
+    Some((path.to_string(), format.to_string()))
+}
+
+fn latest_broad_structured_read_range(
+    loop_state: &crate::agent_engine::LoopState,
+) -> Option<(String, String)> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && matches!(step.skill.as_str(), "system_basic" | "fs_basic"))
+        .filter_map(|step| step.output.as_deref())
+        .filter_map(|output| serde_json::from_str::<serde_json::Value>(output).ok())
+        .find_map(|value| broad_structured_read_range_from_value(&value))
+}
+
+fn message_is_non_answer_separator(message: &str) -> bool {
+    let chars = message
+        .trim()
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect::<Vec<_>>();
+    if chars.len() < 6 || chars.iter().any(|ch| ch.is_alphanumeric()) {
+        return false;
+    }
+    let first = chars[0];
+    chars.iter().all(|ch| *ch == first)
+        || chars
+            .iter()
+            .all(|ch| matches!(*ch, '=' | '-' | '_' | '*' | '#' | '~'))
+}
+
+fn discard_non_answer_separator_delivery_for_broad_structured_read(
+    task_id: &str,
+    loop_state: &mut crate::agent_engine::LoopState,
+) -> bool {
+    if latest_broad_structured_read_range(loop_state).is_none() {
+        return false;
+    }
+    let before_len = loop_state.delivery_messages.len();
+    loop_state.delivery_messages.retain(|message| {
+        crate::finalize::is_execution_summary_message(message)
+            || !message_is_non_answer_separator(message)
+    });
+    let removed = before_len != loop_state.delivery_messages.len();
+    if removed {
+        if loop_state
+            .last_user_visible_respond
+            .as_deref()
+            .is_some_and(message_is_non_answer_separator)
+        {
+            loop_state.last_user_visible_respond = None;
+        }
+        if loop_state
+            .last_publishable_synthesis_output
+            .as_deref()
+            .is_some_and(message_is_non_answer_separator)
+        {
+            loop_state.last_publishable_synthesis_output = None;
+        }
+        info!(
+            "delivery discard_non_answer_separator_after_structured_read task_id={}",
+            task_id
+        );
+    }
+    removed
+}
+
+fn validate_structured_file(path: &str, format: &str) -> Option<Result<(), String>> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|err| err.to_string())
+        .ok()?;
+    let result = match format {
+        "json" => serde_json::from_str::<serde_json::Value>(&content)
+            .map(|_| ())
+            .map_err(|err| err.to_string()),
+        "toml" => toml::from_str::<toml::Value>(&content)
+            .map(|_| ())
+            .map_err(|err| err.to_string()),
+        _ => return None,
+    };
+    Some(result)
+}
+
+fn deterministic_structured_file_validation_from_read_range(
+    state: &AppState,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let (path, format) = latest_broad_structured_read_range(loop_state)?;
+    let validation = validate_structured_file(&path, &format)?;
+    let prefer_english = prefer_english_for_user_text(state, user_text);
+    let answer = match validation {
+        Ok(()) if prefer_english => format!("pass: {format} parsed successfully"),
+        Ok(()) => format!("通过：{format} 解析成功"),
+        Err(err) if prefer_english => format!(
+            "fail: {format} parse failed: {}",
+            crate::truncate_for_agent_trace(&err)
+        ),
+        Err(err) => format!(
+            "未通过：{format} 解析失败：{}",
+            crate::truncate_for_agent_trace(&err)
+        ),
+    };
+    Some((
+        answer,
+        crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: 1,
+            ..Default::default()
+        },
+    ))
+}
+
+fn attach_deterministic_structured_file_validation_from_read_range(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut crate::agent_engine::LoopState,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some((answer, summary)) =
+        deterministic_structured_file_validation_from_read_range(state, user_text, loop_state)
+    else {
+        return false;
+    };
+    *finalizer_summary = Some(summary);
+    loop_state.last_user_visible_respond = Some(answer.clone());
+    append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+    info!(
+        "delivery fallback_from_structured_file_validation_read_range task_id={}",
+        task.task_id
+    );
+    true
+}
+
+fn replace_delivery_with_deterministic_rustclaw_config_risk_answer(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut crate::agent_engine::LoopState,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some((answer, summary)) = direct_rustclaw_config_risk_answer(state, user_text, loop_state)
+    else {
+        return false;
+    };
+    if loop_state
+        .delivery_messages
+        .last()
+        .map(|message| message.trim() == answer.trim())
+        .unwrap_or(false)
+    {
+        loop_state.last_user_visible_respond = Some(answer);
+        *finalizer_summary = Some(summary);
+        return true;
+    }
+    loop_state
+        .delivery_messages
+        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    append_delivery_message(
+        &task.task_id,
+        &mut loop_state.delivery_messages,
+        answer.clone(),
+    );
+    loop_state.last_user_visible_respond = Some(answer);
+    *finalizer_summary = Some(summary);
+    info!(
+        "delivery replace_with_deterministic_rustclaw_config_risk task_id={}",
+        task.task_id
+    );
+    true
+}
+
 fn has_publishable_synthesis_other_than_status(
     loop_state: &crate::agent_engine::LoopState,
     status_answer: &str,
@@ -5338,7 +6241,20 @@ async fn missing_delivery_after_observation_message(
     {
         return answer;
     }
+    if let Some((answer, _summary)) =
+        direct_rustclaw_config_risk_answer(state, user_text, loop_state)
+    {
+        return answer;
+    }
     if let Some((answer, _summary)) = direct_quantity_comparison_from_compare_paths(
+        state,
+        user_text,
+        loop_state,
+        agent_run_context,
+    ) {
+        return answer;
+    }
+    if let Some(answer) = deterministic_structured_container_summary_answer(
         state,
         user_text,
         loop_state,
@@ -5396,6 +6312,10 @@ async fn observed_execution_without_publishable_delivery_reply(
                     .map(|(answer, _summary)| answer)
             })
             .or_else(|| {
+                direct_rustclaw_config_risk_answer(state, user_text, loop_state)
+                    .map(|(answer, _summary)| answer)
+            })
+            .or_else(|| {
                 direct_quantity_comparison_from_compare_paths(
                     state,
                     user_text,
@@ -5403,6 +6323,14 @@ async fn observed_execution_without_publishable_delivery_reply(
                     agent_run_context,
                 )
                 .map(|(answer, _summary)| answer)
+            })
+            .or_else(|| {
+                deterministic_structured_container_summary_answer(
+                    state,
+                    user_text,
+                    loop_state,
+                    agent_run_context,
+                )
             })
             .or_else(|| {
                 deterministic_missing_observed_target_answer(
@@ -5422,11 +6350,21 @@ async fn observed_execution_without_publishable_delivery_reply(
     )
     .await;
     let mut delivery_messages = Vec::new();
-    delivery_messages.extend(execution_summaries);
+    if !delivery_contract_suppresses_execution_summary(
+        loop_state,
+        agent_run_context,
+        std::slice::from_ref(&message),
+    ) {
+        delivery_messages.extend(execution_summaries);
+    }
     delivery_messages.push(message.clone());
     let delivery_consistent =
         crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
     let has_deterministic_answer = deterministic_answer.is_some();
+    let finalizer_summary = finalizer_summary.or_else(|| {
+        has_deterministic_answer
+            .then(|| deterministic_observed_execution_status_summary(loop_state))
+    });
     let (final_status, should_fail_task) = observed_execution_without_publishable_delivery_outcome(
         has_deterministic_answer,
         finalizer_summary.as_ref(),
@@ -5722,6 +6660,20 @@ pub(crate) async fn finalize_loop_reply(
 
     if loop_state.delivery_messages.is_empty() {
         if let Some((answer, summary)) =
+            direct_rustclaw_config_risk_answer(state, user_text, &loop_state)
+        {
+            finalizer_summary = Some(summary);
+            loop_state.last_user_visible_respond = Some(answer.clone());
+            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+            info!(
+                "delivery fallback_from_rustclaw_config_risk_observed task_id={}",
+                task.task_id
+            );
+        }
+    }
+
+    if loop_state.delivery_messages.is_empty() {
+        if let Some((answer, summary)) =
             direct_non_builtin_skill_raw_answer(state, &loop_state, agent_run_context)
         {
             finalizer_summary = Some(summary);
@@ -5946,6 +6898,23 @@ pub(crate) async fn finalize_loop_reply(
         agent_run_context,
         &mut finalizer_summary,
     );
+    replace_delivery_with_deterministic_rustclaw_config_risk_answer(
+        state,
+        task,
+        user_text,
+        &mut loop_state,
+        &mut finalizer_summary,
+    );
+    discard_non_answer_separator_delivery_for_broad_structured_read(&task.task_id, &mut loop_state);
+    if loop_state.delivery_messages.is_empty() {
+        attach_deterministic_structured_file_validation_from_read_range(
+            state,
+            task,
+            user_text,
+            &mut loop_state,
+            &mut finalizer_summary,
+        );
+    }
 
     if let Some(reply) = content_evidence_step_failure_reply_from_loop(
         state,
@@ -6245,11 +7214,14 @@ mod tests {
         compare_paths_size_ratio_answer, content_evidence_step_failure_answer,
         content_evidence_terminal_respond_is_contractual_answer,
         deterministic_missing_observed_target_answer,
-        deterministic_observed_execution_status_answer, direct_config_edit_observed_answer,
-        direct_file_token_from_observed_auto_locator_filename,
+        deterministic_observed_execution_status_answer,
+        deterministic_structured_file_validation_from_read_range,
+        direct_config_edit_observed_answer, direct_file_token_from_observed_auto_locator_filename,
         direct_file_token_from_observed_inventory, direct_non_builtin_skill_raw_answer,
         direct_publishable_observed_answer, direct_quantity_comparison_from_compare_paths,
-        direct_scalar_observed_answer, direct_structured_observed_answer,
+        direct_rustclaw_config_risk_answer, direct_scalar_observed_answer,
+        direct_structured_observed_answer,
+        discard_non_answer_separator_delivery_for_broad_structured_read,
         discard_raw_passthrough_delivery_when_structured_answer_available,
         ensure_requested_success_marker_visible, execution_recipe_closeout_note,
         final_answer_text_from_delivery, finalize_loop_reply, finalizer_requires_clarify,
@@ -6263,6 +7235,7 @@ mod tests {
         prefer_observed_answer_for_exact_contract,
         replace_delivery_with_deterministic_execution_failed_step_answer,
         replace_delivery_with_deterministic_observed_execution_status_answer,
+        replace_delivery_with_deterministic_rustclaw_config_risk_answer,
         replace_delivery_with_latest_tail_read_range_answer,
         replace_delivery_with_observed_markdown_heading_scalar,
         resolve_file_token_from_auto_locator_answer, should_attach_execution_summary,
@@ -6964,6 +7937,68 @@ mod tests {
         assert_eq!(answer, "[app]\nname = \"fixture\"");
     }
 
+    #[test]
+    fn broad_structured_read_drops_separator_and_validates_file() {
+        let state = test_state();
+        let path = std::env::temp_dir().join(format!(
+            "rustclaw_structured_validation_{}.toml",
+            std::process::id()
+        ));
+        std::fs::write(&path, "[memory]\nconfig_path = \"configs/memory.toml\"\n")
+            .expect("write temp toml");
+        let path_text = path.to_string_lossy().to_string();
+        let mut loop_state = crate::agent_engine::LoopState::new(1);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.delivery_messages = vec![
+            "============================================================================="
+                .to_string(),
+        ];
+        loop_state.last_user_visible_respond = Some(
+            "============================================================================="
+                .to_string(),
+        );
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            &serde_json::json!({
+                "action": "read_range",
+                "mode": "head",
+                "requested_n": 120,
+                "path": path_text,
+                "resolved_path": path_text,
+                "excerpt": "1|# ============================================================================="
+            })
+            .to_string(),
+        ));
+
+        assert!(
+            discard_non_answer_separator_delivery_for_broad_structured_read(
+                "task",
+                &mut loop_state
+            )
+        );
+        assert!(loop_state.delivery_messages.is_empty());
+        assert!(loop_state.last_user_visible_respond.is_none());
+
+        let (answer, summary) = deterministic_structured_file_validation_from_read_range(
+            &state,
+            "Vérifie seulement si ce fichier est un TOML valide.",
+            &loop_state,
+        )
+        .expect("structured validation fallback");
+        assert!(
+            answer.contains("toml")
+                && (answer.contains("解析成功") || answer.contains("parsed successfully")),
+            "answer: {answer}"
+        );
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
     fn err_step_result(step_id: &str, skill: &str, error: &str) -> StepExecutionResult {
         StepExecutionResult {
             step_id: step_id.to_string(),
@@ -7045,6 +8080,69 @@ mod tests {
             summary.disposition,
             Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
         );
+    }
+
+    #[test]
+    fn direct_rustclaw_config_risk_answer_uses_structured_field_values() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(1);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "config_basic",
+            r#"{"action":"extract_fields","path":"/home/guagua/rustclaw/configs/config.toml","resolved_path":"/home/guagua/rustclaw/configs/config.toml","count":6,"results":[{"field_path":"tools.allow","resolved_field_path":"tools.allow","exists":true,"value":["*"],"value_text":"[\"*\"]"},{"field_path":"tools.allow_sudo","resolved_field_path":"tools.allow_sudo","exists":true,"value":true,"value_text":"true"},{"field_path":"tools.allow_path_outside_workspace","resolved_field_path":"tools.allow_path_outside_workspace","exists":true,"value":true,"value_text":"true"},{"field_path":"self_extension.enabled","resolved_field_path":"self_extension.enabled","exists":true,"value":false,"value_text":"false"},{"field_path":"worker.task_timeout_seconds","resolved_field_path":"worker.task_timeout_seconds","exists":true,"value":3600,"value_text":"3600"},{"field_path":"server.listen","resolved_field_path":"server.listen","exists":true,"value":"0.0.0.0:8787","value_text":"0.0.0.0:8787"}]}"#,
+        ));
+
+        let (answer, summary) = direct_rustclaw_config_risk_answer(
+            &state,
+            "configs/config.toml の RustClaw 設定リスクを確認し、重要な点だけ答えて。",
+            &loop_state,
+        )
+        .expect("structured config risk answer");
+
+        assert!(answer.contains("Found 4 config risk(s)"));
+        assert!(answer.contains("tools.allow=[\"*\"]"));
+        assert!(answer.contains("tools.allow_sudo=true"));
+        assert!(answer.contains("tools.allow_path_outside_workspace=true"));
+        assert!(answer.contains("server.listen=\"0.0.0.0:8787\""));
+        assert!(!answer.contains("self_extension.enabled=true"));
+        assert!(!answer.contains("86400"));
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
+    #[test]
+    fn rustclaw_config_risk_replacement_drops_ungrounded_synthesis() {
+        let state = test_state();
+        let task = claimed_task("task-config-risk-replace");
+        let mut loop_state = crate::agent_engine::LoopState::new(1);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state
+            .delivery_messages
+            .push("self_extension.enabled=true and worker.task_timeout_seconds=86400".to_string());
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "config_basic",
+            r#"{"action":"extract_fields","path":"configs/config.toml","resolved_path":"/home/guagua/rustclaw/configs/config.toml","results":[{"field_path":"tools.allow_sudo","resolved_field_path":"tools.allow_sudo","exists":true,"value":true},{"field_path":"tools.allow_path_outside_workspace","resolved_field_path":"tools.allow_path_outside_workspace","exists":true,"value":true},{"field_path":"self_extension.enabled","resolved_field_path":"self_extension.enabled","exists":true,"value":false},{"field_path":"worker.task_timeout_seconds","resolved_field_path":"worker.task_timeout_seconds","exists":true,"value":3600}]}"#,
+        ));
+        let mut summary = None;
+
+        assert!(replace_delivery_with_deterministic_rustclaw_config_risk_answer(
+            &state,
+            &task,
+            "Check configs/config.toml for RustClaw configuration risks and list only important findings.",
+            &mut loop_state,
+            &mut summary,
+        ));
+
+        let answer = loop_state.delivery_messages.join("\n");
+        assert!(answer.contains("tools.allow_sudo=true"));
+        assert!(answer.contains("tools.allow_path_outside_workspace=true"));
+        assert!(!answer.contains("self_extension.enabled=true"));
+        assert!(!answer.contains("86400"));
+        assert!(summary.is_some());
     }
 
     #[tokio::test]
@@ -7250,6 +8348,200 @@ mod tests {
             delivery.last().map(String::as_str),
             Some("rustclaw-nl-fixture")
         );
+    }
+
+    #[test]
+    fn execution_summary_drops_existing_summary_for_scalar_delivery_contract() {
+        let route = scalar_route_result();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"description","value_text":"Local fixture package for RustClaw NL regression tests"}"#,
+        ));
+        let mut delivery = vec![
+            "**実行過程**\n1. ツール `config_basic`を呼び出しました".to_string(),
+            "Local fixture package for RustClaw NL regression tests".to_string(),
+        ];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(
+            delivery,
+            vec!["Local fixture package for RustClaw NL regression tests"]
+        );
+        assert!(!delivery
+            .iter()
+            .any(|message| crate::finalize::is_execution_summary_message(message)));
+    }
+
+    #[test]
+    fn execution_summary_drops_existing_summary_when_structured_keys_delivery_matches_scalar_observation(
+    ) {
+        let mut route = free_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "config_basic",
+            r#"{"action":"structured_keys","path":"package.json","keys":["scripts.lint"]}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"scripts.lint","value":"echo lint","value_text":"echo lint","value_type":"string"}"#,
+        ));
+        let mut delivery = vec![
+            "**Execution**\n1. Called tool `config_basic` with action `structured_keys`."
+                .to_string(),
+            "**Execution**\n2. Called tool `config_basic` with action `extract_field`.".to_string(),
+            "echo lint".to_string(),
+        ];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(delivery, vec!["echo lint"]);
+        assert!(!delivery
+            .iter()
+            .any(|message| crate::finalize::is_execution_summary_message(message)));
+    }
+
+    #[test]
+    fn execution_summary_drops_existing_summary_for_config_guard_delivery() {
+        let mut route = free_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "config_edit",
+            r#"{"action":"guard_config","format":"toml","path":"/home/guagua/rustclaw/configs/config.toml","resolved_path":"/home/guagua/rustclaw/configs/config.toml","risk_count":3,"risks":["tools.allow_sudo=true","tools.allow_path_outside_workspace=true","telegram.sendfile.full_access=true"]}"#,
+        ));
+        let answer = "Found 3 config risk(s) in `/home/guagua/rustclaw/configs/config.toml`: tools.allow_sudo=true; tools.allow_path_outside_workspace=true; telegram.sendfile.full_access=true.";
+        let mut delivery = vec![
+            "**実行過程**\n1. スキル `config_edit`（action=guard_config）を呼び出しました"
+                .to_string(),
+            answer.to_string(),
+        ];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(delivery, vec![answer]);
+        assert!(!delivery
+            .iter()
+            .any(|message| crate::finalize::is_execution_summary_message(message)));
+    }
+
+    #[test]
+    fn execution_summary_drops_existing_summary_for_transform_result_delivery() {
+        let mut route = free_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "transform",
+            r#"{"status":"ok","formatted":null,"result":[{"name":"beta"},{"name":"alpha"}]}"#,
+        ));
+        let answer = r#"[{"name":"beta"},{"name":"alpha"}]"#;
+        let mut delivery = vec![
+            "**Execution**\n1. Called skill `transform` (action=transform_data)".to_string(),
+            answer.to_string(),
+        ];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(delivery, vec![answer]);
+        assert!(!delivery
+            .iter()
+            .any(|message| crate::finalize::is_execution_summary_message(message)));
+    }
+
+    #[test]
+    fn execution_summary_drops_existing_summary_for_strict_synthesized_delivery() {
+        let mut route = free_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"inventory_dir","names":["README.md","configs"],"counts":{"total":2}}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "synthesize_answer",
+            "README.md is documentation; configs contains settings.",
+        ));
+        let answer = "README.md is documentation; configs contains settings.";
+        let mut delivery = vec![
+            "**Execution**\n1. Called tool `fs_basic` (action=inventory_dir)".to_string(),
+            answer.to_string(),
+        ];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(delivery, vec![answer]);
+        assert!(!delivery
+            .iter()
+            .any(|message| crate::finalize::is_execution_summary_message(message)));
+    }
+
+    #[test]
+    fn execution_summary_drops_existing_summary_for_synthesized_content_delivery() {
+        let mut route = free_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"scripts","value":{"build":"echo build","dev":"echo dev","lint":"echo lint"},"value_text":"{\"build\":\"echo build\",\"dev\":\"echo dev\",\"lint\":\"echo lint\"}","value_type":"object"}"#,
+        ));
+        let mut delivery = vec![
+            "**执行过程**\n1. 调用工具 `config_basic`".to_string(),
+            "该 scripts 字段定义了 build、dev、lint 三个脚本，均为 echo 占位命令。".to_string(),
+        ];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(
+            delivery,
+            vec!["该 scripts 字段定义了 build、dev、lint 三个脚本，均为 echo 占位命令。"]
+        );
+        assert!(!delivery
+            .iter()
+            .any(|message| crate::finalize::is_execution_summary_message(message)));
     }
 
     #[test]
@@ -7756,6 +9048,51 @@ mod tests {
         assert_eq!(reply.messages.len(), 2);
         assert!(reply.messages[0].contains("**执行过程**"));
         assert!(reply.messages[0].contains("system_basic"));
+    }
+
+    #[tokio::test]
+    async fn observed_execution_without_delivery_uses_structured_container_summary() {
+        let state = test_state();
+        let task = claimed_task("task-structured-container-summary");
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"scripts","format":"json","path":"package.json","resolved_field_path":"scripts","value":{"build":"echo build","dev":"echo dev","lint":"echo lint"},"value_text":"{\"build\":\"echo build\",\"dev\":\"echo dev\",\"lint\":\"echo lint\"}","value_type":"object"}"#,
+        ));
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let reply = observed_execution_without_publishable_delivery_reply(
+            &state,
+            &task,
+            "Read the scripts field from package.json and summarize it briefly.",
+            &loop_state,
+            Some(&ctx),
+            None,
+            "no publishable final answer was produced",
+        )
+        .await
+        .expect("observed execution reply");
+
+        assert!(!reply.should_fail_task);
+        assert_eq!(
+            reply.text,
+            "`scripts` contains 3 entries: build=echo build, dev=echo dev, lint=echo lint."
+        );
+        assert_eq!(reply.messages, vec![reply.text.clone()]);
+        assert_eq!(
+            reply
+                .task_journal
+                .as_ref()
+                .and_then(|journal| journal.final_status),
+            Some(crate::task_journal::TaskJournalFinalStatus::Success)
+        );
     }
 
     #[test]

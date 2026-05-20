@@ -536,6 +536,9 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
         "config_validation" | "structured_config_validation" => {
             Some(crate::OutputSemanticKind::ConfigValidation)
         }
+        "config_risk_assessment" | "config_risk" | "structured_config_risk" | "config_guard" => {
+            Some(crate::OutputSemanticKind::ConfigRiskAssessment)
+        }
         "sqlite_table_listing" => Some(crate::OutputSemanticKind::SqliteTableListing),
         "sqlite_table_names_only" => Some(crate::OutputSemanticKind::SqliteTableNamesOnly),
         "sqlite_database_kind_judgment" => {

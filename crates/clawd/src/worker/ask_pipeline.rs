@@ -806,6 +806,11 @@ fn unbound_model_context_target_route_should_force_clarify(
     {
         return false;
     }
+    if route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+        && route_result.output_contract.semantic_kind == crate::OutputSemanticKind::None
+    {
+        return false;
+    }
     if semantic_kind_can_execute_without_locator(route_result.output_contract.semantic_kind)
         && !(route_result.output_contract.semantic_kind
             == crate::OutputSemanticKind::RawCommandOutput
@@ -2412,6 +2417,35 @@ mod tests {
         assert!(!unbound_targeted_evidence_route_should_force_clarify(
             "Which package manager is detected for this workspace?",
             &route,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn unbound_model_context_allows_current_workspace_generic_observation() {
+        let state = test_state_with_root(make_temp_root("unbound_model_current_workspace_generic"));
+        let mut route = executable_filename_route();
+        route.resolved_intent =
+            "Preview how files in the current workspace could be categorized.".to_string();
+        route.route_reason =
+            "The request needs observing the current workspace before summarizing.".to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(!unbound_model_context_target_route_should_force_clarify(
+            &state,
+            "preview the current workspace categories",
+            &route,
+            None,
             &snapshot,
         ));
     }

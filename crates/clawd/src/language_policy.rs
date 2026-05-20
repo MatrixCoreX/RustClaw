@@ -194,6 +194,12 @@ pub(crate) fn text_language_conflicts_with_hint(text: &str, language_hint: &str)
     if hint.starts_with("zh") {
         return counts.cjk == 0 && counts.ascii_alpha > 16;
     }
+    if hint.starts_with("ko") {
+        return counts.hangul == 0 && counts.ascii_alpha > 16;
+    }
+    if hint.starts_with("ja") {
+        return counts.kana == 0 && counts.cjk == 0 && counts.ascii_alpha > 16;
+    }
     false
 }
 
@@ -451,6 +457,18 @@ mod tests {
         assert!(text_language_conflicts_with_hint(
             "I couldn't determine the requested action.",
             "zh-CN"
+        ));
+        assert!(text_language_conflicts_with_hint(
+            "# Service Notes\n\nRustClaw test fixture service notes.",
+            "ko"
+        ));
+        assert!(text_language_conflicts_with_hint(
+            "# Service Notes\n\nRustClaw test fixture service notes.",
+            "ja"
+        ));
+        assert!(!text_language_conflicts_with_hint(
+            "서비스 노트의 핵심은 로컬 테스트 서비스 설명입니다.",
+            "ko"
         ));
     }
 

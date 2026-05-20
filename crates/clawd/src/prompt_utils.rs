@@ -583,6 +583,20 @@ fn normalize_direct_answer_gate_response_shape(raw: &str) -> &'static str {
     }
 }
 
+fn direct_answer_gate_semantic_token_requests_scalar_shape(raw: &str) -> bool {
+    matches!(
+        normalize_schema_token_for_gate(raw).as_str(),
+        "scalar"
+            | "scalar_value"
+            | "scalar_only"
+            | "value"
+            | "value_only"
+            | "single_value"
+            | "field_value"
+            | "file_field_value"
+    )
+}
+
 fn normalize_direct_answer_gate_delivery_intent(raw: &str) -> &'static str {
     match normalize_schema_token_for_gate(raw).as_str() {
         "file_single" | "single_file" | "file" | "deliver_file" | "file_delivery" => "file_single",
@@ -686,6 +700,9 @@ fn normalize_direct_answer_gate_semantic_kind(raw: &str) -> &'static str {
         }
         "structured_keys" => "structured_keys",
         "config_validation" | "structured_config_validation" => "config_validation",
+        "config_risk_assessment" | "config_risk" | "structured_config_risk" | "config_guard" => {
+            "config_risk_assessment"
+        }
         "package_manager_detection" | "package_manager_detect" | "package_detect_manager" => {
             "package_manager_detection"
         }
@@ -804,7 +821,10 @@ fn canonicalize_direct_answer_gate_contract(value: Value) -> (Value, bool) {
             normalized = true;
         }
     }
+    let mut semantic_token_requests_scalar_shape = false;
     if let Some(Value::String(raw)) = map.get("semantic_kind").cloned() {
+        semantic_token_requests_scalar_shape =
+            direct_answer_gate_semantic_token_requests_scalar_shape(&raw);
         let canonical = normalize_direct_answer_gate_semantic_kind(&raw);
         if canonical != raw {
             map.insert(
@@ -813,6 +833,18 @@ fn canonicalize_direct_answer_gate_contract(value: Value) -> (Value, bool) {
             );
             normalized = true;
         }
+    }
+    if semantic_token_requests_scalar_shape
+        && map
+            .get("response_shape")
+            .and_then(Value::as_str)
+            .is_some_and(|shape| shape != "scalar" && shape != "file_token")
+    {
+        map.insert(
+            "response_shape".to_string(),
+            Value::String("scalar".to_string()),
+        );
+        normalized = true;
     }
     let self_extension = map
         .remove("self_extension")

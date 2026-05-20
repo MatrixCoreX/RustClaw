@@ -1098,6 +1098,7 @@ fn action_supports_structured_direct_observed_finalize(
                 | crate::OutputSemanticKind::FilePaths
                 | crate::OutputSemanticKind::ContentPresenceCheck
                 | crate::OutputSemanticKind::ConfigValidation
+                | crate::OutputSemanticKind::ConfigRiskAssessment
         )
     }) {
         return false;
@@ -1134,6 +1135,13 @@ fn action_supports_structured_direct_observed_finalize(
                     })
             }
             Some("validate") => !one_sentence,
+            _ => false,
+        },
+        "config_edit" => match action {
+            Some("guard_config") => route_result.is_some_and(|route| {
+                route.output_contract.semantic_kind
+                    == crate::OutputSemanticKind::ConfigRiskAssessment
+            }),
             _ => false,
         },
         "system_basic" => match action {
@@ -2185,6 +2193,9 @@ fn scalar_content_auto_locator_observation_plan(
     if !Path::new(path).is_file() {
         return None;
     }
+    if is_supported_archive_path(path) {
+        return None;
+    }
     if route.output_contract.semantic_kind == crate::OutputSemanticKind::ConfigValidation {
         return Some(vec![config_basic_validate_action(path.to_string())]);
     }
@@ -2900,6 +2911,121 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_result(
     ))
 }
 
+fn archive_basic_enabled_for_planning(state: &AppState) -> bool {
+    let enabled_skills = state.get_skills_list();
+    enabled_skills.is_empty() || enabled_skills.contains("archive_basic")
+}
+
+fn archive_list_auto_locator_target_path(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<String> {
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !route_expects_terminal_user_answer(route)
+    {
+        return None;
+    }
+    auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (!hint.is_empty()).then_some(hint)
+        })
+        .filter(|path| is_supported_archive_path(path))
+        .map(ToString::to_string)
+}
+
+fn archive_list_auto_locator_deterministic_plan_result(
+    goal: &str,
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1
+        || loop_state.has_tool_or_skill_output
+        || !archive_basic_enabled_for_planning(state)
+    {
+        return None;
+    }
+    let archive = archive_list_auto_locator_target_path(route_result, auto_locator_path)?;
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "archive_basic".to_string(),
+            args: serde_json::json!({
+                "action": "list",
+                "archive": archive,
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn transform_skill_enabled_for_planning(state: &AppState) -> bool {
+    let enabled_skills = state.get_skills_list();
+    enabled_skills.is_empty() || enabled_skills.contains("transform")
+}
+
+fn inline_json_transform_args_from_text(text: &str) -> Option<Value> {
+    if !crate::intent::surface_signals::inline_json_transform_request(text) {
+        return None;
+    }
+    let raw = crate::extract_first_json_value_any(text)?;
+    let value = serde_json::from_str::<Value>(&raw).ok()?;
+    let args = value
+        .as_object()
+        .filter(|obj| obj.get("skill").and_then(Value::as_str) == Some("transform"))
+        .and_then(|obj| obj.get("args").cloned())
+        .unwrap_or(value);
+    args.as_object()?;
+    Some(normalize_transform_args(args))
+}
+
+fn inline_json_transform_deterministic_plan_result(
+    goal: &str,
+    state: &AppState,
+    loop_state: &LoopState,
+    original_user_text: &str,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1
+        || loop_state.has_tool_or_skill_output
+        || !transform_skill_enabled_for_planning(state)
+    {
+        return None;
+    }
+    let args = inline_json_transform_args_from_text(original_user_text)
+        .or_else(|| inline_json_transform_args_from_text(goal))?;
+    let actions = vec![AgentAction::CallSkill {
+        skill: "transform".to_string(),
+        args,
+    }];
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
 fn replace_scalar_path_respond_only_with_auto_locator_observation(
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
@@ -3561,6 +3687,18 @@ fn planned_bounded_file_read_path(action: &AgentAction) -> Option<&str> {
         | AgentAction::Respond { .. }
         | AgentAction::Think { .. } => None,
     }
+}
+
+fn planned_structured_config_observation_path(action: &AgentAction) -> Option<&str> {
+    match action {
+        AgentAction::CallSkill { args, .. } | AgentAction::CallTool { args, .. }
+            if action_is_readonly_config_observation(action) =>
+        {
+            args.get("path").and_then(Value::as_str).map(str::trim)
+        }
+        _ => None,
+    }
+    .filter(|path| !path.is_empty())
 }
 
 fn route_allows_single_document_parse_synthesis(route: &RouteResult) -> bool {
@@ -4694,6 +4832,13 @@ fn normalize_legacy_compatibility_actions(
     let actions =
         strip_terminal_discussion_for_direct_skill_passthrough(state, route_result, actions);
     let actions = normalize_action_schema_aliases(state, route_result, actions);
+    let actions = rewrite_invalid_rustclaw_config_section_field_reads_to_guard(
+        route_result,
+        auto_locator_path,
+        actions,
+    );
+    let actions =
+        rewrite_rustclaw_config_risk_assessment_to_guard(route_result, auto_locator_path, actions);
     let actions =
         rewrite_rustclaw_config_validation_to_guard(route_result, auto_locator_path, actions);
     let actions = rewrite_sqlite_table_listing_plan_to_db_basic(
@@ -4766,6 +4911,201 @@ fn rewrite_rustclaw_config_validation_to_guard(
             }
         })
         .collect()
+}
+
+fn rewrite_rustclaw_config_risk_assessment_to_guard(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if route_result.is_none_or(|route| {
+        route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigRiskAssessment
+    }) || actions.iter().any(is_config_guard_action)
+    {
+        return actions;
+    }
+    let Some(path) =
+        rustclaw_config_risk_assessment_target(route_result, auto_locator_path, &actions)
+    else {
+        return actions;
+    };
+    info!(
+        "plan_rewrite_rustclaw_config_risk_assessment_to_guard path={}",
+        crate::truncate_for_log(&path)
+    );
+    let mut args = serde_json::Map::new();
+    args.insert(
+        "action".to_string(),
+        Value::String("guard_config".to_string()),
+    );
+    args.insert("path".to_string(), Value::String(path));
+    args.insert("format".to_string(), Value::String("toml".to_string()));
+    vec![AgentAction::CallTool {
+        tool: "config_edit".to_string(),
+        args: Value::Object(args),
+    }]
+}
+
+fn rustclaw_config_risk_assessment_target(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+    actions: &[AgentAction],
+) -> Option<String> {
+    actions
+        .iter()
+        .filter_map(planned_config_risk_observation_path)
+        .find(|path| is_rustclaw_main_config_path(path))
+        .or_else(|| {
+            auto_locator_path
+                .map(str::trim)
+                .filter(|path| is_rustclaw_main_config_path(path))
+        })
+        .or_else(|| {
+            route_result
+                .map(|route| route.output_contract.locator_hint.trim())
+                .filter(|path| is_rustclaw_main_config_path(path))
+        })
+        .map(ToString::to_string)
+}
+
+fn planned_config_risk_observation_path(action: &AgentAction) -> Option<&str> {
+    planned_structured_config_observation_path(action)
+        .or_else(|| planned_bounded_file_read_path(action))
+}
+
+fn rewrite_invalid_rustclaw_config_section_field_reads_to_guard(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if actions.iter().any(is_config_guard_action) {
+        return actions;
+    }
+    let Some((path, format)) = invalid_rustclaw_config_section_field_read_target(
+        route_result,
+        auto_locator_path,
+        &actions,
+    ) else {
+        return actions;
+    };
+    info!(
+        "plan_rewrite_invalid_rustclaw_config_section_field_read_to_guard path={}",
+        crate::truncate_for_log(&path)
+    );
+    let mut args = serde_json::Map::new();
+    args.insert(
+        "action".to_string(),
+        Value::String("guard_config".to_string()),
+    );
+    args.insert("path".to_string(), Value::String(path));
+    if let Some(format) = format {
+        args.insert("format".to_string(), Value::String(format));
+    }
+    vec![AgentAction::CallTool {
+        tool: "config_edit".to_string(),
+        args: Value::Object(args),
+    }]
+}
+
+fn invalid_rustclaw_config_section_field_read_target(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+    actions: &[AgentAction],
+) -> Option<(String, Option<String>)> {
+    actions.iter().find_map(|action| {
+        let (skill, args) = match action {
+            AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
+            AgentAction::CallTool { tool, args } => (tool.as_str(), args),
+            _ => return None,
+        };
+        let action_name = args
+            .get("action")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        let is_field_read = (skill.eq_ignore_ascii_case("config_basic")
+            && matches!(action_name, "read_field" | "read_fields"))
+            || (skill.eq_ignore_ascii_case("system_basic")
+                && matches!(action_name, "extract_field" | "extract_fields"));
+        if !is_field_read || !config_field_args_are_section_headers(args) {
+            return None;
+        }
+        let path = args
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .or_else(|| {
+                auto_locator_path
+                    .map(str::trim)
+                    .filter(|path| !path.is_empty())
+            })
+            .or_else(|| {
+                route_result
+                    .map(|route| route.output_contract.locator_hint.trim())
+                    .filter(|path| !path.is_empty())
+            })?;
+        if !is_rustclaw_main_config_path(path) {
+            return None;
+        }
+        let format = args
+            .get("format")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .or_else(|| Some("toml".to_string()));
+        Some((path.to_string(), format))
+    })
+}
+
+fn config_field_args_are_section_headers(args: &Value) -> bool {
+    let fields = args
+        .get("field_paths")
+        .or_else(|| args.get("fields"))
+        .map(config_field_selector_list)
+        .filter(|fields| !fields.is_empty())
+        .or_else(|| {
+            args.get("field_path")
+                .or_else(|| args.get("field"))
+                .or_else(|| args.get("key"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|field| !field.is_empty())
+                .map(|field| vec![field.to_string()])
+        })
+        .unwrap_or_default();
+    fields.len() >= 2
+        && fields
+            .iter()
+            .all(|field| config_field_is_section_header(field))
+}
+
+fn config_field_selector_list(value: &Value) -> Vec<String> {
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|field| !field.is_empty())
+            .map(ToString::to_string)
+            .collect(),
+        Value::String(text) => text
+            .split(',')
+            .map(str::trim)
+            .filter(|field| !field.is_empty())
+            .map(ToString::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn config_field_is_section_header(field: &str) -> bool {
+    let field = field.trim();
+    field.len() > 2
+        && field.starts_with('[')
+        && field.ends_with(']')
+        && !field[1..field.len() - 1].trim().is_empty()
 }
 
 fn is_config_guard_action(action: &AgentAction) -> bool {
@@ -4888,6 +5228,9 @@ fn normalize_action_schema_aliases(
     let actions = strip_directory_read_range_after_inventory_dir(actions);
     let actions = broaden_default_read_range_for_structured_text(actions);
     let actions = rewrite_config_validation_read_plan_to_validate(route_result, None, actions);
+    let actions =
+        rewrite_invalid_rustclaw_config_section_field_reads_to_guard(route_result, None, actions);
+    let actions = rewrite_rustclaw_config_risk_assessment_to_guard(route_result, None, actions);
     let actions = rewrite_structured_scalar_field_read_plan_to_read_field(
         route_result,
         route_result
@@ -5037,6 +5380,11 @@ fn config_validation_target_path(
         .iter()
         .find_map(planned_bounded_file_read_path)
         .or_else(|| {
+            actions
+                .iter()
+                .find_map(planned_structured_config_observation_path)
+        })
+        .or_else(|| {
             auto_locator_path
                 .map(str::trim)
                 .filter(|path| !path.is_empty())
@@ -5072,7 +5420,10 @@ fn rewrite_config_validation_read_plan_to_validate(
     let mut inserted = false;
     let mut changed = false;
     for action in actions {
-        if !inserted && action_observes_bounded_file_content(&action) {
+        if !inserted
+            && (action_observes_bounded_file_content(&action)
+                || action_is_readonly_config_observation(&action))
+        {
             rewritten.push(config_basic_validate_action(path.clone()));
             inserted = true;
             changed = true;
@@ -5135,6 +5486,8 @@ fn normalize_evidence_contract_actions(
         auto_locator_path,
         actions,
     );
+    let actions =
+        rewrite_config_validation_read_plan_to_validate(route_result, auto_locator_path, actions);
     let actions = rewrite_extract_field_paths_to_structured_candidates(
         state,
         route_result,
@@ -5645,10 +5998,42 @@ fn current_turn_requests_config_edit(
         .iter()
         .filter(|action| action_targets_config_edit(action))
         .collect::<Vec<_>>();
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ConfigRiskAssessment {
+        return !config_actions.is_empty()
+            && config_actions
+                .iter()
+                .all(|action| config_edit_action_is_route_guard(action, route));
+    }
     !config_actions.is_empty()
         && config_actions
             .iter()
             .all(|action| config_edit_action_has_current_structural_anchor(action, request))
+}
+
+fn config_edit_action_is_route_guard(action: &AgentAction, route: &RouteResult) -> bool {
+    let (tool, args) = match action {
+        AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args } => {
+            (tool.as_str(), args)
+        }
+        _ => return false,
+    };
+    if !tool.eq_ignore_ascii_case("config_edit") {
+        return false;
+    }
+    if args.get("action").and_then(Value::as_str).map(str::trim) != Some("guard_config") {
+        return false;
+    }
+    let Some(path) = json_trimmed_string_arg(args, &["path", "file", "file_path", "config_path"])
+    else {
+        return false;
+    };
+    let locator = route.output_contract.locator_hint.trim();
+    is_rustclaw_main_config_path(&path)
+        && (locator.is_empty()
+            || is_rustclaw_main_config_path(locator)
+            || path
+                .replace('\\', "/")
+                .eq_ignore_ascii_case(&locator.replace('\\', "/")))
 }
 
 fn config_edit_action_has_current_structural_anchor(action: &AgentAction, request: &str) -> bool {
@@ -6663,7 +7048,100 @@ fn normalize_transform_args(mut args: Value) -> Value {
             info!("plan_normalize_transform_sort_alias_to_ops");
         }
     }
+    normalize_transform_ops(obj);
     args
+}
+
+fn normalize_transform_ops(obj: &mut serde_json::Map<String, Value>) {
+    let Some(ops) = obj.get_mut("ops").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for op in ops {
+        let Some(op_obj) = op.as_object_mut() else {
+            continue;
+        };
+        let op_name = op_obj
+            .get("op")
+            .and_then(Value::as_str)
+            .map(|name| name.trim().to_ascii_lowercase())
+            .unwrap_or_default();
+        if op_name == "filter" {
+            normalize_transform_filter_op(op_obj);
+        }
+    }
+}
+
+fn normalize_transform_filter_op(op: &mut serde_json::Map<String, Value>) {
+    let Some(where_obj) = op.get("where").and_then(Value::as_object).cloned() else {
+        return;
+    };
+    if !op.contains_key("field") {
+        if let Some(field) = where_obj
+            .get("field")
+            .or_else(|| where_obj.get("path"))
+            .filter(|value| has_non_empty_json_value(value))
+            .cloned()
+        {
+            op.insert("field".to_string(), field);
+        }
+    }
+    if !op.contains_key("path") {
+        if let Some(path) = where_obj
+            .get("path")
+            .filter(|value| has_non_empty_json_value(value))
+            .cloned()
+        {
+            op.insert("path".to_string(), path);
+        }
+    }
+    if !op.contains_key("cmp") {
+        if let Some(cmp) = where_obj
+            .get("cmp")
+            .or_else(|| where_obj.get("operator"))
+            .and_then(Value::as_str)
+            .and_then(normalize_transform_cmp_alias)
+        {
+            op.insert("cmp".to_string(), Value::String(cmp.to_string()));
+        } else if let Some(cmp) = transform_where_comparator_key(&where_obj) {
+            op.insert("cmp".to_string(), Value::String(cmp.to_string()));
+        }
+    }
+    if !op.contains_key("value") {
+        if let Some(value) = where_obj
+            .get("value")
+            .filter(|value| has_non_empty_json_value(value))
+            .cloned()
+        {
+            op.insert("value".to_string(), value);
+        } else if let Some(cmp_key) = transform_where_comparator_key(&where_obj) {
+            if let Some(value) = where_obj.get(cmp_key).cloned() {
+                op.insert("value".to_string(), value);
+            }
+        }
+    }
+}
+
+fn transform_where_comparator_key(where_obj: &serde_json::Map<String, Value>) -> Option<&str> {
+    where_obj
+        .keys()
+        .filter_map(|key| normalize_transform_cmp_alias(key).map(|cmp| (key.as_str(), cmp)))
+        .find(|(key, _)| !matches!(*key, "field" | "path" | "cmp" | "operator" | "value" | "op"))
+        .map(|(key, _)| key)
+}
+
+fn normalize_transform_cmp_alias(raw: &str) -> Option<&'static str> {
+    match raw.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+        "eq" | "equal" | "equals" => Some("eq"),
+        "ne" | "neq" | "not_eq" | "not_equals" => Some("ne"),
+        "gt" => Some("gt"),
+        "gte" | "ge" => Some("gte"),
+        "lt" => Some("lt"),
+        "lte" | "le" => Some("lte"),
+        "contains" => Some("contains"),
+        "in" => Some("in"),
+        "exists" => Some("exists"),
+        _ => None,
+    }
 }
 
 fn normalize_transform_schema_aliases(actions: Vec<AgentAction>) -> Vec<AgentAction> {
@@ -12391,6 +12869,18 @@ pub(super) async fn plan_round_actions(
     let explicit_command_request = route_allows_explicit_command_preservation(route_result)
         && explicit_command_segment(&state.policy.command_intent, &original_user_text_for_policy)
             .is_some();
+    if let Some(plan_result) = inline_json_transform_deterministic_plan_result(
+        goal,
+        state,
+        loop_state,
+        &original_user_text_for_policy,
+    ) {
+        info!(
+            "plan_deterministic_inline_json_transform task_id={} round={}",
+            task.task_id, loop_state.round_no
+        );
+        return Ok(plan_result);
+    }
     if explicit_command_request {
         if let Some(plan_result) = explicit_command_deterministic_plan_result(
             state,
@@ -12468,6 +12958,19 @@ pub(super) async fn plan_round_actions(
         ) {
             info!(
                 "plan_deterministic_file_paths_locator task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
+        if let Some(plan_result) = archive_list_auto_locator_deterministic_plan_result(
+            goal,
+            state,
+            route_result,
+            loop_state,
+            auto_locator_path,
+        ) {
+            info!(
+                "plan_deterministic_archive_list_auto_locator task_id={} round={}",
                 task.task_id, loop_state.round_no
             );
             return Ok(plan_result);
@@ -12977,6 +13480,7 @@ mod tests {
 
     use super::{
         action_targets_config_edit, actions_use_ad_hoc_command_without_route_preferred_skill,
+        archive_list_auto_locator_deterministic_plan_result,
         broaden_default_read_range_for_structured_text, build_lightweight_skill_playbooks_text,
         build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
         can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
@@ -12988,7 +13492,8 @@ mod tests {
         fill_missing_read_range_path_from_route_locator,
         generic_directory_auto_locator_observation_plan,
         has_pre_observation_structured_output_shape,
-        inject_synthesize_answer_for_bare_placeholder_respond, is_bare_last_output_placeholder,
+        inject_synthesize_answer_for_bare_placeholder_respond,
+        inline_json_transform_deterministic_plan_result, is_bare_last_output_placeholder,
         normalize_archive_basic_schema_aliases, normalize_git_basic_schema_aliases,
         normalize_planned_actions, normalize_planned_actions_with_original,
         normalize_planned_actions_with_original_and_context, normalize_system_basic_schema_aliases,
@@ -13011,6 +13516,7 @@ mod tests {
         rewrite_terminal_synthesis_placeholder_respond,
         rewrite_unresolved_template_arg_multi_file_read_plan, round1_prompt_spec_for_class,
         scalar_content_auto_locator_deterministic_plan_result,
+        scalar_content_auto_locator_observation_plan,
         scalar_path_auto_locator_deterministic_plan_result,
         scalar_path_auto_locator_observation_plan,
         scalar_path_directory_locator_search_deterministic_plan_result,
@@ -14327,6 +14833,197 @@ mod tests {
     }
 
     #[test]
+    fn config_validation_contract_normalizes_config_field_read_to_validate() {
+        let state = test_state();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "configs/config.toml".to_string();
+        route.resolved_intent =
+            "Validate TOML syntax of configs/config.toml and answer pass or fail".to_string();
+        let actions = vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "read_field",
+                "path": "/home/guagua/rustclaw/configs/config.toml",
+                "field_path": "memory",
+            }),
+        }];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "Validate only the TOML syntax of configs/config.toml and answer pass or fail.",
+            Some("/home/guagua/rustclaw/configs/config.toml"),
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "config_basic", "validate");
+        assert_eq!(
+            args.get("validation_profile").and_then(Value::as_str),
+            Some("syntax_only")
+        );
+        assert_eq!(args.get("format").and_then(Value::as_str), Some("toml"));
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some("/home/guagua/rustclaw/configs/config.toml")
+        );
+        assert!(
+            normalized
+                .iter()
+                .all(|action| !planned_call_is(action, "config_basic", "read_field")),
+            "normalized actions: {normalized:?}"
+        );
+    }
+
+    #[test]
+    fn rustclaw_config_section_header_field_reads_rewrite_to_guard_config() {
+        let state = test_state();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "configs/config.toml".to_string();
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "list_keys",
+                    "path": "/home/guagua/rustclaw/configs/config.toml",
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "read_fields",
+                    "path": "/home/guagua/rustclaw/configs/config.toml",
+                    "field_paths": ["[server]", "[security]", "[auth]"],
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_2".to_string()],
+            },
+        ];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "Inspect RustClaw configuration file configs/config.toml for security or risk-related settings and present only the important findings.",
+            Some("/home/guagua/rustclaw/configs/config.toml"),
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "config_edit", "guard_config");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some("/home/guagua/rustclaw/configs/config.toml")
+        );
+        assert_eq!(args.get("format").and_then(Value::as_str), Some("toml"));
+        assert!(
+            normalized
+                .iter()
+                .all(|action| !planned_call_is(action, "config_basic", "read_fields")),
+            "normalized actions: {normalized:?}"
+        );
+    }
+
+    #[test]
+    fn config_risk_assessment_rewrites_key_listing_to_guard_config() {
+        let state = test_state();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "configs/config.toml".to_string();
+        let actions = vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "list_keys",
+                "path": "/home/guagua/rustclaw/configs/config.toml",
+            }),
+        }];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "Structured RustClaw config risk assessment.",
+            Some("/home/guagua/rustclaw/configs/config.toml"),
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "config_edit", "guard_config");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some("/home/guagua/rustclaw/configs/config.toml")
+        );
+        assert_eq!(args.get("format").and_then(Value::as_str), Some("toml"));
+        assert!(
+            normalized
+                .iter()
+                .all(|action| !planned_call_is(action, "config_basic", "list_keys")),
+            "normalized actions: {normalized:?}"
+        );
+    }
+
+    #[test]
+    fn config_risk_assessment_rewrites_file_head_read_to_guard_config() {
+        let state = test_state();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "configs/config.toml".to_string();
+        let actions = vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "/home/guagua/rustclaw/configs/config.toml",
+                "mode": "head",
+                "n": 120,
+            }),
+        }];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "Structured RustClaw config risk assessment.",
+            Some("/home/guagua/rustclaw/configs/config.toml"),
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "config_edit", "guard_config");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some("/home/guagua/rustclaw/configs/config.toml")
+        );
+        assert!(
+            normalized
+                .iter()
+                .all(|action| !planned_call_is(action, "fs_basic", "read_text_range")),
+            "normalized actions: {normalized:?}"
+        );
+    }
+
+    #[test]
     fn scalar_structured_field_contract_rewrites_broad_read_to_read_field() {
         let state = test_state();
         let mut route = route_result(
@@ -14681,6 +15378,52 @@ mod tests {
     }
 
     #[test]
+    fn archive_auto_locator_plans_list_instead_of_text_read() {
+        let state = test_state_with_enabled_skills(&["archive_basic"]);
+        let mut route = base_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.resolved_intent = "Inspect the archive contents without unpacking it.".to_string();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip".to_string();
+        let loop_state = LoopState::new(1);
+
+        assert!(
+            scalar_content_auto_locator_observation_plan(
+                Some(&route),
+                Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"),
+            )
+            .is_none(),
+            "archive files must not be planned as text reads"
+        );
+
+        let plan = archive_list_auto_locator_deterministic_plan_result(
+            "Inspect the archive",
+            &state,
+            Some(&route),
+            &loop_state,
+            Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"),
+        )
+        .expect("archive list plan");
+
+        assert_eq!(plan.steps.len(), 3);
+        let step = &plan.steps[0];
+        assert_eq!(step.action_type, "call_skill");
+        assert_eq!(step.skill, "archive_basic");
+        assert_eq!(
+            step.args.get("action").and_then(Value::as_str),
+            Some("list")
+        );
+        assert_eq!(
+            step.args.get("archive").and_then(Value::as_str),
+            Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip")
+        );
+    }
+
+    #[test]
     fn transform_action_alias_and_sort_args_normalize_to_transform_data_ops() {
         let actions = vec![AgentAction::CallTool {
             tool: "transform".to_string(),
@@ -14712,6 +15455,46 @@ mod tests {
         assert_eq!(ops[0].get("by").and_then(Value::as_str), Some("score"));
         assert_eq!(ops[0].get("order").and_then(Value::as_str), Some("desc"));
         assert!(args.get("sort_by").is_none());
+    }
+
+    #[test]
+    fn inline_json_transform_deterministic_plan_uses_current_payload() {
+        let state = test_state_with_enabled_skills(&["transform"]);
+        let loop_state = LoopState::new(1);
+        let current = r#"{"action":"transform_data","data":[{"name":"alpha","score":7},{"name":"beta","score":12}],"ops":[{"op":"filter","where":{"field":"score","gte":7}}]}"#;
+        let goal = r#"older context: {"action":"transform_data","data":[{"stale":true}],"ops":[{"op":"project","fields":["stale"]}]}"#;
+
+        let plan =
+            inline_json_transform_deterministic_plan_result(goal, &state, &loop_state, current)
+                .expect("inline transform should produce deterministic plan");
+
+        assert_eq!(plan.steps.len(), 1);
+        let step = &plan.steps[0];
+        assert_eq!(step.action_type, "call_skill");
+        assert_eq!(step.skill, "transform");
+        assert_eq!(
+            step.args.get("action").and_then(Value::as_str),
+            Some("transform_data")
+        );
+        assert_eq!(
+            step.args
+                .get("data")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(|item| item.get("name"))
+                .and_then(Value::as_str),
+            Some("alpha")
+        );
+        let op = step
+            .args
+            .get("ops")
+            .and_then(Value::as_array)
+            .and_then(|ops| ops.first())
+            .and_then(Value::as_object)
+            .expect("normalized filter op");
+        assert_eq!(op.get("field").and_then(Value::as_str), Some("score"));
+        assert_eq!(op.get("cmp").and_then(Value::as_str), Some("gte"));
+        assert_eq!(op.get("value").and_then(Value::as_i64), Some(7));
     }
 
     #[test]

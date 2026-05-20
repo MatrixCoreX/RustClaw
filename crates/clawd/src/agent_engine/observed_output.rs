@@ -775,8 +775,22 @@ fn value_structured_text(value: &serde_json::Value, value_text: Option<&str>) ->
         .or_else(|| serde_json::to_string(value).ok())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ArchiveListEntry {
+    name: String,
+    size_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ArchiveListSummary {
+    archive: Option<String>,
+    entries: Vec<ArchiveListEntry>,
+}
+
 #[derive(Debug, Clone)]
-struct StructuredScalarObservation;
+struct StructuredScalarObservation {
+    text: String,
+}
 
 fn structured_scalar_observation_from_extract_item(
     value: &serde_json::Value,
@@ -800,8 +814,10 @@ fn structured_scalar_observation_from_extract_item(
         .and_then(|item| item.as_str())
         .map(str::trim)
         .filter(|text| !text.is_empty())
-        .map(|_| StructuredScalarObservation)
-        .or_else(|| value_scalar_text(raw_value).map(|_| StructuredScalarObservation))
+        .map(|text| StructuredScalarObservation {
+            text: text.to_string(),
+        })
+        .or_else(|| value_scalar_text(raw_value).map(|text| StructuredScalarObservation { text }))
 }
 
 fn structured_scalar_observation_from_step(
@@ -847,6 +863,13 @@ fn recent_structured_scalar_observations(
 
 pub(crate) fn recent_structured_scalar_observation_count(loop_state: &LoopState) -> usize {
     recent_structured_scalar_observations(loop_state, 2).len()
+}
+
+pub(crate) fn latest_structured_scalar_observation_text(loop_state: &LoopState) -> Option<String> {
+    recent_structured_scalar_observations(loop_state, 1)
+        .into_iter()
+        .next()
+        .map(|observation| observation.text)
 }
 
 fn route_needs_structured_scalar_pair_synthesis(
@@ -1057,7 +1080,7 @@ fn db_basic_tables_summary_candidate(
     None
 }
 
-fn transform_skill_formatted_output_candidate(body: &str) -> Option<String> {
+pub(crate) fn transform_skill_formatted_output_candidate(body: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     let status_ok = value
         .get("status")
@@ -1073,6 +1096,12 @@ fn transform_skill_formatted_output_candidate(body: &str) -> Option<String> {
         .map(str::trim)
         .filter(|formatted| !formatted.is_empty())
         .map(ToString::to_string)
+        .or_else(|| {
+            value
+                .get("result")
+                .filter(|result| !result.is_null())
+                .and_then(|result| serde_json::to_string(result).ok())
+        })
 }
 
 fn service_control_summary_candidate(value: &serde_json::Value) -> Option<String> {
@@ -1442,6 +1471,46 @@ fn content_excerpt_summary_direct_answer_candidate(
         })
         .unwrap_or_else(|| body.to_string());
     first_meaningful_excerpt_sentence(&text)
+}
+
+fn direct_free_text_conflicts_with_request_language(
+    candidate: &str,
+    request_language_hint: &str,
+) -> bool {
+    crate::language_policy::text_language_conflicts_with_hint(candidate, request_language_hint)
+}
+
+fn read_range_candidate_looks_structured_artifact(candidate: &str) -> bool {
+    let mut total = 0usize;
+    let mut structural = 0usize;
+    for line in candidate
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        total += 1;
+        let starts_structural =
+            line.starts_with(['{', '}', '[', ']', '<']) || line.ends_with(['{', '}', '[', ']']);
+        let assignment_like = line
+            .split_once('=')
+            .is_some_and(|(left, right)| !left.trim().is_empty() && !right.trim().is_empty());
+        let json_pair_like = line.trim_start().starts_with('"')
+            && line
+                .split_once(':')
+                .is_some_and(|(left, right)| !left.trim().is_empty() && !right.trim().is_empty());
+        if starts_structural || assignment_like || json_pair_like {
+            structural += 1;
+        }
+    }
+    total > 0 && structural.saturating_mul(2) >= total
+}
+
+fn read_range_direct_candidate_conflicts_with_request_language(
+    candidate: &str,
+    request_language_hint: &str,
+) -> bool {
+    !read_range_candidate_looks_structured_artifact(candidate)
+        && direct_free_text_conflicts_with_request_language(candidate, request_language_hint)
 }
 
 fn inventory_dir_scalar_path_candidate(
@@ -4278,7 +4347,248 @@ fn compact_log_analyze_excerpt(value: &serde_json::Value) -> Option<String> {
     Some(sections.join("\n"))
 }
 
+fn archive_list_summary_from_body(body: &str) -> Option<ArchiveListSummary> {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| archive_list_summary_from_value(&value))
+        .or_else(|| archive_list_summary_from_raw_output(body, None))
+}
+
+fn archive_list_summary_from_value(value: &serde_json::Value) -> Option<ArchiveListSummary> {
+    if value.get("action").and_then(|v| v.as_str())? != "list" {
+        return None;
+    }
+    let archive = value
+        .get("archive")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string);
+    if let Some(entries) = archive_entries_from_value_array(value.get("entries")) {
+        if !entries.is_empty() {
+            return Some(ArchiveListSummary { archive, entries });
+        }
+    }
+    value
+        .get("output")
+        .and_then(|v| v.as_str())
+        .and_then(|output| archive_list_summary_from_raw_output(output, archive))
+}
+
+fn archive_entries_from_value_array(
+    value: Option<&serde_json::Value>,
+) -> Option<Vec<ArchiveListEntry>> {
+    let entries = value?.as_array()?;
+    Some(
+        entries
+            .iter()
+            .filter_map(|entry| {
+                let name = entry
+                    .get("name")
+                    .or_else(|| entry.get("path"))
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())?;
+                let size_bytes = entry.get("size_bytes").and_then(|v| v.as_u64());
+                Some(ArchiveListEntry {
+                    name: name.to_string(),
+                    size_bytes,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn archive_list_summary_from_raw_output(
+    output: &str,
+    archive_hint: Option<String>,
+) -> Option<ArchiveListSummary> {
+    let archive = archive_hint.or_else(|| archive_path_from_listing_header(output));
+    let mut entries = output
+        .lines()
+        .filter_map(parse_zip_listing_entry_line)
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        entries = parse_plain_archive_listing_entries(output);
+    }
+    if entries.is_empty() {
+        return None;
+    }
+    Some(ArchiveListSummary { archive, entries })
+}
+
+fn archive_path_from_listing_header(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("Archive:")
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(ToString::to_string)
+    })
+}
+
+fn parse_zip_listing_entry_line(line: &str) -> Option<ArchiveListEntry> {
+    static ZIP_ENTRY_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let regex = ZIP_ENTRY_RE.get_or_init(|| {
+        regex::Regex::new(r"^\s*(\d+)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+(.+?)\s*$")
+            .expect("valid zip listing entry regex")
+    });
+    let captures = regex.captures(line)?;
+    let size_bytes = captures.get(1)?.as_str().parse::<u64>().ok();
+    let name = captures.get(2)?.as_str().trim();
+    (!name.is_empty()).then(|| ArchiveListEntry {
+        name: name.to_string(),
+        size_bytes,
+    })
+}
+
+fn parse_plain_archive_listing_entries(output: &str) -> Vec<ArchiveListEntry> {
+    if output
+        .lines()
+        .any(|line| line.trim_start().starts_with("Archive:"))
+    {
+        return Vec::new();
+    }
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| *line != "exit=0")
+        .filter(|line| !line.starts_with("tar:"))
+        .filter(|line| !line.starts_with("zip warning:"))
+        .filter(|line| !line.chars().all(|ch| ch == '-'))
+        .map(|name| ArchiveListEntry {
+            name: name.to_string(),
+            size_bytes: None,
+        })
+        .collect()
+}
+
+fn archive_entry_display(entry: &ArchiveListEntry, prefer_english: bool) -> String {
+    match entry.size_bytes {
+        Some(size) if prefer_english => format!("{} ({size} bytes)", entry.name),
+        Some(size) => format!("{}（{size} 字节）", entry.name),
+        None => entry.name.clone(),
+    }
+}
+
+fn archive_list_summary_direct_answer(
+    state: Option<&AppState>,
+    summary: &ArchiveListSummary,
+    prefer_english: bool,
+) -> Option<String> {
+    if summary.entries.is_empty() {
+        return None;
+    }
+    let shown = summary
+        .entries
+        .iter()
+        .take(8)
+        .map(|entry| archive_entry_display(entry, prefer_english))
+        .collect::<Vec<_>>();
+    if shown.is_empty() {
+        return None;
+    }
+    let omitted = summary.entries.len().saturating_sub(shown.len());
+    let separator = if prefer_english { ", " } else { "、" };
+    let entries = shown.join(separator);
+    let count = summary.entries.len().to_string();
+    let count_label = if prefer_english {
+        if summary.entries.len() == 1 {
+            "1 entry".to_string()
+        } else {
+            format!("{} entries", summary.entries.len())
+        }
+    } else {
+        format!("{} 个条目", summary.entries.len())
+    };
+    let more = if omitted == 0 {
+        String::new()
+    } else if prefer_english {
+        format!(", plus {omitted} more")
+    } else {
+        format!("，另有 {omitted} 个未列出")
+    };
+    Some(observed_t_with_vars(
+        state,
+        "clawd.msg.archive_list_summary",
+        "压缩包包含 {count_label}：{entries}{more}。",
+        "The archive contains {count_label}: {entries}{more}.",
+        prefer_english,
+        &[
+            ("count", &count),
+            ("count_label", &count_label),
+            ("entries", &entries),
+            ("more", &more),
+        ],
+    ))
+}
+
+fn archive_list_summary_observed_candidate(summary: &ArchiveListSummary) -> Option<String> {
+    if summary.entries.is_empty() {
+        return None;
+    }
+    let archive = summary.archive.as_deref().unwrap_or("-");
+    let mut lines = vec![format!(
+        "archive_basic action=list archive={archive} total_entries={}",
+        summary.entries.len()
+    )];
+    for entry in summary.entries.iter().take(32) {
+        match entry.size_bytes {
+            Some(size_bytes) => {
+                lines.push(format!("entry name={} size_bytes={size_bytes}", entry.name))
+            }
+            None => lines.push(format!("entry name={}", entry.name)),
+        }
+    }
+    if summary.entries.len() > 32 {
+        lines.push(format!("entries_omitted={}", summary.entries.len() - 32));
+    }
+    Some(lines.join("\n"))
+}
+
+fn answer_is_raw_archive_listing_passthrough(answer: &str) -> bool {
+    let trimmed = answer.trim();
+    if trimmed.is_empty() || archive_list_summary_from_raw_output(trimmed, None).is_none() {
+        return false;
+    }
+    trimmed
+        .lines()
+        .map(str::trim_start)
+        .any(|line| line.starts_with("Archive:") || line.starts_with("Length"))
+}
+
+fn latest_archive_list_summary(loop_state: &LoopState) -> Option<ArchiveListSummary> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && step.skill == "archive_basic")
+        .filter_map(|step| step.output.as_deref())
+        .find_map(archive_list_summary_from_body)
+}
+
+fn archive_list_raw_passthrough_replacement(
+    answer: &str,
+    state: &AppState,
+    loop_state: &LoopState,
+    request_language_hint: &str,
+) -> Option<String> {
+    if !answer_is_raw_archive_listing_passthrough(answer) {
+        return None;
+    }
+    let summary = latest_archive_list_summary(loop_state)?;
+    archive_list_summary_direct_answer(
+        Some(state),
+        &summary,
+        observed_request_prefers_english_template(Some(state), request_language_hint),
+    )
+}
+
 fn archive_basic_observed_candidate(value: &serde_json::Value) -> Option<String> {
+    if let Some(summary) = archive_list_summary_from_value(value) {
+        return archive_list_summary_observed_candidate(&summary);
+    }
     let action = value.get("action").and_then(|v| v.as_str())?.trim();
     if action.is_empty() {
         return None;
@@ -4361,6 +4671,15 @@ fn validate_structured_observed_candidate(value: &serde_json::Value) -> Option<S
 }
 
 fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
+    if skill == "archive_basic" {
+        return archive_list_summary_from_body(body)
+            .and_then(|summary| archive_list_summary_observed_candidate(&summary))
+            .or_else(|| {
+                serde_json::from_str::<serde_json::Value>(body)
+                    .ok()
+                    .and_then(|value| archive_basic_observed_candidate(&value))
+            });
+    }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     match skill {
         "system_basic" => {
@@ -4392,7 +4711,6 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
                 fs_search_direct_answer_candidate(None, &value, None, false, true, false)
             })
         }
-        "archive_basic" => archive_basic_observed_candidate(&value),
         "log_analyze" => compact_log_analyze_excerpt(&value),
         "package_manager" => package_manager_summary_candidate(
             None,
@@ -4733,6 +5051,12 @@ fn extract_direct_answer_from_generic_output_impl(
                 "git_basic" => None,
                 "doc_parse" => {
                     content_excerpt_summary_direct_answer_candidate(route, &observed_output.body)
+                        .filter(|candidate| {
+                            !direct_free_text_conflicts_with_request_language(
+                                candidate,
+                                request_language_hint,
+                            )
+                        })
                 }
                 "db_basic" => route.and_then(|route| {
                     db_basic_tables_summary_candidate(
@@ -4787,6 +5111,12 @@ fn extract_direct_answer_from_generic_output_impl(
                                     excerpt,
                                     prefers_english_free_text,
                                     read_range_preserve_blank_lines(&value),
+                                )
+                            })
+                            .filter(|candidate| {
+                                !read_range_direct_candidate_conflicts_with_request_language(
+                                    candidate,
+                                    request_language_hint,
                                 )
                             })
                     } else if action == Some("inventory_dir")
@@ -5071,7 +5401,10 @@ fn replace_internal_missing_sentinel_with_structured_observation(
         .filter(|replacement| !is_internal_missing_scalar_sentinel(replacement))
 }
 
-fn answer_is_direct_observation_passthrough(answer: &str, loop_state: &LoopState) -> bool {
+pub(crate) fn answer_is_direct_observation_passthrough(
+    answer: &str,
+    loop_state: &LoopState,
+) -> bool {
     let answer = answer.trim();
     if answer.is_empty() {
         return false;
@@ -5475,6 +5808,16 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
         );
         answer = replacement;
     }
+    if let Some(replacement) =
+        archive_list_raw_passthrough_replacement(&answer, state, loop_state, &request_language_hint)
+    {
+        tracing::info!(
+            "observed_answer_fallback_replace_archive_raw_passthrough task_id={} replacement={}",
+            task.task_id,
+            crate::truncate_for_log(&replacement)
+        );
+        answer = replacement;
+    }
     if let Some(diagnostic) = scalar_count_diagnostic_line_for_answer(
         &answer,
         agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
@@ -5589,7 +5932,8 @@ mod tests {
 
     use super::super::LoopState;
     use super::{
-        answer_is_direct_observation_passthrough, cross_turn_observed_output_entries,
+        answer_is_direct_observation_passthrough, archive_list_raw_passthrough_replacement,
+        archive_list_summary_from_body, cross_turn_observed_output_entries,
         extract_direct_answer_from_generic_output, extract_direct_scalar_from_generic_output,
         extract_direct_scalar_from_generic_output_i18n,
         extract_direct_scalar_from_generic_output_with_locator_hint,
@@ -7544,7 +7888,7 @@ version.workspace = true
         ));
         let route_result = RouteResult {
             ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
-            resolved_intent: "读取 README.md 并总结一行".to_string(),
+            resolved_intent: "Read README.md and summarize it in one line.".to_string(),
             needs_clarify: false,
             clarify_question: String::new(),
             route_reason: String::new(),
@@ -7579,6 +7923,62 @@ version.workspace = true
             Some(
                 "RustClaw is a local Rust agent runtime centered on clawd and designed for multi-channel task execution."
             )
+        );
+    }
+
+    #[test]
+    fn direct_doc_parse_summary_defers_when_language_conflicts_with_request() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "doc_parse",
+            r##"{"text":"# RustClaw\n\nRustClaw is a local Rust agent runtime centered on clawd and designed for multi-channel task execution."}"##,
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent: "读取 README.md 并用一句中文总结".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                locator_hint: "README.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+            None
+        );
+    }
+
+    #[test]
+    fn transform_output_candidate_falls_back_to_result_json() {
+        assert_eq!(
+            super::transform_skill_formatted_output_candidate(
+                r#"{"status":"ok","formatted":null,"result":[{"name":"beta"},{"name":"alpha"}]}"#
+            )
+            .as_deref(),
+            Some(r#"[{"name":"beta"},{"name":"alpha"}]"#)
         );
     }
 
@@ -7892,6 +8292,54 @@ version.workspace = true
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .is_none(),
             "summary-style read_range requests should fall back to synthesis instead of raw passthrough"
+        );
+    }
+
+    #[test]
+    fn direct_answer_defers_read_range_passthrough_when_language_conflicts() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","path":"/tmp/service_notes.md","resolved_path":"/tmp/service_notes.md","excerpt":"1|# Service Notes\n2|\n3|RustClaw test fixture service notes."}"#,
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent: "service_notes.md 를 읽고 핵심만 요약해.".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "llm_contract:generic_filename_read_range".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Filename,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::None,
+                locator_hint: "service_notes.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some("/tmp/service_notes.md".to_string()),
+            ..AgentRunContext::default()
+        };
+
+        assert!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .is_none(),
+            "language-conflicting read_range evidence should be synthesized instead of raw passthrough"
         );
     }
 
@@ -10641,6 +11089,39 @@ version.workspace = true
             structured_observed_body("db_basic", body).as_deref(),
             Some("db_tables=users, orders, service_logs")
         );
+    }
+
+    #[test]
+    fn archive_list_summary_parses_raw_zip_table_for_synthesis() {
+        let body = "exit=0\nArchive:  /tmp/test_bundle.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n       22  2026-04-03 01:14   notes.txt\n       20  2026-04-03 01:14   nested/config.ini\n---------                     -------\n       42                     2 files";
+        let summary = archive_list_summary_from_body(body).expect("zip listing should parse");
+        assert_eq!(summary.archive.as_deref(), Some("/tmp/test_bundle.zip"));
+        assert_eq!(summary.entries.len(), 2);
+        assert_eq!(summary.entries[0].name, "notes.txt");
+        assert_eq!(summary.entries[0].size_bytes, Some(22));
+        assert_eq!(
+            structured_observed_body("archive_basic", body).as_deref(),
+            Some(
+                "archive_basic action=list archive=/tmp/test_bundle.zip total_entries=2\nentry name=notes.txt size_bytes=22\nentry name=nested/config.ini size_bytes=20"
+            )
+        );
+    }
+
+    #[test]
+    fn archive_raw_passthrough_replacement_uses_structured_summary() {
+        let mut loop_state = LoopState::new(2);
+        let body = "exit=0\nArchive:  /tmp/test_bundle.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n       22  2026-04-03 01:14   notes.txt\n       20  2026-04-03 01:14   nested/config.ini\n---------                     -------\n       42                     2 files";
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "archive_basic", body));
+        let state = AppState::test_default_with_fixture_provider();
+        let replacement =
+            archive_list_raw_passthrough_replacement(body, &state, &loop_state, "zh-CN")
+                .expect("raw archive output should be replaced");
+        assert!(replacement.contains("压缩包包含 2 个条目"));
+        assert!(replacement.contains("notes.txt"));
+        assert!(replacement.contains("nested/config.ini"));
+        assert!(!replacement.contains("Archive:"));
     }
 
     #[test]

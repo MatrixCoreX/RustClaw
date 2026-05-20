@@ -107,6 +107,7 @@
             "recent_scalar_equality_check",
             "git_commit_subject",
             "structured_keys",
+            "config_risk_assessment",
             "sqlite_table_listing",
             "sqlite_table_names_only",
             "sqlite_database_kind_judgment",

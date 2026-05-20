@@ -84,6 +84,9 @@ fn resolve_static_capability_action_for_state(
         }
         "config.read_back" => Some(("config_edit", Some("read_back"))),
         "config.restart_if_requested" => Some(("config_edit", Some("restart_if_requested"))),
+        "transform" | "transform.transform_data" | "data.transform" | "data.transform_records" => {
+            Some(("transform", Some("transform_data")))
+        }
         "system.run_command" | "system.run_cmd" => Some(("run_cmd", None)),
         _ => None,
     }) else {
@@ -296,12 +299,37 @@ mod tests {
         }
     }
 
+    #[test]
+    fn resolves_transform_capability_to_transform_skill() {
+        let action = resolve_static_capability_action(
+            &normalize_capability_name("transform"),
+            json!({"data":[{"score": 1}], "ops":[{"op":"sort","by":"score"}]}),
+        )
+        .expect("capability should resolve");
+        match action {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "transform");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("transform_data")
+                );
+            }
+            other => panic!("unexpected action: {other:?}"),
+        }
+    }
+
     fn resolve_static_capability_action(normalized: &str, args: Value) -> Option<AgentAction> {
         match normalized {
             "filesystem.list_entries" | "filesystem.list_dir" => Some(AgentAction::CallTool {
                 tool: "fs_basic".to_string(),
                 args: with_action(args, "list_dir"),
             }),
+            "transform" | "transform.transform_data" | "data.transform" => {
+                Some(AgentAction::CallSkill {
+                    skill: "transform".to_string(),
+                    args: with_action(args, "transform_data"),
+                })
+            }
             "system.run_command" | "system.run_cmd" => Some(AgentAction::CallSkill {
                 skill: "run_cmd".to_string(),
                 args: normalize_run_command_args(args),
