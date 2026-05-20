@@ -835,6 +835,12 @@ fn unbound_targeted_evidence_route_should_force_clarify(
     if route_result.output_contract.requires_content_evidence
         && !semantic_kind_can_execute_without_locator(route_result.output_contract.semantic_kind)
     {
+        if route_result.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+            && route_result.output_contract.semantic_kind == crate::OutputSemanticKind::None
+            && !route_introduces_unmentioned_distinctive_context_target(prompt, route_result)
+        {
+            return false;
+        }
         return true;
     }
     matches!(
@@ -1191,6 +1197,7 @@ fn semantic_kind_can_execute_without_locator(kind: crate::OutputSemanticKind) ->
             | crate::OutputSemanticKind::ServiceStatus
             | crate::OutputSemanticKind::WorkspaceProjectSummary
             | crate::OutputSemanticKind::GitCommitSubject
+            | crate::OutputSemanticKind::PackageManagerDetection
             | crate::OutputSemanticKind::DockerPs
             | crate::OutputSemanticKind::DockerImages
             | crate::OutputSemanticKind::DockerLogs
@@ -1289,8 +1296,6 @@ fn route_introduces_unmentioned_distinctive_context_target(
 ) -> bool {
     let mut text = String::new();
     text.push_str(&route_result.resolved_intent);
-    text.push('\n');
-    text.push_str(&route_result.route_reason);
     text.push('\n');
     text.push_str(&route_result.clarify_question);
     distinctive_context_tokens(&text)
@@ -2388,6 +2393,30 @@ mod tests {
     }
 
     #[test]
+    fn unbound_current_workspace_semantic_none_allows_self_scoped_observation() {
+        let mut route = executable_filename_route();
+        route.resolved_intent =
+            "Detect which package manager is present in the current workspace.".to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(!unbound_targeted_evidence_route_should_force_clarify(
+            "Which package manager is detected for this workspace?",
+            &route,
+            &snapshot,
+        ));
+    }
+
+    #[test]
     fn background_only_locator_rewrite_requires_clarify_without_session_anchor() {
         let state = test_state_with_root(make_temp_root("background_locator_requires_clarify"));
         let mut route = executable_filename_route();
@@ -2498,6 +2527,35 @@ mod tests {
         assert!(!unbound_model_context_target_route_should_force_clarify(
             &state,
             "Run pwd and output only the raw result.",
+            &route,
+            None,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn unbound_model_context_target_ignores_reason_only_example_targets() {
+        let state = test_state_with_root(make_temp_root("unbound_model_context_reason_example"));
+        let mut route = executable_filename_route();
+        route.resolved_intent =
+            "Detect which package manager is used in this workspace.".to_string();
+        route.route_reason =
+            "Observation may inspect examples such as Cargo.toml or package.json.".to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(!unbound_model_context_target_route_should_force_clarify(
+            &state,
+            "Which package manager is detected for this workspace?",
             &route,
             None,
             &snapshot,

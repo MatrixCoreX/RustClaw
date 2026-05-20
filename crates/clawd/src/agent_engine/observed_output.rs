@@ -767,6 +767,14 @@ fn value_scalar_text(value: &serde_json::Value) -> Option<String> {
     }
 }
 
+fn value_structured_text(value: &serde_json::Value, value_text: Option<&str>) -> Option<String> {
+    value_text
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| serde_json::to_string(value).ok())
+}
+
 #[derive(Debug, Clone)]
 struct StructuredScalarObservation;
 
@@ -859,6 +867,37 @@ fn route_needs_structured_scalar_pair_synthesis(
 
 fn observed_request_language_hint(user_text: &str) -> &'static str {
     crate::language_policy::request_language_hint(user_text)
+}
+
+fn observed_language_supports_bilingual_template(language_hint: &str) -> bool {
+    let hint = language_hint.trim().to_ascii_lowercase();
+    hint == "config_default" || hint.starts_with("en") || hint.starts_with("zh")
+}
+
+fn observed_request_prefers_english_template(
+    state: Option<&AppState>,
+    language_hint: &str,
+) -> bool {
+    let hint = language_hint.trim().to_ascii_lowercase();
+    if hint.starts_with("zh") {
+        return false;
+    }
+    if hint.starts_with("en") {
+        return true;
+    }
+    if hint == "config_default" {
+        return state
+            .map(|state| {
+                state
+                    .policy
+                    .command_intent
+                    .default_locale
+                    .to_ascii_lowercase()
+                    .starts_with("en")
+            })
+            .unwrap_or(false);
+    }
+    true
 }
 
 fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> String {
@@ -1221,6 +1260,7 @@ fn system_basic_structured_doc_observed_body(skill: &str, body: &str) -> Option<
             None,
             &value,
             Some(crate::OutputResponseShape::Free),
+            true,
             true,
         )
         .or_else(|| Some(body.to_string())),
@@ -3212,6 +3252,9 @@ fn structured_scalar_candidate(
     }
     let action = value.get("action").and_then(|v| v.as_str())?;
     match action {
+        "validate_structured" => {
+            validate_structured_direct_answer_candidate(state, &value, prefer_english)
+        }
         "read_range" => route
             .filter(|route| route_allows_scalar_read_range_direct_answer(route))
             .and_then(|_| {
@@ -3276,7 +3319,21 @@ fn structured_scalar_candidate(
                             field_value,
                             serde_json::Value::Object(_) | serde_json::Value::Array(_)
                         ) {
-                            return None;
+                            let scalar_contract = route.is_some_and(|route| {
+                                route.output_contract.response_shape
+                                    == crate::OutputResponseShape::Scalar
+                            });
+                            if !scalar_contract {
+                                return None;
+                            }
+                            return Some(structured_field_display_line(
+                                state,
+                                field_path,
+                                field_value,
+                                value.get("value_text").and_then(|v| v.as_str()),
+                                true,
+                                prefer_english,
+                            ));
                         }
                         return Some(structured_field_display_line(
                             state,
@@ -3293,7 +3350,26 @@ fn structured_scalar_candidate(
                     field_value,
                     serde_json::Value::Object(_) | serde_json::Value::Array(_)
                 ) {
-                    return None;
+                    let scalar_contract = route.is_some_and(|route| {
+                        route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+                    });
+                    if !scalar_contract {
+                        return None;
+                    }
+                    let value_text = value.get("value_text").and_then(|v| v.as_str());
+                    if route.is_some() && extract_field_has_non_exact_resolution(&value) {
+                        if let Some(field_path) = json_trimmed_str(&value, "resolved_field_path") {
+                            return Some(structured_field_display_line(
+                                state,
+                                field_path,
+                                field_value,
+                                value_text,
+                                true,
+                                prefer_english,
+                            ));
+                        }
+                    }
+                    return value_structured_text(field_value, value_text);
                 }
                 let text = value
                     .get("value_text")
@@ -3464,6 +3540,7 @@ fn extract_fields_direct_answer_candidate(
     value: &serde_json::Value,
     response_shape: Option<crate::OutputResponseShape>,
     prefer_english: bool,
+    allow_localized_template: bool,
 ) -> Option<String> {
     if !matches!(
         value.get("action").and_then(|v| v.as_str()),
@@ -3473,6 +3550,9 @@ fn extract_fields_direct_answer_candidate(
     }
     let results = value.get("results")?.as_array()?;
     if results.is_empty() {
+        return None;
+    }
+    if !allow_localized_template && results.iter().any(|item| field_result_is_missing(item)) {
         return None;
     }
     let lines = results
@@ -3511,11 +3591,19 @@ fn extract_fields_direct_answer_candidate(
     Some(lines.join("\n"))
 }
 
+fn field_result_is_missing(value: &serde_json::Value) -> bool {
+    !value
+        .get("exists")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
 fn extract_field_direct_answer_candidate(
     state: Option<&AppState>,
     value: &serde_json::Value,
     response_shape: Option<crate::OutputResponseShape>,
     prefer_english: bool,
+    allow_localized_template: bool,
 ) -> Option<String> {
     if !matches!(
         value.get("action").and_then(|v| v.as_str()),
@@ -3543,6 +3631,9 @@ fn extract_field_direct_answer_candidate(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     if !exists {
+        if !allow_localized_template {
+            return None;
+        }
         return Some(observed_t_with_vars(
             state,
             "clawd.msg.extract_field_missing",
@@ -4497,7 +4588,10 @@ fn extract_direct_answer_from_generic_output_impl(
     let request_language_hint = current_turn_request_text(route, agent_run_context)
         .map(observed_request_language_hint)
         .unwrap_or("config_default");
-    let prefers_english_free_text = request_language_hint == "en";
+    let allow_localized_direct_template =
+        observed_language_supports_bilingual_template(request_language_hint);
+    let prefers_english_free_text =
+        observed_request_prefers_english_template(state, request_language_hint);
     let prefers_english_presence_answer = route.is_some_and(|route| {
         route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
             && prefers_english_free_text
@@ -4718,6 +4812,7 @@ fn extract_direct_answer_from_generic_output_impl(
                             &value,
                             response_shape,
                             prefers_english_free_text,
+                            allow_localized_direct_template,
                         )
                     } else if matches!(action, Some("extract_fields" | "read_fields")) {
                         extract_fields_direct_answer_candidate(
@@ -4725,6 +4820,7 @@ fn extract_direct_answer_from_generic_output_impl(
                             &value,
                             response_shape,
                             prefers_english_free_text,
+                            allow_localized_direct_template,
                         )
                     } else if action == Some("structured_keys") {
                         structured_keys_direct_answer_candidate(
@@ -5497,10 +5593,12 @@ mod tests {
         extract_direct_answer_from_generic_output, extract_direct_scalar_from_generic_output,
         extract_direct_scalar_from_generic_output_i18n,
         extract_direct_scalar_from_generic_output_with_locator_hint,
-        has_observed_answer_candidates, inventory_dir_direct_answer_candidate,
-        normalize_system_basic_match_path, normalized_observed_listing, observed_contract_json,
-        observed_output_entries, observed_request_language_hint, observed_response_style_hint,
-        recent_generated_output_from_user_request,
+        extract_field_direct_answer_candidate, has_observed_answer_candidates,
+        inventory_dir_direct_answer_candidate, normalize_system_basic_match_path,
+        normalized_observed_listing, observed_contract_json,
+        observed_language_supports_bilingual_template, observed_output_entries,
+        observed_request_language_hint, observed_request_prefers_english_template,
+        observed_response_style_hint, recent_generated_output_from_user_request,
         replace_internal_missing_sentinel_with_structured_observation,
         route_allows_path_batch_scalar_path_observed_answer, route_observation_facts_entry,
         route_requests_scalar_path_only, route_requires_synthesized_delivery,
@@ -5827,6 +5925,29 @@ mod tests {
     }
 
     #[test]
+    fn direct_scalar_returns_container_read_field_json_for_scalar_contract() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"read_field","exists":true,"field_path":"package.version","value":{"workspace":true},"value_text":"{\"workspace\":true}","value_type":"object"}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint = "Cargo.toml".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some(r#"{"workspace":true}"#)
+        );
+    }
+
+    #[test]
     fn direct_scalar_preserves_resolved_extract_field_label_for_non_exact_match() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -5967,6 +6088,35 @@ mod tests {
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
             Some("pass: toml parsed successfully")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_formats_config_validation_result_in_request_language() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"validate_structured","path":"configs/config.toml","resolved_path":"/tmp/configs/config.toml","format":"toml","valid":true,"root_type":"object"}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route_result.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint = "configs/config.toml".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            original_user_request: Some("只检查 configs/config.toml 是否是合法 TOML。".to_string()),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output_i18n(
+                &loop_state,
+                &AppState::test_default_with_fixture_provider(),
+                Some(&agent_run_context)
+            )
+            .as_deref(),
+            Some("通过：toml 解析成功")
         );
     }
 
@@ -6998,6 +7148,37 @@ version.workspace = true
         );
         assert_eq!(observed_request_language_hint("只输出路径"), "zh-CN");
         assert_eq!(observed_request_language_hint("12345"), "config_default");
+    }
+
+    #[test]
+    fn observed_bilingual_templates_defer_non_bilingual_missing_field_answers() {
+        assert!(!observed_language_supports_bilingual_template("ja"));
+        assert!(observed_request_prefers_english_template(None, "ja"));
+        let missing = serde_json::json!({
+            "action": "extract_field",
+            "field_path": "package.no_such_key_100_matrix",
+            "exists": false,
+        });
+
+        assert_eq!(
+            extract_field_direct_answer_candidate(
+                None,
+                &missing,
+                Some(OutputResponseShape::OneSentence),
+                false,
+                true,
+            )
+            .as_deref(),
+            Some("未找到 package.no_such_key_100_matrix 字段")
+        );
+        assert!(extract_field_direct_answer_candidate(
+            None,
+            &missing,
+            Some(OutputResponseShape::OneSentence),
+            true,
+            false,
+        )
+        .is_none());
     }
 
     #[test]

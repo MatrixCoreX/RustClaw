@@ -683,6 +683,9 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         | "top_level_keys"
         | "object_keys"
         | "config_keys" => OutputSemanticKind::StructuredKeys,
+        "config_validation" | "structured_config_validation" | "structured_file_validation" => {
+            OutputSemanticKind::ConfigValidation
+        }
         "sqlite_table_listing" | "sqlite_tables_listing" | "sqlite_tables_summary" => {
             OutputSemanticKind::SqliteTableListing
         }
@@ -1999,6 +2002,7 @@ fn output_semantic_kind_requires_fresh_evidence(kind: OutputSemanticKind) -> boo
             | OutputSemanticKind::ExistenceWithPathSummary
             | OutputSemanticKind::GitCommitSubject
             | OutputSemanticKind::StructuredKeys
+            | OutputSemanticKind::ConfigValidation
             | OutputSemanticKind::SqliteTableListing
             | OutputSemanticKind::SqliteTableNamesOnly
             | OutputSemanticKind::SqliteDatabaseKindJudgment
@@ -3094,7 +3098,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("Allowed output_contract keys only: response_shape, exact_sentence_count, requires_content_evidence, delivery_required, locator_kind, delivery_intent, semantic_kind, locator_hint, self_extension. Do not emit exact_format, required_evidence, fields, examples, post_processing, or custom keys.".to_string());
     parts.push("locator_hint must be a clean concrete locator value or concrete target pair, not a full instruction sentence and not explanatory prose. If no clean locator is known, leave it empty and let needs_clarify/decision express the missing target.".to_string());
     parts.push("Allowed response_shape: free, one_sentence, strict, scalar, file_token. Allowed locator_kind: none, path, current_workspace, url, filename. Allowed delivery_intent: none, file_single, directory_lookup, directory_batch_files.".to_string());
-    parts.push("Allowed semantic_kind: none, raw_command_output, service_status, hidden_entries_check, file_names, directory_names, directory_entry_groups, file_paths, directory_purpose_summary, content_excerpt_summary, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, execution_failed_step, generated_file_delivery, scalar_path_only, existence_with_path, existence_with_path_summary, recent_scalar_equality_check, git_commit_subject, structured_keys, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment, sqlite_schema_version, archive_list, archive_pack, archive_unpack, docker_ps, docker_images, docker_logs, docker_container_lifecycle.".to_string());
+    parts.push("Allowed semantic_kind: none, raw_command_output, service_status, hidden_entries_check, file_names, directory_names, directory_entry_groups, file_paths, directory_purpose_summary, content_excerpt_summary, content_presence_check, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, execution_failed_step, generated_file_delivery, scalar_path_only, existence_with_path, existence_with_path_summary, recent_scalar_equality_check, git_commit_subject, structured_keys, config_validation, package_manager_detection, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment, sqlite_schema_version, archive_list, archive_pack, archive_unpack, docker_ps, docker_images, docker_logs, docker_container_lifecycle.".to_string());
     parts.push("Allowed turn_type: task_request, task_append, task_replace, task_correct, task_scope_update, run_control, approval_decision, status_query, feedback_or_error, preference_or_memory, or empty string. clarify is a decision, never a turn_type or resume_behavior.".to_string());
     parts.push("state_patch must be a JSON object or null. Use null when there is no structured update; never output an empty string for state_patch. For ordered-entry follow-ups against an active ordered list, set state_patch.ordered_entry_ref to {\"index\":N,\"index_base\":1} for absolute item selection or {\"relative_offset\":K} for signed relative selection. When a standalone current REQUEST creates a new user-visible deliverable that later short corrections should edit, set state_patch.primary_task_update=\"replace\" and state_patch.active_task_boundary=\"new_deliverable\". For active-task visible corrections, set required_content_literals / replacement_pairs / forbidden_visible_literals as structured exact content literals, not language-specific phrase markers. Keep output-only/body-only/length/tone/count/format constraints in resolved_user_intent and output_contract, not in required_content_literals. For a clear deictic reference, set state_patch.deictic_reference={\"target\":\"current_action_result\"|\"current_turn_locator\"|\"comparison_result\"|\"unresolved_prior_object\"|\"missing_locator\"|\"ambiguous_locator\"}; unresolved/missing/ambiguous targets mean safe clarify. For runtime self-state questions about whether this assistant is waiting for user approval, set state_patch.runtime_status_query={\"kind\":\"approval_wait\",\"scope\":\"current_task\"}. The runtime consumes structured numbers/targets/status tokens, not language-specific ordinal words, pronouns, connectors, or status wording.".to_string());
     parts.push("Every enum field must be exactly one listed schema token. Do not output aliases, combined values, or explanatory prose in decision/output_contract/execution_recipe/turn_type/target_task_policy.".to_string());
@@ -3349,6 +3353,11 @@ fn contract_repair_report_from_before_after(before: &Value, after: &Value) -> Co
         report.add(
             "structured_recipe",
             "execution_recipe_structured_read_observation",
+        );
+    } else if execution_recipe_value_declares_package_manager_detection(before_recipe) {
+        report.add(
+            "structured_recipe",
+            "execution_recipe_package_manager_detection",
         );
     } else if output_recipe_value_declares_execution(before_recipe) {
         report.add("enum_alias", "execution_recipe_enum");
@@ -4572,6 +4581,9 @@ fn normalize_execution_recipe_for_schema(obj: &mut serde_json::Map<String, Value
             request_uses_filename_only_schema_token(req),
         );
         mark_decision_planner_execute_from_execution_recipe(obj);
+    } else if execution_recipe_value_declares_package_manager_detection(execution_recipe) {
+        normalize_output_contract_for_package_manager_detection(obj);
+        mark_decision_planner_execute_from_execution_recipe(obj);
     } else if output_recipe_value_declares_execution(obj.get("execution_recipe")) {
         mark_output_contract_requires_content_evidence(obj);
         mark_decision_planner_execute_from_execution_recipe(obj);
@@ -4618,7 +4630,8 @@ fn output_recipe_value_declares_execution(value: Option<&Value>) -> bool {
 
 fn execution_recipe_value_declares_structured_read_observation(value: Option<&Value>) -> bool {
     execution_recipe_value_structured_locator_hint(value).is_some()
-        && execution_recipe_value_declares_structured_read_action(value)
+        && (execution_recipe_value_declares_structured_read_action(value)
+            || execution_recipe_value_declares_structured_scalar_field_request(value))
 }
 
 fn execution_recipe_value_declares_structured_read_action(value: Option<&Value>) -> bool {
@@ -4639,6 +4652,9 @@ fn execution_recipe_value_declares_structured_read_action(value: Option<&Value>)
 }
 
 fn execution_recipe_value_declares_structured_scalar_extraction(value: Option<&Value>) -> bool {
+    if execution_recipe_value_declares_structured_scalar_field_request(value) {
+        return true;
+    }
     match value {
         Some(Value::Object(map)) => map.iter().any(|(key, value)| {
             let key = normalize_schema_token(key);
@@ -4663,6 +4679,104 @@ fn execution_recipe_value_declares_structured_scalar_extraction(value: Option<&V
             .any(|value| execution_recipe_value_declares_structured_scalar_extraction(Some(value))),
         _ => false,
     }
+}
+
+fn execution_recipe_value_declares_structured_scalar_field_request(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Object(map)) => map.iter().any(|(key, value)| {
+            let key = normalize_schema_token(key);
+            (schema_key_is_structured_scalar_field_selector(&key)
+                && value_has_nonempty_scalar_text(value))
+                || execution_recipe_value_declares_structured_scalar_field_request(Some(value))
+        }),
+        Some(Value::Array(items)) => items.iter().any(|value| {
+            execution_recipe_value_declares_structured_scalar_field_request(Some(value))
+        }),
+        _ => false,
+    }
+}
+
+fn schema_key_is_structured_scalar_field_selector(key: &str) -> bool {
+    matches!(
+        key,
+        "target_key"
+            | "target_field"
+            | "field_path"
+            | "key_path"
+            | "field_selector"
+            | "json_pointer"
+            | "json_path"
+    )
+}
+
+fn execution_recipe_value_declares_package_manager_detection(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::Object(map)) => {
+            let mut has_package_manager_target = false;
+            let mut has_detect_action = false;
+            for (key, value) in map {
+                let key = normalize_schema_token(key);
+                if matches!(
+                    key.as_str(),
+                    "capability" | "capability_name" | "planner_capability"
+                ) && value_has_schema_token(
+                    value,
+                    schema_token_is_package_manager_detect_capability,
+                ) {
+                    return true;
+                }
+                if matches!(
+                    key.as_str(),
+                    "name" | "skill" | "skill_name" | "runner" | "runner_name" | "tool"
+                ) && value_has_schema_token(value, schema_token_is_package_manager_skill)
+                {
+                    has_package_manager_target = true;
+                }
+                if matches!(
+                    key.as_str(),
+                    "action" | "operation" | "op" | "method" | "intent"
+                ) && value_has_schema_token(value, schema_token_is_package_manager_detect_action)
+                {
+                    has_detect_action = true;
+                }
+                if execution_recipe_value_declares_package_manager_detection(Some(value)) {
+                    return true;
+                }
+            }
+            has_package_manager_target && has_detect_action
+        }
+        Some(Value::Array(items)) => items
+            .iter()
+            .any(|value| execution_recipe_value_declares_package_manager_detection(Some(value))),
+        _ => false,
+    }
+}
+
+fn schema_token_is_package_manager_skill(token: &str) -> bool {
+    matches!(token, "package_manager" | "package_manager_skill")
+}
+
+fn schema_token_is_package_manager_detect_action(token: &str) -> bool {
+    matches!(
+        token,
+        "detect"
+            | "detection"
+            | "detect_manager"
+            | "manager_detection"
+            | "package_detect_manager"
+            | "package_manager_detect"
+            | "package_manager_detection"
+    )
+}
+
+fn schema_token_is_package_manager_detect_capability(token: &str) -> bool {
+    matches!(
+        token,
+        "package.detect_manager"
+            | "package_detect_manager"
+            | "package_manager_detect"
+            | "package_manager_detection"
+    )
 }
 
 fn value_has_schema_token(value: &Value, predicate: fn(&str) -> bool) -> bool {
@@ -4937,7 +5051,7 @@ fn normalize_output_contract_for_structured_read_recipe(
             Value::String("scalar".to_string()),
         );
     }
-    if model_only_filename_semantic {
+    if scalar_extraction || model_only_filename_semantic {
         contract.insert(
             "semantic_kind".to_string(),
             Value::String(OutputSemanticKind::None.as_str().to_string()),
@@ -4953,6 +5067,40 @@ fn normalize_output_contract_for_structured_read_recipe(
         );
         contract.insert("locator_hint".to_string(), Value::String(hint.to_string()));
     }
+}
+
+fn normalize_output_contract_for_package_manager_detection(
+    obj: &mut serde_json::Map<String, Value>,
+) {
+    let value = obj
+        .entry("output_contract".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !value.is_object() {
+        coerce_output_contract_value_for_schema(value);
+    }
+    let Some(contract) = value.as_object_mut() else {
+        return;
+    };
+
+    contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
+    contract.insert("delivery_required".to_string(), Value::Bool(false));
+    contract.insert(
+        "delivery_intent".to_string(),
+        Value::String("none".to_string()),
+    );
+    contract.insert(
+        "locator_kind".to_string(),
+        Value::String("none".to_string()),
+    );
+    contract.insert("locator_hint".to_string(), Value::String(String::new()));
+    contract.insert(
+        "semantic_kind".to_string(),
+        Value::String(
+            OutputSemanticKind::PackageManagerDetection
+                .as_str()
+                .to_string(),
+        ),
+    );
 }
 
 fn normalize_output_contract_for_command_payload(
@@ -7525,6 +7673,68 @@ mod tests {
     }
 
     #[test]
+    fn package_manager_skill_recipe_repairs_to_detection_contract() {
+        let raw = r#"{
+          "resolved_user_intent":"inspect_package_manager",
+          "needs_clarify":false,
+          "decision":"planner_execute",
+          "output_contract":{
+            "response_shape":"one_sentence",
+            "requires_content_evidence":true,
+            "locator_kind":"none",
+            "semantic_kind":"none",
+            "locator_hint":""
+          },
+          "execution_recipe":{
+            "kind":"skill",
+            "name":"package_manager",
+            "action":"detect"
+          }
+        }"#;
+
+        let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+            raw,
+            "inspect system package manager",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+        assert_eq!(
+            value.get("decision").and_then(|value| value.as_str()),
+            Some("planner_execute")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/requires_content_evidence")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/locator_kind")
+                .and_then(|value| value.as_str()),
+            Some("none")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/locator_hint")
+                .and_then(|value| value.as_str()),
+            Some("")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/semantic_kind")
+                .and_then(|value| value.as_str()),
+            Some("package_manager_detection")
+        );
+        assert!(report
+            .detail_csv()
+            .contains("execution_recipe_package_manager_detection"));
+        assert!(!report
+            .detail_csv()
+            .contains("execution_recipe_untrusted_text_ignored"));
+    }
+
+    #[test]
     fn structured_read_recipe_with_explicit_locator_repairs_content_contract() {
         let raw = r#"{
           "resolved_user_intent":"read_title_of_note_file",
@@ -7627,6 +7837,74 @@ mod tests {
         assert!(report
             .detail_csv()
             .contains("execution_recipe_structured_read_observation"));
+    }
+
+    #[test]
+    fn structured_field_recipe_repairs_structured_keys_contract_to_scalar_value() {
+        let raw = r#"{
+          "resolved_user_intent":"read manifest package field",
+          "needs_clarify":false,
+          "decision":"planner_execute",
+          "output_contract":{
+            "response_shape":"strict",
+            "requires_content_evidence":true,
+            "locator_kind":"path",
+            "locator_hint":"crates/clawd/Cargo.toml",
+            "semantic_kind":"structured_keys"
+          },
+          "execution_recipe":{
+            "kind":"tool",
+            "tool_name":"doc_parse",
+            "params":{
+              "path":"crates/clawd/Cargo.toml",
+              "target_key":"package.name",
+              "format":"toml"
+            }
+          }
+        }"#;
+
+        let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+            raw,
+            "Read the structured manifest field.",
+        );
+        let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+        assert_eq!(
+            value
+                .pointer("/output_contract/response_shape")
+                .and_then(|value| value.as_str()),
+            Some("scalar")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/semantic_kind")
+                .and_then(|value| value.as_str()),
+            Some("none")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/requires_content_evidence")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/locator_kind")
+                .and_then(|value| value.as_str()),
+            Some("path")
+        );
+        assert_eq!(
+            value
+                .pointer("/output_contract/locator_hint")
+                .and_then(|value| value.as_str()),
+            Some("crates/clawd/Cargo.toml")
+        );
+        assert!(report
+            .detail_csv()
+            .contains("execution_recipe_structured_read_observation"));
+        assert!(!report
+            .detail_csv()
+            .contains("execution_recipe_untrusted_text_ignored"));
     }
 
     #[test]

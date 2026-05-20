@@ -563,6 +563,9 @@ fn parse_gate_semantic_kind(raw: &str) -> crate::OutputSemanticKind {
         "recent_scalar_equality_check" => crate::OutputSemanticKind::RecentScalarEqualityCheck,
         "git_commit_subject" => crate::OutputSemanticKind::GitCommitSubject,
         "structured_keys" => crate::OutputSemanticKind::StructuredKeys,
+        "config_validation" | "structured_config_validation" => {
+            crate::OutputSemanticKind::ConfigValidation
+        }
         "sqlite_table_listing" => crate::OutputSemanticKind::SqliteTableListing,
         "sqlite_table_names_only" => crate::OutputSemanticKind::SqliteTableNamesOnly,
         "sqlite_database_kind_judgment" => crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
