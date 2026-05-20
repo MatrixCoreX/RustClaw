@@ -72,6 +72,7 @@ fn synthesize_route_allows_direct_fallback(agent_run_context: Option<&AgentRunCo
         crate::OutputSemanticKind::FileNames
             | crate::OutputSemanticKind::DirectoryNames
             | crate::OutputSemanticKind::FilePaths
+            | crate::OutputSemanticKind::ConfigValidation
     ) {
         return true;
     }
@@ -1687,6 +1688,58 @@ mod tests {
         };
 
         assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
+    }
+
+    #[test]
+    fn synthesize_route_allows_direct_fallback_for_config_validation_contract() {
+        let route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent: "Validate config syntax from structured parser evidence.".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "structured config validation".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::ConfigValidation,
+                locator_hint: "configs/config.toml".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let ctx = AgentRunContext {
+            route_result: Some(route),
+            original_user_request: Some(
+                "Validate only the TOML syntax of configs/config.toml and answer pass or fail."
+                    .to_string(),
+            ),
+            ..AgentRunContext::default()
+        };
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"validate_structured","format":"toml","path":"configs/config.toml","resolved_path":"/tmp/config.toml","valid":true}"#,
+        ));
+        let state = test_state_with_registry();
+
+        assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
+        assert_eq!(
+            synthesize_direct_observed_fallback_answer(&state, &loop_state, Some(&ctx)).as_deref(),
+            Some("pass: toml parsed successfully")
+        );
     }
 
     #[test]

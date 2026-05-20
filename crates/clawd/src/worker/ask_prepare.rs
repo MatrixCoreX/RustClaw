@@ -533,6 +533,9 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
         }
         "git_commit_subject" => Some(crate::OutputSemanticKind::GitCommitSubject),
         "structured_keys" => Some(crate::OutputSemanticKind::StructuredKeys),
+        "config_validation" | "structured_config_validation" => {
+            Some(crate::OutputSemanticKind::ConfigValidation)
+        }
         "sqlite_table_listing" => Some(crate::OutputSemanticKind::SqliteTableListing),
         "sqlite_table_names_only" => Some(crate::OutputSemanticKind::SqliteTableNamesOnly),
         "sqlite_database_kind_judgment" => {
@@ -547,6 +550,7 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
         "docker_logs" => Some(crate::OutputSemanticKind::DockerLogs),
         "docker_container_lifecycle" => Some(crate::OutputSemanticKind::DockerContainerLifecycle),
         "service_status" => Some(crate::OutputSemanticKind::ServiceStatus),
+        "package_manager_detection" => Some(crate::OutputSemanticKind::PackageManagerDetection),
         _ => None,
     }
 }

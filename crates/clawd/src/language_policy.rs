@@ -211,7 +211,8 @@ pub(crate) fn request_language_hint(user_text: &str) -> &'static str {
     }
     if counts.cjk > 0 {
         let semantic_counts = text_language_counts_without_neutral_artifacts(trimmed);
-        return if semantic_counts.cjk > 0 && semantic_counts.non_cjk_alpha() == 0 {
+        return if semantic_counts.cjk > 0 && semantic_counts.cjk >= semantic_counts.non_cjk_alpha()
+        {
             "zh-CN"
         } else {
             "mixed"
@@ -410,6 +411,10 @@ mod tests {
         );
         assert_eq!(
             request_language_hint("读取 /home/guagua/rustclaw/configs/config.toml 的第一行"),
+            "zh-CN"
+        );
+        assert_eq!(
+            request_language_hint("只检查 configs/config.toml 是否是合法 TOML，别做语义风险判断。"),
             "zh-CN"
         );
         assert_eq!(request_language_hint("读取 AGENTS.md 的第一行"), "zh-CN");

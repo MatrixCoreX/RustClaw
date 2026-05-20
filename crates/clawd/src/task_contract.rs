@@ -349,7 +349,9 @@ fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
         | OutputSemanticKind::SqliteTableNamesOnly
         | OutputSemanticKind::SqliteDatabaseKindJudgment
         | OutputSemanticKind::SqliteSchemaVersion => return TaskTargetObject::Db,
-        OutputSemanticKind::StructuredKeys => return TaskTargetObject::ConfigKey,
+        OutputSemanticKind::StructuredKeys | OutputSemanticKind::ConfigValidation => {
+            return TaskTargetObject::ConfigKey;
+        }
         OutputSemanticKind::PackageManagerDetection => return TaskTargetObject::System,
         _ => {}
     }
@@ -395,6 +397,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::ExistenceWithPath
         | OutputSemanticKind::GitCommitSubject
         | OutputSemanticKind::StructuredKeys
+        | OutputSemanticKind::ConfigValidation
         | OutputSemanticKind::SqliteDatabaseKindJudgment
         | OutputSemanticKind::SqliteSchemaVersion => TaskOperation::Inspect,
         OutputSemanticKind::QuantityComparison | OutputSemanticKind::RecentScalarEqualityCheck => {
@@ -496,6 +499,7 @@ pub(crate) fn required_evidence_fields_for_output_contract(
         OutputSemanticKind::ServiceStatus
         | OutputSemanticKind::PackageManagerDetection
         | OutputSemanticKind::StructuredKeys
+        | OutputSemanticKind::ConfigValidation
         | OutputSemanticKind::SqliteDatabaseKindJudgment
         | OutputSemanticKind::SqliteSchemaVersion
         | OutputSemanticKind::RecentScalarEqualityCheck => {

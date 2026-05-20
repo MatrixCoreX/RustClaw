@@ -63,6 +63,32 @@ fn assistant_memory_source_text(answer_text: &str, answer_messages: &[String]) -
     }
 }
 
+fn should_reinsert_execution_summaries_for_delivery(
+    route_result: &crate::RouteResult,
+    answer_text: &str,
+) -> bool {
+    let output_contract = &route_result.output_contract;
+    if (output_contract.response_shape == crate::OutputResponseShape::Scalar
+        || output_contract.semantic_kind == crate::OutputSemanticKind::ConfigValidation)
+        && !answer_text.trim().is_empty()
+        && !crate::finalize::is_execution_summary_message(answer_text)
+    {
+        return false;
+    }
+    true
+}
+
+fn drop_execution_summaries_when_delivery_is_scalar(
+    route_result: &crate::RouteResult,
+    answer_text: &str,
+    answer_messages: &mut Vec<String>,
+) {
+    if should_reinsert_execution_summaries_for_delivery(route_result, answer_text) {
+        return;
+    }
+    answer_messages.retain(|message| !crate::finalize::is_execution_summary_message(message));
+}
+
 fn journal_has_missing_file_search_evidence(
     journal: Option<&crate::task_journal::TaskJournal>,
 ) -> bool {
@@ -751,56 +777,65 @@ pub(crate) async fn finalize_ask_result(
             let failure_reply = answer.should_fail_task;
             let missing_file_delivery_reply =
                 missing_file_delivery_reply_text(state, task, prompt, route_result, &answer).await;
-            let (answer_text, answer_messages) =
-                if failure_reply || route_result.ask_mode.is_clarify_only() {
-                    (
-                        crate::intercept_response_text_for_delivery(&answer.text),
-                        answer
-                            .messages
-                            .into_iter()
-                            .map(|message| message.trim().to_string())
-                            .filter(|message| !message.is_empty())
-                            .collect(),
-                    )
-                } else if let Some(reply_text) = missing_file_delivery_reply {
-                    let mut messages = answer
+            let (answer_text, answer_messages) = if failure_reply
+                || route_result.ask_mode.is_clarify_only()
+            {
+                (
+                    crate::intercept_response_text_for_delivery(&answer.text),
+                    answer
                         .messages
                         .into_iter()
                         .map(|message| message.trim().to_string())
                         .filter(|message| !message.is_empty())
-                        .filter(|message| crate::finalize::is_execution_summary_message(message))
-                        .collect::<Vec<_>>();
-                    messages.push(reply_text.clone());
-                    (reply_text, messages)
-                } else {
-                    let original_messages = answer.messages;
-                    let execution_summaries = original_messages
-                        .iter()
-                        .map(|message| message.trim().to_string())
-                        .filter(|message| !message.is_empty())
-                        .filter(|message| crate::finalize::is_execution_summary_message(message))
-                        .collect::<Vec<_>>();
-                    let (answer_text, mut answer_messages) =
-                        crate::intercept_response_payload_for_delivery(
-                            state,
-                            // Delivery interception must stay grounded in the original user request.
-                            // The execution prompt may contain injected runtime hints such as
-                            // [AUTO_LOCATOR], which are useful for planning/execution but must not be
-                            // reinterpreted as fresh user-provided locator input during final delivery
-                            // normalization.
-                            prompt,
-                            route_result.wants_file_delivery,
-                            &route_result.output_contract,
-                            answer.text,
-                            original_messages,
-                        );
+                        .collect(),
+                )
+            } else if let Some(reply_text) = missing_file_delivery_reply {
+                let mut messages = answer
+                    .messages
+                    .into_iter()
+                    .map(|message| message.trim().to_string())
+                    .filter(|message| !message.is_empty())
+                    .filter(|message| crate::finalize::is_execution_summary_message(message))
+                    .collect::<Vec<_>>();
+                messages.push(reply_text.clone());
+                (reply_text, messages)
+            } else {
+                let original_messages = answer.messages;
+                let execution_summaries = original_messages
+                    .iter()
+                    .map(|message| message.trim().to_string())
+                    .filter(|message| !message.is_empty())
+                    .filter(|message| crate::finalize::is_execution_summary_message(message))
+                    .collect::<Vec<_>>();
+                let (answer_text, mut answer_messages) =
+                    crate::intercept_response_payload_for_delivery(
+                        state,
+                        // Delivery interception must stay grounded in the original user request.
+                        // The execution prompt may contain injected runtime hints such as
+                        // [AUTO_LOCATOR], which are useful for planning/execution but must not be
+                        // reinterpreted as fresh user-provided locator input during final delivery
+                        // normalization.
+                        prompt,
+                        route_result.wants_file_delivery,
+                        &route_result.output_contract,
+                        answer.text,
+                        original_messages,
+                    );
+                if should_reinsert_execution_summaries_for_delivery(route_result, &answer_text) {
                     for summary in execution_summaries.into_iter().rev() {
                         if !answer_messages.iter().any(|message| message == &summary) {
                             answer_messages.insert(0, summary);
                         }
                     }
-                    (answer_text, answer_messages)
-                };
+                } else {
+                    drop_execution_summaries_when_delivery_is_scalar(
+                        route_result,
+                        &answer_text,
+                        &mut answer_messages,
+                    );
+                }
+                (answer_text, answer_messages)
+            };
             journal.record_final_answer(&answer_text);
             if !failure_reply && !semantic_clarify && journal.answer_verifier_summary.is_none() {
                 if let Some(answer_verifier) = crate::answer_verifier::verify_answer_observe_only(
@@ -1070,8 +1105,9 @@ pub(crate) async fn finalize_ask_result(
 #[cfg(test)]
 mod tests {
     use super::{
-        assistant_memory_source_text, journal_has_missing_file_search_evidence,
-        non_failure_final_status, should_use_answer_route_result,
+        assistant_memory_source_text, drop_execution_summaries_when_delivery_is_scalar,
+        journal_has_missing_file_search_evidence, non_failure_final_status,
+        should_reinsert_execution_summaries_for_delivery, should_use_answer_route_result,
     };
 
     use serde_json::json;
@@ -1137,6 +1173,68 @@ mod tests {
             ),
             ""
         );
+    }
+
+    #[test]
+    fn scalar_delivery_does_not_reinsert_execution_summary() {
+        let mut route = route_result(crate::AskMode::Act {
+            finalize: crate::ActFinalizeStyle::Plain,
+        });
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+
+        assert!(!should_reinsert_execution_summaries_for_delivery(
+            &route, "1.0.0"
+        ));
+    }
+
+    #[test]
+    fn scalar_delivery_drops_existing_execution_summary_messages() {
+        let mut route = route_result(crate::AskMode::Act {
+            finalize: crate::ActFinalizeStyle::Plain,
+        });
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        let mut messages = vec![
+            "**执行过程**\n1. 调用工具 `fs_basic`\n   输出：ok".to_string(),
+            "{\"workspace\":true}".to_string(),
+        ];
+
+        drop_execution_summaries_when_delivery_is_scalar(
+            &route,
+            "{\"workspace\":true}",
+            &mut messages,
+        );
+
+        assert_eq!(messages, vec!["{\"workspace\":true}".to_string()]);
+    }
+
+    #[test]
+    fn config_validation_delivery_drops_existing_execution_summary_messages() {
+        let mut route = route_result(crate::AskMode::Act {
+            finalize: crate::ActFinalizeStyle::ChatWrapped,
+        });
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
+        let mut messages = vec![
+            "**Execution**\n1. Called tool `config_basic`\n   Output: valid".to_string(),
+            "pass".to_string(),
+        ];
+
+        drop_execution_summaries_when_delivery_is_scalar(&route, "pass", &mut messages);
+
+        assert_eq!(messages, vec!["pass".to_string()]);
+    }
+
+    #[test]
+    fn free_delivery_keeps_execution_summary_available() {
+        let mut route = route_result(crate::AskMode::Act {
+            finalize: crate::ActFinalizeStyle::Plain,
+        });
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+
+        assert!(should_reinsert_execution_summaries_for_delivery(
+            &route,
+            "配置检查通过。"
+        ));
     }
 
     #[test]

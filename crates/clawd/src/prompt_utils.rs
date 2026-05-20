@@ -685,6 +685,10 @@ fn normalize_direct_answer_gate_semantic_kind(raw: &str) -> &'static str {
             "git_commit_subject"
         }
         "structured_keys" => "structured_keys",
+        "config_validation" | "structured_config_validation" => "config_validation",
+        "package_manager_detection" | "package_manager_detect" | "package_detect_manager" => {
+            "package_manager_detection"
+        }
         "sqlite_table_listing" => "sqlite_table_listing",
         "sqlite_table_names_only" => "sqlite_table_names_only",
         "sqlite_database_kind_judgment" => "sqlite_database_kind_judgment",
@@ -2371,6 +2375,8 @@ mod tests {
             "directory_purpose_summary",
             "excerpt_kind_judgment",
             "recent_artifacts_judgment",
+            "config_validation",
+            "package_manager_detection",
         ];
 
         for semantic_kind in semantic_kinds {

@@ -2627,11 +2627,14 @@ fn prefer_observed_answer_for_exact_contract(
         .map(str::trim)
         .filter(|text| !text.is_empty())
     {
+        let scalar_value_contract =
+            route.output_contract.response_shape == crate::OutputResponseShape::Scalar;
         if delivery_messages
             .last()
             .map(|message| message.trim() == synthesis)
             .unwrap_or(false)
             && !(has_prior_step_error && allow_prior_step_error_replacement)
+            && !scalar_value_contract
             && planned_delivery_is_explicit_contractual_answer(route, synthesis)
         {
             info!(
@@ -2650,7 +2653,10 @@ fn prefer_observed_answer_for_exact_contract(
                 .map(str::trim)
                 .is_some_and(|synthesis| synthesis == message.trim())
         });
+    let scalar_value_contract =
+        route.output_contract.response_shape == crate::OutputResponseShape::Scalar;
     if !current_delivery_is_publishable_synthesis
+        && !scalar_value_contract
         && delivery_messages
             .last()
             .is_some_and(|message| planned_delivery_is_explicit_contractual_answer(route, message))
@@ -11017,6 +11023,69 @@ mod tests {
             summary.disposition,
             Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
         );
+    }
+
+    #[test]
+    fn scalar_contract_prefers_latest_structured_observed_value_over_planned_delivery() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.delivery_messages.push(
+            "true (workspace inherited -- root workspace defines the actual version number)"
+                .to_string(),
+        );
+        loop_state.last_user_visible_respond = loop_state.delivery_messages.last().cloned();
+        loop_state.last_publishable_synthesis_output =
+            Some("workspace.package.version: 0.1.7".to_string());
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"package.version","format":"toml","resolved_field_path":"package.version","value":{"workspace":true},"value_text":"{\"workspace\":true}","value_type":"object"}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"workspace.package.version","format":"toml","resolved_field_path":"workspace.package.version","value":"0.1.7","value_text":"0.1.7","value_type":"string"}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_3",
+            "synthesize_answer",
+            "workspace.package.version: 0.1.7",
+        ));
+        let mut route = scalar_route_result();
+        route.resolved_intent =
+            "Read package.version from crates/clawd/Cargo.toml and output only the value."
+                .to_string();
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "crates/clawd/Cargo.toml".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            original_user_request: Some(
+                "Read package.version from crates/clawd/Cargo.toml and output only the value."
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
+        let mut finalizer_summary = None;
+        let mut delivery = vec![
+            "true (workspace inherited -- root workspace defines the actual version number)"
+                .to_string(),
+        ];
+        prefer_observed_answer_for_exact_contract(
+            &state,
+            "task-1",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut delivery,
+            &mut finalizer_summary,
+        );
+
+        assert_eq!(delivery, vec!["0.1.7".to_string()]);
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some("0.1.7")
+        );
+        assert!(finalizer_summary.is_some());
     }
 
     #[test]

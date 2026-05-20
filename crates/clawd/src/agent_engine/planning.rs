@@ -1,6 +1,7 @@
 use claw_core::skill_registry::PrimaryFallbackRole;
 use regex::Regex;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -1096,6 +1097,7 @@ fn action_supports_structured_direct_observed_finalize(
                 | crate::OutputSemanticKind::DirectoryNames
                 | crate::OutputSemanticKind::FilePaths
                 | crate::OutputSemanticKind::ContentPresenceCheck
+                | crate::OutputSemanticKind::ConfigValidation
         )
     }) {
         return false;
@@ -2183,6 +2185,9 @@ fn scalar_content_auto_locator_observation_plan(
     if !Path::new(path).is_file() {
         return None;
     }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ConfigValidation {
+        return Some(vec![config_basic_validate_action(path.to_string())]);
+    }
     Some(vec![
         AgentAction::CallTool {
             tool: "fs_basic".to_string(),
@@ -2203,16 +2208,28 @@ fn scalar_content_auto_locator_observation_plan(
 }
 
 fn scalar_content_auto_locator_deterministic_plan_result(
+    state: &AppState,
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
+    user_text: &str,
+    original_user_text: Option<&str>,
     auto_locator_path: Option<&str>,
 ) -> Option<PlanResult> {
     if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
         return None;
     }
     let actions = scalar_content_auto_locator_observation_plan(route_result, auto_locator_path)?;
-    let actions = canonicalize_legacy_file_config_capabilities(actions);
+    let actions = normalize_planned_actions_with_original_and_context(
+        state,
+        route_result,
+        loop_state,
+        user_text,
+        original_user_text,
+        Some(goal),
+        auto_locator_path,
+        actions,
+    );
     let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
     Some(build_plan_result(
@@ -3425,6 +3442,12 @@ fn replace_structured_keys_read_plan(
     }) {
         return actions;
     }
+    if actions
+        .iter()
+        .any(action_is_structured_field_read_with_explicit_field)
+    {
+        return actions;
+    }
     let Some(path) = structured_keys_locator_path(route_result, auto_locator_path) else {
         return actions;
     };
@@ -3458,6 +3481,37 @@ fn replace_structured_keys_read_plan(
             "max_keys": 1000,
         }),
     }]
+}
+
+fn action_is_structured_field_read_with_explicit_field(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            let action_name = args
+                .get("action")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_ascii_lowercase());
+            let is_field_read = if skill.eq_ignore_ascii_case("config_basic") {
+                matches!(action_name.as_deref(), Some("read_field" | "read_fields"))
+            } else if skill.eq_ignore_ascii_case("system_basic") {
+                matches!(
+                    action_name.as_deref(),
+                    Some("extract_field" | "extract_fields")
+                )
+            } else {
+                false
+            };
+            is_field_read
+                && (json_trimmed_string_arg(args, &["field_path", "field", "key"]).is_some()
+                    || args
+                        .get("field_paths")
+                        .or_else(|| args.get("fields"))
+                        .is_some_and(|value| !string_list_from_value(Some(value)).is_empty()))
+        }
+        AgentAction::CallCapability { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::SynthesizeAnswer { .. }
+        | AgentAction::Think { .. } => false,
+    }
 }
 
 fn action_observes_bounded_file_content(action: &AgentAction) -> bool {
@@ -4833,6 +4887,16 @@ fn normalize_action_schema_aliases(
     let actions = strip_file_lines_count_before_tail_read_range(actions);
     let actions = strip_directory_read_range_after_inventory_dir(actions);
     let actions = broaden_default_read_range_for_structured_text(actions);
+    let actions = rewrite_config_validation_read_plan_to_validate(route_result, None, actions);
+    let actions = rewrite_structured_scalar_field_read_plan_to_read_field(
+        route_result,
+        route_result
+            .map(|route| route.resolved_intent.as_str())
+            .unwrap_or_default(),
+        None,
+        None,
+        actions,
+    );
     enforce_output_contract_tool_args(route_result, actions)
 }
 
@@ -4916,6 +4980,129 @@ fn path_has_structured_text_extension(path: &str) -> bool {
         .is_some_and(|ext| matches!(ext.as_str(), "json" | "toml" | "yaml" | "yml"))
 }
 
+fn structured_config_format_for_path(path: &str) -> Option<&'static str> {
+    match Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("json") => Some("json"),
+        Some("toml") => Some("toml"),
+        Some("yaml" | "yml") => Some("yaml"),
+        _ => None,
+    }
+}
+
+fn config_basic_validate_action(path: String) -> AgentAction {
+    let mut args = serde_json::Map::new();
+    args.insert("action".to_string(), Value::String("validate".to_string()));
+    args.insert("path".to_string(), Value::String(path.clone()));
+    if let Some(format) = structured_config_format_for_path(&path) {
+        args.insert("format".to_string(), Value::String(format.to_string()));
+    }
+    args.insert(
+        "validation_profile".to_string(),
+        Value::String("syntax_only".to_string()),
+    );
+    AgentAction::CallTool {
+        tool: "config_basic".to_string(),
+        args: Value::Object(args),
+    }
+}
+
+fn action_is_structured_config_validation(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            let action_name = args
+                .get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
+            (skill.eq_ignore_ascii_case("config_basic")
+                && action_name.eq_ignore_ascii_case("validate"))
+                || (skill.eq_ignore_ascii_case("system_basic")
+                    && action_name.eq_ignore_ascii_case("validate_structured"))
+        }
+        _ => false,
+    }
+}
+
+fn config_validation_target_path(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+    actions: &[AgentAction],
+) -> Option<String> {
+    actions
+        .iter()
+        .find_map(planned_bounded_file_read_path)
+        .or_else(|| {
+            auto_locator_path
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+        })
+        .or_else(|| {
+            route_result
+                .map(|route| route.output_contract.locator_hint.trim())
+                .filter(|path| !path.is_empty())
+        })
+        .filter(|path| path_has_structured_document_extension(path))
+        .map(ToString::to_string)
+}
+
+fn rewrite_config_validation_read_plan_to_validate(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.needs_clarify
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ConfigValidation
+        || actions.iter().any(action_is_structured_config_validation)
+    {
+        return actions;
+    }
+    let Some(path) = config_validation_target_path(Some(route), auto_locator_path, &actions) else {
+        return actions;
+    };
+
+    let mut rewritten = Vec::with_capacity(actions.len().max(1));
+    let mut inserted = false;
+    let mut changed = false;
+    for action in actions {
+        if !inserted && action_observes_bounded_file_content(&action) {
+            rewritten.push(config_basic_validate_action(path.clone()));
+            inserted = true;
+            changed = true;
+            continue;
+        }
+        if !inserted
+            && matches!(
+                action,
+                AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. }
+            )
+        {
+            rewritten.push(config_basic_validate_action(path.clone()));
+            inserted = true;
+            changed = true;
+        }
+        rewritten.push(action);
+    }
+    if !inserted {
+        rewritten.push(config_basic_validate_action(path.clone()));
+        changed = true;
+    }
+    if changed {
+        info!(
+            "plan_rewrite_config_validation_read_plan_to_validate path={}",
+            crate::truncate_for_log(&path)
+        );
+    }
+    rewritten
+}
+
 fn normalize_evidence_contract_actions(
     state: &AppState,
     route_result: Option<&RouteResult>,
@@ -4938,6 +5125,13 @@ fn normalize_evidence_contract_actions(
     let actions = rewrite_config_change_preview_to_config_edit_plan(
         route_result,
         user_text,
+        auto_locator_path,
+        actions,
+    );
+    let actions = rewrite_structured_scalar_field_read_plan_to_read_field(
+        route_result,
+        user_text,
+        plan_context,
         auto_locator_path,
         actions,
     );
@@ -5063,6 +5257,219 @@ fn route_locator_structured_config_path(route: &RouteResult) -> Option<String> {
         crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
     )
     .then(|| hint.to_string())
+}
+
+fn rewrite_structured_scalar_field_read_plan_to_read_field(
+    route_result: Option<&RouteResult>,
+    user_text: &str,
+    plan_context: Option<&str>,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.needs_clarify
+        || route.output_contract.delivery_required
+        || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        || !route.output_contract.requires_content_evidence
+        || actions.iter().any(action_is_structured_scalar_field_read)
+        || !actions.iter().any(action_observes_bounded_file_content)
+        || actions.iter().any(|action| {
+            !action_observes_bounded_file_content(action)
+                && !matches!(
+                    action,
+                    AgentAction::SynthesizeAnswer { .. }
+                        | AgentAction::Respond { .. }
+                        | AgentAction::Think { .. }
+                )
+        })
+    {
+        return actions;
+    }
+    let Some(path) = structured_scalar_field_read_target_path(route, auto_locator_path, &actions)
+    else {
+        return actions;
+    };
+    let Some(field_path) =
+        structured_scalar_field_selector(route, user_text, plan_context, Some(&path))
+    else {
+        return actions;
+    };
+
+    info!(
+        "plan_rewrite_structured_scalar_field_read_to_config_basic path={} field={}",
+        crate::truncate_for_log(&path),
+        crate::truncate_for_log(&field_path)
+    );
+    vec![config_basic_read_field_action(path, field_path)]
+}
+
+fn action_is_structured_scalar_field_read(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            let action_name = args
+                .get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
+            (skill.eq_ignore_ascii_case("config_basic")
+                && matches!(
+                    action_name.to_ascii_lowercase().as_str(),
+                    "read_field" | "read_fields"
+                ))
+                || (skill.eq_ignore_ascii_case("system_basic")
+                    && matches!(
+                        action_name.to_ascii_lowercase().as_str(),
+                        "extract_field" | "extract_fields"
+                    ))
+        }
+        AgentAction::CallCapability { .. }
+        | AgentAction::Think { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::SynthesizeAnswer { .. } => false,
+    }
+}
+
+fn structured_scalar_field_read_target_path(
+    route: &RouteResult,
+    auto_locator_path: Option<&str>,
+    actions: &[AgentAction],
+) -> Option<String> {
+    actions
+        .iter()
+        .find_map(planned_bounded_file_read_path)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            auto_locator_path
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(ToString::to_string)
+        })
+        .or_else(|| route_locator_structured_config_path(route))
+        .filter(|path| path_has_structured_document_extension(path))
+}
+
+fn structured_scalar_field_selector(
+    route: &RouteResult,
+    user_text: &str,
+    _plan_context: Option<&str>,
+    target_path: Option<&str>,
+) -> Option<String> {
+    let current_turn_sources = [Some(user_text), Some(route.resolved_intent.as_str())];
+    current_turn_sources
+        .iter()
+        .flatten()
+        .find_map(|text| {
+            crate::intent::surface_signals::extract_dotted_field_selector(text)
+                .filter(|candidate| structured_field_selector_candidate_is_valid(candidate))
+                .or_else(|| extract_dotted_field_selector_for_structured_target(text))
+        })
+        .or_else(|| {
+            let path = target_path?;
+            current_turn_sources
+                .iter()
+                .flatten()
+                .find_map(|text| extract_schema_backed_field_selector(path, text))
+        })
+}
+
+fn structured_field_selector_candidate_is_valid(candidate: &str) -> bool {
+    let token = candidate.trim();
+    !token.is_empty()
+        && !token.contains('/')
+        && !token.contains('\\')
+        && !path_has_structured_document_extension(token)
+        && !crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(token)
+}
+
+fn extract_dotted_field_selector_for_structured_target(text: &str) -> Option<String> {
+    static DOTTED_SELECTOR_RE: OnceLock<Regex> = OnceLock::new();
+    let re = DOTTED_SELECTOR_RE.get_or_init(|| {
+        Regex::new(r"\b[A-Za-z_$][A-Za-z0-9_$-]*(?:\.[A-Za-z_$][A-Za-z0-9_$-]*)+\b")
+            .expect("valid dotted selector regex")
+    });
+    re.find_iter(text).find_map(|candidate| {
+        let token = candidate.as_str().trim();
+        if !structured_field_selector_candidate_is_valid(token) {
+            return None;
+        }
+        Some(token.to_string())
+    })
+}
+
+fn extract_schema_backed_field_selector(path: &str, text: &str) -> Option<String> {
+    let value = parse_structured_file_value(Path::new(path))?;
+    let index = structured_field_leaf_index(&value);
+    schema_field_candidate_tokens(text).find_map(|token| {
+        let lower = token.to_ascii_lowercase();
+        let paths = index.get(&lower)?;
+        if paths.iter().any(|path| path.eq_ignore_ascii_case(&token)) {
+            return Some(token);
+        }
+        (paths.len() == 1).then(|| paths[0].clone())
+    })
+}
+
+fn structured_field_leaf_index(value: &Value) -> HashMap<String, Vec<String>> {
+    let mut out = HashMap::new();
+    collect_structured_field_leaf_index(value, "", &mut out);
+    out
+}
+
+fn collect_structured_field_leaf_index(
+    value: &Value,
+    prefix: &str,
+    out: &mut HashMap<String, Vec<String>>,
+) {
+    let Some(obj) = value.as_object() else {
+        return;
+    };
+    for (key, child) in obj {
+        if !schema_field_token_is_valid(key) {
+            continue;
+        }
+        let path = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        let lower = key.to_ascii_lowercase();
+        out.entry(lower).or_insert_with(Vec::new).push(path.clone());
+        collect_structured_field_leaf_index(child, &path, out);
+    }
+}
+
+fn schema_field_candidate_tokens(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split_whitespace().filter_map(|token| {
+        let trimmed = token
+            .trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && !matches!(ch, '_' | '-' | '$'));
+        schema_field_token_is_valid(trimmed).then(|| trimmed.to_string())
+    })
+}
+
+fn schema_field_token_is_valid(token: &str) -> bool {
+    !token.is_empty()
+        && !token.contains('/')
+        && !token.contains('\\')
+        && !path_has_structured_document_extension(token)
+        && !crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(token)
+        && token
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '$'))
+}
+
+fn config_basic_read_field_action(path: String, field_path: String) -> AgentAction {
+    AgentAction::CallTool {
+        tool: "config_basic".to_string(),
+        args: serde_json::json!({
+            "action": "read_field",
+            "path": path,
+            "field_path": field_path,
+        }),
+    }
 }
 
 fn parse_config_change_value_after_field(user_text: &str, field_path: &str) -> Option<Value> {
@@ -9112,7 +9519,12 @@ fn rewrite_extract_field_paths_to_structured_candidates(
             continue;
         };
         let current = resolve_workspace_path(&state.skill_rt.workspace_root, &request.path);
-        if rewrite_cargo_workspace_package_fields_to_workspace_package(args, &current, &request) {
+        if rewrite_cargo_workspace_package_fields_to_workspace_package(
+            args,
+            &state.skill_rt.workspace_root,
+            &current,
+            &request,
+        ) {
             continue;
         }
         if structured_file_has_all_fields(&current, &request.fields) {
@@ -9151,36 +9563,18 @@ fn rewrite_extract_field_paths_to_structured_candidates(
 
 fn rewrite_cargo_workspace_package_fields_to_workspace_package(
     args: &mut Value,
+    workspace_root: &Path,
     current: &Path,
     request: &StructuredExtractRequest,
 ) -> bool {
     if current.file_name().and_then(|name| name.to_str()) != Some("Cargo.toml") {
         return false;
     }
-    let Some(root_value) = parse_structured_file_value(current) else {
+    let Some((target_path, rewritten_fields)) =
+        resolve_cargo_workspace_package_fields(workspace_root, current, &request.fields)
+    else {
         return false;
     };
-    if lookup_structured_field_value(&root_value, "workspace").is_none()
-        || lookup_structured_field_value(&root_value, "package").is_some()
-    {
-        return false;
-    }
-    let mut rewritten_fields = Vec::with_capacity(request.fields.len());
-    let mut changed = false;
-    for field in &request.fields {
-        let Some(suffix) = field.strip_prefix("package.") else {
-            return false;
-        };
-        let workspace_field = format!("workspace.package.{suffix}");
-        if lookup_structured_field_value(&root_value, &workspace_field).is_none() {
-            return false;
-        }
-        rewritten_fields.push(workspace_field);
-        changed = true;
-    }
-    if !changed {
-        return false;
-    }
     let Some(obj) = args.as_object_mut() else {
         return false;
     };
@@ -9216,12 +9610,94 @@ fn rewrite_cargo_workspace_package_fields_to_workspace_package(
     } else {
         return false;
     }
+    obj.insert(
+        "path".to_string(),
+        Value::String(target_path.display().to_string()),
+    );
     info!(
-        "plan_rewrite_cargo_workspace_package_fields path={} fields={:?}",
+        "plan_rewrite_cargo_workspace_package_fields from={} to={} fields={:?}",
         current.display(),
+        target_path.display(),
         rewritten_fields
     );
     true
+}
+
+fn resolve_cargo_workspace_package_fields(
+    workspace_root: &Path,
+    current: &Path,
+    fields: &[String],
+) -> Option<(PathBuf, Vec<String>)> {
+    let current_value = parse_structured_file_value(current)?;
+    let rewritten_fields = cargo_workspace_package_field_paths(fields)?;
+    if lookup_structured_field_value(&current_value, "workspace").is_some()
+        && lookup_structured_field_value(&current_value, "package").is_none()
+        && rewritten_fields
+            .iter()
+            .all(|field| lookup_structured_field_value(&current_value, field).is_some())
+    {
+        return Some((current.to_path_buf(), rewritten_fields));
+    }
+    if !fields.iter().all(|field| {
+        lookup_structured_field_value(&current_value, field)
+            .is_some_and(is_cargo_workspace_inherited_marker)
+    }) {
+        return None;
+    }
+    let target =
+        find_cargo_workspace_manifest_with_fields(workspace_root, current, &rewritten_fields)?;
+    Some((target, rewritten_fields))
+}
+
+fn cargo_workspace_package_field_paths(fields: &[String]) -> Option<Vec<String>> {
+    let mut rewritten = Vec::with_capacity(fields.len());
+    for field in fields {
+        let suffix = field.strip_prefix("package.")?;
+        if suffix.trim().is_empty() {
+            return None;
+        }
+        rewritten.push(format!("workspace.package.{suffix}"));
+    }
+    Some(rewritten)
+}
+
+fn is_cargo_workspace_inherited_marker(value: &Value) -> bool {
+    value.as_object().is_some_and(|obj| {
+        obj.len() == 1
+            && obj
+                .get("workspace")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+    })
+}
+
+fn find_cargo_workspace_manifest_with_fields(
+    workspace_root: &Path,
+    current: &Path,
+    fields: &[String],
+) -> Option<PathBuf> {
+    let workspace_root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let mut dir = current.parent()?.to_path_buf();
+    loop {
+        let manifest = dir.join("Cargo.toml");
+        if !same_existing_or_display_path(&manifest, current)
+            && manifest.is_file()
+            && parse_structured_file_value(&manifest).is_some_and(|value| {
+                lookup_structured_field_value(&value, "workspace").is_some()
+                    && fields
+                        .iter()
+                        .all(|field| lookup_structured_field_value(&value, field).is_some())
+            })
+        {
+            return Some(manifest);
+        }
+        if same_existing_or_display_path(&dir, &workspace_root) || !dir.pop() {
+            break;
+        }
+    }
+    None
 }
 
 fn structured_extract_request(args: &Value) -> Option<StructuredExtractRequest> {
@@ -11945,9 +12421,12 @@ pub(super) async fn plan_round_actions(
             return Ok(plan_result);
         }
         if let Some(plan_result) = scalar_content_auto_locator_deterministic_plan_result(
+            state,
             goal,
             route_result,
             loop_state,
+            user_text,
+            Some(&original_user_text_for_policy),
             auto_locator_path,
         ) {
             info!(
@@ -12521,6 +13000,7 @@ mod tests {
         replace_workspace_synthesis_respond_only_plan, rewrite_archive_pack_plan_to_archive_basic,
         rewrite_archive_unpack_run_cmd_to_archive_basic,
         rewrite_config_change_preview_to_config_edit_plan,
+        rewrite_config_validation_read_plan_to_validate,
         rewrite_docker_readonly_run_cmd_to_docker_basic, rewrite_extract_field_alias_args,
         rewrite_pre_observation_concrete_respond_to_placeholder,
         rewrite_process_ps_run_cmd_to_process_basic, rewrite_rustclaw_config_validation_to_guard,
@@ -13746,6 +14226,153 @@ mod tests {
         let rewritten = rewrite_rustclaw_config_validation_to_guard(Some(&route), None, actions);
 
         expect_planned_call(&rewritten[0], "config_basic", "validate");
+    }
+
+    #[test]
+    fn config_validation_contract_rewrites_broad_read_to_validate() {
+        let mut route = base_route_result();
+        route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "configs/config.toml".to_string();
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": "configs/config.toml",
+                    "mode": "head",
+                    "n": 500,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let rewritten =
+            rewrite_config_validation_read_plan_to_validate(Some(&route), None, actions);
+
+        let args = expect_planned_call(&rewritten[0], "config_basic", "validate");
+        assert_eq!(
+            args.get("validation_profile").and_then(Value::as_str),
+            Some("syntax_only")
+        );
+        assert_eq!(args.get("format").and_then(Value::as_str), Some("toml"));
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some("configs/config.toml")
+        );
+    }
+
+    #[test]
+    fn config_validation_contract_normalizes_tool_read_to_validate() {
+        let state = test_state();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "configs/config.toml".to_string();
+        route.resolved_intent =
+            "Validate TOML syntax of configs/config.toml and answer pass or fail".to_string();
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": "/home/guagua/rustclaw/configs/config.toml",
+                    "mode": "head",
+                    "n": 120,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "Validate only the TOML syntax of configs/config.toml and answer pass or fail.",
+            Some("/home/guagua/rustclaw/configs/config.toml"),
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "config_basic", "validate");
+        assert_eq!(
+            args.get("validation_profile").and_then(Value::as_str),
+            Some("syntax_only")
+        );
+        assert_eq!(args.get("format").and_then(Value::as_str), Some("toml"));
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some("/home/guagua/rustclaw/configs/config.toml")
+        );
+        assert!(
+            normalized
+                .iter()
+                .all(|action| !planned_call_is(action, "fs_basic", "read_text_range")),
+            "normalized actions: {normalized:?}"
+        );
+    }
+
+    #[test]
+    fn scalar_structured_field_contract_rewrites_broad_read_to_read_field() {
+        let state = test_state();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "crates/clawd/Cargo.toml".to_string();
+        route.resolved_intent =
+            "Read package.version from crates/clawd/Cargo.toml and output only the value."
+                .to_string();
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": "crates/clawd/Cargo.toml",
+                    "mode": "head",
+                    "n": 500,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string()],
+            },
+        ];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "Read package.version from crates/clawd/Cargo.toml and output only the value.",
+            None,
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 1);
+        let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some("crates/clawd/Cargo.toml")
+        );
+        assert_eq!(
+            args.get("field_path").and_then(Value::as_str),
+            Some("package.version")
+        );
     }
 
     #[test]
@@ -17964,11 +18591,15 @@ version = "0.1.7"
         route.output_contract.delivery_required = false;
         let mut loop_state = LoopState::default();
         loop_state.round_no = 1;
+        let state = test_state();
 
         assert!(scalar_content_auto_locator_deterministic_plan_result(
+            &state,
             "extract scalar from resolved file content",
             Some(&route),
             &loop_state,
+            "extract scalar from resolved file content",
+            Some("extract scalar from resolved file content"),
             Some(&note_path),
         )
         .is_none());
@@ -17990,11 +18621,15 @@ version = "0.1.7"
         route.output_contract.delivery_required = false;
         let mut loop_state = LoopState::default();
         loop_state.round_no = 1;
+        let state = test_state();
 
         let plan = scalar_content_auto_locator_deterministic_plan_result(
+            &state,
             "extract scalar from resolved file content",
             Some(&route),
             &loop_state,
+            "extract scalar from resolved file content",
+            Some("extract scalar from resolved file content"),
             Some(&note_path),
         )
         .expect("generic content-evidence scalar contracts should read the resolved file");
@@ -18010,6 +18645,227 @@ version = "0.1.7"
         assert!(matches!(
             plan.steps[1].to_agent_action(),
             Some(AgentAction::SynthesizeAnswer { .. })
+        ));
+    }
+
+    #[test]
+    fn scalar_content_auto_locator_validates_config_contract() {
+        let root = TempDirGuard::new("scalar_content_auto_locator_config_validation");
+        let config = root.path.join("config.toml");
+        fs::write(&config, "[service]\nname = \"rustclaw\"\n").expect("write config");
+        let config_path = config.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = config_path.clone();
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+        let state = test_state();
+
+        let plan = scalar_content_auto_locator_deterministic_plan_result(
+            &state,
+            "validate structured config syntax",
+            Some(&route),
+            &loop_state,
+            "validate structured config syntax",
+            Some("validate structured config syntax"),
+            Some(&config_path),
+        )
+        .expect("config validation should use structured validation");
+
+        assert_eq!(plan.steps.len(), 1);
+        assert!(matches!(
+            plan.steps[0].to_agent_action(),
+            Some(AgentAction::CallTool { ref tool, ref args })
+                if tool == "config_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("validate")
+                    && args.get("path").and_then(Value::as_str) == Some(config_path.as_str())
+                    && args.get("validation_profile").and_then(Value::as_str)
+                        == Some("syntax_only")
+        ));
+    }
+
+    #[test]
+    fn scalar_content_auto_locator_uses_structured_read_field_for_structured_scalar_contract() {
+        let root = TempDirGuard::new("scalar_content_auto_locator_structured_field");
+        let manifest = root.path.join("Cargo.toml");
+        fs::write(&manifest, "[package]\nname = \"rustclaw-test\"\n").expect("write manifest");
+        let manifest_path = manifest.display().to_string();
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = manifest_path.clone();
+        route.resolved_intent =
+            "Read package.name from Cargo.toml and output only that value.".to_string();
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let plan = scalar_content_auto_locator_deterministic_plan_result(
+            &state,
+            "Read package.name from Cargo.toml and output only that value.",
+            Some(&route),
+            &loop_state,
+            "Read package.name from Cargo.toml and output only that value.",
+            Some("Read package.name from Cargo.toml and output only that value."),
+            Some(&manifest_path),
+        )
+        .expect("structured scalar contracts should use structured field reads");
+
+        assert_eq!(plan.steps.len(), 1);
+        let actual = plan.steps[0].to_agent_action();
+        assert!(
+            matches!(
+            actual,
+            Some(AgentAction::CallTool { ref tool, ref args })
+                if tool == "config_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("read_field")
+                    && args.get("path").and_then(Value::as_str) == Some(manifest_path.as_str())
+                    && args.get("field_path").and_then(Value::as_str) == Some("package.name")
+            ),
+            "unexpected plan action: {:?}",
+            actual
+        );
+    }
+
+    #[test]
+    fn scalar_content_auto_locator_resolves_cargo_workspace_inherited_package_version() {
+        let root = TempDirGuard::new("scalar_content_auto_locator_workspace_version");
+        fs::write(
+            root.path.join("Cargo.toml"),
+            r#"[workspace]
+members = ["crates/clawd"]
+
+[workspace.package]
+version = "0.1.7"
+"#,
+        )
+        .expect("write workspace manifest");
+        let member_dir = root.path.join("crates/clawd");
+        fs::create_dir_all(&member_dir).expect("create member");
+        fs::write(
+            member_dir.join("Cargo.toml"),
+            r#"[package]
+name = "clawd"
+version.workspace = true
+"#,
+        )
+        .expect("write member manifest");
+        let member_manifest = member_dir.join("Cargo.toml");
+        let member_path = member_manifest.display().to_string();
+        let root_manifest = root.path.join("Cargo.toml").display().to_string();
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = member_path.clone();
+        route.resolved_intent =
+            "Read package.version from crates/clawd/Cargo.toml and output only the value."
+                .to_string();
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let plan = scalar_content_auto_locator_deterministic_plan_result(
+            &state,
+            "Read package.version from crates/clawd/Cargo.toml and output only the value.",
+            Some(&route),
+            &loop_state,
+            "Read package.version from crates/clawd/Cargo.toml and output only the value.",
+            Some("Read package.version from crates/clawd/Cargo.toml and output only the value."),
+            Some(&member_path),
+        )
+        .expect("workspace-inherited Cargo scalar contracts should read workspace package field");
+
+        assert_eq!(plan.steps.len(), 1);
+        assert!(matches!(
+            plan.steps[0].to_agent_action(),
+            Some(AgentAction::CallTool { ref tool, ref args })
+                if tool == "config_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("read_field")
+                    && args.get("path").and_then(Value::as_str) == Some(root_manifest.as_str())
+                    && args.get("field_path").and_then(Value::as_str)
+                        == Some("workspace.package.version")
+        ));
+    }
+
+    #[test]
+    fn scalar_content_auto_locator_ignores_memory_field_when_current_request_names_bare_key() {
+        let root = TempDirGuard::new("scalar_content_auto_locator_bare_key");
+        let fixture_dir = root.path.join("scripts/nl_tests/fixtures/device_local");
+        fs::create_dir_all(&fixture_dir).expect("create fixture dir");
+        let package = fixture_dir.join("package.json");
+        fs::write(
+            &package,
+            r#"{
+  "name": "rustclaw-nl-fixture",
+  "version": "1.0.0",
+  "scripts": { "build": "echo build" }
+}"#,
+        )
+        .expect("write package");
+        let package_path = package.display().to_string();
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = package_path.clone();
+        route.resolved_intent =
+            "Extract the name field from scripts/nl_tests/fixtures/device_local/package.json and output only the value."
+                .to_string();
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+        let current_request =
+            "读取 scripts/nl_tests/fixtures/device_local/package.json 的 name 字段，只输出值。";
+        let goal = format!(
+            "### PLANNER_MEMORY_CONTEXT\nfixture fact: scripts.build='echo build'\n\n### CURRENT_REQUEST\n{current_request}"
+        );
+
+        let plan = scalar_content_auto_locator_deterministic_plan_result(
+            &state,
+            &goal,
+            Some(&route),
+            &loop_state,
+            current_request,
+            Some(current_request),
+            Some(&package_path),
+        )
+        .expect("bare schema key should be selected from current request");
+
+        assert_eq!(plan.steps.len(), 1);
+        assert!(matches!(
+            plan.steps[0].to_agent_action(),
+            Some(AgentAction::CallTool { ref tool, ref args })
+                if tool == "config_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("read_field")
+                    && args.get("path").and_then(Value::as_str) == Some(package_path.as_str())
+                    && args.get("field_path").and_then(Value::as_str) == Some("name")
         ));
     }
 
@@ -18870,6 +19726,68 @@ version = "0.1.7"
             }
             other => panic!("expected config_basic list_keys action, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn structured_keys_contract_keeps_explicit_structured_field_read() {
+        let root = TempDirGuard::new("structured_keys_field_read_plan");
+        let config_path = root.path.join("Cargo.toml");
+        fs::write(&config_path, "[package]\nname = \"clawd\"\n").expect("write config");
+        let config_path = config_path.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = config_path.clone();
+        route.output_contract.delivery_required = false;
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "read_field",
+                    "path": config_path.clone(),
+                    "field_path": "package.no_such_key_100_matrix",
+                    "format": "toml",
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+        ];
+
+        let state = test_state_with_enabled_skills(&["system_basic", "config_basic"]);
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "read the requested structured field",
+            None,
+            Some(&config_path),
+            actions,
+        );
+
+        assert!(normalized.iter().any(|action| {
+            matches!(
+                action,
+                AgentAction::CallTool { tool, args }
+                    if tool == "config_basic"
+                        && args.get("action").and_then(Value::as_str) == Some("read_field")
+                        && args.get("path").and_then(Value::as_str) == Some(config_path.as_str())
+                        && args.get("field_path").and_then(Value::as_str)
+                            == Some("package.no_such_key_100_matrix")
+            )
+        }));
+        assert!(!normalized.iter().any(|action| {
+            matches!(
+                action,
+                AgentAction::CallTool { tool, args }
+                    if tool == "config_basic"
+                        && args.get("action").and_then(Value::as_str) == Some("list_keys")
+            )
+        }));
     }
 
     #[test]
