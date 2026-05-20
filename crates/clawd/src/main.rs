@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use axum::extract::{Path as AxumPath, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::routing::{get, get_service, post};
+use axum::routing::{delete, get, get_service, post};
 use axum::{Json, Router};
 use claw_core::config::AppConfig;
 use claw_core::types::{
@@ -735,6 +735,14 @@ async fn main() -> anyhow::Result<()> {
         .merge(http::ui_routes::build_ui_router())
         .route("/tasks", post(submit_task))
         .route("/classifiers/direct", post(classify_direct))
+        .route("/memory", get(get_memory_overview))
+        .route("/memory/recent", get(list_memory_recent_handler))
+        .route("/memory/preferences", get(list_memory_preferences_handler))
+        .route("/memory/facts", get(list_memory_facts_handler))
+        .route("/memory/:memory_id", delete(delete_memory_handler))
+        .route("/memory/:memory_id/expire", post(expire_memory_handler))
+        .route("/memory/clear", post(clear_memory_handler))
+        .route("/memory/settings", post(update_memory_settings_handler))
         .route("/tasks/:task_id", get(get_task))
         .route("/tasks/active", post(list_active_tasks))
         .route("/tasks/cancel", post(cancel_tasks))
@@ -1103,6 +1111,267 @@ fn require_auth_identity_for_api<T: Serialize>(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Auth lookup failed",
             ))
+        }
+    }
+}
+
+async fn get_memory_overview(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (StatusCode, Json<ApiResponse<memory::api::MemoryOverview>>) {
+    let identity =
+        match require_auth_identity_for_api::<memory::api::MemoryOverview>(&state, &headers) {
+            Ok(identity) => identity,
+            Err(resp) => return resp,
+        };
+    let db = match state.core.db.get() {
+        Ok(db) => db,
+        Err(err) => {
+            error!("get memory overview db failed: {}", err);
+            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+    match memory::api::memory_overview(
+        &db,
+        identity.user_id,
+        identity.chat_id,
+        &identity.user_key,
+        state.policy.memory.long_term_enabled,
+        state.policy.memory.hybrid_recall_enabled,
+    ) {
+        Ok(overview) => api_ok(overview),
+        Err(err) => {
+            error!("get memory overview failed: {}", err);
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "Memory lookup failed")
+        }
+    }
+}
+
+async fn list_memory_preferences_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (
+    StatusCode,
+    Json<ApiResponse<Vec<memory::api::MemoryPreferenceItem>>>,
+) {
+    let identity = match require_auth_identity_for_api::<Vec<memory::api::MemoryPreferenceItem>>(
+        &state, &headers,
+    ) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    let db = match state.core.db.get() {
+        Ok(db) => db,
+        Err(err) => {
+            error!("list memory preferences db failed: {}", err);
+            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+    match memory::api::list_preferences(&db, identity.user_id, identity.chat_id, &identity.user_key)
+    {
+        Ok(items) => api_ok(items),
+        Err(err) => {
+            error!("list memory preferences failed: {}", err);
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "Memory lookup failed")
+        }
+    }
+}
+
+async fn list_memory_facts_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (
+    StatusCode,
+    Json<ApiResponse<Vec<memory::api::MemoryFactItem>>>,
+) {
+    let identity =
+        match require_auth_identity_for_api::<Vec<memory::api::MemoryFactItem>>(&state, &headers) {
+            Ok(identity) => identity,
+            Err(resp) => return resp,
+        };
+    let db = match state.core.db.get() {
+        Ok(db) => db,
+        Err(err) => {
+            error!("list memory facts db failed: {}", err);
+            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+    match memory::api::list_facts(&db, identity.user_id, &identity.user_key) {
+        Ok(items) => api_ok(items),
+        Err(err) => {
+            error!("list memory facts failed: {}", err);
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "Memory lookup failed")
+        }
+    }
+}
+
+async fn list_memory_recent_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> (
+    StatusCode,
+    Json<ApiResponse<Vec<memory::api::MemoryRecentItem>>>,
+) {
+    let identity =
+        match require_auth_identity_for_api::<Vec<memory::api::MemoryRecentItem>>(&state, &headers)
+        {
+            Ok(identity) => identity,
+            Err(resp) => return resp,
+        };
+    let db = match state.core.db.get() {
+        Ok(db) => db,
+        Err(err) => {
+            error!("list recent memories db failed: {}", err);
+            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+    match memory::api::list_recent(
+        &db,
+        identity.user_id,
+        identity.chat_id,
+        &identity.user_key,
+        50,
+    ) {
+        Ok(items) => api_ok(items),
+        Err(err) => {
+            error!("list recent memories failed: {}", err);
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "Memory lookup failed")
+        }
+    }
+}
+
+async fn delete_memory_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(memory_id): AxumPath<String>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<memory::api::MemoryDeleteResult>>,
+) {
+    let identity =
+        match require_auth_identity_for_api::<memory::api::MemoryDeleteResult>(&state, &headers) {
+            Ok(identity) => identity,
+            Err(resp) => return resp,
+        };
+    let db = match state.core.db.get() {
+        Ok(db) => db,
+        Err(err) => {
+            error!("delete memory db failed: {}", err);
+            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+    match memory::api::delete_memory_object(
+        &db,
+        identity.user_id,
+        identity.chat_id,
+        &identity.user_key,
+        &memory_id,
+        now_ts_u64() as i64,
+    ) {
+        Ok(Some(result)) => api_ok(result),
+        Ok(None) => api_err(StatusCode::NOT_FOUND, "Memory item not found"),
+        Err(err) => {
+            warn!("delete memory failed: {}", err);
+            api_err(StatusCode::BAD_REQUEST, "Invalid memory id")
+        }
+    }
+}
+
+async fn expire_memory_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(memory_id): AxumPath<String>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<memory::api::MemoryExpireResult>>,
+) {
+    let identity =
+        match require_auth_identity_for_api::<memory::api::MemoryExpireResult>(&state, &headers) {
+            Ok(identity) => identity,
+            Err(resp) => return resp,
+        };
+    let db = match state.core.db.get() {
+        Ok(db) => db,
+        Err(err) => {
+            error!("expire memory db failed: {}", err);
+            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+    match memory::api::expire_memory_object(
+        &db,
+        identity.user_id,
+        identity.chat_id,
+        &identity.user_key,
+        &memory_id,
+        now_ts_u64() as i64,
+    ) {
+        Ok(Some(result)) => api_ok(result),
+        Ok(None) => api_err(StatusCode::NOT_FOUND, "Memory item not found"),
+        Err(err) => {
+            warn!("expire memory failed: {}", err);
+            api_err(StatusCode::BAD_REQUEST, "Invalid memory id")
+        }
+    }
+}
+
+async fn clear_memory_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<memory::api::MemoryClearRequest>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<memory::api::MemoryClearResult>>,
+) {
+    let identity =
+        match require_auth_identity_for_api::<memory::api::MemoryClearResult>(&state, &headers) {
+            Ok(identity) => identity,
+            Err(resp) => return resp,
+        };
+    let db = match state.core.db.get() {
+        Ok(db) => db,
+        Err(err) => {
+            error!("clear memory db failed: {}", err);
+            return api_err(StatusCode::INTERNAL_SERVER_ERROR, "Database error");
+        }
+    };
+    match memory::api::clear_memory_scope(
+        &db,
+        identity.user_id,
+        identity.chat_id,
+        &identity.user_key,
+        req.scope,
+        now_ts_u64() as i64,
+    ) {
+        Ok(result) => api_ok(result),
+        Err(err) => {
+            error!("clear memory failed: {}", err);
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, "Memory clear failed")
+        }
+    }
+}
+
+async fn update_memory_settings_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<memory::api::MemorySettingsRequest>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<memory::api::MemorySettingsResult>>,
+) {
+    let _identity = match require_auth_identity_for_api::<memory::api::MemorySettingsResult>(
+        &state, &headers,
+    ) {
+        Ok(identity) => identity,
+        Err(resp) => return resp,
+    };
+    match memory::api::update_memory_settings_file(&state.skill_rt.workspace_root, &req) {
+        Ok(result) => api_ok(result),
+        Err(err) => {
+            error!("update memory settings failed: {}", err);
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Memory settings update failed",
+            )
         }
     }
 }

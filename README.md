@@ -193,6 +193,136 @@ flowchart TD
 - `Final delivery / output-contract guard`: applies delivery normalization and output-contract verification before final task persistence.
 - `Finalize`: may also start background memory work after the user-visible result is saved, including long-term summary refresh and optional preference extraction controlled by `configs/memory.toml`.
 
+## Natural Language Contract Boundary
+
+RustClaw keeps natural-language understanding on the LLM side and deterministic execution on the runtime side. The intent normalizer and planner may read user wording, examples, skill docs, and multilingual prompt guidance, but they must turn that understanding into structured fields before runtime code acts on it.
+
+Runtime code should consume stable contracts such as:
+
+- schema enums, for example `semantic_kind = "package_manager_detection"`
+- action names, for example `read_field`, `validate_config`, or `transform_data`
+- registry metadata and `planner_capabilities`
+- `TaskContract` / `OutputContract` fields, target locators, and explicit `field_path` values
+- JSON/TOML/YAML field paths, file extensions, structured tool output, exit codes, error kinds, and risk/effect metadata
+
+Runtime code should not add per-language phrase tables or `prompt.contains(...)` branches to make a single natural-language case pass. If a new user wording needs better handling, update the normalizer/planner schema, registry capability metadata, `INTERFACE.md`, generated skill prompts, or vendor prompt patch so the LLM emits the same structured contract in any language. `python3 scripts/check_no_nl_hardmatch.py` is the local guard for this boundary.
+
+## Memory System
+
+RustClaw memory is split into short-term conversation records, structured user preferences, long-term fact cards, and retrieval indexes. The design goal is to make memory useful without letting old assistant output become a hidden instruction for a new task.
+
+### Write Path
+
+After an `ask` task finalizes, RustClaw can persist:
+
+- short-term records in `memories`, scoped by `user_key`, `user_id`, `chat_id`, role, memory type, salience, and safety flag
+- user preferences in `user_preferences`, such as `response_language`, `response_style`, `response_format`, and `agent_display_name`
+- long-term fact cards in `memory_facts`, with source, confidence, scope, status, conflict group, expiry, and supersede metadata
+
+Preference and fact writes go through a structured memory intent contract. The model is asked to emit `memory_actions` such as `upsert`, `delete`, `expire`, or `noop`; runtime code then validates action enum, kind, scope, confidence, source evidence, TTL, and safety fields before anything is stored. The runtime does not decide durable preference writes by matching a single natural-language phrase.
+
+Long-term summary refresh still exists as a fallback summary path, but durable knowledge is stored as fact cards first. A fact card keeps `fact_key`, `fact_value`, human-readable `fact_text`, `source_ref`, `source_memory_ids_json`, `reason`, `confidence`, `expires_at_ts`, `conflict_group`, and `status`. New active facts in the same conflict group supersede older facts, and expired or deleted facts are removed from retrieval.
+
+### Recall And Use Policy
+
+Memory recall is built as a structured context and then filtered by a memory use policy for the current stage:
+
+- route: defaults to a minimal profile with active preferences, relevant facts, and knowledge docs; it omits old assistant results for new tasks
+- follow-up route: can include recent events, assistant results, similar triggers, unfinished goals, and snippets when active session state shows that the user is continuing prior work
+- planner: can use unfinished goals, preferences, facts, and knowledge docs, but avoids fallback long-term summaries and old assistant results by default
+- chat: uses stable preferences and facts; bounded recent context is allowed only when current session state makes it relevant
+- skill: `_memory` is cropped by the skill registry `memory_policy`; skills without a policy get a safe default scoped profile
+
+The `photo_organize` skill, for example, declares a memory policy that allows preferences, relevant facts, and knowledge docs while excluding long-term summaries, recent events, assistant results, similar triggers, unfinished goals, and raw recent snippets.
+
+### Retrieval Index
+
+Hybrid recall uses `memory_retrieval_index` plus optional FTS. Each indexed row records `source_kind`, `source_ref`, memory kind, metadata, salience, success state, and embedding metadata:
+
+- `embedding_model`
+- `embedding_dims`
+- `embedding_version`
+
+The default provider is `local-hash-v1`, which runs offline. Unsupported or unavailable embedding providers fall back to local hash so the runtime keeps working. Retrieval only uses cosine scoring when the stored embedding metadata matches the current provider spec; mismatched rows fall back to lexical, salience, recency, and success-state scoring. Set `reindex_on_startup = true` in `configs/memory.toml`, or start with an empty index, to rebuild the retrieval index from short-term records, preferences, fact cards, and KB snapshots.
+
+### User Control
+
+The browser console includes a Memory page. It shows counts, preferences, fact cards, and recent records for the current identity. Users can:
+
+- delete a preference, fact, or recent memory item
+- mark a fact card as expired
+- clear recent records, preferences, facts, or all memory for the current identity
+- enable or disable long-term memory through `configs/memory.toml`
+
+The HTTP API behind the page is:
+
+```text
+GET    /v1/memory
+GET    /v1/memory/recent
+GET    /v1/memory/preferences
+GET    /v1/memory/facts
+DELETE /v1/memory/:id
+POST   /v1/memory/:id/expire
+POST   /v1/memory/clear
+POST   /v1/memory/settings
+```
+
+Recent records with safety flags are hidden by default in the UI. Fact-card details such as reason, source, and conflict group are available in a secondary details view instead of being shown as raw JSON first.
+
+### Trace And Troubleshooting
+
+Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content.
+
+Useful code and config entry points:
+
+- `configs/memory.toml`
+- `crates/clawd/src/memory/intent.rs`
+- `crates/clawd/src/memory/apply.rs`
+- `crates/clawd/src/memory/facts.rs`
+- `crates/clawd/src/memory/use_policy.rs`
+- `crates/clawd/src/memory/retrieval.rs`
+- `crates/clawd/src/memory/indexing.rs`
+- `crates/clawd/src/memory/api.rs`
+
+### Memory Flow
+
+```mermaid
+flowchart TD
+    User[User request] --> Task[POST /v1/tasks]
+    Task --> Worker[worker_once]
+    Worker --> Ask{kind=ask?}
+    Ask -->|yes| Normalizer[Intent normalizer]
+    Ask -->|run_skill| DirectSkill[Direct run_skill path]
+    Normalizer --> Bundle[Ask context bundle]
+    Bundle --> Recall[Structured memory recall]
+    Recall --> Policy[Memory use policy]
+    Policy --> Route[Route prompt]
+    Policy --> Planner[Planner prompt]
+    Policy --> Chat[Chat prompt]
+    Policy --> SkillArgs[Skill _memory args]
+    SkillArgs --> SkillPolicy[Registry memory_policy crop]
+    SkillPolicy --> Runner[skill-runner / builtin / external skill]
+    Route --> Runtime[Runtime / planner execution]
+    Planner --> Runtime
+    Chat --> Visible[User-visible answer]
+    Runtime --> Visible
+    Runner --> Runtime
+    Visible --> Finalize[Finalize task result]
+    Finalize --> ShortTerm[(memories)]
+    Finalize -. optional .-> Intent[Memory intent extractor]
+    Intent --> Validate[Runtime schema / scope / safety validation]
+    Validate --> Prefs[(user_preferences)]
+    Validate --> Facts[(memory_facts)]
+    Finalize -. optional .-> Summary[Long-term summary refresh]
+    Summary --> Facts
+    Prefs --> Index[(memory_retrieval_index)]
+    Facts --> Index
+    ShortTerm --> Index
+    Index --> Recall
+    Policy --> Journal[Task journal memory_trace]
+    Runtime --> Journal
+```
+
 ## Main Components
 
 - `crates/clawd`: core runtime, HTTP API, routing, memory, scheduling, auth, task queue

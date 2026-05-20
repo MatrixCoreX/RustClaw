@@ -934,6 +934,10 @@ pub struct MemoryConfig {
     pub route_trigger_budget_chars: usize,
     #[serde(default = "default_memory_embedding_model")]
     pub embedding_model: String,
+    #[serde(default = "default_memory_embedding_dims")]
+    pub embedding_dims: usize,
+    #[serde(default = "default_memory_embedding_version")]
+    pub embedding_version: String,
     #[serde(default = "default_memory_embedding_batch_size")]
     pub embedding_batch_size: usize,
     #[serde(default = "default_memory_reindex_on_startup")]
@@ -993,6 +997,8 @@ impl Default for MemoryConfig {
             agent_memory_budget_chars: default_memory_agent_memory_budget_chars(),
             route_trigger_budget_chars: default_memory_route_trigger_budget_chars(),
             embedding_model: default_memory_embedding_model(),
+            embedding_dims: default_memory_embedding_dims(),
+            embedding_version: default_memory_embedding_version(),
             embedding_batch_size: default_memory_embedding_batch_size(),
             reindex_on_startup: default_memory_reindex_on_startup(),
             rules: MemoryRulesConfig::default(),
@@ -1010,8 +1016,6 @@ pub struct MemoryRulesConfig {
     pub injection_markers: Vec<String>,
     #[serde(default = "default_memory_rule_salience_boost_markers")]
     pub salience_boost_markers: Vec<String>,
-    #[serde(default)]
-    pub preferences: MemoryPreferenceRulesConfig,
 }
 
 impl Default for MemoryRulesConfig {
@@ -1021,33 +1025,6 @@ impl Default for MemoryRulesConfig {
             instruction_markers: default_memory_rule_instruction_markers(),
             injection_markers: default_memory_rule_injection_markers(),
             salience_boost_markers: default_memory_rule_salience_boost_markers(),
-            preferences: MemoryPreferenceRulesConfig::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct MemoryPreferenceRulesConfig {
-    #[serde(default = "default_memory_rule_pref_language_zh")]
-    pub language_zh: Vec<String>,
-    #[serde(default = "default_memory_rule_pref_language_en")]
-    pub language_en: Vec<String>,
-    #[serde(default = "default_memory_rule_pref_style_concise")]
-    pub style_concise: Vec<String>,
-    #[serde(default = "default_memory_rule_pref_style_detailed")]
-    pub style_detailed: Vec<String>,
-    #[serde(default = "default_memory_rule_pref_format_plain_text")]
-    pub format_plain_text: Vec<String>,
-}
-
-impl Default for MemoryPreferenceRulesConfig {
-    fn default() -> Self {
-        Self {
-            language_zh: default_memory_rule_pref_language_zh(),
-            language_en: default_memory_rule_pref_language_en(),
-            style_concise: default_memory_rule_pref_style_concise(),
-            style_detailed: default_memory_rule_pref_style_detailed(),
-            format_plain_text: default_memory_rule_pref_format_plain_text(),
         }
     }
 }
@@ -1649,6 +1626,14 @@ fn default_memory_embedding_model() -> String {
     "local-hash-v1".to_string()
 }
 
+fn default_memory_embedding_dims() -> usize {
+    24
+}
+
+fn default_memory_embedding_version() -> String {
+    "local-hash-v1".to_string()
+}
+
 fn default_memory_embedding_batch_size() -> usize {
     16
 }
@@ -1710,26 +1695,6 @@ fn default_memory_rule_injection_markers() -> Vec<String> {
 }
 
 fn default_memory_rule_salience_boost_markers() -> Vec<String> {
-    Vec::new()
-}
-
-fn default_memory_rule_pref_language_zh() -> Vec<String> {
-    Vec::new()
-}
-
-fn default_memory_rule_pref_language_en() -> Vec<String> {
-    Vec::new()
-}
-
-fn default_memory_rule_pref_style_concise() -> Vec<String> {
-    Vec::new()
-}
-
-fn default_memory_rule_pref_style_detailed() -> Vec<String> {
-    Vec::new()
-}
-
-fn default_memory_rule_pref_format_plain_text() -> Vec<String> {
     Vec::new()
 }
 

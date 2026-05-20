@@ -154,8 +154,11 @@ base_url = "https://api.minimaxi.com/v1"
 max_concurrency = 1
 model = "MiniMax-M2.7"
 # Optional prompt-budget capacity override for compatible providers whose
-# public model name does not expose a reliable context window.
-context_window_tokens = 2013
+# public model name does not expose a reliable context window. Local probe on
+# 2026-05-19 accepted 252k input chars (~89k reported prompt tokens); 120k keeps
+# RustClaw's byte budget high enough for full routing prompts while staying
+# below the observed character envelope.
+context_window_tokens = 120000
 models = [
     "MiniMax-M2.7",
     "MiniMax-M2.5",

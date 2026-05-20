@@ -259,6 +259,7 @@ pub(crate) fn ensure_schedule_schema(db: &Connection) -> anyhow::Result<()> {
 
 pub(crate) fn ensure_memory_schema(db: &Connection) -> anyhow::Result<()> {
     db.execute_batch(crate::MEMORY_UPGRADE_SQL)?;
+    crate::memory::facts::ensure_memory_fact_schema(db)?;
     db.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_memories_user_chat_role_id
          ON memories(user_id, chat_id, role, id DESC);",

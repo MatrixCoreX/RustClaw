@@ -1,15 +1,20 @@
 use std::collections::HashSet;
 
+pub(crate) mod api;
+pub(crate) mod apply;
+pub(crate) mod embedding;
+pub(crate) mod facts;
 pub(crate) mod indexing;
+pub(crate) mod intent;
 pub(crate) mod retrieval;
 pub(crate) mod service;
+pub(crate) mod use_policy;
 
 pub(crate) use service::dynamic_chat_memory_budget_chars;
 
 use anyhow::anyhow;
 use claw_core::config::MemoryConfig;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Deserialize;
 use serde_json::Value;
 use tracing::warn;
 
@@ -36,6 +41,13 @@ pub(crate) const RETRIEVAL_SOURCE_MEMORY: &str = "memory";
 pub(crate) const RETRIEVAL_SOURCE_PREFERENCE: &str = "preference";
 pub(crate) const RETRIEVAL_SOURCE_KB_DOC: &str = "kb_doc";
 pub(crate) const RETRIEVAL_SOURCE_KNOWLEDGE_FACT: &str = "knowledge_fact";
+pub(crate) const RETRIEVAL_SOURCE_MEMORY_FACT: &str = "memory_fact";
+
+pub(crate) const MEMORY_FACT_STATUS_ACTIVE: &str = "active";
+pub(crate) const MEMORY_FACT_STATUS_SUPERSEDED: &str = "superseded";
+pub(crate) const MEMORY_FACT_STATUS_EXPIRED: &str = "expired";
+#[allow(dead_code)]
+pub(crate) const MEMORY_FACT_STATUS_DELETED: &str = "deleted";
 
 // `memory_kind` answers "how should this row be recalled/presented?"
 // Multiple sources may map into the same recall bucket.
@@ -70,7 +82,7 @@ const AGENT_DISPLAY_NAME_INVALID_VALUES: &[&str] = &[
 pub(crate) fn retrieval_source_is_knowledge(source_kind: &str) -> bool {
     matches!(
         source_kind,
-        RETRIEVAL_SOURCE_KB_DOC | RETRIEVAL_SOURCE_KNOWLEDGE_FACT
+        RETRIEVAL_SOURCE_KB_DOC | RETRIEVAL_SOURCE_KNOWLEDGE_FACT | RETRIEVAL_SOURCE_MEMORY_FACT
     )
 }
 
@@ -108,25 +120,15 @@ pub(crate) fn retrieval_source_ref_for_kb_chunk(
     )
 }
 
+pub(crate) fn retrieval_source_ref_for_memory_fact(fact_id: i64) -> String {
+    format!("memory_fact:{fact_id}")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MemoryWriteKind {
     Default,
     AssistantOutcome,
     UnfinishedGoal,
-}
-
-#[derive(Debug, Deserialize)]
-struct MemoryPreferenceLlmOut {
-    #[serde(default)]
-    preferences: Vec<MemoryPreferenceLlmItem>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MemoryPreferenceLlmItem {
-    key: String,
-    value: String,
-    #[serde(default)]
-    confidence: Option<f32>,
 }
 
 fn normalized_user_key_opt(user_key: Option<&str>) -> Option<&str> {
@@ -296,12 +298,6 @@ pub(crate) fn insert_memory(
         }
     }
     let trimmed = utf8_safe_prefix(&normalized, keep).to_string();
-    let extracted_prefs =
-        if role == MEMORY_ROLE_USER && state.policy.memory.enable_preference_extraction {
-            extract_user_preferences(content, &state.policy.memory)
-        } else {
-            Vec::new()
-        };
     let should_skip = state.policy.memory.write_filter_enabled
         && should_skip_memory_write(
             &trimmed,
@@ -309,7 +305,7 @@ pub(crate) fn insert_memory(
             state.policy.memory.write_min_chars.max(1),
             &state.policy.memory,
         );
-    if should_skip && extracted_prefs.is_empty() {
+    if should_skip {
         return Ok(());
     }
 
@@ -327,19 +323,6 @@ pub(crate) fn insert_memory(
     let now_text = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
     let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
-    upsert_user_preferences(
-        state,
-        &db,
-        user_id,
-        chat_id,
-        &user_key,
-        &extracted_prefs,
-        &now_text,
-        now_ts_i64,
-    )?;
-    if should_skip {
-        return Ok(());
-    }
     if is_duplicate_recent_memory(&db, user_id, chat_id, &user_key, role, &trimmed)? {
         return Ok(());
     }
@@ -382,7 +365,12 @@ pub(crate) fn insert_memory(
     Ok(())
 }
 
-pub(crate) async fn maybe_extract_user_preferences_with_llm(
+const MEMORY_INTENT_EXTRACT_PROMPT_TEMPLATE: &str =
+    include_str!("../../../prompts/layers/overlays/memory_intent_extract_prompt.md");
+const MEMORY_INTENT_SCHEMA_TEXT: &str =
+    include_str!("../../../prompts/schemas/memory_intent.schema.json");
+
+pub(crate) async fn maybe_extract_memory_intent_with_llm(
     state: &AppState,
     task: &crate::ClaimedTask,
     content: &str,
@@ -391,37 +379,57 @@ pub(crate) async fn maybe_extract_user_preferences_with_llm(
     if !cfg.enable_preference_extraction || !cfg.llm_preference_fallback_enabled {
         return Ok(());
     }
-    if !extract_user_preferences(content, cfg).is_empty() {
-        return Ok(());
-    }
     let trimmed = content.trim();
     if trimmed.chars().count() < cfg.write_min_chars.max(8) {
         return Ok(());
     }
 
     let prompt_text = utf8_safe_prefix(trimmed, cfg.llm_preference_max_chars.max(128));
-    let prompt = build_memory_preference_llm_prompt(prompt_text);
+    let source_ref = format!("task:{}:user", task.task_id);
+    let prompt = build_memory_intent_llm_prompt(prompt_text, &source_ref);
     let raw = match crate::llm_gateway::run_with_fallback_with_prompt_source(
         state,
         task,
         &prompt,
-        "memory_preference_extract",
+        "memory_intent_extract",
     )
     .await
     {
         Ok(raw) => raw,
         Err(err) => {
             warn!(
-                "memory preference llm fallback failed task_id={} err={}",
+                "memory intent llm extraction failed task_id={} err={}",
                 task.task_id, err
             );
             return Ok(());
         }
     };
 
-    let extracted =
-        parse_memory_preference_llm_output(&raw, cfg.llm_preference_min_confidence.clamp(0.0, 1.0));
-    if extracted.is_empty() {
+    let intent = match intent::parse_memory_intent_schema(&raw) {
+        Ok(intent) => intent,
+        Err(err) => {
+            warn!(
+                "memory intent schema validation failed task_id={} err={}",
+                task.task_id, err
+            );
+            return Ok(());
+        }
+    };
+    let validation =
+        intent::validate_memory_intent_actions(intent, cfg.llm_preference_min_confidence);
+    if !validation.rejected.is_empty() {
+        warn!(
+            "memory intent rejected actions task_id={} rejected_count={} first_reason={}",
+            task.task_id,
+            validation.rejected.len(),
+            validation
+                .rejected
+                .first()
+                .map(|item| item.reason.as_str())
+                .unwrap_or("unknown")
+        );
+    }
+    if validation.accepted.is_empty() {
         return Ok(());
     }
 
@@ -429,16 +437,27 @@ pub(crate) async fn maybe_extract_user_preferences_with_llm(
     let now_text = now_ts();
     let now_ts_i64 = now_ts_u64() as i64;
     let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
-    upsert_user_preferences(
+    let stats = apply::apply_memory_actions(
         state,
         &db,
         task.user_id,
         task.chat_id,
         &user_key,
-        &extracted,
+        &validation.accepted,
         &now_text,
         now_ts_i64,
-    )
+    )?;
+    if stats.upserted_preferences > 0 || stats.deleted_preferences > 0 || stats.ignored_actions > 0
+    {
+        tracing::info!(
+            "memory intent applied task_id={} upserted_preferences={} deleted_preferences={} ignored_actions={}",
+            task.task_id,
+            stats.upserted_preferences,
+            stats.deleted_preferences,
+            stats.ignored_actions
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn count_chat_memory_rounds(
@@ -1627,12 +1646,7 @@ fn is_duplicate_recent_memory(
 fn detect_instructional_text(text: &str, cfg: &MemoryConfig) -> bool {
     let norm = text.to_ascii_lowercase();
     contains_any_marker(&norm, &cfg.rules.salience_boost_markers)
-        && (contains_any_marker(&norm, &cfg.rules.instruction_markers)
-            || contains_any_marker(&norm, &cfg.rules.preferences.language_zh)
-            || contains_any_marker(&norm, &cfg.rules.preferences.language_en)
-            || contains_any_marker(&norm, &cfg.rules.preferences.style_concise)
-            || contains_any_marker(&norm, &cfg.rules.preferences.style_detailed)
-            || contains_any_marker(&norm, &cfg.rules.preferences.format_plain_text))
+        && contains_any_marker(&norm, &cfg.rules.instruction_markers)
 }
 
 fn classify_memory_safety_flag(text: &str, cfg: &MemoryConfig) -> String {
@@ -1692,135 +1706,16 @@ fn estimate_memory_salience(
     score.clamp(0.0, 1.0)
 }
 
-fn extract_user_preferences(
-    content: &str,
-    cfg: &MemoryConfig,
-) -> Vec<(String, String, f32, String)> {
-    let mut out = Vec::new();
-    let norm = content.to_ascii_lowercase();
-    if !contains_any_marker(&norm, &cfg.rules.salience_boost_markers) {
-        return out;
-    }
-    let pref = &cfg.rules.preferences;
-    if contains_any_marker(&norm, &pref.language_zh) {
-        out.push((
-            "response_language".to_string(),
-            "zh-CN".to_string(),
-            0.96,
-            "rule_extract".to_string(),
-        ));
-    }
-
-    if contains_any_marker(&norm, &pref.language_en) {
-        out.push((
-            "response_language".to_string(),
-            "en-US".to_string(),
-            0.96,
-            "rule_extract".to_string(),
-        ));
-    }
-
-    if contains_any_marker(&norm, &pref.style_concise) {
-        out.push((
-            "response_style".to_string(),
-            "concise".to_string(),
-            0.8,
-            "rule_extract".to_string(),
-        ));
-    }
-    if contains_any_marker(&norm, &pref.style_detailed) {
-        out.push((
-            "response_style".to_string(),
-            "detailed".to_string(),
-            0.8,
-            "rule_extract".to_string(),
-        ));
-    }
-
-    if contains_any_marker(&norm, &pref.format_plain_text) {
-        out.push((
-            "response_format".to_string(),
-            "plain_text".to_string(),
-            0.84,
-            "rule_extract".to_string(),
-        ));
-    }
-    out
-}
-
-fn build_memory_preference_llm_prompt(content: &str) -> String {
+fn build_memory_intent_llm_prompt(content: &str, source_ref: &str) -> String {
     let content = content.replace("```", "'''");
-    format!(
-        r#"You are RustClaw's memory preference extractor.
-
-Extract only durable user preferences that should be remembered across future turns.
-Do not extract one-off constraints for the current request unless the user clearly says it should apply later, by meaning such as "以后", "以后都", "默认", "记住", "always", "from now on", or "going forward".
-
-Return JSON only:
-{{"preferences":[{{"key":"response_language|response_style|response_format","value":"...","confidence":0.0}}]}}
-
-Allowed values:
-- response_language: a BCP-47-like language tag, such as zh-CN, en-US, ja-JP.
-- response_style: concise or detailed.
-- response_format: plain_text or markdown.
-
-If there is no durable preference, return {{"preferences":[]}}.
-
-User text:
-```text
-{content}
-```"#
+    crate::prompt_utils::render_prompt_template(
+        MEMORY_INTENT_EXTRACT_PROMPT_TEMPLATE,
+        &[
+            ("__MEMORY_INTENT_SCHEMA__", MEMORY_INTENT_SCHEMA_TEXT),
+            ("__SOURCE_REF__", source_ref),
+            ("__USER_TEXT__", &content),
+        ],
     )
-}
-
-fn parse_memory_preference_llm_output(
-    raw: &str,
-    min_confidence: f32,
-) -> Vec<(String, String, f32, String)> {
-    let Some(parsed) =
-        crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<MemoryPreferenceLlmOut>(raw)
-    else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for item in parsed.preferences {
-        let confidence = item.confidence.unwrap_or(0.0).clamp(0.0, 1.0);
-        if confidence < min_confidence {
-            continue;
-        }
-        let Some((key, value)) = normalize_llm_preference_item(&item.key, &item.value) else {
-            continue;
-        };
-        out.push((key, value, confidence, "llm_preference_extract".to_string()));
-    }
-    out
-}
-
-fn normalize_llm_preference_item(key: &str, value: &str) -> Option<(String, String)> {
-    let key = key.trim();
-    let value = value.trim();
-    if key.is_empty() || value.is_empty() {
-        return None;
-    }
-    match key {
-        "response_language" => {
-            let normalized = value
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-                .collect::<String>();
-            let len = normalized.len();
-            ((2..=24).contains(&len)).then_some((key.to_string(), normalized))
-        }
-        "response_style" => match value {
-            "concise" | "detailed" => Some((key.to_string(), value.to_string())),
-            _ => None,
-        },
-        "response_format" => match value {
-            "plain_text" | "markdown" => Some((key.to_string(), value.to_string())),
-            _ => None,
-        },
-        _ => None,
-    }
 }
 
 fn normalize_agent_display_name(raw: &str) -> Option<String> {
@@ -1981,17 +1876,16 @@ mod tests {
     use crate::{AgentRuntimeConfig, AppState};
 
     use super::{
-        build_last_turn_full_context, build_recent_assistant_replies_context,
-        clarify_assistant_placeholder, classify_assistant_context_reply_kind,
-        extract_result_text_for_recent_turns, insert_memory, legacy_principal_chat_id,
-        ordered_entries_from_assistant_reply, parse_memory_preference_llm_output,
+        build_last_turn_full_context, build_memory_intent_llm_prompt,
+        build_recent_assistant_replies_context, clarify_assistant_placeholder,
+        classify_assistant_context_reply_kind, extract_result_text_for_recent_turns, insert_memory,
+        legacy_principal_chat_id, ordered_entries_from_assistant_reply,
         provider_unavailable_assistant_placeholder, recall_memories_since_id,
         recall_user_preferences, retrieval_source_ref_for_kb_chunk,
         retrieval_source_ref_for_memory, retrieval_source_ref_for_preference,
         upsert_user_preferences_from_route_hint, AssistantContextReplyKind, MemoryWriteKind,
         MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_SYSTEM, MEMORY_ROLE_USER, MEMORY_TYPE_GENERIC,
-        MEMORY_TYPE_USER_INSTRUCTION, RETRIEVAL_PRODUCER_KB, RETRIEVAL_PRODUCER_MEMORY_PIPELINE,
-        RETRIEVAL_SOURCE_MEMORY,
+        RETRIEVAL_PRODUCER_KB, RETRIEVAL_PRODUCER_MEMORY_PIPELINE, RETRIEVAL_SOURCE_MEMORY,
     };
     use serde_json::json;
 
@@ -2083,54 +1977,6 @@ mod tests {
             );",
         )
         .expect("create user_preferences table");
-    }
-
-    #[test]
-    fn memory_preference_llm_output_accepts_whitelisted_preferences() {
-        let raw = r#"{
-            "preferences": [
-                {"key":"response_language","value":"ja-JP","confidence":0.91},
-                {"key":"response_style","value":"concise","confidence":0.8},
-                {"key":"response_format","value":"plain_text","confidence":0.74}
-            ]
-        }"#;
-        let prefs = parse_memory_preference_llm_output(raw, 0.72);
-        assert_eq!(
-            prefs,
-            vec![
-                (
-                    "response_language".to_string(),
-                    "ja-JP".to_string(),
-                    0.91,
-                    "llm_preference_extract".to_string()
-                ),
-                (
-                    "response_style".to_string(),
-                    "concise".to_string(),
-                    0.8,
-                    "llm_preference_extract".to_string()
-                ),
-                (
-                    "response_format".to_string(),
-                    "plain_text".to_string(),
-                    0.74,
-                    "llm_preference_extract".to_string()
-                ),
-            ]
-        );
-    }
-
-    #[test]
-    fn memory_preference_llm_output_rejects_low_confidence_and_unknown_fields() {
-        let raw = r#"{
-            "preferences": [
-                {"key":"response_style","value":"concise","confidence":0.2},
-                {"key":"shell_access","value":"enabled","confidence":0.99},
-                {"key":"response_format","value":"html","confidence":0.99}
-            ]
-        }"#;
-        let prefs = parse_memory_preference_llm_output(raw, 0.72);
-        assert!(prefs.is_empty());
     }
 
     #[test]
@@ -2463,55 +2309,207 @@ mod tests {
     }
 
     #[test]
-    fn explicit_long_term_preferences_are_persisted() {
-        let mut state = test_state();
-        state.policy.memory.rules.instruction_markers = vec!["请".to_string(), "执行".to_string()];
-        state.policy.memory.rules.salience_boost_markers =
-            vec!["以后".to_string(), "默认".to_string(), "记住".to_string()];
-        state.policy.memory.rules.preferences.language_zh =
-            vec!["默认中文".to_string(), "中文回复".to_string()];
-        state.policy.memory.rules.preferences.style_concise =
-            vec!["简短".to_string(), "简洁".to_string()];
+    fn structured_memory_intent_preferences_are_applied_without_phrase_rules() {
+        let state = test_state();
         {
             let db = state.core.db.get().expect("db");
-            create_memories_table(&db);
             create_user_preferences_table(&db);
-        }
-
-        insert_memory(
-            &state,
-            1,
-            2,
-            Some("test-user"),
-            "local",
-            None,
-            MEMORY_ROLE_USER,
-            "以后默认中文回复，并且记住要简短。",
-            2000,
-            MemoryWriteKind::Default,
-        )
-        .expect("insert user memory");
-
-        let db = state.core.db.get().expect("db");
-        let (memory_type, is_instructional): (String, i64) = db
-            .query_row(
-                "SELECT memory_type, is_instructional FROM memories ORDER BY id DESC LIMIT 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+            let action = crate::memory::intent::MemoryAction {
+                action: crate::memory::intent::MemoryActionOp::Upsert,
+                kind: crate::memory::intent::MemoryActionKind::Preference,
+                scope: crate::memory::intent::MemoryScope::User,
+                key: "response_language".to_string(),
+                value: "한국어".to_string(),
+                normalized_value: Some("ko-KR".to_string()),
+                confidence: 0.93,
+                ttl_policy: crate::memory::intent::MemoryTtlPolicy::LongTerm,
+                expires_at_ts: None,
+                source: crate::memory::intent::MemoryActionSource {
+                    source_kind: crate::memory::intent::MemorySourceKind::LlmMemoryExtract,
+                    source_ref: Some("task:test:user".to_string()),
+                    source_text: "앞으로 한국어로 답해줘.".to_string(),
+                    memory_ids: Vec::new(),
+                },
+                reason: "durable response language preference".to_string(),
+                risk: crate::memory::intent::MemoryActionRisk {
+                    sensitive: false,
+                    injection_like: false,
+                },
+            };
+            let stats = crate::memory::apply::apply_memory_actions(
+                &state,
+                &db,
+                1,
+                2,
+                "test-user",
+                &[action],
+                "2026-05-19T00:00:00Z",
+                1,
             )
-            .expect("latest memory");
-        assert_eq!(memory_type, MEMORY_TYPE_USER_INSTRUCTION);
-        assert_eq!(is_instructional, 1);
-        drop(db);
+            .expect("apply memory action");
+            assert_eq!(stats.upserted_preferences, 1);
+        }
 
         let prefs =
             recall_user_preferences(&state, Some("test-user"), 1, 2, 8).expect("recall prefs");
-        assert!(prefs
-            .iter()
-            .any(|(key, value)| key == "response_language" && value == "zh-CN"));
-        assert!(prefs
-            .iter()
-            .any(|(key, value)| key == "response_style" && value == "concise"));
+        assert_eq!(
+            prefs,
+            vec![("response_language".to_string(), "ko-KR".to_string())]
+        );
+    }
+
+    #[test]
+    fn structured_memory_intent_multilingual_overwrite_uses_schema_key_only() {
+        let state = test_state();
+        {
+            let db = state.core.db.get().expect("db");
+            create_user_preferences_table(&db);
+            let ja_action = crate::memory::intent::MemoryAction {
+                action: crate::memory::intent::MemoryActionOp::Upsert,
+                kind: crate::memory::intent::MemoryActionKind::Preference,
+                scope: crate::memory::intent::MemoryScope::User,
+                key: "response_language".to_string(),
+                value: "日本語".to_string(),
+                normalized_value: Some("ja-JP".to_string()),
+                confidence: 0.9,
+                ttl_policy: crate::memory::intent::MemoryTtlPolicy::LongTerm,
+                expires_at_ts: None,
+                source: crate::memory::intent::MemoryActionSource {
+                    source_kind: crate::memory::intent::MemorySourceKind::LlmMemoryExtract,
+                    source_ref: Some("task:test-ja:user".to_string()),
+                    source_text: "これからは日本語で返事してください。".to_string(),
+                    memory_ids: Vec::new(),
+                },
+                reason: "durable response language preference".to_string(),
+                risk: crate::memory::intent::MemoryActionRisk {
+                    sensitive: false,
+                    injection_like: false,
+                },
+            };
+            let fr_action = crate::memory::intent::MemoryAction {
+                action: crate::memory::intent::MemoryActionOp::Upsert,
+                kind: crate::memory::intent::MemoryActionKind::Preference,
+                scope: crate::memory::intent::MemoryScope::User,
+                key: "response_language".to_string(),
+                value: "français".to_string(),
+                normalized_value: Some("fr-FR".to_string()),
+                confidence: 0.92,
+                ttl_policy: crate::memory::intent::MemoryTtlPolicy::LongTerm,
+                expires_at_ts: None,
+                source: crate::memory::intent::MemoryActionSource {
+                    source_kind: crate::memory::intent::MemorySourceKind::LlmMemoryExtract,
+                    source_ref: Some("task:test-fr:user".to_string()),
+                    source_text: "Réponds toujours en français.".to_string(),
+                    memory_ids: Vec::new(),
+                },
+                reason: "durable response language preference update".to_string(),
+                risk: crate::memory::intent::MemoryActionRisk {
+                    sensitive: false,
+                    injection_like: false,
+                },
+            };
+            crate::memory::apply::apply_memory_actions(
+                &state,
+                &db,
+                1,
+                2,
+                "test-user",
+                &[ja_action],
+                "2026-05-19T00:00:00Z",
+                1,
+            )
+            .expect("apply Japanese action");
+            crate::memory::apply::apply_memory_actions(
+                &state,
+                &db,
+                1,
+                2,
+                "test-user",
+                &[fr_action],
+                "2026-05-19T00:00:01Z",
+                2,
+            )
+            .expect("apply French action");
+        }
+
+        let prefs =
+            recall_user_preferences(&state, Some("test-user"), 1, 2, 8).expect("recall prefs");
+        assert_eq!(
+            prefs,
+            vec![("response_language".to_string(), "fr-FR".to_string())]
+        );
+    }
+
+    #[test]
+    fn structured_memory_intent_delete_removes_preference_by_schema_key() {
+        let state = test_state();
+        {
+            let db = state.core.db.get().expect("db");
+            create_user_preferences_table(&db);
+            db.execute(
+                "INSERT INTO user_preferences (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
+                 VALUES (1, 2, 'test-user', 'response_language', 'fr-FR', 0.91, 'test', 'now', 1)",
+                [],
+            )
+            .expect("insert preference");
+            let action = crate::memory::intent::MemoryAction {
+                action: crate::memory::intent::MemoryActionOp::Delete,
+                kind: crate::memory::intent::MemoryActionKind::Preference,
+                scope: crate::memory::intent::MemoryScope::User,
+                key: "response_language".to_string(),
+                value: String::new(),
+                normalized_value: None,
+                confidence: 0.9,
+                ttl_policy: crate::memory::intent::MemoryTtlPolicy::LongTerm,
+                expires_at_ts: None,
+                source: crate::memory::intent::MemoryActionSource {
+                    source_kind: crate::memory::intent::MemorySourceKind::LlmMemoryExtract,
+                    source_ref: Some("task:test:user".to_string()),
+                    source_text: "Forget my default response language preference.".to_string(),
+                    memory_ids: Vec::new(),
+                },
+                reason: "user asked to remove stored response language preference".to_string(),
+                risk: crate::memory::intent::MemoryActionRisk {
+                    sensitive: false,
+                    injection_like: false,
+                },
+            };
+            let stats = crate::memory::apply::apply_memory_actions(
+                &state,
+                &db,
+                1,
+                2,
+                "test-user",
+                &[action],
+                "2026-05-19T00:00:00Z",
+                2,
+            )
+            .expect("apply delete action");
+            assert_eq!(stats.deleted_preferences, 1);
+        }
+
+        let prefs =
+            recall_user_preferences(&state, Some("test-user"), 1, 2, 8).expect("recall prefs");
+        assert!(prefs.is_empty());
+    }
+
+    #[test]
+    fn memory_intent_prompt_avoids_fixed_natural_language_trigger_examples() {
+        let prompt = build_memory_intent_llm_prompt("plain request", "task:test:user");
+        for forbidden in [
+            "以后",
+            "默认中文",
+            "from now on",
+            "going forward",
+            "reply in english",
+        ] {
+            assert!(
+                !prompt.contains(forbidden),
+                "prompt should not contain fixed natural-language trigger example: {forbidden}"
+            );
+        }
+        assert!(prompt.contains("task:test:user"));
+        assert!(prompt.contains("\"memory_actions\""));
     }
 
     #[test]

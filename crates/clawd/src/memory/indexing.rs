@@ -6,16 +6,18 @@ use rusqlite::{params, Connection};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::retrieval::{build_topic_tags, embed_text_locally, vector_to_json};
+use super::embedding::{embed_text_locally, local_hash_embedding_spec};
+use super::retrieval::{build_topic_tags, vector_to_json};
 use super::{
     retrieval_source_ref_for_kb_chunk, retrieval_source_ref_for_memory,
-    retrieval_source_ref_for_preference, LLM_SHORT_TERM_MEMORY_PREFIX, MEMORY_ROLE_ASSISTANT,
+    retrieval_source_ref_for_memory_fact, retrieval_source_ref_for_preference,
+    LLM_SHORT_TERM_MEMORY_PREFIX, MEMORY_FACT_STATUS_ACTIVE, MEMORY_ROLE_ASSISTANT,
     MEMORY_ROLE_SYSTEM, MEMORY_ROLE_USER, MEMORY_SCOPE_CHAT, MEMORY_SCOPE_USER,
     MEMORY_TYPE_UNFINISHED_GOAL, RETRIEVAL_KIND_ASSISTANT_RESULT, RETRIEVAL_KIND_EPISODIC_EVENT,
     RETRIEVAL_KIND_KNOWLEDGE_DOC, RETRIEVAL_KIND_SEMANTIC_FACT, RETRIEVAL_KIND_TRIGGER_ANCHOR,
     RETRIEVAL_KIND_UNFINISHED_GOAL, RETRIEVAL_PRODUCER_KB, RETRIEVAL_PRODUCER_MEMORY_PIPELINE,
     RETRIEVAL_SOURCE_KB_DOC, RETRIEVAL_SOURCE_KNOWLEDGE_FACT, RETRIEVAL_SOURCE_MEMORY,
-    RETRIEVAL_SOURCE_PREFERENCE, RETRIEVAL_SUCCESS_STATE_NEUTRAL,
+    RETRIEVAL_SOURCE_MEMORY_FACT, RETRIEVAL_SOURCE_PREFERENCE, RETRIEVAL_SUCCESS_STATE_NEUTRAL,
     RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
 };
 
@@ -36,6 +38,9 @@ pub(crate) fn ensure_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
             trigger_text      TEXT,
             topic_tags        TEXT NOT NULL DEFAULT '',
             vector_json       TEXT NOT NULL DEFAULT '[]',
+            embedding_model   TEXT NOT NULL DEFAULT 'local-hash-v1',
+            embedding_dims    INTEGER NOT NULL DEFAULT 24,
+            embedding_version TEXT NOT NULL DEFAULT 'local-hash-v1',
             metadata_json     TEXT NOT NULL DEFAULT '{}',
             salience          REAL NOT NULL DEFAULT 0.5,
             success_state     TEXT NOT NULL DEFAULT 'neutral',
@@ -56,6 +61,24 @@ pub(crate) fn ensure_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
         "metadata_json",
         "ALTER TABLE memory_retrieval_index ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'",
     )?;
+    crate::ensure_column_exists(
+        db,
+        "memory_retrieval_index",
+        "embedding_model",
+        "ALTER TABLE memory_retrieval_index ADD COLUMN embedding_model TEXT NOT NULL DEFAULT 'local-hash-v1'",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "memory_retrieval_index",
+        "embedding_dims",
+        "ALTER TABLE memory_retrieval_index ADD COLUMN embedding_dims INTEGER NOT NULL DEFAULT 24",
+    )?;
+    crate::ensure_column_exists(
+        db,
+        "memory_retrieval_index",
+        "embedding_version",
+        "ALTER TABLE memory_retrieval_index ADD COLUMN embedding_version TEXT NOT NULL DEFAULT 'local-hash-v1'",
+    )?;
     db.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_memory_retrieval_scope_updated
          ON memory_retrieval_index(user_key, chat_id, updated_at_ts DESC);
@@ -68,7 +91,9 @@ pub(crate) fn ensure_retrieval_schema(db: &Connection) -> anyhow::Result<()> {
          CREATE INDEX IF NOT EXISTS idx_memory_retrieval_source_kind
          ON memory_retrieval_index(source_kind, updated_at_ts DESC);
          CREATE INDEX IF NOT EXISTS idx_memory_retrieval_source_ref
-         ON memory_retrieval_index(source_ref);",
+         ON memory_retrieval_index(source_ref);
+         CREATE INDEX IF NOT EXISTS idx_memory_retrieval_embedding_version
+         ON memory_retrieval_index(embedding_model, embedding_version);",
     )?;
     let _ = db.execute_batch(
         "CREATE VIRTUAL TABLE IF NOT EXISTS memory_retrieval_index_fts
@@ -189,6 +214,7 @@ pub(crate) fn rebuild_retrieval_index(
         let pref = vec![(pref_key, pref_value, confidence, source)];
         index_preference_entries(db, user_id, chat_id, &user_key, &pref, ts)?;
     }
+    rebuild_memory_fact_rows(db)?;
     rebuild_kb_rows(db, workspace_root)?;
     Ok(())
 }
@@ -392,13 +418,15 @@ fn insert_index_row(
 ) -> anyhow::Result<()> {
     let topic_tags = build_topic_tags(search_text);
     let vector_json = vector_to_json(&embed_text_locally(search_text));
+    let embedding_spec = local_hash_embedding_spec();
     db.execute(
         "INSERT INTO memory_retrieval_index (
             source_kind, source_memory_id, source_pref_key, source_ref, user_id, chat_id, user_key,
-            memory_kind, role, search_text, trigger_text, topic_tags, vector_json, metadata_json,
+            memory_kind, role, search_text, trigger_text, topic_tags, vector_json,
+            embedding_model, embedding_dims, embedding_version, metadata_json,
             salience, success_state, tool_or_skill_name, created_at_ts, updated_at_ts
          )
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?21)",
         params![
             source_kind,
             source_memory_id,
@@ -413,6 +441,9 @@ fn insert_index_row(
             trigger_text,
             topic_tags,
             vector_json,
+            embedding_spec.model_id,
+            embedding_spec.dims as i64,
+            embedding_spec.version,
             metadata_json.unwrap_or("{}"),
             salience,
             success_state,
@@ -528,6 +559,35 @@ fn rebuild_kb_rows(db: &Connection, workspace_root: &Path) -> anyhow::Result<()>
     Ok(())
 }
 
+fn rebuild_memory_fact_rows(db: &Connection) -> anyhow::Result<()> {
+    super::facts::ensure_memory_fact_schema(db)?;
+    let now_ts = crate::now_ts_u64() as i64;
+    let mut stmt = db.prepare(
+        "SELECT id, user_id, COALESCE(user_key, ''), namespace, fact_text, confidence, updated_at_ts
+         FROM memory_facts
+         WHERE status = ?1 AND (expires_at_ts IS NULL OR expires_at_ts > ?2)
+         ORDER BY updated_at_ts ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(params![MEMORY_FACT_STATUS_ACTIVE, now_ts], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, f32>(5).unwrap_or(0.8),
+            row.get::<_, i64>(6).unwrap_or(0),
+        ))
+    })?;
+    for row in rows {
+        let (fact_id, user_id, user_key, namespace, fact_text, confidence, ts) = row?;
+        upsert_memory_fact_retrieval_row(
+            db, user_id, &user_key, &namespace, fact_id, &fact_text, confidence, ts,
+        )?;
+    }
+    Ok(())
+}
+
 fn collect_kb_snapshot_files(root: &Path) -> anyhow::Result<Vec<std::path::PathBuf>> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -570,6 +630,7 @@ fn build_kb_metadata(
     .to_string()
 }
 
+#[allow(dead_code)]
 pub(crate) fn upsert_knowledge_fact(
     db: &Connection,
     user_id: i64,
@@ -617,6 +678,75 @@ pub(crate) fn upsert_knowledge_fact(
     Ok(())
 }
 
+pub(crate) fn upsert_memory_fact_retrieval_row(
+    db: &Connection,
+    user_id: i64,
+    user_key: &str,
+    namespace: &str,
+    fact_id: i64,
+    text: &str,
+    confidence: f32,
+    ts: i64,
+) -> anyhow::Result<()> {
+    let cleaned = text.trim();
+    if cleaned.is_empty() {
+        return Ok(());
+    }
+    let source_ref = retrieval_source_ref_for_memory_fact(fact_id);
+    db.execute(
+        "DELETE FROM memory_retrieval_index
+         WHERE source_kind = ?1 AND source_ref = ?2",
+        params![RETRIEVAL_SOURCE_MEMORY_FACT, source_ref],
+    )?;
+    let metadata = build_memory_fact_metadata_json(namespace, fact_id);
+    insert_index_row(
+        db,
+        RETRIEVAL_SOURCE_MEMORY_FACT,
+        None,
+        None,
+        Some(&source_ref),
+        user_id,
+        0,
+        user_key,
+        RETRIEVAL_KIND_SEMANTIC_FACT,
+        Some(MEMORY_ROLE_SYSTEM),
+        cleaned,
+        None,
+        Some(&metadata),
+        confidence.clamp(0.0, 1.0),
+        RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
+        Some(RETRIEVAL_PRODUCER_MEMORY_PIPELINE),
+        ts,
+    )?;
+    let _ = db.execute(
+        "DELETE FROM memory_retrieval_index_fts
+         WHERE rowid NOT IN (SELECT id FROM memory_retrieval_index)",
+        [],
+    );
+    Ok(())
+}
+
+pub(crate) fn delete_memory_fact_retrieval_rows(
+    db: &Connection,
+    fact_ids: &[i64],
+) -> anyhow::Result<()> {
+    for fact_id in fact_ids {
+        let source_ref = retrieval_source_ref_for_memory_fact(*fact_id);
+        db.execute(
+            "DELETE FROM memory_retrieval_index
+             WHERE source_kind = ?1 AND source_ref = ?2",
+            params![RETRIEVAL_SOURCE_MEMORY_FACT, source_ref],
+        )?;
+    }
+    let _ = db.execute(
+        "DELETE FROM memory_retrieval_index_fts
+         WHERE rowid NOT IN (SELECT id FROM memory_retrieval_index)",
+        [],
+    );
+    Ok(())
+}
+
+#[allow(dead_code)]
 fn build_knowledge_fact_metadata_json(namespace: &str) -> String {
     json!({
         "scope_kind": MEMORY_SCOPE_USER,
@@ -624,4 +754,116 @@ fn build_knowledge_fact_metadata_json(namespace: &str) -> String {
         "path": "conversation",
     })
     .to_string()
+}
+
+fn build_memory_fact_metadata_json(namespace: &str, fact_id: i64) -> String {
+    json!({
+        "scope_kind": MEMORY_SCOPE_USER,
+        "namespace": namespace,
+        "path": "memory_facts",
+        "fact_id": fact_id,
+    })
+    .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use claw_core::config::MemoryConfig;
+    use rusqlite::{params, Connection};
+
+    use super::{ensure_retrieval_schema, rebuild_retrieval_index};
+    use crate::memory::facts::{upsert_memory_fact_card, MemoryFactUpsert};
+
+    fn setup_db() -> Connection {
+        let db = Connection::open_in_memory().expect("open memory db");
+        db.execute_batch(crate::INIT_SQL).expect("init base schema");
+        crate::db_init::ensure_memory_schema(&db).expect("ensure memory schema");
+        crate::repo::auth::ensure_key_auth_schema(&db).expect("ensure key auth schema");
+        ensure_retrieval_schema(&db).expect("ensure retrieval schema");
+        db
+    }
+
+    #[test]
+    fn rebuild_retrieval_index_restores_memory_preference_and_fact_rows() {
+        let db = setup_db();
+        db.execute(
+            "INSERT INTO memories
+             (user_id, chat_id, user_key, channel, role, content, created_at, created_at_ts, memory_type, salience, is_instructional, safety_flag)
+             VALUES (?1, ?2, ?3, 'ui', 'user', '用户正在测试记忆索引重建', '1000', ?4, 'generic', 0.8, 0, 'normal')",
+            params![7, 11, "user:test", 1000_i64],
+        )
+        .expect("insert memory");
+        db.execute(
+            "INSERT INTO user_preferences
+             (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                7,
+                11,
+                "user:test",
+                "response_language",
+                "zh-CN",
+                0.96_f32,
+                "memory_extract",
+                "1000",
+                1000_i64,
+            ],
+        )
+        .expect("insert preference");
+        let source_ids = [1_i64];
+        let fact = MemoryFactUpsert::from_long_term_summary(
+            "user_profile",
+            "response_language",
+            "zh-CN",
+            "以后默认用中文回复",
+            0.96,
+            "long_term_summary:42",
+            &source_ids,
+            "explicit durable preference",
+            Some("user_profile:response_language"),
+        );
+        upsert_memory_fact_card(&db, 7, 11, "user:test", &fact, 1001).expect("upsert fact");
+
+        db.execute("DELETE FROM memory_retrieval_index", [])
+            .expect("clear index");
+        rebuild_retrieval_index(&db, &MemoryConfig::default(), &std::env::temp_dir())
+            .expect("rebuild retrieval index");
+
+        let memory_rows: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM memory_retrieval_index WHERE source_kind = ?1",
+                [crate::memory::RETRIEVAL_SOURCE_MEMORY],
+                |row| row.get(0),
+            )
+            .expect("memory rows");
+        let preference_rows: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM memory_retrieval_index WHERE source_kind = ?1",
+                [crate::memory::RETRIEVAL_SOURCE_PREFERENCE],
+                |row| row.get(0),
+            )
+            .expect("preference rows");
+        let fact_rows: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM memory_retrieval_index WHERE source_kind = ?1",
+                [crate::memory::RETRIEVAL_SOURCE_MEMORY_FACT],
+                |row| row.get(0),
+            )
+            .expect("fact rows");
+        let embedding_version: String = db
+            .query_row(
+                "SELECT embedding_version FROM memory_retrieval_index WHERE source_kind = ?1 LIMIT 1",
+                [crate::memory::RETRIEVAL_SOURCE_PREFERENCE],
+                |row| row.get(0),
+            )
+            .expect("embedding version");
+
+        assert!(memory_rows >= 1);
+        assert_eq!(preference_rows, 1);
+        assert_eq!(fact_rows, 1);
+        assert_eq!(
+            embedding_version,
+            crate::memory::embedding::local_hash_embedding_spec().version
+        );
+    }
 }

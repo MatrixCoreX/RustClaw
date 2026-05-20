@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 
 use anyhow::anyhow;
 use rusqlite::{params, Connection};
@@ -10,7 +9,8 @@ use crate::memory::{
     retrieval_source_is_knowledge, MEMORY_ROLE_ASSISTANT, MEMORY_ROLE_USER,
     RETRIEVAL_KIND_ASSISTANT_RESULT, RETRIEVAL_KIND_EPISODIC_EVENT, RETRIEVAL_KIND_TRIGGER_ANCHOR,
     RETRIEVAL_KIND_UNFINISHED_GOAL, RETRIEVAL_SOURCE_KB_DOC, RETRIEVAL_SOURCE_KNOWLEDGE_FACT,
-    RETRIEVAL_SUCCESS_STATE_FAILED, RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
+    RETRIEVAL_SOURCE_MEMORY_FACT, RETRIEVAL_SUCCESS_STATE_FAILED,
+    RETRIEVAL_SUCCESS_STATE_SUCCEEDED,
 };
 use crate::AppState;
 
@@ -45,7 +45,7 @@ pub(crate) struct StructuredMemoryContext {
     pub(crate) recalled_recent: Vec<(String, String)>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MemoryContextMode {
     Chat,
     Planner,
@@ -62,6 +62,9 @@ struct RetrievalRow {
     role: Option<String>,
     search_text: String,
     vector_json: String,
+    embedding_model: String,
+    embedding_dims: usize,
+    embedding_version: String,
     metadata_json: String,
     salience: f32,
     success_state: String,
@@ -78,20 +81,6 @@ struct RetrievalMetadata {
     path: String,
 }
 
-pub(crate) fn embed_text_locally(text: &str) -> Vec<f32> {
-    const DIMS: usize = 24;
-    let mut vec = vec![0.0_f32; DIMS];
-    for token in tokenize_text(text) {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        token.hash(&mut hasher);
-        let hash = hasher.finish() as usize;
-        let idx = hash % DIMS;
-        vec[idx] += 1.0;
-    }
-    normalize_vector(&mut vec);
-    vec
-}
-
 pub(crate) fn vector_to_json(vec: &[f32]) -> String {
     serde_json::to_string(vec).unwrap_or_else(|_| "[]".to_string())
 }
@@ -101,7 +90,7 @@ pub(crate) fn vector_from_json(raw: &str) -> Vec<f32> {
 }
 
 pub(crate) fn build_topic_tags(text: &str) -> String {
-    tokenize_text(text)
+    super::embedding::tokenize_text(text)
         .into_iter()
         .take(8)
         .collect::<Vec<_>>()
@@ -117,6 +106,7 @@ pub(crate) fn retrieve_indexed_memories(
 ) -> anyhow::Result<IndexedRecall> {
     let scope_user_key = super::effective_user_key(user_key, user_id, chat_id);
     let db = state.core.db.get().map_err(|e| anyhow!("db pool: {e}"))?;
+    crate::memory::facts::expire_due_memory_facts(&db, crate::now_ts_u64() as i64)?;
     let mut candidates = fetch_recent_candidates(
         &db,
         user_id,
@@ -166,8 +156,9 @@ pub(crate) fn retrieve_indexed_memories(
         return Ok(IndexedRecall::default());
     }
 
-    let keywords = tokenize_text(anchor_prompt);
-    let query_vec = embed_text_locally(anchor_prompt);
+    let keywords = super::embedding::tokenize_text(anchor_prompt);
+    let query_vec = super::embedding::embed_one_with_config(&state.policy.memory, anchor_prompt)?;
+    let embedding_spec = super::embedding::embedding_spec_for_config(&state.policy.memory);
     let newest_ts = merged.iter().map(|v| v.updated_at_ts).max().unwrap_or(0);
     let oldest_ts = merged
         .iter()
@@ -184,7 +175,14 @@ pub(crate) fn retrieve_indexed_memories(
                 &row.search_text,
                 &keywords,
             );
-            let vector = cosine_similarity(&query_vec, &vector_from_json(&row.vector_json));
+            let vector = if row.embedding_model == embedding_spec.model_id
+                && row.embedding_dims == embedding_spec.dims
+                && row.embedding_version == embedding_spec.version
+            {
+                cosine_similarity(&query_vec, &vector_from_json(&row.vector_json))
+            } else {
+                0.0
+            };
             let recency = if newest_ts <= oldest_ts {
                 0.06
             } else {
@@ -553,13 +551,14 @@ fn fetch_recent_candidates(
     limit: usize,
 ) -> anyhow::Result<Vec<RetrievalRow>> {
     let mut stmt = db.prepare(
-        "SELECT id, source_kind, memory_kind, role, search_text, vector_json, metadata_json, salience, success_state,
+        "SELECT id, source_kind, memory_kind, role, search_text, vector_json,
+                embedding_model, embedding_dims, embedding_version, metadata_json, salience, success_state,
                 COALESCE(updated_at_ts, created_at_ts, 0)
          FROM memory_retrieval_index
          WHERE (user_id = ?1 AND chat_id = ?2 AND COALESCE(user_key, '') = ?3)
-           OR (source_kind = ?4 AND COALESCE(user_key, '') = ?3)
+           OR (source_kind IN (?4, ?5) AND COALESCE(user_key, '') = ?3)
          ORDER BY COALESCE(updated_at_ts, created_at_ts, 0) DESC, id DESC
-         LIMIT ?5",
+         LIMIT ?6",
     )?;
     let rows = stmt.query_map(
         params![
@@ -567,6 +566,7 @@ fn fetch_recent_candidates(
             chat_id,
             user_key,
             RETRIEVAL_SOURCE_KNOWLEDGE_FACT,
+            RETRIEVAL_SOURCE_MEMORY_FACT,
             limit as i64
         ],
         |row| {
@@ -577,10 +577,13 @@ fn fetch_recent_candidates(
                 role: row.get::<_, Option<String>>(3)?,
                 search_text: row.get(4)?,
                 vector_json: row.get(5)?,
-                metadata_json: row.get(6)?,
-                salience: row.get::<_, f32>(7).unwrap_or(0.5),
-                success_state: row.get(8)?,
-                updated_at_ts: row.get::<_, i64>(9).unwrap_or(0),
+                embedding_model: row.get(6)?,
+                embedding_dims: row.get::<_, i64>(7).unwrap_or(0).max(0) as usize,
+                embedding_version: row.get(8)?,
+                metadata_json: row.get(9)?,
+                salience: row.get::<_, f32>(10).unwrap_or(0.5),
+                success_state: row.get(11)?,
+                updated_at_ts: row.get::<_, i64>(12).unwrap_or(0),
             })
         },
     )?;
@@ -590,7 +593,8 @@ fn fetch_recent_candidates(
     }
     let kb_limit = limit.div_ceil(3).clamp(2, 16);
     let mut kb_stmt = db.prepare(
-        "SELECT id, source_kind, memory_kind, role, search_text, vector_json, metadata_json, salience, success_state,
+        "SELECT id, source_kind, memory_kind, role, search_text, vector_json,
+                embedding_model, embedding_dims, embedding_version, metadata_json, salience, success_state,
                 COALESCE(updated_at_ts, created_at_ts, 0)
          FROM memory_retrieval_index
          WHERE source_kind = ?1 AND COALESCE(user_key, '') = ?2
@@ -607,10 +611,13 @@ fn fetch_recent_candidates(
                 role: row.get::<_, Option<String>>(3)?,
                 search_text: row.get(4)?,
                 vector_json: row.get(5)?,
-                metadata_json: row.get(6)?,
-                salience: row.get::<_, f32>(7).unwrap_or(0.5),
-                success_state: row.get(8)?,
-                updated_at_ts: row.get::<_, i64>(9).unwrap_or(0),
+                embedding_model: row.get(6)?,
+                embedding_dims: row.get::<_, i64>(7).unwrap_or(0).max(0) as usize,
+                embedding_version: row.get(8)?,
+                metadata_json: row.get(9)?,
+                salience: row.get::<_, f32>(10).unwrap_or(0.5),
+                success_state: row.get(11)?,
+                updated_at_ts: row.get::<_, i64>(12).unwrap_or(0),
             })
         },
     )?;
@@ -636,15 +643,17 @@ fn fetch_fts_candidates(
         return Ok(Vec::new());
     }
     let mut stmt = match db.prepare(
-        "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json, i.metadata_json, i.salience, i.success_state,
+        "SELECT i.id, i.source_kind, i.memory_kind, i.role, i.search_text, i.vector_json,
+                i.embedding_model, i.embedding_dims, i.embedding_version, i.metadata_json, i.salience, i.success_state,
                 COALESCE(i.updated_at_ts, i.created_at_ts, 0)
          FROM memory_retrieval_index_fts f
          JOIN memory_retrieval_index i ON i.id = f.rowid
          WHERE ((i.user_id = ?1 AND i.chat_id = ?2 AND COALESCE(i.user_key, '') = ?3)
            OR (i.source_kind = ?4 AND COALESCE(i.user_key, '') = ?3)
-           OR (i.source_kind = ?5 AND COALESCE(i.user_key, '') = ?3))
-           AND f.memory_retrieval_index_fts MATCH ?6
-         LIMIT ?7",
+           OR (i.source_kind = ?5 AND COALESCE(i.user_key, '') = ?3)
+           OR (i.source_kind = ?6 AND COALESCE(i.user_key, '') = ?3))
+           AND f.memory_retrieval_index_fts MATCH ?7
+         LIMIT ?8",
     ) {
         Ok(stmt) => stmt,
         Err(_) => return Ok(Vec::new()),
@@ -656,6 +665,7 @@ fn fetch_fts_candidates(
             user_key,
             RETRIEVAL_SOURCE_KB_DOC,
             RETRIEVAL_SOURCE_KNOWLEDGE_FACT,
+            RETRIEVAL_SOURCE_MEMORY_FACT,
             query,
             limit as i64
         ],
@@ -667,10 +677,13 @@ fn fetch_fts_candidates(
                 role: row.get::<_, Option<String>>(3)?,
                 search_text: row.get(4)?,
                 vector_json: row.get(5)?,
-                metadata_json: row.get(6)?,
-                salience: row.get::<_, f32>(7).unwrap_or(0.5),
-                success_state: row.get(8)?,
-                updated_at_ts: row.get::<_, i64>(9).unwrap_or(0),
+                embedding_model: row.get(6)?,
+                embedding_dims: row.get::<_, i64>(7).unwrap_or(0).max(0) as usize,
+                embedding_version: row.get(8)?,
+                metadata_json: row.get(9)?,
+                salience: row.get::<_, f32>(10).unwrap_or(0.5),
+                success_state: row.get(11)?,
+                updated_at_ts: row.get::<_, i64>(12).unwrap_or(0),
             })
         },
     ) {
@@ -691,7 +704,9 @@ fn source_label_for_row(row: &RetrievalRow) -> Option<String> {
     }
     let namespace = metadata.namespace.trim();
     let path = metadata.path.trim();
-    if row.source_kind == RETRIEVAL_SOURCE_KNOWLEDGE_FACT {
+    if row.source_kind == RETRIEVAL_SOURCE_KNOWLEDGE_FACT
+        || row.source_kind == RETRIEVAL_SOURCE_MEMORY_FACT
+    {
         if !namespace.is_empty() {
             return Some(namespace.to_string());
         }
@@ -726,7 +741,7 @@ fn fts_table_exists(db: &Connection) -> anyhow::Result<bool> {
 }
 
 fn build_fts_query(prompt: &str) -> String {
-    let keywords = tokenize_text(prompt);
+    let keywords = super::embedding::tokenize_text(prompt);
     keywords
         .into_iter()
         .take(8)
@@ -736,40 +751,6 @@ fn build_fts_query(prompt: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" OR ")
-}
-
-fn tokenize_text(text: &str) -> Vec<String> {
-    let lower = text.to_ascii_lowercase();
-    let mut out = lower
-        .split(|c: char| !c.is_alphanumeric() && c != '_')
-        .filter(|w| w.len() >= 2)
-        .map(|w| w.to_string())
-        .collect::<Vec<_>>();
-    let cjk = text
-        .chars()
-        .filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c))
-        .collect::<String>();
-    let chars = cjk.chars().collect::<Vec<_>>();
-    for w in chars.windows(2).take(16) {
-        out.push(w.iter().collect::<String>());
-    }
-    out.sort();
-    out.dedup();
-    out
-}
-
-fn normalize_vector(vec: &mut [f32]) {
-    let norm = vec
-        .iter()
-        .map(|v| (*v as f64) * (*v as f64))
-        .sum::<f64>()
-        .sqrt() as f32;
-    if norm <= f32::EPSILON {
-        return;
-    }
-    for item in vec.iter_mut() {
-        *item /= norm;
-    }
 }
 
 fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
@@ -823,6 +804,7 @@ mod tests {
         MemoryContextMode, RetrievalRow, RetrievedMemoryItem, StructuredMemoryContext,
     };
     use crate::db_init::ensure_memory_schema;
+    use crate::memory::facts::{upsert_memory_fact_card, MemoryFactUpsert};
     use crate::memory::indexing::{ensure_retrieval_schema, upsert_knowledge_fact};
     use crate::runtime::{AgentRuntimeConfig, AppState, SkillViewsSnapshot, ToolsPolicy};
 
@@ -928,7 +910,9 @@ mod tests {
     fn stable_fact_rendering_skips_cross_turn_deictic_locator_mapping() {
         let ctx = StructuredMemoryContext {
             relevant_facts: vec![
-                item("那个日志指 /tmp/device/app.log\nReason: stale cross-turn alias"),
+                item(
+                    r#"{"deictic_reference":{"target":"unresolved_prior_object"},"locator":"/tmp/device/app.log","reason":"stale cross-turn alias"}"#,
+                ),
                 item("默认用中文回复\nReason: durable preference"),
             ],
             ..Default::default()
@@ -939,11 +923,12 @@ mod tests {
         assert!(block.contains("STABLE_FACTS"));
         assert!(block.contains("默认用中文回复"));
         assert!(!block.contains("/tmp/device/app.log"));
-        assert!(!block.contains("那个日志"));
+        assert!(!block.contains("unresolved_prior_object"));
     }
 
     #[test]
     fn knowledge_fact_source_label_uses_namespace_only() {
+        let embedding_spec = crate::memory::embedding::local_hash_embedding_spec();
         let row = RetrievalRow {
             id: 1,
             source_kind: crate::memory::RETRIEVAL_SOURCE_KNOWLEDGE_FACT.to_string(),
@@ -951,6 +936,9 @@ mod tests {
             role: Some(crate::memory::MEMORY_ROLE_SYSTEM.to_string()),
             search_text: "用户长期偏好中文回复".to_string(),
             vector_json: "[]".to_string(),
+            embedding_model: embedding_spec.model_id,
+            embedding_dims: embedding_spec.dims,
+            embedding_version: embedding_spec.version,
             metadata_json: r#"{"namespace":"user_profile","path":"conversation"}"#.to_string(),
             salience: 0.9,
             success_state: crate::memory::RETRIEVAL_SUCCESS_STATE_SUCCEEDED.to_string(),
@@ -1027,6 +1015,173 @@ mod tests {
     }
 
     #[test]
+    fn memory_fact_cards_recall_into_relevant_facts_without_reason_text() {
+        let state = test_state();
+        let user_id = 1001;
+        let chat_id = 2002;
+        let user_key = "user:test";
+        {
+            let db = state.core.db.get().expect("db lock");
+            db.execute_batch(crate::INIT_SQL).expect("init base schema");
+            ensure_memory_schema(&db).expect("ensure memory schema");
+            ensure_retrieval_schema(&db).expect("ensure retrieval schema");
+            let source_ids = [42_i64];
+            let fact = MemoryFactUpsert::from_long_term_summary(
+                "user_profile",
+                "response_language",
+                "zh-CN",
+                "以后默认用中文回复",
+                0.96,
+                "long_term_summary:42",
+                &source_ids,
+                "explicit durable preference",
+                Some("user_profile:response_language"),
+            );
+            upsert_memory_fact_card(&db, user_id, chat_id, user_key, &fact, 1_775_301_800)
+                .expect("upsert fact card");
+        }
+
+        let recall =
+            retrieve_indexed_memories(&state, Some(user_key), user_id, chat_id, "以后回复都用中文")
+                .expect("retrieve indexed memories");
+
+        assert_eq!(recall.relevant_facts.len(), 1);
+        assert_eq!(recall.relevant_facts[0].text, "以后默认用中文回复");
+        assert_eq!(
+            recall.relevant_facts[0].source_label.as_deref(),
+            Some("user_profile")
+        );
+        assert!(!recall.relevant_facts[0].text.contains("Reason:"));
+    }
+
+    #[test]
+    fn retrieval_multilingual_queries_keep_structured_preferences_and_facts() {
+        let state = test_state();
+        let user_id = 1001;
+        let chat_id = 2002;
+        let user_key = "user:test";
+        {
+            let db = state.core.db.get().expect("db lock");
+            db.execute_batch(crate::INIT_SQL).expect("init base schema");
+            ensure_memory_schema(&db).expect("ensure memory schema");
+            ensure_retrieval_schema(&db).expect("ensure retrieval schema");
+            db.execute(
+                "INSERT INTO user_preferences
+                 (user_id, chat_id, user_key, pref_key, pref_value, confidence, source, updated_at, updated_at_ts)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    user_id,
+                    chat_id,
+                    user_key,
+                    "response_language",
+                    "zh-CN",
+                    0.96_f32,
+                    "memory_extract",
+                    "1000",
+                    1000_i64,
+                ],
+            )
+            .expect("insert preference");
+            crate::memory::indexing::index_preference_entries(
+                &db,
+                user_id,
+                chat_id,
+                user_key,
+                &[(
+                    "response_language".to_string(),
+                    "zh-CN".to_string(),
+                    0.96,
+                    "memory_extract".to_string(),
+                )],
+                1000,
+            )
+            .expect("index preference");
+            let source_ids = [42_i64];
+            let fact = MemoryFactUpsert::from_long_term_summary(
+                "user_profile",
+                "reply_language",
+                "zh-CN",
+                "用户希望默认使用中文回复",
+                0.96,
+                "long_term_summary:42",
+                &source_ids,
+                "stable multilingual preference",
+                Some("user_profile:reply_language"),
+            );
+            upsert_memory_fact_card(&db, user_id, chat_id, user_key, &fact, 1_775_301_800)
+                .expect("upsert fact card");
+        }
+
+        for prompt in [
+            "以后回复都用中文",
+            "Please answer in my saved language",
+            "保存済みの返信言語を使って",
+            "저장된 답변 언어를 사용해줘",
+            "Utilise ma langue de réponse enregistrée",
+        ] {
+            let recall =
+                retrieve_indexed_memories(&state, Some(user_key), user_id, chat_id, prompt)
+                    .expect("retrieve indexed memories");
+            let joined = recall
+                .relevant_facts
+                .iter()
+                .map(|item| item.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                joined.contains("response_language"),
+                "preference should remain recallable for prompt {prompt:?}; got {joined:?}"
+            );
+            assert!(
+                joined.contains("默认使用中文回复"),
+                "fact should remain recallable for prompt {prompt:?}; got {joined:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn retrieval_index_rows_record_embedding_version() {
+        let state = test_state();
+        {
+            let db = state.core.db.get().expect("db lock");
+            db.execute_batch(crate::INIT_SQL).expect("init base schema");
+            ensure_memory_schema(&db).expect("ensure memory schema");
+            ensure_retrieval_schema(&db).expect("ensure retrieval schema");
+            upsert_knowledge_fact(
+                &db,
+                1001,
+                "user:test",
+                "user_profile",
+                crate::memory::RETRIEVAL_KIND_SEMANTIC_FACT,
+                "knowledge:user:test:embedding-version",
+                "User prefers concise Chinese replies.",
+                1_775_301_800,
+            )
+            .expect("insert knowledge fact");
+
+            let row = db
+                .query_row(
+                    "SELECT embedding_model, embedding_dims, embedding_version
+                     FROM memory_retrieval_index
+                     WHERE source_ref = ?1",
+                    ["knowledge:user:test:embedding-version"],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .expect("embedding version row");
+            let spec = crate::memory::embedding::local_hash_embedding_spec();
+            assert_eq!(row.0, spec.model_id);
+            assert_eq!(row.1, spec.dims as i64);
+            assert_eq!(row.2, spec.version);
+        }
+    }
+
+    #[test]
     fn kb_docs_are_scoped_by_user_key() {
         let state = test_state();
         {
@@ -1049,7 +1204,7 @@ mod tests {
                     "deployment runbook for user a",
                     crate::memory::retrieval::build_topic_tags("deployment runbook for user a"),
                     crate::memory::retrieval::vector_to_json(
-                        &crate::memory::retrieval::embed_text_locally(
+                        &crate::memory::embedding::embed_text_locally(
                             "deployment runbook for user a",
                         ),
                     ),

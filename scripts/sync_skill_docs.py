@@ -139,6 +139,7 @@ def _extract_section(md: str, title: str) -> str:
 def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
     capability = _extract_section(interface_md, "Capability Summary")
     config_entry_points = _extract_section(interface_md, "Config Entry Points")
+    memory_entry_points = _extract_section(interface_md, "Memory Entry Points")
     actions = _extract_section(interface_md, "Actions")
     params = _extract_section(interface_md, "Parameter Contract")
     errors = _extract_section(interface_md, "Error Contract")
@@ -151,6 +152,12 @@ def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
     examples = examples or "- TODO: add request/response examples."
 
     source_path = interface_path.relative_to(REPO_ROOT).as_posix()
+    memory_section = ""
+    if memory_entry_points:
+        memory_section = f"""
+## Memory Entry Points (from interface)
+{memory_entry_points}
+"""
 
     content = f"""{PROMPT_MANAGED_MARKER}
 ## Role & Boundaries
@@ -166,7 +173,7 @@ def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
 
 ## Config Entry Points (from interface)
 {config_entry_points}
-
+{memory_section}
 ## Actions (from interface)
 {actions}
 

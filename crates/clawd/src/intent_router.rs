@@ -695,6 +695,9 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         "sqlite_schema_version" | "sqlite_db_schema_version" => {
             OutputSemanticKind::SqliteSchemaVersion
         }
+        "package_manager_detection" | "package_manager_detect" | "package_detect_manager" => {
+            OutputSemanticKind::PackageManagerDetection
+        }
         "archive_list" | "archive_listing" | "archive_contents" => OutputSemanticKind::ArchiveList,
         "archive_pack" | "archive_create" | "archive_compress" => OutputSemanticKind::ArchivePack,
         "archive_unpack" | "archive_extract" | "archive_decompress" => {
@@ -2000,6 +2003,7 @@ fn output_semantic_kind_requires_fresh_evidence(kind: OutputSemanticKind) -> boo
             | OutputSemanticKind::SqliteTableNamesOnly
             | OutputSemanticKind::SqliteDatabaseKindJudgment
             | OutputSemanticKind::SqliteSchemaVersion
+            | OutputSemanticKind::PackageManagerDetection
             | OutputSemanticKind::ArchiveList
             | OutputSemanticKind::ArchivePack
             | OutputSemanticKind::ArchiveUnpack
@@ -7181,7 +7185,7 @@ mod tests {
 
     #[test]
     fn inline_json_transform_repair_keeps_planner_contract() {
-        let request = r#"把这个 JSON 数组按 score 从高到低排序，只输出 name 顺序：[{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
+        let request = r#"{"action":"transform_data","data":[{"name":"alpha","score":7},{"name":"beta","score":12}],"ops":[{"op":"sort","by":"score","order":"desc"},{"op":"project","fields":["name"]}]}"#;
         let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
         let mut contract = IntentOutputContract {
             requires_content_evidence: true,
@@ -11032,6 +11036,7 @@ mod tests {
                 memory_ctx: crate::memory::service::PromptMemoryContext {
                     prompt_with_memory: String::new(),
                     chat_prompt_context: String::new(),
+                    memory_trace: None,
                     long_term_summary: None,
                     preferences: Vec::new(),
                     recalled: Vec::new(),
@@ -12536,6 +12541,19 @@ mod tests {
 
     #[test]
     fn current_turn_locator_sanitizer_drops_contextual_path_prefix() {
+        let req = "读一下 README.md 然后用恰好三句话总结，不要多也不要少";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let cleaned = super::sanitize_resolved_intent_for_current_turn_locator(
+            "读取 docs/README.md 文件内容并用恰好三句话进行总结",
+            req,
+            &surface,
+        );
+
+        assert_eq!(cleaned.as_deref(), Some(req));
+    }
+
+    #[test]
+    fn current_turn_locator_sanitizer_ignores_bare_stem_without_extension() {
         let req = "读一下 README 然后用恰好三句话总结，不要多也不要少";
         let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
         let cleaned = super::sanitize_resolved_intent_for_current_turn_locator(
@@ -12544,7 +12562,7 @@ mod tests {
             &surface,
         );
 
-        assert_eq!(cleaned.as_deref(), Some(req));
+        assert_eq!(cleaned, None);
     }
 
     fn make_temp_workspace_with_child(test_name: &str, child_name: &str) -> std::path::PathBuf {

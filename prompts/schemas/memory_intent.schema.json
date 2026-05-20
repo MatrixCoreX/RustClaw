@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/prompts/schemas/memory_intent.schema.json",
+  "title": "MemoryIntentOut",
+  "description": "Schema for structured memory intent extraction. Mirrors `MemoryIntentOut` / `MemoryAction` in `crates/clawd/src/memory/intent.rs`. The model decides semantic memory actions; runtime validates schema, confidence, source evidence, scope, TTL, and safety before writing.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["memory_actions"],
+  "properties": {
+    "memory_actions": {
+      "type": "array",
+      "description": "Structured actions proposed by the model. Runtime may reject any action that fails policy validation.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "action",
+          "kind",
+          "scope",
+          "key",
+          "value",
+          "normalized_value",
+          "confidence",
+          "ttl_policy",
+          "expires_at_ts",
+          "source",
+          "reason",
+          "risk"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["upsert", "delete", "expire", "noop"]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "preference",
+              "profile_fact",
+              "project_fact",
+              "rule",
+              "transient_event",
+              "safety_signal"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": ["chat", "user", "project"]
+          },
+          "key": {
+            "type": "string",
+            "description": "Stable machine key such as response_language, response_style, agent_display_name, or a project fact key."
+          },
+          "value": {
+            "type": "string",
+            "description": "User-facing value or fact text."
+          },
+          "normalized_value": {
+            "type": ["string", "null"],
+            "description": "Optional machine-normalized value, such as a BCP-47 language tag."
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0
+          },
+          "ttl_policy": {
+            "type": "string",
+            "enum": ["session", "short_term", "long_term", "explicit_until"]
+          },
+          "expires_at_ts": {
+            "type": ["integer", "null"]
+          },
+          "source": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["source_kind", "source_ref", "source_text", "memory_ids"],
+            "properties": {
+              "source_kind": {
+                "type": "string",
+                "enum": [
+                  "current_user_message",
+                  "route_semantic_extract",
+                  "llm_memory_extract",
+                  "rule_shortcut",
+                  "system_event"
+                ]
+              },
+              "source_ref": {
+                "type": ["string", "null"],
+                "description": "Optional stable source-local reference."
+              },
+              "source_text": {
+                "type": "string",
+                "description": "Short evidence text used for audit and validation."
+              },
+              "memory_ids": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "reason": {
+            "type": "string"
+          },
+          "risk": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["sensitive", "injection_like"],
+            "properties": {
+              "sensitive": {
+                "type": "boolean"
+              },
+              "injection_like": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

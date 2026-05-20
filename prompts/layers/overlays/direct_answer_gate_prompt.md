@@ -38,6 +38,7 @@ Hard rules:
 Canonical output contract:
 - For `direct_answer`: keep `requires_content_evidence=false`, `delivery_required=false`, `locator_kind="none"`, `delivery_intent="none"`.
 - For `planner_execute`: set `requires_content_evidence=true` when evidence is needed; set `locator_kind` and `semantic_kind` when clear; otherwise keep `semantic_kind="none"` and let the planner choose tools.
+- For locatorless runtime scalar observations where no concrete file/path/object is missing, use `response_shape="scalar"`, `requires_content_evidence=true`, `locator_kind="none"`, `semantic_kind="none"`, and `reference_resolution.target="none"`. If a concrete target object is missing or ambiguous, set `reference_resolution.target` to `missing_locator` / `ambiguous_locator` instead of guessing.
 - For file/content presence checks, use `semantic_kind="content_presence_check"` when the user asks whether a property, field, identifier, string, symbol, or text pattern appears in a concrete file or bounded local scope.
 - For current workspace/project/repository synthesis, use `locator_kind="current_workspace"` and `semantic_kind="workspace_project_summary"` when appropriate.
 - For existing-file delivery, including a file selected from a directory/listing by ordinal or order, use `decision="planner_execute"`, `response_shape="file_token"`, `delivery_required=true`, `delivery_intent="file_single"`, and `requires_content_evidence=true`. The planner/finalizer must deliver `FILE:<path>`, not a bare filename, a prose description, or pasted content.

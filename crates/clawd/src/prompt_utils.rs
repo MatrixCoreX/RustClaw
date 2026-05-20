@@ -76,6 +76,8 @@ pub(crate) enum PromptSchemaId {
     DeliveryTextClassifier,
     ScheduleIntent,
     LongTermSummary,
+    #[allow(dead_code)]
+    MemoryIntent,
     RunCmdSuggestion,
 }
 
@@ -92,6 +94,7 @@ impl PromptSchemaId {
             Self::DeliveryTextClassifier => "delivery_text_classifier",
             Self::ScheduleIntent => "schedule_intent",
             Self::LongTermSummary => "long_term_summary",
+            Self::MemoryIntent => "memory_intent",
             Self::RunCmdSuggestion => "run_cmd_suggestion",
         }
     }
@@ -111,6 +114,7 @@ impl PromptSchemaId {
         static DELIVERY_TEXT_CLASSIFIER: OnceLock<Value> = OnceLock::new();
         static SCHEDULE_INTENT: OnceLock<Value> = OnceLock::new();
         static LONG_TERM_SUMMARY: OnceLock<Value> = OnceLock::new();
+        static MEMORY_INTENT: OnceLock<Value> = OnceLock::new();
         static RUN_CMD_SUGGESTION: OnceLock<Value> = OnceLock::new();
 
         match self {
@@ -164,6 +168,11 @@ impl PromptSchemaId {
             Self::LongTermSummary => LONG_TERM_SUMMARY.get_or_init(|| {
                 parse_schema(include_str!(
                     "../../../prompts/schemas/long_term_summary.schema.json"
+                ))
+            }),
+            Self::MemoryIntent => MEMORY_INTENT.get_or_init(|| {
+                parse_schema(include_str!(
+                    "../../../prompts/schemas/memory_intent.schema.json"
                 ))
             }),
             Self::RunCmdSuggestion => RUN_CMD_SUGGESTION.get_or_init(|| {
