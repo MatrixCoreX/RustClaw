@@ -532,6 +532,14 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
             Some(crate::OutputSemanticKind::RecentScalarEqualityCheck)
         }
         "git_commit_subject" => Some(crate::OutputSemanticKind::GitCommitSubject),
+        "git_repository_state"
+        | "git_workspace_state"
+        | "git_state"
+        | "git_status"
+        | "git_branch"
+        | "git_current_branch"
+        | "git_remote"
+        | "git_changed_files" => Some(crate::OutputSemanticKind::GitRepositoryState),
         "structured_keys" => Some(crate::OutputSemanticKind::StructuredKeys),
         "config_validation" | "structured_config_validation" => {
             Some(crate::OutputSemanticKind::ConfigValidation)

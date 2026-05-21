@@ -249,15 +249,12 @@ fn markdown_line_is_non_answer_separator_heading(line: &str) -> bool {
     if !(1..=6).contains(&hashes) {
         return false;
     }
-    trimmed
-        .get(hashes..)
-        .map(str::trim)
-        .is_some_and(|rest| {
-            !rest.is_empty()
-                && rest
-                    .chars()
-                    .all(|ch| matches!(ch, '=' | '-' | '_' | '*' | '#'))
-        })
+    trimmed.get(hashes..).map(str::trim).is_some_and(|rest| {
+        !rest.is_empty()
+            && rest
+                .chars()
+                .all(|ch| matches!(ch, '=' | '-' | '_' | '*' | '#'))
+    })
 }
 
 fn synthesize_user_language_source<'a>(
@@ -809,7 +806,8 @@ mod tests {
     use super::{
         classify_skill_failure_recovery, deterministic_observed_execution_status_answer,
         deterministic_scalar_markdown_heading_answer, strip_internal_execution_args,
-        synthesize_answer_allows_direct_fallback, synthesize_direct_fallback_would_passthrough_multiline_read_range,
+        synthesize_answer_allows_direct_fallback,
+        synthesize_direct_fallback_would_passthrough_multiline_read_range,
         synthesize_direct_observed_fallback_answer, synthesize_failure_observed_facts,
         synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
         unresolved_file_token_delivery_artifact,
@@ -1700,10 +1698,12 @@ mod tests {
         };
 
         assert!(synthesize_route_allows_direct_fallback(Some(&ctx)));
-        assert!(synthesize_direct_fallback_would_passthrough_multiline_read_range(
-            &loop_state,
-            Some(&ctx)
-        ));
+        assert!(
+            synthesize_direct_fallback_would_passthrough_multiline_read_range(
+                &loop_state,
+                Some(&ctx)
+            )
+        );
     }
 
     #[test]

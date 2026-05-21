@@ -1093,9 +1093,11 @@ fn action_supports_structured_direct_observed_finalize(
             route.output_contract.semantic_kind,
             crate::OutputSemanticKind::None
                 | crate::OutputSemanticKind::StructuredKeys
+                | crate::OutputSemanticKind::DirectoryEntryGroups
                 | crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames
                 | crate::OutputSemanticKind::FilePaths
+                | crate::OutputSemanticKind::QuantityComparison
                 | crate::OutputSemanticKind::ContentPresenceCheck
                 | crate::OutputSemanticKind::ConfigValidation
                 | crate::OutputSemanticKind::ConfigRiskAssessment
@@ -1164,6 +1166,19 @@ fn action_supports_structured_direct_observed_finalize(
                             .is_some_and(path_has_structured_document_extension)
                     })
             }
+            Some("tree_summary") => route_result.is_some_and(|route| {
+                matches!(
+                    route.output_contract.semantic_kind,
+                    crate::OutputSemanticKind::None
+                        | crate::OutputSemanticKind::DirectoryEntryGroups
+                )
+            }),
+            Some("dir_compare") => route_result.is_some_and(|route| {
+                matches!(
+                    route.output_contract.semantic_kind,
+                    crate::OutputSemanticKind::None | crate::OutputSemanticKind::QuantityComparison
+                )
+            }),
             _ => false,
         },
         "fs_basic" => match action {
@@ -1201,11 +1216,31 @@ fn observation_only_plan_can_finalize_from_direct_output(
         route.output_contract.requires_content_evidence
             && route_expects_terminal_user_answer(route)
             && structured_scalar_observation_units(actions) > 1
+            && !last_executable_action(actions).is_some_and(action_is_structured_field_bundle_read)
     }) {
         return false;
     }
     last_executable_action(actions)
         .is_some_and(|action| action_supports_direct_observed_finalize(state, route_result, action))
+}
+
+fn action_is_structured_field_bundle_read(action: &AgentAction) -> bool {
+    let (skill, args) = match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            (skill.as_str(), args)
+        }
+        _ => return false,
+    };
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(|action| action.trim().to_ascii_lowercase());
+    let action = action.as_deref();
+    let fields = args.get("field_paths").or_else(|| args.get("fields"));
+    let field_count = string_list_from_value(fields).len();
+    ((skill.eq_ignore_ascii_case("config_basic") && action == Some("read_fields"))
+        || (skill.eq_ignore_ascii_case("system_basic") && action == Some("extract_fields")))
+        && field_count > 0
 }
 
 fn route_uses_runtime_owned_observed_finalizer(route_result: &RouteResult) -> bool {
@@ -1229,6 +1264,7 @@ fn route_uses_runtime_owned_observed_finalizer(route_result: &RouteResult) -> bo
             | crate::OutputSemanticKind::ScalarPathOnly
             | crate::OutputSemanticKind::ExistenceWithPath
             | crate::OutputSemanticKind::GitCommitSubject
+            | crate::OutputSemanticKind::GitRepositoryState
             | crate::OutputSemanticKind::StructuredKeys
             | crate::OutputSemanticKind::ArchiveList
             | crate::OutputSemanticKind::ArchivePack
@@ -2174,6 +2210,8 @@ fn scalar_content_auto_locator_observation_plan(
             route.output_contract.semantic_kind,
             crate::OutputSemanticKind::RawCommandOutput
                 | crate::OutputSemanticKind::ScalarPathOnly
+                | crate::OutputSemanticKind::ExistenceWithPath
+                | crate::OutputSemanticKind::ExistenceWithPathSummary
                 | crate::OutputSemanticKind::ScalarCount
                 | crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames
@@ -2251,6 +2289,50 @@ fn scalar_content_auto_locator_deterministic_plan_result(
     ))
 }
 
+fn file_facts_auto_locator_observation_plan(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<Vec<AgentAction>> {
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None | crate::OutputSemanticKind::QuantityComparison
+        )
+        || !route_expects_terminal_user_answer(route)
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+    {
+        return None;
+    }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+        && crate::task_contract::target_locators_for_route(route).len() > 1
+    {
+        return None;
+    }
+    let path = auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())?;
+    if !Path::new(path).is_file() || is_supported_archive_path(path) {
+        return None;
+    }
+    let targets = vec![path.to_string()];
+    Some(vec![
+        fs_basic_stat_paths_action_for_explicit_targets(&targets),
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ])
+}
+
 fn generic_directory_auto_locator_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
@@ -2310,6 +2392,169 @@ fn generic_directory_auto_locator_observation_plan(
             content: "{{last_output}}".to_string(),
         },
     ])
+}
+
+fn directory_tree_auto_locator_observation_plan(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<Vec<AgentAction>> {
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !route_expects_terminal_user_answer(route)
+        || !matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Free
+                | crate::OutputResponseShape::OneSentence
+                | crate::OutputResponseShape::Strict
+        )
+        || !matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+                | crate::OutputSemanticKind::RawCommandOutput
+                | crate::OutputSemanticKind::DirectoryEntryGroups
+                | crate::OutputSemanticKind::DirectoryPurposeSummary
+                | crate::OutputSemanticKind::WorkspaceProjectSummary
+        )
+    {
+        return None;
+    }
+    if crate::task_contract::target_locators_for_route(route).len() > 1 {
+        return None;
+    }
+    let path = route_directory_locator_path(route, auto_locator_path)?;
+    if !Path::new(&path).is_dir() {
+        return None;
+    }
+    let tree_summary = AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: serde_json::json!({
+            "action": "tree_summary",
+            "path": path,
+            "max_depth": 2,
+            "max_children_per_dir": 12,
+            "include_hidden": false,
+        }),
+    };
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::DirectoryPurposeSummary
+            | crate::OutputSemanticKind::WorkspaceProjectSummary
+            | crate::OutputSemanticKind::RawCommandOutput
+    ) {
+        Some(vec![
+            tree_summary,
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ])
+    } else {
+        Some(vec![tree_summary])
+    }
+}
+
+fn directory_tree_auto_locator_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
+        return None;
+    }
+    let actions = directory_tree_auto_locator_observation_plan(route_result, auto_locator_path)?;
+    let actions = normalize_planned_actions_with_original_and_context(
+        state,
+        route_result,
+        loop_state,
+        user_text,
+        original_user_text,
+        Some(goal),
+        auto_locator_path,
+        actions,
+    );
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn directory_compare_locator_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
+        return None;
+    }
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+    {
+        return None;
+    }
+    let targets = crate::task_contract::target_locators_for_route(route);
+    if targets.len() != 2 {
+        return None;
+    }
+    let left =
+        resolve_directory_locator_for_dir_compare(&state.skill_rt.workspace_root, &targets[0])?;
+    let right =
+        resolve_directory_locator_for_dir_compare(&state.skill_rt.workspace_root, &targets[1])?;
+    if left.eq_ignore_ascii_case(&right) {
+        return None;
+    }
+    let actions = vec![AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: serde_json::json!({
+            "action": "dir_compare",
+            "left_path": left,
+            "right_path": right,
+            "recursive": true,
+            "include_hidden": false,
+            "max_diffs": 20,
+        }),
+    }];
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn resolve_directory_locator_for_dir_compare(workspace_root: &Path, raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let path = Path::new(raw);
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        workspace_root.join(path)
+    };
+    if !path.is_dir() {
+        return None;
+    }
+    Some(path.canonicalize().unwrap_or(path).display().to_string())
 }
 
 fn scalar_path_auto_locator_deterministic_plan_result(
@@ -2490,6 +2735,11 @@ fn existence_with_path_locator_observation_plan(
                 .map(str::trim)
                 .filter(|path| !path.is_empty())
                 .or_else(|| (!hint.is_empty()).then_some(hint))?;
+            if is_supported_archive_path(path)
+                && archive_entry_target_for_route_or_text(route, current_user_text, path).is_some()
+            {
+                return None;
+            }
             if Path::new(path).is_dir() {
                 if let Some(file_name) =
                     single_filename_target_for_directory_locator(route, current_user_text)
@@ -2671,6 +2921,141 @@ fn single_name_target_for_directory_locator(
         .or_else(|| single_quoted_search_name_target(current_user_text))
         .or_else(|| single_quoted_search_name_target(&route.resolved_intent))
         .or_else(|| single_identifier_search_name_target_outside_locators(current_user_text))
+}
+
+fn archive_entry_target_for_route_or_text(
+    route: &RouteResult,
+    current_user_text: &str,
+    archive_path: &str,
+) -> Option<String> {
+    let archive_path = archive_path.trim();
+    if archive_path.is_empty() || !is_supported_archive_path(archive_path) {
+        return None;
+    }
+
+    let mut path_candidates = Vec::new();
+    let mut filename_candidates = Vec::new();
+    for text in [current_user_text, route.resolved_intent.as_str()] {
+        for locator in
+            crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(text)
+        {
+            push_archive_entry_target_candidate(
+                &mut path_candidates,
+                &mut filename_candidates,
+                &locator.locator_hint,
+                archive_path,
+            );
+        }
+        for filename in crate::delivery_utils::extract_filename_candidates(text) {
+            push_archive_entry_target_candidate(
+                &mut path_candidates,
+                &mut filename_candidates,
+                &filename,
+                archive_path,
+            );
+        }
+    }
+
+    path_candidates
+        .into_iter()
+        .next()
+        .or_else(|| filename_candidates.into_iter().next())
+}
+
+fn push_archive_entry_target_candidate(
+    path_candidates: &mut Vec<String>,
+    filename_candidates: &mut Vec<String>,
+    candidate: &str,
+    archive_path: &str,
+) {
+    let Some(candidate) = normalize_archive_entry_target_candidate(candidate, archive_path) else {
+        return;
+    };
+    let target = if candidate.contains('/') || candidate.contains('\\') {
+        path_candidates
+    } else {
+        filename_candidates
+    };
+    if !target
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(&candidate))
+    {
+        target.push(candidate);
+    }
+}
+
+fn normalize_archive_entry_target_candidate(candidate: &str, archive_path: &str) -> Option<String> {
+    let trimmed = candidate.trim().trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\''
+                | '`'
+                | ','
+                | '，'
+                | '。'
+                | ':'
+                | '：'
+                | ';'
+                | '；'
+                | '('
+                | ')'
+                | '（'
+                | '）'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | '《'
+                | '》'
+        )
+    });
+    if trimmed.is_empty()
+        || trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains("://")
+        || Path::new(trimmed).is_absolute()
+        || is_supported_archive_path(trimmed)
+        || archive_locator_candidate_matches_archive(trimmed, archive_path)
+        || crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(trimmed)
+    {
+        return None;
+    }
+    if !trimmed.contains('/')
+        && !trimmed.contains('\\')
+        && !archive_entry_target_candidate_has_extension(trimmed)
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn archive_locator_candidate_matches_archive(candidate: &str, archive_path: &str) -> bool {
+    let candidate_norm = candidate.replace('\\', "/");
+    let archive_norm = archive_path.trim().replace('\\', "/");
+    if candidate_norm.eq_ignore_ascii_case(&archive_norm) {
+        return true;
+    }
+    let archive_name = archive_norm
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(archive_norm.as_str());
+    candidate_norm.eq_ignore_ascii_case(archive_name)
+}
+
+fn archive_entry_target_candidate_has_extension(candidate: &str) -> bool {
+    let basename = candidate
+        .rsplit(|ch| ch == '/' || ch == '\\')
+        .next()
+        .unwrap_or(candidate);
+    let Some((stem, ext)) = basename.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty()
+        && (1..=16).contains(&ext.len())
+        && ext.chars().all(|ch| ch.is_ascii_alphanumeric())
 }
 
 fn existence_with_path_locator_deterministic_plan_result(
@@ -5253,6 +5638,15 @@ fn normalize_action_schema_aliases(
     let actions =
         rewrite_invalid_rustclaw_config_section_field_reads_to_guard(route_result, None, actions);
     let actions = rewrite_rustclaw_config_risk_assessment_to_guard(route_result, None, actions);
+    let actions = rewrite_structured_multi_field_read_plan_to_read_fields(
+        route_result,
+        route_result
+            .map(|route| route.resolved_intent.as_str())
+            .unwrap_or_default(),
+        None,
+        None,
+        actions,
+    );
     let actions = rewrite_structured_scalar_field_read_plan_to_read_field(
         route_result,
         route_result
@@ -5476,6 +5870,129 @@ fn rewrite_config_validation_read_plan_to_validate(
     rewritten
 }
 
+fn rewrite_unrequested_path_like_config_field_read_to_validate(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    user_text: &str,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.needs_clarify
+        || route.output_contract.delivery_required
+        || !route.output_contract.requires_content_evidence
+    {
+        return actions;
+    }
+
+    let mut changed = false;
+    let mut rewritten = Vec::with_capacity(actions.len());
+    for action in actions {
+        let Some(path) = unrequested_path_like_config_field_validation_path(
+            state,
+            route,
+            user_text,
+            auto_locator_path,
+            &action,
+        ) else {
+            rewritten.push(action);
+            continue;
+        };
+        info!(
+            "plan_rewrite_unrequested_path_like_config_field_read_to_validate path={}",
+            crate::truncate_for_log(&path)
+        );
+        rewritten.push(config_basic_validate_action(path));
+        changed = true;
+    }
+
+    if changed {
+        rewritten
+    } else {
+        rewritten
+    }
+}
+
+fn unrequested_path_like_config_field_validation_path(
+    state: &AppState,
+    route: &RouteResult,
+    user_text: &str,
+    auto_locator_path: Option<&str>,
+    action: &AgentAction,
+) -> Option<String> {
+    let (skill, args) = match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            (skill.as_str(), args)
+        }
+        _ => return None,
+    };
+    if !skill.eq_ignore_ascii_case("system_basic") && !skill.eq_ignore_ascii_case("config_basic") {
+        return None;
+    }
+
+    let request = structured_extract_request(args)?;
+    let current = resolve_workspace_path(&state.skill_rt.workspace_root, &request.path);
+    let current_text = current.display().to_string();
+    if !path_has_structured_text_extension(&request.path)
+        && !path_has_structured_text_extension(&current_text)
+    {
+        return None;
+    }
+    if structured_file_has_all_fields(&current, &request.fields) {
+        return None;
+    }
+    if request
+        .fields
+        .iter()
+        .any(|field| current_request_mentions_token(user_text, route, field))
+    {
+        return None;
+    }
+    if structured_scalar_field_selector(route, user_text, None, Some(&current_text)).is_some() {
+        return None;
+    }
+    if !request
+        .fields
+        .iter()
+        .any(|field| field_token_looks_like_locator(field))
+    {
+        return None;
+    }
+
+    let auto_path = auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .filter(|path| path_has_structured_text_extension(path))
+        .filter(|path| {
+            same_existing_or_display_path(Path::new(path), &current) || !current.exists()
+        });
+    auto_path
+        .map(ToString::to_string)
+        .or_else(|| path_has_structured_text_extension(&request.path).then(|| request.path.clone()))
+        .or_else(|| path_has_structured_text_extension(&current_text).then_some(current_text))
+}
+
+fn field_token_looks_like_locator(value: &str) -> bool {
+    let token = value.trim();
+    if token.is_empty() {
+        return false;
+    }
+    Path::new(token).components().count() > 1 || filename_candidate_has_document_extension(token)
+}
+
+fn current_request_mentions_token(user_text: &str, route: &RouteResult, token: &str) -> bool {
+    let token = token.trim();
+    if token.is_empty() {
+        return false;
+    }
+    let token_lower = token.to_ascii_lowercase();
+    [user_text, route.resolved_intent.as_str()]
+        .iter()
+        .any(|text| text.contains(token) || text.to_ascii_lowercase().contains(&token_lower))
+}
+
 fn normalize_evidence_contract_actions(
     state: &AppState,
     route_result: Option<&RouteResult>,
@@ -5501,6 +6018,13 @@ fn normalize_evidence_contract_actions(
         auto_locator_path,
         actions,
     );
+    let actions = rewrite_structured_multi_field_read_plan_to_read_fields(
+        route_result,
+        user_text,
+        plan_context,
+        auto_locator_path,
+        actions,
+    );
     let actions = rewrite_structured_scalar_field_read_plan_to_read_field(
         route_result,
         user_text,
@@ -5510,6 +6034,13 @@ fn normalize_evidence_contract_actions(
     );
     let actions =
         rewrite_config_validation_read_plan_to_validate(route_result, auto_locator_path, actions);
+    let actions = rewrite_unrequested_path_like_config_field_read_to_validate(
+        state,
+        route_result,
+        user_text,
+        auto_locator_path,
+        actions,
+    );
     let actions = rewrite_extract_field_paths_to_structured_candidates(
         state,
         route_result,
@@ -5523,6 +6054,8 @@ fn normalize_evidence_contract_actions(
         ensure_workspace_synthesis_has_default_text_evidence(route_result, loop_state, actions);
     let actions =
         append_synthesize_for_unscoped_workspace_text_evidence(route_result, loop_state, actions);
+    let actions = rewrite_dir_compare_paths_to_unique_workspace_directories(state, actions);
+    let actions = replace_directory_compare_search_plan(state, route_result, actions);
     let actions = ensure_explicit_multi_file_targets_have_path_facts(
         route_result,
         loop_state,
@@ -5680,6 +6213,50 @@ fn rewrite_structured_scalar_field_read_plan_to_read_field(
     vec![config_basic_read_field_action(path, field_path)]
 }
 
+fn rewrite_structured_multi_field_read_plan_to_read_fields(
+    route_result: Option<&RouteResult>,
+    user_text: &str,
+    plan_context: Option<&str>,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.needs_clarify
+        || route.output_contract.delivery_required
+        || !route.output_contract.requires_content_evidence
+        || actions.iter().any(action_is_structured_scalar_field_read)
+        || !actions.iter().any(action_observes_bounded_file_content)
+        || actions.iter().any(|action| {
+            !action_observes_bounded_file_content(action)
+                && !matches!(
+                    action,
+                    AgentAction::SynthesizeAnswer { .. }
+                        | AgentAction::Respond { .. }
+                        | AgentAction::Think { .. }
+                )
+        })
+    {
+        return actions;
+    }
+    let Some(path) = structured_scalar_field_read_target_path(route, auto_locator_path, &actions)
+    else {
+        return actions;
+    };
+    let field_paths = structured_field_selectors(route, user_text, plan_context, Some(&path));
+    if field_paths.len() < 2 {
+        return actions;
+    }
+
+    info!(
+        "plan_rewrite_structured_multi_field_read_to_config_basic path={} fields={:?}",
+        crate::truncate_for_log(&path),
+        field_paths
+    );
+    vec![config_basic_read_fields_action(path, field_paths)]
+}
+
 fn action_is_structured_scalar_field_read(action: &AgentAction) -> bool {
     match action {
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
@@ -5730,25 +6307,76 @@ fn structured_scalar_field_read_target_path(
 fn structured_scalar_field_selector(
     route: &RouteResult,
     user_text: &str,
-    _plan_context: Option<&str>,
+    plan_context: Option<&str>,
     target_path: Option<&str>,
 ) -> Option<String> {
+    structured_field_selectors(route, user_text, plan_context, target_path)
+        .into_iter()
+        .next()
+}
+
+fn structured_field_selectors(
+    route: &RouteResult,
+    user_text: &str,
+    plan_context: Option<&str>,
+    target_path: Option<&str>,
+) -> Vec<String> {
     let current_turn_sources = [Some(user_text), Some(route.resolved_intent.as_str())];
-    current_turn_sources
+    let selectors = structured_field_selectors_from_sources(&current_turn_sources, target_path);
+    if !selectors.is_empty() {
+        return selectors;
+    }
+
+    let fallback_sources = [plan_context];
+    structured_field_selectors_from_sources(&fallback_sources, target_path)
+}
+
+fn structured_field_selectors_from_sources(
+    sources: &[Option<&str>],
+    target_path: Option<&str>,
+) -> Vec<String> {
+    let mut selectors = Vec::new();
+    for text in sources.iter().flatten() {
+        for candidate in extract_dotted_field_selectors_for_structured_target(text) {
+            push_unique_selector(&mut selectors, candidate);
+        }
+    }
+    if !selectors.is_empty() {
+        return selectors;
+    }
+
+    if let Some(path) = target_path {
+        for text in sources.iter().flatten() {
+            for candidate in extract_schema_identity_field_selectors(path, text) {
+                push_unique_selector(&mut selectors, candidate);
+            }
+        }
+        if !selectors.is_empty() {
+            return selectors;
+        }
+
+        for text in sources.iter().flatten() {
+            for candidate in extract_schema_backed_field_selectors(path, text) {
+                push_unique_selector(&mut selectors, candidate);
+            }
+        }
+    }
+
+    selectors
+}
+
+fn push_unique_selector(out: &mut Vec<String>, candidate: String) {
+    let candidate = candidate.trim();
+    if candidate.is_empty() {
+        return;
+    }
+    if out
         .iter()
-        .flatten()
-        .find_map(|text| {
-            crate::intent::surface_signals::extract_dotted_field_selector(text)
-                .filter(|candidate| structured_field_selector_candidate_is_valid(candidate))
-                .or_else(|| extract_dotted_field_selector_for_structured_target(text))
-        })
-        .or_else(|| {
-            let path = target_path?;
-            current_turn_sources
-                .iter()
-                .flatten()
-                .find_map(|text| extract_schema_backed_field_selector(path, text))
-        })
+        .any(|existing| existing.eq_ignore_ascii_case(candidate))
+    {
+        return;
+    }
+    out.push(candidate.to_string());
 }
 
 fn structured_field_selector_candidate_is_valid(candidate: &str) -> bool {
@@ -5760,32 +6388,101 @@ fn structured_field_selector_candidate_is_valid(candidate: &str) -> bool {
         && !crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(token)
 }
 
-fn extract_dotted_field_selector_for_structured_target(text: &str) -> Option<String> {
+fn extract_dotted_field_selectors_for_structured_target(text: &str) -> Vec<String> {
     static DOTTED_SELECTOR_RE: OnceLock<Regex> = OnceLock::new();
     let re = DOTTED_SELECTOR_RE.get_or_init(|| {
         Regex::new(r"\b[A-Za-z_$][A-Za-z0-9_$-]*(?:\.[A-Za-z_$][A-Za-z0-9_$-]*)+\b")
             .expect("valid dotted selector regex")
     });
-    re.find_iter(text).find_map(|candidate| {
+    let mut out = Vec::new();
+    for candidate in re.find_iter(text) {
         let token = candidate.as_str().trim();
-        if !structured_field_selector_candidate_is_valid(token) {
-            return None;
+        if structured_field_selector_candidate_is_valid(token) {
+            push_unique_selector(&mut out, token.to_string());
         }
-        Some(token.to_string())
-    })
+    }
+    out
 }
 
-fn extract_schema_backed_field_selector(path: &str, text: &str) -> Option<String> {
-    let value = parse_structured_file_value(Path::new(path))?;
+fn extract_schema_backed_field_selectors(path: &str, text: &str) -> Vec<String> {
+    let Some(value) = parse_structured_file_value(Path::new(path)) else {
+        return Vec::new();
+    };
     let index = structured_field_leaf_index(&value);
-    schema_field_candidate_tokens(text).find_map(|token| {
+    let mut out = Vec::new();
+    for token in schema_field_candidate_tokens(text) {
         let lower = token.to_ascii_lowercase();
-        let paths = index.get(&lower)?;
+        let Some(paths) = index.get(&lower) else {
+            continue;
+        };
         if paths.iter().any(|path| path.eq_ignore_ascii_case(&token)) {
-            return Some(token);
+            push_unique_selector(&mut out, token);
+            continue;
         }
-        (paths.len() == 1).then(|| paths[0].clone())
-    })
+        if paths.len() == 1 {
+            push_unique_selector(&mut out, paths[0].clone());
+        }
+    }
+    out
+}
+
+fn extract_schema_identity_field_selectors(path: &str, text: &str) -> Vec<String> {
+    let Some(value) = parse_structured_file_value(Path::new(path)) else {
+        return Vec::new();
+    };
+    let tokens = schema_field_candidate_tokens(text).collect::<Vec<_>>();
+    if tokens.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    collect_schema_identity_field_selectors(&value, &tokens, &mut out);
+    out
+}
+
+fn collect_schema_identity_field_selectors(
+    value: &Value,
+    tokens: &[String],
+    out: &mut Vec<String>,
+) {
+    match value {
+        Value::Object(map) => {
+            for child in map.values() {
+                collect_schema_identity_field_selectors(child, tokens, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                if let Some(obj) = item.as_object() {
+                    for identity_key in ["name", "id", "key"] {
+                        let Some(identity_value) = obj.get(identity_key).and_then(Value::as_str)
+                        else {
+                            continue;
+                        };
+                        if !schema_text_tokens_contain(tokens, identity_value) {
+                            continue;
+                        }
+                        for field_key in obj.keys() {
+                            if field_key == identity_key || !schema_field_token_is_valid(field_key)
+                            {
+                                continue;
+                            }
+                            if schema_text_tokens_contain(tokens, field_key) {
+                                push_unique_selector(out, format!("{identity_value}.{field_key}"));
+                            }
+                        }
+                    }
+                }
+                collect_schema_identity_field_selectors(item, tokens, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn schema_text_tokens_contain(tokens: &[String], needle: &str) -> bool {
+    tokens
+        .iter()
+        .any(|token| token.eq_ignore_ascii_case(needle))
 }
 
 fn structured_field_leaf_index(value: &Value) -> HashMap<String, Vec<String>> {
@@ -5843,6 +6540,17 @@ fn config_basic_read_field_action(path: String, field_path: String) -> AgentActi
             "action": "read_field",
             "path": path,
             "field_path": field_path,
+        }),
+    }
+}
+
+fn config_basic_read_fields_action(path: String, field_paths: Vec<String>) -> AgentAction {
+    AgentAction::CallTool {
+        tool: "config_basic".to_string(),
+        args: serde_json::json!({
+            "action": "read_fields",
+            "path": path,
+            "field_paths": field_paths,
         }),
     }
 }
@@ -7191,12 +7899,18 @@ fn normalize_archive_basic_args(mut args: Value, route_result: Option<&RouteResu
     let Some(obj) = args.as_object_mut() else {
         return args;
     };
-    let action_name = obj
+    let mut action_name = obj
         .get("action")
         .and_then(Value::as_str)
         .map(str::trim)
         .unwrap_or_default()
         .to_ascii_lowercase();
+    if !matches!(action_name.as_str(), "list" | "pack" | "unpack")
+        && unknown_archive_action_can_normalize_to_list(obj, route_result)
+    {
+        obj.insert("action".to_string(), Value::String("list".to_string()));
+        action_name = "list".to_string();
+    }
     match action_name.as_str() {
         "pack" => {
             normalize_arg_alias(
@@ -7258,6 +7972,55 @@ fn normalize_archive_basic_args(mut args: Value, route_result: Option<&RouteResu
         _ => {}
     }
     args
+}
+
+fn unknown_archive_action_can_normalize_to_list(
+    obj: &serde_json::Map<String, Value>,
+    route_result: Option<&RouteResult>,
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if archive_list_auto_locator_target_path(Some(route), None).is_none()
+        || archive_args_have_pack_or_unpack_shape(obj)
+    {
+        return false;
+    }
+    archive_arg_candidate_from_obj(obj)
+        .as_deref()
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (!hint.is_empty()).then_some(hint)
+        })
+        .is_some_and(is_supported_archive_path)
+}
+
+fn archive_args_have_pack_or_unpack_shape(obj: &serde_json::Map<String, Value>) -> bool {
+    [
+        "source",
+        "source_path",
+        "src",
+        "dest",
+        "dest_path",
+        "destination",
+        "destination_path",
+        "output",
+        "output_path",
+    ]
+    .iter()
+    .any(|key| obj.contains_key(*key))
+}
+
+fn archive_arg_candidate_from_obj(obj: &serde_json::Map<String, Value>) -> Option<String> {
+    ["archive", "archive_path", "path", "input", "input_path"]
+        .iter()
+        .find_map(|key| {
+            obj.get(*key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
 }
 
 fn normalize_archive_basic_schema_aliases(
@@ -8316,7 +9079,8 @@ fn path_metadata_facts_plan_satisfies_route(
             || path_metadata_facts_synthesizes_terminal_answer(actions);
     }
     route_requests_path_metadata_compare(route_result)
-        && structured_scalar_observation_units(actions) >= 2
+        && (structured_scalar_observation_units(actions) >= 2
+            || actions_satisfy_single_path_metadata_facts(route_result, actions))
 }
 
 fn path_metadata_facts_synthesizes_terminal_answer(actions: &[AgentAction]) -> bool {
@@ -8854,6 +9618,59 @@ fn actions_satisfy_single_scalar_count(route: &RouteResult, actions: &[AgentActi
     count_actions == 1
 }
 
+fn action_is_single_path_metadata_observation(action: &AgentAction) -> bool {
+    match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            let action_name = args
+                .get("action")
+                .and_then(Value::as_str)
+                .map(|action| action.trim().to_ascii_lowercase());
+            let paths = string_list_from_value(args.get("paths"))
+                .into_iter()
+                .chain(string_list_from_value(args.get("targets")))
+                .chain(string_list_from_value(args.get("path")))
+                .map(|path| path.trim().to_string())
+                .filter(|path| !path.is_empty())
+                .collect::<Vec<_>>();
+            paths.len() == 1
+                && ((skill == "fs_basic" && action_name.as_deref() == Some("stat_paths"))
+                    || (skill == "system_basic"
+                        && action_name.as_deref() == Some("path_batch_facts")))
+        }
+        AgentAction::Think { .. }
+        | AgentAction::CallCapability { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::SynthesizeAnswer { .. } => false,
+    }
+}
+
+fn actions_satisfy_single_path_metadata_facts(
+    route: &RouteResult,
+    actions: &[AgentAction],
+) -> bool {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison
+        || route.output_contract.delivery_required
+        || crate::task_contract::target_locators_for_route(route).len() > 1
+    {
+        return false;
+    }
+    let mut metadata_observations = 0usize;
+    for action in actions {
+        if action_is_single_path_metadata_observation(action) {
+            metadata_observations += 1;
+            continue;
+        }
+        if matches!(
+            action,
+            AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. }
+        ) {
+            continue;
+        }
+        return false;
+    }
+    metadata_observations == 1
+}
+
 fn executed_step_scalar_compare_observation_units(
     step: &crate::executor::StepExecutionResult,
 ) -> usize {
@@ -8935,6 +9752,9 @@ fn structured_scalar_compare_missing_required_extracts_for_round(
     if scalar_units == 1 && actions_satisfy_single_scalar_count(route, actions) {
         return false;
     }
+    if scalar_units == 1 && actions_satisfy_single_path_metadata_facts(route, actions) {
+        return false;
+    }
     scalar_units < 2
 }
 
@@ -8990,6 +9810,356 @@ fn fs_basic_stat_paths_action_for_explicit_targets(targets: &[String]) -> AgentA
             "fields": ["exists", "kind", "size", "modified"],
         }),
     }
+}
+
+fn planned_find_entries_directory_name(action: &AgentAction) -> Option<(String, String)> {
+    let (AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }) =
+        action
+    else {
+        return None;
+    };
+    if !skill.eq_ignore_ascii_case("fs_basic") {
+        return None;
+    }
+    let obj = args.as_object()?;
+    if obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|action| action.eq_ignore_ascii_case("find_entries"))?
+        .is_empty()
+    {
+        return None;
+    }
+    if obj
+        .get("ext")
+        .or_else(|| obj.get("extension"))
+        .is_some_and(has_non_empty_json_value)
+    {
+        return None;
+    }
+    let pattern = obj
+        .get("pattern")
+        .or_else(|| obj.get("name"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    if pattern.contains(['*', '?', '[', ']']) || pattern.contains('/') || pattern.contains('\\') {
+        return None;
+    }
+    let root = obj
+        .get("root")
+        .or_else(|| obj.get("path"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(".");
+    Some((root.to_string(), pattern.to_string()))
+}
+
+fn rewrite_dir_compare_paths_to_unique_workspace_directories(
+    state: &AppState,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let max_visits = directory_name_locator_scan_limit(state);
+    actions
+        .into_iter()
+        .map(|action| {
+            let action = rewrite_dir_compare_action_paths(
+                &state.skill_rt.workspace_root,
+                max_visits,
+                action,
+            );
+            rewrite_compare_paths_action_to_system_dir_compare(action)
+        })
+        .collect()
+}
+
+fn rewrite_dir_compare_action_paths(
+    workspace_root: &Path,
+    max_visits: usize,
+    action: AgentAction,
+) -> AgentAction {
+    match action {
+        AgentAction::CallSkill { skill, args } => {
+            if let Some(args) =
+                rewrite_dir_compare_args(workspace_root, max_visits, &skill, args.clone())
+            {
+                AgentAction::CallSkill { skill, args }
+            } else {
+                AgentAction::CallSkill { skill, args }
+            }
+        }
+        AgentAction::CallTool { tool, args } => {
+            if let Some(args) =
+                rewrite_dir_compare_args(workspace_root, max_visits, &tool, args.clone())
+            {
+                AgentAction::CallTool { tool, args }
+            } else {
+                AgentAction::CallTool { tool, args }
+            }
+        }
+        other => other,
+    }
+}
+
+fn rewrite_dir_compare_args(
+    workspace_root: &Path,
+    max_visits: usize,
+    skill: &str,
+    args: Value,
+) -> Option<Value> {
+    if !skill.eq_ignore_ascii_case("system_basic") && !skill.eq_ignore_ascii_case("fs_basic") {
+        return None;
+    }
+    let obj = args.as_object()?;
+    let action = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|action| {
+            action.eq_ignore_ascii_case("dir_compare")
+                || action.eq_ignore_ascii_case("compare_paths")
+        })?;
+    let (left_raw, right_raw) = if action.eq_ignore_ascii_case("compare_paths") {
+        let paths = obj.get("paths").and_then(Value::as_array)?;
+        if paths.len() != 2 {
+            return None;
+        }
+        (paths[0].as_str()?, paths[1].as_str()?)
+    } else {
+        (
+            obj.get("left_path")
+                .or_else(|| obj.get("left"))
+                .and_then(Value::as_str)?,
+            obj.get("right_path")
+                .or_else(|| obj.get("right"))
+                .and_then(Value::as_str)?,
+        )
+    };
+    let left = resolve_dir_compare_path_or_unique_name(workspace_root, left_raw, max_visits)?;
+    let right = resolve_dir_compare_path_or_unique_name(workspace_root, right_raw, max_visits)?;
+    if left.eq_ignore_ascii_case(left_raw.trim()) && right.eq_ignore_ascii_case(right_raw.trim()) {
+        return None;
+    }
+    let mut rewritten = obj.clone();
+    rewritten.insert(
+        "action".to_string(),
+        Value::String("dir_compare".to_string()),
+    );
+    rewritten.insert("left_path".to_string(), Value::String(left.clone()));
+    rewritten.insert("right_path".to_string(), Value::String(right.clone()));
+    rewritten.remove("paths");
+    info!(
+        "plan_rewrite_dir_compare_paths left={} right={}",
+        crate::truncate_for_log(&left),
+        crate::truncate_for_log(&right)
+    );
+    Some(Value::Object(rewritten))
+}
+
+fn resolve_dir_compare_path_or_unique_name(
+    workspace_root: &Path,
+    raw: &str,
+    max_visits: usize,
+) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let candidate = Path::new(raw);
+    let absolute_candidate = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        workspace_root.join(candidate)
+    };
+    if absolute_candidate.is_dir() {
+        return Some(
+            absolute_candidate
+                .canonicalize()
+                .unwrap_or(absolute_candidate)
+                .display()
+                .to_string(),
+        );
+    }
+    if raw.contains('/') || raw.contains('\\') {
+        return None;
+    }
+    resolve_directory_name_under(workspace_root, ".", raw, max_visits)
+        .map(|relative| workspace_root.join(relative))
+        .filter(|path| path.is_dir())
+        .map(|path| path.canonicalize().unwrap_or(path).display().to_string())
+}
+
+fn rewrite_compare_paths_action_to_system_dir_compare(action: AgentAction) -> AgentAction {
+    match action {
+        AgentAction::CallTool { tool, args }
+            if tool.eq_ignore_ascii_case("fs_basic")
+                && args
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .is_some_and(|action| action.eq_ignore_ascii_case("dir_compare")) =>
+        {
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args,
+            }
+        }
+        AgentAction::CallSkill { skill, args }
+            if skill.eq_ignore_ascii_case("fs_basic")
+                && args
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .is_some_and(|action| action.eq_ignore_ascii_case("dir_compare")) =>
+        {
+            AgentAction::CallSkill {
+                skill: "system_basic".to_string(),
+                args,
+            }
+        }
+        other => other,
+    }
+}
+
+fn resolve_directory_name_under(
+    workspace_root: &Path,
+    root_hint: &str,
+    name: &str,
+    max_visits: usize,
+) -> Option<String> {
+    let root_path = Path::new(root_hint);
+    let root = if root_path.is_absolute() {
+        root_path.to_path_buf()
+    } else {
+        workspace_root.join(root_path)
+    };
+    if !root.is_dir() {
+        return None;
+    }
+    let mut stack = vec![root];
+    let mut matches = Vec::new();
+    let mut visits = 0usize;
+    while let Some(dir) = stack.pop() {
+        visits = visits.saturating_add(1);
+        if visits > max_visits {
+            break;
+        }
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut children = entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let file_type = entry.file_type().ok()?;
+                file_type.is_dir().then(|| entry.path())
+            })
+            .collect::<Vec<_>>();
+        children.sort();
+        for child in children.into_iter().rev() {
+            if child
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|file_name| file_name.eq_ignore_ascii_case(name))
+            {
+                matches.push(child.clone());
+                if matches.len() > 1 {
+                    return None;
+                }
+            }
+            stack.push(child);
+        }
+    }
+    let resolved = matches.pop()?;
+    resolved
+        .strip_prefix(workspace_root)
+        .ok()
+        .and_then(|relative| relative.to_str())
+        .map(|relative| relative.trim_start_matches('/').to_string())
+        .filter(|relative| !relative.is_empty())
+        .or_else(|| resolved.to_str().map(ToString::to_string))
+}
+
+fn replace_directory_compare_search_plan(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.needs_clarify
+        || !route.is_execute_gate()
+        || route.output_contract.delivery_required
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison
+    {
+        return actions;
+    }
+    let executable = actions
+        .iter()
+        .filter(|action| {
+            matches!(
+                action,
+                AgentAction::CallSkill { .. } | AgentAction::CallTool { .. }
+            )
+        })
+        .collect::<Vec<_>>();
+    if executable.len() != 2
+        || actions.iter().any(|action| {
+            matches!(
+                action,
+                AgentAction::SynthesizeAnswer { .. } | AgentAction::Respond { .. }
+            )
+        })
+    {
+        return actions;
+    }
+    let Some((left_root, left_name)) = planned_find_entries_directory_name(executable[0]) else {
+        return actions;
+    };
+    let Some((right_root, right_name)) = planned_find_entries_directory_name(executable[1]) else {
+        return actions;
+    };
+    let max_visits = directory_name_locator_scan_limit(state);
+    let Some(left_path) = resolve_directory_name_under(
+        &state.skill_rt.workspace_root,
+        &left_root,
+        &left_name,
+        max_visits,
+    ) else {
+        return actions;
+    };
+    let Some(right_path) = resolve_directory_name_under(
+        &state.skill_rt.workspace_root,
+        &right_root,
+        &right_name,
+        max_visits,
+    ) else {
+        return actions;
+    };
+    if left_path.eq_ignore_ascii_case(&right_path) {
+        return actions;
+    }
+    info!(
+        "plan_replace_directory_compare_search_with_dir_compare left={} right={}",
+        crate::truncate_for_log(&left_path),
+        crate::truncate_for_log(&right_path)
+    );
+    vec![AgentAction::CallSkill {
+        skill: "system_basic".to_string(),
+        args: serde_json::json!({
+            "action": "dir_compare",
+            "left_path": left_path,
+            "right_path": right_path,
+            "recursive": true,
+            "include_hidden": false,
+            "max_diffs": 20,
+        }),
+    }]
+}
+
+fn directory_name_locator_scan_limit(state: &AppState) -> usize {
+    state.skill_rt.locator_scan_max_files.max(50_000)
 }
 
 fn plan_path_matches_explicit_file_target(path: &str, target: &str) -> bool {
@@ -9680,17 +10850,96 @@ fn value_contains_unresolved_template(value: &Value) -> bool {
 
 fn explicit_document_file_targets(user_text: &str) -> Vec<String> {
     let mut targets = Vec::new();
+    for candidate in explicit_document_path_targets(user_text) {
+        if document_target_already_covered(&targets, &candidate) {
+            continue;
+        }
+        targets.push(candidate);
+    }
     for candidate in crate::delivery_utils::extract_filename_candidates(user_text) {
         if !filename_candidate_has_document_extension(&candidate)
-            || targets
-                .iter()
-                .any(|existing: &String| existing.eq_ignore_ascii_case(&candidate))
+            || document_target_already_covered(&targets, &candidate)
         {
             continue;
         }
         targets.push(candidate);
     }
     targets
+}
+
+fn explicit_document_path_targets(user_text: &str) -> Vec<String> {
+    let mut targets = Vec::new();
+    for token in user_text.split_whitespace() {
+        let candidate = trim_structural_document_target_token(token);
+        if candidate.is_empty()
+            || !(candidate.contains('/') || candidate.contains('\\'))
+            || candidate.contains("://")
+            || crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(
+                &candidate,
+            )
+            || !filename_candidate_has_document_extension(&candidate)
+            || document_target_already_covered(&targets, &candidate)
+        {
+            continue;
+        }
+        targets.push(candidate);
+    }
+    targets
+}
+
+fn trim_structural_document_target_token(token: &str) -> String {
+    token
+        .trim()
+        .trim_matches(|ch: char| {
+            matches!(
+                ch,
+                '"' | '\''
+                    | '`'
+                    | ','
+                    | '，'
+                    | '。'
+                    | ':'
+                    | '：'
+                    | ';'
+                    | '；'
+                    | '('
+                    | ')'
+                    | '（'
+                    | '）'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '<'
+                    | '>'
+                    | '《'
+                    | '》'
+            )
+        })
+        .to_string()
+}
+
+fn document_target_already_covered(targets: &[String], candidate: &str) -> bool {
+    let candidate = candidate.trim();
+    if candidate.is_empty() {
+        return true;
+    }
+    let candidate_basename = Path::new(candidate)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(candidate);
+    targets.iter().any(|existing| {
+        if existing.eq_ignore_ascii_case(candidate) {
+            return true;
+        }
+        let existing_basename = Path::new(existing)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(existing);
+        existing_basename.eq_ignore_ascii_case(candidate_basename)
+            && (existing.contains('/') || existing.contains('\\'))
+            && !(candidate.contains('/') || candidate.contains('\\'))
+    })
 }
 
 fn structured_or_text_multi_file_targets(route: &RouteResult, user_text: &str) -> Vec<String> {
@@ -13464,6 +14713,33 @@ pub(super) async fn plan_round_actions(
             );
             return Ok(plan_result);
         }
+        if let Some(plan_result) = directory_compare_locator_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+        ) {
+            info!(
+                "plan_deterministic_directory_compare_locator task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
+        if let Some(plan_result) = directory_tree_auto_locator_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            user_text,
+            Some(&original_user_text_for_policy),
+            auto_locator_path,
+        ) {
+            info!(
+                "plan_deterministic_directory_tree_auto_locator task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
         if let Some(plan_result) = archive_list_auto_locator_deterministic_plan_result(
             goal,
             state,
@@ -13678,6 +14954,17 @@ pub(super) async fn plan_round_actions(
             if fallback.is_some() {
                 warn!(
                     "plan_parse_failed_using_auto_locator_observation_plan task_id={} round={}",
+                    task.task_id, loop_state.round_no
+                );
+            }
+            fallback
+        })
+        .or_else(|| {
+            let fallback =
+                file_facts_auto_locator_observation_plan(route_result, auto_locator_path);
+            if fallback.is_some() {
+                warn!(
+                    "plan_parse_failed_using_file_facts_auto_locator_plan task_id={} round={}",
                     task.task_id, loop_state.round_no
                 );
             }
@@ -13988,9 +15275,12 @@ mod tests {
         can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
         compact_skill_playbook_from_prompt,
         content_excerpt_summary_auto_locator_deterministic_plan_result,
-        enforce_output_contract_tool_args, ensure_content_excerpt_summary_has_bounded_content,
+        directory_compare_locator_deterministic_plan_result,
+        directory_tree_auto_locator_deterministic_plan_result, enforce_output_contract_tool_args,
+        ensure_content_excerpt_summary_has_bounded_content,
         existence_with_path_locator_deterministic_plan_result,
-        explicit_command_deterministic_plan_result, file_paths_locator_deterministic_plan_result,
+        explicit_command_deterministic_plan_result, file_facts_auto_locator_observation_plan,
+        file_paths_locator_deterministic_plan_result,
         fill_missing_read_range_path_from_route_locator,
         generic_directory_auto_locator_observation_plan,
         has_pre_observation_structured_output_shape,
@@ -14031,7 +15321,8 @@ mod tests {
         strip_terminal_discussion_for_observed_finalize,
         strip_terminal_discussion_for_scalar_path_observation,
         strip_terminal_placeholder_respond_for_exact_listing_contract,
-        strip_unresolved_template_reads_after_inventory_dir, LoopState, PlanningPromptClass,
+        strip_unresolved_template_reads_after_inventory_dir, structured_field_selectors, LoopState,
+        PlanningPromptClass,
     };
     use crate::agent_engine::CLAWD_LITERAL_COMMAND_ARG;
     use crate::{
@@ -15588,6 +16879,101 @@ mod tests {
     }
 
     #[test]
+    fn unrequested_path_like_config_field_read_rewrites_to_validate() {
+        let root = TempDirGuard::new("unrequested_path_like_config_field");
+        let config_dir = root.path.join("configs");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let config_path = config_dir.join("app_config.toml");
+        fs::write(&config_path, "[app]\nname = \"demo\"\n").expect("write config");
+        let config_text = config_path.display().to_string();
+
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = config_text.clone();
+        route.resolved_intent = format!("Validate TOML syntax of {config_text}.");
+        let actions = vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "read_field",
+                "path": config_text,
+                "field_path": "no_such_note.md",
+            }),
+        }];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "Validate only whether configs/app_config.toml can be parsed as TOML.",
+            Some(config_path.display().to_string().as_str()),
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "config_basic", "validate");
+        assert_eq!(
+            args.get("validation_profile").and_then(Value::as_str),
+            Some("syntax_only")
+        );
+        assert_eq!(args.get("format").and_then(Value::as_str), Some("toml"));
+        assert!(
+            normalized
+                .iter()
+                .all(|action| !planned_call_is(action, "config_basic", "read_field")),
+            "normalized actions: {normalized:?}"
+        );
+    }
+
+    #[test]
+    fn explicit_path_like_config_field_read_is_preserved_when_user_mentions_field() {
+        let root = TempDirGuard::new("explicit_path_like_config_field");
+        let config_dir = root.path.join("configs");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let config_path = config_dir.join("app_config.toml");
+        fs::write(&config_path, "[app]\nname = \"demo\"\n").expect("write config");
+        let config_text = config_path.display().to_string();
+
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = config_text.clone();
+        route.resolved_intent = format!("Read field no_such_note.md from {config_text}.");
+        let actions = vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "read_field",
+                "path": config_text,
+                "field_path": "no_such_note.md",
+            }),
+        }];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "Read field no_such_note.md from configs/app_config.toml.",
+            Some(config_path.display().to_string().as_str()),
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
+        assert_eq!(
+            args.get("field_path").and_then(Value::as_str),
+            Some("no_such_note.md")
+        );
+    }
+
+    #[test]
     fn rustclaw_config_section_header_field_reads_rewrite_to_guard_config() {
         let state = test_state();
         let mut route = route_result(
@@ -15811,7 +17197,7 @@ mod tests {
             actions,
         );
 
-        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized.len(), 1, "normalized actions: {normalized:?}");
         let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
         assert_eq!(
             args.get("path").and_then(Value::as_str),
@@ -15820,6 +17206,138 @@ mod tests {
         assert_eq!(
             args.get("field_path").and_then(Value::as_str),
             Some("package.version")
+        );
+    }
+
+    #[test]
+    fn structured_multi_field_contract_rewrites_broad_read_to_read_fields() {
+        let root = TempDirGuard::new("structured_multi_field_plan");
+        let config_dir = root.path.join("configs");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let config = config_dir.join("app_config.toml");
+        fs::write(
+            &config,
+            r#"[app]
+name = "RustClaw NL Fixture"
+
+[paths]
+docs_dir = "docs"
+logs_dir = "logs"
+db_path = "data/test_contract.sqlite"
+"#,
+        )
+        .expect("write config");
+        let config_path = config.display().to_string();
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = config_path.clone();
+        route.resolved_intent =
+            "Return paths.logs_dir and paths.db_path from app_config.toml.".to_string();
+        assert_eq!(
+            structured_field_selectors(
+                &route,
+                "scripts/nl_tests/fixtures/device_local/configs/app_config.toml 의 paths.logs_dir 와 paths.db_path 값만 알려줘.",
+                None,
+                Some(&config_path),
+            ),
+            vec!["paths.logs_dir".to_string(), "paths.db_path".to_string()]
+        );
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": config_path,
+                    "mode": "head",
+                    "n": 120,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+        ];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "scripts/nl_tests/fixtures/device_local/configs/app_config.toml 의 paths.logs_dir 와 paths.db_path 값만 알려줘.",
+            None,
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 1, "normalized actions: {normalized:?}");
+        let args = expect_planned_call(&normalized[0], "config_basic", "read_fields");
+        let field_paths = args
+            .get("field_paths")
+            .and_then(Value::as_array)
+            .expect("field_paths");
+        assert_eq!(
+            field_paths,
+            &vec![json!("paths.logs_dir"), json!("paths.db_path")]
+        );
+    }
+
+    #[test]
+    fn structured_identity_scalar_contract_rewrites_broad_read_to_read_field() {
+        let root = TempDirGuard::new("structured_identity_field_plan");
+        let registry = root.path.join("skills_registry.toml");
+        fs::write(
+            &registry,
+            r#"[[skills]]
+name = "fs_basic"
+group = "filesystem"
+planner_kind = "tool"
+
+[[skills]]
+name = "archive_basic"
+group = "archive"
+planner_kind = "tool"
+"#,
+        )
+        .expect("write registry");
+        let registry_path = registry.display().to_string();
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = registry_path.clone();
+        route.resolved_intent =
+            "Read skills_registry.toml and return the group value for archive_basic.".to_string();
+        let actions = vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": registry_path,
+                "mode": "head",
+                "n": 120,
+            }),
+        }];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "configs/skills_registry.toml で archive_basic の group だけ答えて。",
+            None,
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 1);
+        let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
+        assert_eq!(
+            args.get("field_path").and_then(Value::as_str),
+            Some("archive_basic.group")
         );
     }
 
@@ -15909,6 +17427,70 @@ mod tests {
                     Some("/tmp/rustclaw_archive_nl_case/sample.tgz")
                 );
                 assert!(args.get("path").is_none());
+            }
+            other => panic!("expected archive_basic action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn archive_basic_unknown_readonly_action_normalizes_to_list_for_archive_contract() {
+        let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
+        let mut route = base_route_result();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_hint = archive.to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "archive_basic".to_string(),
+            args: json!({
+                "action": "exists",
+                "archive": archive,
+                "entry": "nested/config.ini",
+            }),
+        }];
+
+        let normalized = normalize_archive_basic_schema_aliases(Some(&route), actions);
+
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "archive_basic");
+                assert_eq!(args.get("action").and_then(Value::as_str), Some("list"));
+                assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
+            }
+            other => panic!("expected archive_basic action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn archive_basic_unknown_mutating_shape_does_not_normalize_to_list() {
+        let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
+        let mut route = base_route_result();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_hint = archive.to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "archive_basic".to_string(),
+            args: json!({
+                "action": "make_archive",
+                "source": "scripts/nl_tests/fixtures/device_local/docs",
+                "archive": archive,
+            }),
+        }];
+
+        let normalized = normalize_archive_basic_schema_aliases(Some(&route), actions);
+
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "archive_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("make_archive")
+                );
             }
             other => panic!("expected archive_basic action, got {other:?}"),
         }
@@ -19015,6 +20597,136 @@ version = "0.1.7"
     }
 
     #[test]
+    fn file_facts_auto_locator_builds_stat_paths_synthesis_plan() {
+        let root = TempDirGuard::new("file_facts_auto_locator");
+        let report = root.path.join("README.md");
+        fs::write(&report, "hello").expect("write report");
+        let report_path = report.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = report_path.clone();
+
+        let actions =
+            file_facts_auto_locator_observation_plan(Some(&route), Some(&report_path)).unwrap();
+
+        assert_eq!(actions.len(), 3);
+        match &actions[0] {
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "fs_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("stat_paths")
+                );
+                assert_eq!(args.get("paths"), Some(&json!([report_path])));
+                assert_eq!(
+                    args.get("fields"),
+                    Some(&json!(["exists", "kind", "size", "modified"]))
+                );
+            }
+            other => panic!("expected fs_basic stat_paths action, got {other:?}"),
+        }
+        assert!(matches!(actions[1], AgentAction::SynthesizeAnswer { .. }));
+        assert!(matches!(
+            &actions[2],
+            AgentAction::Respond { content } if content == "{{last_output}}"
+        ));
+    }
+
+    #[test]
+    fn file_facts_auto_locator_does_not_override_content_semantic() {
+        let root = TempDirGuard::new("file_facts_content_semantic");
+        let report = root.path.join("README.md");
+        fs::write(&report, "hello").expect("write report");
+        let report_path = report.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = report_path.clone();
+
+        assert!(
+            file_facts_auto_locator_observation_plan(Some(&route), Some(&report_path)).is_none()
+        );
+    }
+
+    #[test]
+    fn file_facts_auto_locator_accepts_single_file_metadata_mislabeled_as_quantity_comparison() {
+        let root = TempDirGuard::new("file_facts_quantity_comparison");
+        let report = root.path.join("README.md");
+        fs::write(&report, "hello").expect("write report");
+        let report_path = report.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::OneSentence,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = report_path.clone();
+
+        let actions =
+            file_facts_auto_locator_observation_plan(Some(&route), Some(&report_path)).unwrap();
+
+        assert!(matches!(
+            &actions[0],
+            AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+                if skill == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("stat_paths")
+                    && args.get("paths") == Some(&json!([report_path]))
+        ));
+        assert!(!should_force_actionable_plan_repair(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(1),
+            &actions
+        ));
+    }
+
+    #[test]
+    fn single_path_metadata_facts_do_not_satisfy_multi_target_quantity_comparison() {
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::OneSentence,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "README.md | AGENTS.md".to_string();
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "stat_paths",
+                    "paths": ["README.md"],
+                    "fields": ["kind", "size_bytes"]
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        assert!(should_force_actionable_plan_repair(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(1),
+            &actions
+        ));
+    }
+
+    #[test]
     fn explicit_command_deterministic_plan_preserves_pipeline_literal() {
         let mut state = test_state_with_enabled_skills(&["run_cmd"]);
         state.policy.command_intent.execute_prefixes = vec!["执行命令".to_string()];
@@ -19309,6 +21021,52 @@ version = "0.1.7"
     }
 
     #[test]
+    fn existence_with_path_multi_file_targets_preserve_relative_path_segments() {
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.resolved_intent = "Check existence and type of two fixture paths".to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint = "/home/guagua/rustclaw".to_string();
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+        let user_text = "Inspecte ces chemins: scripts/nl_tests/fixtures/device_local/package.json et scripts/nl_tests/fixtures/device_local/nope.json; indique existence et type.";
+
+        let plan = existence_with_path_locator_deterministic_plan_result(
+            "check several explicit relative fixture paths",
+            Some(&route),
+            &loop_state,
+            Some("/home/guagua/rustclaw"),
+            user_text,
+        )
+        .expect("multi-path existence route should preserve explicit relative paths");
+
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        assert_eq!(plan.steps.len(), 1);
+        match &plan.steps[0].to_agent_action() {
+            Some(AgentAction::CallTool { tool, args }) => {
+                assert_eq!(tool, "fs_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("stat_paths")
+                );
+                assert_eq!(
+                    args.get("paths"),
+                    Some(&json!([
+                        "scripts/nl_tests/fixtures/device_local/package.json",
+                        "scripts/nl_tests/fixtures/device_local/nope.json"
+                    ]))
+                );
+            }
+            other => panic!("expected fs_basic stat_paths action, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn existence_with_path_current_workspace_single_file_target_uses_path_batch_facts() {
         let mut route = route_result(
             crate::AskMode::planner_execute_plain(),
@@ -19382,6 +21140,95 @@ version = "0.1.7"
                     Some("stat_paths")
                 );
                 assert_eq!(args.get("paths"), Some(&json!(["/tmp/Cargo.lock"])));
+            }
+            other => panic!("expected fs_basic stat_paths action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn archive_entry_existence_uses_archive_list_instead_of_archive_stat() {
+        let state = test_state_with_enabled_skills(&["archive_basic"]);
+        let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.resolved_intent =
+            format!("Check whether archive member nested/config.ini is present in {archive}.");
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = archive.to_string();
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let stat_plan = existence_with_path_locator_deterministic_plan_result(
+            "check archive member existence",
+            Some(&route),
+            &loop_state,
+            Some(archive),
+            "nested/config.ini in scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
+        );
+        assert!(
+            stat_plan.is_none(),
+            "archive member checks must not be answered by statting only the archive file"
+        );
+
+        let plan = archive_list_auto_locator_deterministic_plan_result(
+            "check archive member existence",
+            &state,
+            Some(&route),
+            &loop_state,
+            Some(archive),
+        )
+        .expect("archive member existence should inspect archive entries");
+
+        assert_eq!(plan.steps.len(), 3);
+        match &plan.steps[0].to_agent_action() {
+            Some(AgentAction::CallSkill { skill, args }) => {
+                assert_eq!(skill, "archive_basic");
+                assert_eq!(args.get("action").and_then(Value::as_str), Some("list"));
+                assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
+            }
+            other => panic!("expected archive_basic list action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn archive_file_existence_without_member_target_still_stats_archive() {
+        let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.resolved_intent = format!("Check whether {archive} exists.");
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = archive.to_string();
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let plan = existence_with_path_locator_deterministic_plan_result(
+            "check archive file existence",
+            Some(&route),
+            &loop_state,
+            Some(archive),
+            "Check whether scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip exists.",
+        )
+        .expect("plain archive file existence should use path facts");
+
+        assert_eq!(plan.steps.len(), 1);
+        match &plan.steps[0].to_agent_action() {
+            Some(AgentAction::CallTool { tool, args }) => {
+                assert_eq!(tool, "fs_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("stat_paths")
+                );
+                assert_eq!(args.get("paths"), Some(&json!([archive])));
             }
             other => panic!("expected fs_basic stat_paths action, got {other:?}"),
         }
@@ -19694,6 +21541,141 @@ version = "0.1.7"
         }
         assert!(matches!(actions[1], AgentAction::SynthesizeAnswer { .. }));
         assert!(matches!(actions[2], AgentAction::Respond { .. }));
+    }
+
+    #[test]
+    fn directory_tree_auto_locator_deterministic_plan_uses_system_basic_tree_summary() {
+        let root = TempDirGuard::new("directory_tree_auto_locator");
+        fs::create_dir_all(root.path.join("archive")).expect("create archive dir");
+        fs::write(root.path.join("archive").join("README.txt"), "archive").expect("write readme");
+        let root_path = root.path.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::OneSentence,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = root_path.clone();
+
+        let plan = directory_tree_auto_locator_deterministic_plan_result(
+            &test_state(),
+            "summarize directory structure",
+            Some(&route),
+            &LoopState::new(1),
+            "summarize directory structure",
+            Some("summarize directory structure"),
+            Some(&root_path),
+        )
+        .expect("directory tree plan should be available");
+
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        assert_eq!(plan.steps.len(), 1);
+        assert!(matches!(
+            plan.steps[0].to_agent_action(),
+            Some(AgentAction::CallSkill { skill, args })
+                if skill == "system_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("tree_summary")
+                    && args.get("path").and_then(Value::as_str) == Some(root_path.as_str())
+        ));
+    }
+
+    #[test]
+    fn directory_purpose_auto_locator_keeps_synthesis_after_tree_summary() {
+        let root = TempDirGuard::new("directory_purpose_auto_locator");
+        fs::create_dir_all(root.path.join("docs")).expect("create docs dir");
+        fs::write(root.path.join("docs").join("README.txt"), "docs").expect("write readme");
+        let root_path = root.path.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::OneSentence,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = root_path.clone();
+
+        let plan = directory_tree_auto_locator_deterministic_plan_result(
+            &test_state(),
+            "summarize directory purpose",
+            Some(&route),
+            &LoopState::new(1),
+            "summarize directory purpose",
+            Some("summarize directory purpose"),
+            Some(&root_path),
+        )
+        .expect("directory purpose plan should be available");
+
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        assert_eq!(plan.steps.len(), 3);
+        assert!(matches!(
+            plan.steps[0].to_agent_action(),
+            Some(AgentAction::CallSkill { skill, args })
+                if skill == "system_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("tree_summary")
+        ));
+        assert!(matches!(
+            plan.steps.get(1).and_then(|step| step.to_agent_action()),
+            Some(AgentAction::SynthesizeAnswer { .. })
+        ));
+        assert!(matches!(
+            plan.steps.get(2).and_then(|step| step.to_agent_action()),
+            Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+        ));
+    }
+
+    #[test]
+    fn directory_tree_auto_locator_does_not_override_exact_file_names_contract() {
+        let root = TempDirGuard::new("directory_tree_auto_locator_file_names");
+        fs::write(root.path.join("README.md"), "hello").expect("write readme");
+        let root_path = root.path.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::OneSentence,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = root_path.clone();
+
+        assert!(directory_tree_auto_locator_deterministic_plan_result(
+            &test_state(),
+            "list file names",
+            Some(&route),
+            &LoopState::new(1),
+            "list file names",
+            Some("list file names"),
+            Some(&root_path),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn directory_tree_auto_locator_does_not_override_multi_directory_contract() {
+        let root = TempDirGuard::new("directory_tree_auto_locator_multi_dir");
+        fs::create_dir_all(root.path.join("left")).expect("create left");
+        fs::create_dir_all(root.path.join("right")).expect("create right");
+        let left_path = root.path.join("left").display().to_string();
+        let right_path = root.path.join("right").display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::OneSentence,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = format!("{left_path} | {right_path}");
+
+        assert!(directory_tree_auto_locator_deterministic_plan_result(
+            &test_state(),
+            "compare two directories",
+            Some(&route),
+            &LoopState::new(1),
+            "compare two directories",
+            Some("compare two directories"),
+            Some(&left_path),
+        )
+        .is_none());
     }
 
     #[test]
@@ -20134,6 +22116,36 @@ version = "0.1.7"
             &loop_state,
             "extract scalar from resolved file content",
             Some("extract scalar from resolved file content"),
+            Some(&note_path),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn scalar_content_auto_locator_does_not_read_existence_contract() {
+        let root = TempDirGuard::new("scalar_content_auto_locator_existence");
+        let note = root.path.join("package.json");
+        fs::write(&note, r#"{"name":"fixture"}"#).expect("write package");
+        let note_path = note.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+        let state = test_state();
+
+        assert!(scalar_content_auto_locator_deterministic_plan_result(
+            &state,
+            "check whether the file exists",
+            Some(&route),
+            &loop_state,
+            "check whether the file exists",
+            Some("check whether the file exists"),
             Some(&note_path),
         )
         .is_none());
@@ -22650,6 +24662,236 @@ version.workspace = true
             ),
             "content_evidence_requires_content_observation"
         );
+    }
+
+    #[test]
+    fn quantity_compare_rewrites_directory_name_searches_to_dir_compare() {
+        let root = TempDirGuard::new("quantity_dir_compare");
+        fs::create_dir_all(root.path.join("tmp/bundle_src/nested")).expect("create left");
+        fs::create_dir_all(root.path.join("tmp/dynamic_guard_unpack_case/nested"))
+            .expect("create right");
+        fs::write(root.path.join("tmp/bundle_src/notes.txt"), "same\n").expect("write left");
+        fs::write(
+            root.path.join("tmp/dynamic_guard_unpack_case/notes.txt"),
+            "same\n",
+        )
+        .expect("write right");
+
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        state.skill_rt.locator_scan_max_files = 5000;
+
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::OneSentence,
+        );
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint = root.path.display().to_string();
+
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "find_entries",
+                    "root": ".",
+                    "pattern": "bundle_src"
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "find_entries",
+                    "root": ".",
+                    "pattern": "dynamic_guard_unpack_case"
+                }),
+            },
+        ];
+
+        let normalized = normalize_planned_actions_with_original_and_context(
+            &state,
+            Some(&route),
+            &LoopState::new(2),
+            "compare bundle_src and dynamic_guard_unpack_case recursively",
+            None,
+            None,
+            None,
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 1, "normalized: {normalized:?}");
+        let args = expect_planned_call(&normalized[0], "system_basic", "dir_compare");
+        assert_eq!(
+            args.get("left_path").and_then(Value::as_str),
+            Some("tmp/bundle_src")
+        );
+        assert_eq!(
+            args.get("right_path").and_then(Value::as_str),
+            Some("tmp/dynamic_guard_unpack_case")
+        );
+        assert_eq!(args.get("recursive").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    fn quantity_compare_directory_pair_uses_deterministic_dir_compare_plan() {
+        let root = TempDirGuard::new("quantity_dir_compare_locator");
+        let left = root.path.join("tmp/bundle_src");
+        let right = root.path.join("tmp/dynamic_guard_unpack_case");
+        fs::create_dir_all(&left).expect("left");
+        fs::create_dir_all(&right).expect("right");
+
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::OneSentence,
+        );
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = format!("{} | {}", left.display(), right.display());
+
+        let plan = directory_compare_locator_deterministic_plan_result(
+            &state,
+            "compare two directories recursively",
+            Some(&route),
+            &LoopState::new(1),
+        )
+        .expect("deterministic dir compare plan");
+
+        assert_eq!(plan.steps.len(), 1);
+        let action = plan.steps[0].to_agent_action().expect("action");
+        let args = expect_planned_call(&action, "system_basic", "dir_compare");
+        let expected_left = left.canonicalize().unwrap().display().to_string();
+        let expected_right = right.canonicalize().unwrap().display().to_string();
+        assert_eq!(
+            args.get("left_path").and_then(Value::as_str),
+            Some(expected_left.as_str())
+        );
+        assert_eq!(
+            args.get("right_path").and_then(Value::as_str),
+            Some(expected_right.as_str())
+        );
+    }
+
+    #[test]
+    fn directory_pair_locator_uses_dir_compare_even_without_quantity_semantic() {
+        let root = TempDirGuard::new("directory_pair_compare_locator_no_semantic");
+        let left = root.path.join("tmp/bundle_src");
+        let right = root.path.join("tmp/dynamic_guard_unpack_case");
+        fs::create_dir_all(&left).expect("left");
+        fs::create_dir_all(&right).expect("right");
+
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::OneSentence,
+        );
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = format!("{} | {}", left.display(), right.display());
+
+        let plan = directory_compare_locator_deterministic_plan_result(
+            &state,
+            "compare two directory targets",
+            Some(&route),
+            &LoopState::new(1),
+        )
+        .expect("deterministic dir compare plan");
+
+        assert_eq!(plan.steps.len(), 1);
+        let action = plan.steps[0].to_agent_action().expect("action");
+        let args = expect_planned_call(&action, "system_basic", "dir_compare");
+        assert_eq!(
+            args.get("left_path").and_then(Value::as_str),
+            Some(left.canonicalize().unwrap().to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            args.get("right_path").and_then(Value::as_str),
+            Some(right.canonicalize().unwrap().to_string_lossy().as_ref())
+        );
+    }
+
+    #[test]
+    fn dir_compare_plan_rewrites_unique_directory_basenames_to_paths() {
+        let root = TempDirGuard::new("dir_compare_unique_basename_rewrite");
+        let left = root.path.join("fixtures/tmp/bundle_src");
+        let right = root.path.join("fixtures/tmp/dynamic_guard_unpack_case");
+        fs::create_dir_all(&left).expect("left");
+        fs::create_dir_all(&right).expect("right");
+
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let actions = vec![AgentAction::CallTool {
+            tool: "system_basic".to_string(),
+            args: serde_json::json!({
+                "action": "dir_compare",
+                "left_path": "bundle_src",
+                "right_path": "dynamic_guard_unpack_case",
+                "recursive": true,
+                "max_diffs": 20,
+            }),
+        }];
+
+        let normalized =
+            super::normalize_planned_actions(&state, None, &LoopState::new(1), "", None, actions);
+
+        assert_eq!(normalized.len(), 1);
+        let args = expect_planned_call(&normalized[0], "system_basic", "dir_compare");
+        let expected_left = left.canonicalize().unwrap().display().to_string();
+        let expected_right = right.canonicalize().unwrap().display().to_string();
+        assert_eq!(
+            args.get("left_path").and_then(Value::as_str),
+            Some(expected_left.as_str())
+        );
+        assert_eq!(
+            args.get("right_path").and_then(Value::as_str),
+            Some(expected_right.as_str())
+        );
+    }
+
+    #[test]
+    fn compare_paths_plan_rewrites_to_system_dir_compare_with_resolved_dirs() {
+        let root = TempDirGuard::new("compare_paths_to_dir_compare_rewrite");
+        for idx in 0..2500 {
+            fs::create_dir_all(root.path.join(format!("aaa_filler_{idx:04}"))).expect("filler");
+        }
+        let left = root.path.join("fixtures/tmp/bundle_src");
+        let right = root.path.join("fixtures/tmp/dynamic_guard_unpack_case");
+        fs::create_dir_all(&left).expect("left");
+        fs::create_dir_all(&right).expect("right");
+
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        state.skill_rt.locator_scan_max_files = 10;
+        let actions = vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "compare_paths",
+                "paths": ["bundle_src", "dynamic_guard_unpack_case"],
+                "recursive": true
+            }),
+        }];
+
+        let normalized =
+            super::normalize_planned_actions(&state, None, &LoopState::new(1), "", None, actions);
+
+        assert_eq!(normalized.len(), 1);
+        let args = expect_planned_call(&normalized[0], "system_basic", "dir_compare");
+        let expected_left = left.canonicalize().unwrap().display().to_string();
+        let expected_right = right.canonicalize().unwrap().display().to_string();
+        assert_eq!(
+            args.get("left_path").and_then(Value::as_str),
+            Some(expected_left.as_str())
+        );
+        assert_eq!(
+            args.get("right_path").and_then(Value::as_str),
+            Some(expected_right.as_str())
+        );
+        assert!(args.get("paths").is_none());
     }
 
     #[test]

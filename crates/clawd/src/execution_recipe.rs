@@ -1025,7 +1025,8 @@ pub(crate) fn classify_skill_action_effect(
         "write_file" | "remove_file" | "make_dir" | "package_manager" | "install_module" => {
             ActionEffect::mutate()
         }
-        "health_check" | "http_basic" => ActionEffect::validate(),
+        "health_check" => ActionEffect::validate(),
+        "http_basic" => http_basic_action_effect(args),
         "system_basic" => {
             let action = args
                 .get("action")
@@ -1417,28 +1418,78 @@ fn assess_http_basic_validation(args: &Value, output: &str) -> ValidationObserva
         .and_then(|line| line.strip_prefix("status="))
         .and_then(|digits| digits.trim().parse::<u16>().ok());
     match status_code {
-        Some(200..=299) => {
+        Some(code) => {
+            if let Some(expected_status) = http_basic_expected_status(args) {
+                if code == expected_status {
+                    return ValidationObservation::Passed;
+                }
+                return ValidationObservation::Failed(format!(
+                    "http returned status={code}, expected status={expected_status}"
+                ));
+            }
+            if http_basic_expect_success(args) && !(200..=299).contains(&code) {
+                return ValidationObservation::Failed(format!("http returned status={code}"));
+            }
             let expected = args
                 .get("expect_contains")
                 .and_then(|value| value.as_str())
                 .map(str::trim)
                 .filter(|value| !value.is_empty());
             if let Some(expected) = expected {
+                if !(200..=299).contains(&code) && !http_basic_accept_non_success(args) {
+                    return ValidationObservation::Failed(format!("http returned status={code}"));
+                }
                 let body = output.lines().skip(1).collect::<Vec<_>>().join("\n");
                 if body.contains(expected) {
-                    ValidationObservation::Passed
+                    return ValidationObservation::Passed;
                 } else {
-                    ValidationObservation::Failed(format!(
+                    return ValidationObservation::Failed(format!(
                         "http response missing expected text={expected}"
-                    ))
+                    ));
                 }
-            } else {
-                ValidationObservation::Passed
             }
+            ValidationObservation::Passed
         }
-        Some(code) => ValidationObservation::Failed(format!("http returned status={code}")),
         None => ValidationObservation::Inconclusive,
     }
+}
+
+fn http_basic_action_effect(args: &Value) -> ActionEffect {
+    if http_basic_has_validation_expectation(args) || structured_validation_declared(args) {
+        ActionEffect::validate()
+    } else {
+        ActionEffect::observe()
+    }
+}
+
+fn http_basic_has_validation_expectation(args: &Value) -> bool {
+    args.get("expect_contains")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+        || http_basic_expected_status(args).is_some()
+        || args.get("expect_success").and_then(Value::as_bool) == Some(true)
+        || args.get("require_success_status").and_then(Value::as_bool) == Some(true)
+}
+
+fn http_basic_expected_status(args: &Value) -> Option<u16> {
+    args.get("expect_status")
+        .or_else(|| args.get("expected_status"))
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_str()?.trim().parse::<u64>().ok())
+        })
+        .and_then(|value| u16::try_from(value).ok())
+}
+
+fn http_basic_expect_success(args: &Value) -> bool {
+    args.get("expect_success").and_then(Value::as_bool) == Some(true)
+        || args.get("require_success_status").and_then(Value::as_bool) == Some(true)
+}
+
+fn http_basic_accept_non_success(args: &Value) -> bool {
+    args.get("accept_non_success").and_then(Value::as_bool) == Some(true)
+        || args.get("allow_non_success").and_then(Value::as_bool) == Some(true)
 }
 
 fn structured_validation_result(value: &Value) -> ValidationObservation {
@@ -2136,6 +2187,26 @@ planner_capabilities = [
     }
 
     #[test]
+    fn http_basic_without_expectation_is_observation_not_validation() {
+        let state = test_state();
+        assert_eq!(
+            classify_skill_action_effect(
+                &state,
+                "http_basic",
+                &json!({"action":"get","url":"http://127.0.0.1:8080/no_such_path"}),
+            ),
+            ActionEffect::observe()
+        );
+        let observation = assess_validation_output(
+            &state,
+            "http_basic",
+            &json!({"action":"get","url":"http://127.0.0.1:8080/no_such_path"}),
+            "status=404\nnot found\n",
+        );
+        assert_eq!(observation, ValidationObservation::Passed);
+    }
+
+    #[test]
     fn http_basic_missing_expected_content_is_validation_fail() {
         let state = test_state();
         let observation = assess_validation_output(
@@ -2147,6 +2218,62 @@ planner_capabilities = [
                 "expect_contains":"ops-repair-ok"
             }),
             "status=200\nops-repair-bad\n",
+        );
+        assert!(matches!(observation, ValidationObservation::Failed(_)));
+    }
+
+    #[test]
+    fn http_basic_expected_status_allows_non_success_response() {
+        let state = test_state();
+        assert_eq!(
+            classify_skill_action_effect(
+                &state,
+                "http_basic",
+                &json!({
+                    "action":"get",
+                    "url":"http://127.0.0.1:8080/no_such_path",
+                    "expect_status":404
+                }),
+            ),
+            ActionEffect::validate()
+        );
+        let observation = assess_validation_output(
+            &state,
+            "http_basic",
+            &json!({
+                "action":"get",
+                "url":"http://127.0.0.1:8080/no_such_path",
+                "expect_status":404
+            }),
+            "status=404\nnot found\n",
+        );
+        assert_eq!(observation, ValidationObservation::Passed);
+    }
+
+    #[test]
+    fn http_basic_expect_success_fails_non_success_response() {
+        let state = test_state();
+        assert_eq!(
+            classify_skill_action_effect(
+                &state,
+                "http_basic",
+                &json!({
+                    "action":"get",
+                    "url":"http://127.0.0.1:8080/no_such_path",
+                    "expect_success":true
+                }),
+            ),
+            ActionEffect::validate()
+        );
+        let observation = assess_validation_output(
+            &state,
+            "http_basic",
+            &json!({
+                "action":"get",
+                "url":"http://127.0.0.1:8080/no_such_path",
+                "expect_success":true
+            }),
+            "status=404\nnot found\n",
         );
         assert!(matches!(observation, ValidationObservation::Failed(_)));
     }

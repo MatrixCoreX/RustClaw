@@ -99,6 +99,9 @@ pub(crate) fn structurally_satisfies_answer_contract(
     ) {
         return true;
     }
+    if structured_keys_answer_is_grounded_in_observation(route_result, journal, candidate_answer) {
+        return true;
+    }
     scalar_answer_is_grounded_in_successful_observation(route_result, journal, candidate_answer)
 }
 
@@ -391,6 +394,93 @@ fn path_fact_candidates(fact: &serde_json::Value) -> Vec<String> {
     paths.sort();
     paths.dedup();
     paths
+}
+
+fn structured_keys_answer_is_grounded_in_observation(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    if !route.output_contract.requires_content_evidence && journal.step_results.is_empty() {
+        return false;
+    }
+    let candidate_tokens = key_answer_tokens(candidate_answer);
+    if candidate_tokens.is_empty() {
+        return false;
+    }
+    journal.step_results.iter().any(|step| {
+        step.status == crate::executor::StepExecutionStatus::Ok
+            && step.output_excerpt.as_deref().is_some_and(|output| {
+                structured_keys_from_output(output).is_some_and(|keys| {
+                    !keys.is_empty()
+                        && keys.iter().all(|key| {
+                            normalized_key_answer_units(key).into_iter().all(|unit| {
+                                candidate_tokens
+                                    .iter()
+                                    .any(|token| token.eq_ignore_ascii_case(&unit))
+                            })
+                        })
+                })
+            })
+    })
+}
+
+fn structured_keys_from_output(output: &str) -> Option<Vec<String>> {
+    let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
+    if value.get("action").and_then(|item| item.as_str()) != Some("structured_keys")
+        || !value
+            .get("exists")
+            .and_then(|item| item.as_bool())
+            .unwrap_or(false)
+    {
+        return None;
+    }
+    let values = value
+        .get("keys")
+        .or_else(|| value.get("identity_values"))
+        .and_then(|item| item.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })?;
+    Some(values)
+}
+
+fn normalized_key_answer_units(key: &str) -> Vec<String> {
+    let tokens = key_answer_tokens(key);
+    if tokens.len() == 1 {
+        tokens
+    } else {
+        let trimmed = key.trim();
+        if trimmed.is_empty() {
+            Vec::new()
+        } else {
+            vec![trimmed.to_ascii_lowercase()]
+        }
+    }
+}
+
+fn key_answer_tokens(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        if ch.is_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+            current.push(ch.to_ascii_lowercase());
+        } else if !current.is_empty() {
+            tokens.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens.sort();
+    tokens.dedup();
+    tokens
 }
 
 fn scalar_answer_is_grounded_in_successful_observation(
@@ -792,6 +882,124 @@ mod tests {
 
         assert!(structurally_satisfies_answer_contract(
             &route, &journal, "3"
+        ));
+    }
+
+    #[test]
+    fn structured_keys_answer_covering_all_keys_skips_llm_verifier() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-keys", "ask", "list keys");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "config_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    json!({
+                        "action": "structured_keys",
+                        "exists": true,
+                        "container_type": "object",
+                        "count": 3,
+                        "keys": ["app", "features", "paths"]
+                    })
+                    .to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "app, features, paths"
+        ));
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "app\nfeatures\npaths"
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "app, features"
+        ));
+    }
+
+    #[test]
+    fn structured_keys_answer_accepts_array_identity_values() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::StructuredKeys;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-array-keys", "ask", "list names");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "config_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    json!({
+                        "action": "structured_keys",
+                        "exists": true,
+                        "container_type": "array",
+                        "count": 2,
+                        "identity_values": ["fs_basic", "config-basic"]
+                    })
+                    .to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "`fs_basic`, `config-basic`"
+        ));
+    }
+
+    #[test]
+    fn structured_keys_answer_uses_observed_action_when_semantic_label_missing() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-keys-missing-label", "ask", "keys");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "config_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    json!({
+                        "action": "structured_keys",
+                        "exists": true,
+                        "container_type": "object",
+                        "count": 3,
+                        "keys": ["app", "features", "paths"]
+                    })
+                    .to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "app, features, paths"
         ));
     }
 

@@ -90,6 +90,8 @@ fn canonicalize_fs_search_call(args: Value) -> Option<VirtualToolCanonicalCall> 
                     "name",
                     "query",
                     "keyword",
+                    "entry_name",
+                    "entry_names",
                     "target",
                     "basename_pattern",
                     "name_pattern",
@@ -203,6 +205,10 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             Ok(rewrite_to("system_basic", obj))
         }
         "find_entries" => {
+            let explicit_name_pattern = has_any_non_empty_arg(
+                &obj,
+                &["name_pattern", "basename_pattern", "filename_pattern"],
+            );
             move_value_alias_if_missing(&mut obj, "root", &["path", "dir", "directory"]);
             move_existing_directory_alias_to_root(
                 &mut obj,
@@ -222,6 +228,8 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
                     "name",
                     "keyword",
                     "query",
+                    "entry_name",
+                    "entry_names",
                     "filename",
                     "name_pattern",
                     "basename_pattern",
@@ -246,7 +254,9 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
                     "file_extensions",
                 ],
             );
-            promote_globish_pattern_to_ext(&mut obj);
+            if !explicit_name_pattern {
+                promote_globish_pattern_to_ext(&mut obj);
+            }
             demote_existing_directory_pattern_to_root(&mut obj);
             let has_pattern = has_non_empty_arg(&obj, "pattern");
             let has_ext = has_non_empty_arg(&obj, "ext");
@@ -972,6 +982,40 @@ mod tests {
         assert_eq!(
             rewrite.runtime_args.get("root").and_then(|v| v.as_str()),
             Some(".")
+        );
+    }
+
+    #[test]
+    fn fs_basic_find_entries_entry_name_alias_rewrites_to_name_search() {
+        let args = json!({
+            "action": "find_entries",
+            "target_path": "scripts/nl_tests/fixtures/device_local/tmp",
+            "entry_name": "config.ini",
+            "target_kind": "file"
+        });
+        let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+            .unwrap()
+            .expect("rewrite");
+
+        assert_eq!(rewrite.runtime_tool, "fs_search");
+        assert_eq!(
+            rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+            Some("find_name")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("root").and_then(|v| v.as_str()),
+            Some("scripts/nl_tests/fixtures/device_local/tmp")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("pattern").and_then(|v| v.as_str()),
+            Some("config.ini")
+        );
+        assert_eq!(
+            rewrite
+                .runtime_args
+                .get("target_kind")
+                .and_then(|v| v.as_str()),
+            Some("file")
         );
     }
 

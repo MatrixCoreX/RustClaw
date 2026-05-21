@@ -289,8 +289,10 @@ fn should_collapse_to_single_output(
 }
 
 fn should_preserve_execution_summary_messages(output_contract: &IntentOutputContract) -> bool {
-    let _ = output_contract;
-    true
+    !matches!(
+        output_contract.semantic_kind,
+        crate::OutputSemanticKind::GitRepositoryState
+    )
 }
 
 pub(crate) fn sync_output_payload(
