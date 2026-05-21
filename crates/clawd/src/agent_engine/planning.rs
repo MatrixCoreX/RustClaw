@@ -7519,6 +7519,9 @@ fn enforce_output_contract_tool_args(
                 | AgentAction::CallTool { tool: skill, args }
                     if skill.eq_ignore_ascii_case("fs_basic") =>
                 {
+                    if rewrite_inventory_ext_filter_action_to_fs_basic(route, skill, args) {
+                        return action;
+                    }
                     let Some(obj) = args.as_object_mut() else {
                         return action;
                     };
@@ -7684,7 +7687,7 @@ fn rewrite_inventory_ext_filter_action_to_fs_basic(
         .and_then(Value::as_str)
         .map(str::trim)
         .unwrap_or_default();
-    if action_name != "inventory_dir" {
+    if !matches!(action_name, "inventory_dir" | "list_dir") {
         return false;
     }
     let Some(ext) = first_ext_filter_value(obj) else {
@@ -7707,7 +7710,8 @@ fn rewrite_inventory_ext_filter_action_to_fs_basic(
         "root": root,
         "ext": ext,
         "target_kind": "file",
-        "max_results": max_results
+        "max_results": max_results,
+        "recursive": true
     });
     info!("plan_contract_rewrite_inventory_ext_filter_to_fs_basic");
     true
@@ -11052,9 +11056,7 @@ fn sqlite_distinct_column_values(
     );
     let mut stmt = conn.prepare(&sql).ok()?;
     let rows = stmt
-        .query_map([], |row| {
-            Ok(sqlite_value_ref_to_string(row.get_ref(0)?))
-        })
+        .query_map([], |row| Ok(sqlite_value_ref_to_string(row.get_ref(0)?)))
         .ok()?
         .filter_map(Result::ok)
         .flatten()
@@ -14012,8 +14014,8 @@ mod tests {
         rewrite_service_status_plan_to_service_control,
         rewrite_sqlite_count_query_to_requested_schema_column,
         rewrite_sqlite_schema_version_plan_to_db_basic,
-        rewrite_sqlite_table_probe_to_requested_schema_value,
         rewrite_sqlite_table_listing_plan_to_db_basic,
+        rewrite_sqlite_table_probe_to_requested_schema_value,
         rewrite_terminal_placeholder_respond_to_synthesize_answer,
         rewrite_terminal_synthesis_placeholder_respond,
         rewrite_unresolved_template_arg_multi_file_read_plan, round1_prompt_spec_for_class,
@@ -14381,7 +14383,10 @@ mod tests {
                     args.get("action").and_then(Value::as_str),
                     Some("list_tables")
                 );
-                assert_eq!(args.get("db_path").and_then(Value::as_str), Some("/tmp/app.sqlite"));
+                assert_eq!(
+                    args.get("db_path").and_then(Value::as_str),
+                    Some("/tmp/app.sqlite")
+                );
             }
             other => panic!("expected db_basic action, got {other:?}"),
         }
@@ -23661,9 +23666,52 @@ version = "0.1.7"
                     Some("file")
                 );
                 assert_eq!(args.get("max_results").and_then(Value::as_u64), Some(5));
+                assert_eq!(args.get("recursive").and_then(Value::as_bool), Some(true));
             }
             other => panic!("expected fs_basic find_entries action, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn file_paths_contract_rewrites_fs_basic_list_dir_extension_filter_to_recursive_find() {
+        let actions = vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "list_dir",
+                "path": "scripts/nl_tests/fixtures/device_local",
+                "ext_filter": ".log",
+                "names_only": true
+            }),
+        }];
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local".to_string();
+
+        let normalized = super::normalize_planned_actions(
+            &test_state(),
+            Some(&route),
+            &LoopState::new(2),
+            "list matching file paths under a directory",
+            None,
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "fs_basic", "find_entries");
+        assert_eq!(
+            args.get("root").and_then(Value::as_str),
+            Some("scripts/nl_tests/fixtures/device_local")
+        );
+        assert_eq!(args.get("ext").and_then(Value::as_str), Some("log"));
+        assert_eq!(
+            args.get("target_kind").and_then(Value::as_str),
+            Some("file")
+        );
+        assert_eq!(args.get("recursive").and_then(Value::as_bool), Some(true));
     }
 
     #[test]

@@ -486,7 +486,6 @@ fn trim_locator_token(token: &str) -> String {
                 '"' | '\''
                     | '`'
                     | ','
-                    | '.'
                     | '，'
                     | '。'
                     | ':'
@@ -507,6 +506,7 @@ fn trim_locator_token(token: &str) -> String {
                     | '《'
             )
         })
+        .trim_end_matches('.')
         .to_string()
 }
 
@@ -1176,6 +1176,9 @@ mod tests {
         assert!(super::has_concrete_locator_hint(
             "read scripts/nl_tests/fixtures/device_local/package.json"
         ));
+        assert!(super::has_concrete_locator_hint(
+            "preview ./document before classifying images"
+        ));
         assert!(super::has_concrete_locator_hint("send Cargo.toml"));
         assert!(super::has_concrete_locator_hint(
             "open https://example.com/file.txt"
@@ -1265,6 +1268,27 @@ mod tests {
             Some(
                 file.canonicalize()
                     .expect("canonical file")
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+    }
+
+    #[test]
+    fn resolve_dot_relative_locator_path_from_text() {
+        let root = TempDirGuard::new("dot_relative_explicit_path");
+        let dir = root.path.join("document");
+        fs::create_dir_all(&dir).expect("create document dir");
+        let out = super::resolve_explicit_locator_path_from_text(
+            &root.path,
+            &root.path,
+            "Preview ./document before classifying images.",
+        );
+        assert_eq!(
+            out.as_deref(),
+            Some(
+                dir.canonicalize()
+                    .expect("canonical dir")
                     .to_string_lossy()
                     .as_ref()
             )

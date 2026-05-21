@@ -1890,6 +1890,43 @@ fn current_request_resolves_workspace_child_locator_surface(
     Path::new(&resolved).is_dir().then_some(resolved)
 }
 
+fn current_request_resolves_structural_workspace_child_locator_surface(
+    state: &AppState,
+    current_user_request: &str,
+) -> Option<String> {
+    current_request_has_workspace_child_locator_surface(current_user_request)
+        .then(|| {
+            current_request_resolves_workspace_child_locator_surface(state, current_user_request)
+        })
+        .flatten()
+}
+
+fn direct_answer_gate_chat_promotion_lacks_structured_target(
+    state: &AppState,
+    current_user_request: &str,
+    route: &crate::RouteResult,
+    contract: &crate::IntentOutputContract,
+    has_structural_session_alias_target: bool,
+) -> bool {
+    if !route.is_chat_gate()
+        || route.needs_clarify
+        || has_structural_session_alias_target
+        || current_request_has_structural_execution_target(current_user_request)
+        || current_request_resolves_structural_workspace_child_locator_surface(
+            state,
+            current_user_request,
+        )
+        .is_some()
+        || matches!(
+            contract.locator_kind,
+            crate::OutputLocatorKind::CurrentWorkspace
+        )
+    {
+        return false;
+    }
+    true
+}
+
 fn direct_answer_gate_promotes_workspace_child_context(
     state: &AppState,
     current_user_request: &str,
@@ -1910,9 +1947,10 @@ fn direct_answer_gate_promotes_workspace_child_context(
     {
         return false;
     }
-    let Some(path) =
-        current_request_resolves_workspace_child_locator_surface(state, current_user_request)
-    else {
+    let Some(path) = current_request_resolves_structural_workspace_child_locator_surface(
+        state,
+        current_user_request,
+    ) else {
         return false;
     };
     contract.requires_content_evidence = true;
@@ -2060,8 +2098,11 @@ fn apply_direct_answer_gate_outcome(
     if route_has_executionless_direct_downgrade(route)
         && decision == DirectAnswerGateDecision::PlannerExecute
         && !current_request_has_structural_execution_target(current_user_request)
-        && current_request_resolves_workspace_child_locator_surface(state, current_user_request)
-            .is_none()
+        && current_request_resolves_structural_workspace_child_locator_surface(
+            state,
+            current_user_request,
+        )
+        .is_none()
         && !has_structural_session_alias_target
     {
         append_route_reason(route, "direct_answer_gate_executionless_promotion_blocked");
@@ -2161,6 +2202,19 @@ fn apply_direct_answer_gate_outcome(
                 return DirectAnswerPreflight::DirectAnswer;
             }
             if output_contract_requires_planner_execution(&contract) {
+                if direct_answer_gate_chat_promotion_lacks_structured_target(
+                    state,
+                    current_user_request,
+                    route,
+                    &contract,
+                    has_structural_session_alias_target,
+                ) {
+                    append_route_reason(
+                        route,
+                        "direct_answer_gate_chat_promotion_without_structured_target_ignored",
+                    );
+                    return DirectAnswerPreflight::DirectAnswer;
+                }
                 if direct_answer_gate_promotion_depends_only_on_background_context(
                     state,
                     current_user_request,
@@ -2252,6 +2306,19 @@ fn apply_direct_answer_gate_outcome(
                 &mut contract,
                 structured_scalar_extraction,
             );
+            if direct_answer_gate_chat_promotion_lacks_structured_target(
+                state,
+                current_user_request,
+                route,
+                &contract,
+                has_structural_session_alias_target,
+            ) {
+                append_route_reason(
+                    route,
+                    "direct_answer_gate_chat_promotion_without_structured_target_ignored",
+                );
+                return DirectAnswerPreflight::DirectAnswer;
+            }
             if normalizer_candidate_matches_bound_context
                 && bound_direct_answer_candidate_satisfies_output_contract(&contract)
             {
@@ -4146,6 +4213,32 @@ mod tests {
     }
 
     #[test]
+    fn direct_answer_gate_ignores_chat_promotion_without_structured_target() {
+        let route = chat_route_for_gate();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let gate = gate_out("planner_execute", gate_contract(true, "path", "none"));
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        let outcome = apply_direct_answer_gate_outcome(
+            &state,
+            &mut ctx,
+            "Explain the category label without reading files.",
+            gate,
+        );
+
+        assert!(matches!(outcome, DirectAnswerPreflight::DirectAnswer));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_chat_gate());
+        assert!(!route.output_contract.requires_content_evidence);
+        assert!(route
+            .route_reason
+            .contains("direct_answer_gate_chat_promotion_without_structured_target_ignored"));
+    }
+
+    #[test]
     fn direct_answer_gate_keeps_structural_memory_update_direct() {
         let mut route = chat_route_for_gate();
         route.should_refresh_long_term_memory = true;
@@ -4323,7 +4416,7 @@ mod tests {
 
         let mut route = chat_route_for_gate();
         route.resolved_intent = concat!(
-            "Explain how to classify images within a document without moving files\n",
+            "Explain how to classify images within ./document without moving files\n",
             "answer_candidate: use metadata labels"
         )
         .to_string();
@@ -4336,7 +4429,7 @@ mod tests {
         let outcome = apply_direct_answer_gate_outcome(
             &state,
             &mut ctx,
-            "Preview how images under document could be categorized. Do not move files.",
+            "Preview how images under ./document could be categorized. Do not move files.",
             gate,
         );
 
@@ -4375,6 +4468,41 @@ mod tests {
             &state,
             &mut ctx,
             "用两句话解释 RustClaw 的自然语言契约边界，不要读取文件。",
+            gate,
+        );
+
+        assert!(matches!(outcome, DirectAnswerPreflight::DirectAnswer));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_chat_gate());
+        assert!(!route
+            .route_reason
+            .contains("direct_answer_gate_workspace_child_context_execute"));
+    }
+
+    #[test]
+    fn direct_answer_gate_does_not_promote_category_label_that_matches_workspace_dir() {
+        let root = TempDirGuard::new("gate_category_label_child_context");
+        std::fs::create_dir_all(root.path.join("logs")).expect("logs dir");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = root.path.clone();
+        state.skill_rt.default_locator_search_dir = root.path.clone();
+
+        let mut route = chat_route_for_gate();
+        route.resolved_intent = concat!(
+            "Clarify that a category label alone is not an executable file target.\n",
+            "answer_candidate: Please provide a concrete target if you want file inspection."
+        )
+        .to_string();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
+
+        let outcome = apply_direct_answer_gate_outcome(
+            &state,
+            &mut ctx,
+            "logs is only a category label here. Do not read files.",
             gate,
         );
 

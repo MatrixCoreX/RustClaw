@@ -204,6 +204,17 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
         }
         "find_entries" => {
             move_value_alias_if_missing(&mut obj, "root", &["path", "dir", "directory"]);
+            move_existing_directory_alias_to_root(
+                &mut obj,
+                &[
+                    "target",
+                    "target_path",
+                    "base",
+                    "base_path",
+                    "search_path",
+                    "search_dir",
+                ],
+            );
             move_value_alias_if_missing(
                 &mut obj,
                 "pattern",
@@ -216,6 +227,10 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
                     "basename_pattern",
                     "filename_pattern",
                     "glob",
+                    "filter",
+                    "file_filter",
+                    "include",
+                    "glob_pattern",
                     "include_pattern",
                     "match_pattern",
                 ],
@@ -231,6 +246,7 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
                     "file_extensions",
                 ],
             );
+            promote_globish_pattern_to_ext(&mut obj);
             demote_existing_directory_pattern_to_root(&mut obj);
             let has_pattern = has_non_empty_arg(&obj, "pattern");
             let has_ext = has_non_empty_arg(&obj, "ext");
@@ -482,6 +498,39 @@ fn move_value_alias_if_missing(
     true
 }
 
+fn move_existing_directory_alias_to_root(
+    obj: &mut serde_json::Map<String, Value>,
+    aliases: &[&str],
+) -> bool {
+    if obj.get("root").is_some() {
+        return false;
+    }
+    let Some((alias, value)) = aliases.iter().find_map(|alias| {
+        obj.get(*alias)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && looks_like_directory_root_reference(value))
+            .and_then(|_| obj.get(*alias).cloned().map(|value| (*alias, value)))
+    }) else {
+        return false;
+    };
+    obj.insert("root".to_string(), value);
+    obj.remove(alias);
+    true
+}
+
+fn looks_like_directory_root_reference(value: &str) -> bool {
+    let path = Path::new(value);
+    if path.is_dir() {
+        return true;
+    }
+    let has_path_separator = value.contains('/') || value.contains('\\');
+    if !has_path_separator || value.contains(['*', '?']) {
+        return false;
+    }
+    path.extension().is_none()
+}
+
 fn normalize_action_alias(
     obj: &mut serde_json::Map<String, Value>,
     aliases: &[(&str, &str)],
@@ -533,6 +582,44 @@ fn has_non_empty_arg(obj: &serde_json::Map<String, Value>, key: &str) -> bool {
 
 fn has_any_non_empty_arg(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> bool {
     keys.iter().any(|key| has_non_empty_arg(obj, key))
+}
+
+fn promote_globish_pattern_to_ext(obj: &mut serde_json::Map<String, Value>) -> bool {
+    if has_non_empty_arg(obj, "ext") {
+        return false;
+    }
+    let Some(ext) = obj
+        .get("pattern")
+        .and_then(Value::as_str)
+        .and_then(extension_from_globish_filter)
+    else {
+        return false;
+    };
+    obj.insert("ext".to_string(), Value::String(ext));
+    obj.remove("pattern");
+    true
+}
+
+fn extension_from_globish_filter(text: &str) -> Option<String> {
+    let cleaned = text
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .to_ascii_lowercase();
+    let (_prefix, ext) = cleaned.rsplit_once('.')?;
+    if ext.is_empty()
+        || ext.contains(['*', '?', '/', '\\'])
+        || !ext
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+    {
+        return None;
+    }
+    cleaned
+        .contains('*')
+        .then(|| ext.to_string())
+        .or_else(|| cleaned.strip_prefix('.').map(ToString::to_string))
 }
 
 fn demote_existing_directory_pattern_to_root(obj: &mut serde_json::Map<String, Value>) -> bool {
@@ -823,6 +910,41 @@ mod tests {
             rewrite.runtime_args.get("ext").and_then(|v| v.as_str()),
             Some("sh")
         );
+    }
+
+    #[test]
+    fn fs_basic_find_entries_directory_target_and_filter_rewrites_to_find_ext() {
+        let args = json!({
+            "action": "find_entries",
+            "target": "scripts/nl_tests/fixtures/device_local",
+            "target_kind": "file",
+            "filter": "*.toml"
+        });
+        let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+            .unwrap()
+            .expect("rewrite");
+
+        assert_eq!(rewrite.runtime_tool, "fs_search");
+        assert_eq!(
+            rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+            Some("find_ext")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("root").and_then(|v| v.as_str()),
+            Some("scripts/nl_tests/fixtures/device_local")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("ext").and_then(|v| v.as_str()),
+            Some("toml")
+        );
+        assert_eq!(
+            rewrite
+                .runtime_args
+                .get("target_kind")
+                .and_then(|v| v.as_str()),
+            Some("file")
+        );
+        assert!(rewrite.runtime_args.get("pattern").is_none());
     }
 
     #[test]
