@@ -1600,7 +1600,29 @@ fn replace_delivery_with_observed_markdown_heading_scalar(
 
 fn markdown_heading_from_read_output(output: &str) -> Option<String> {
     let text = markdown_text_from_read_output(output)?;
-    text.lines().find_map(markdown_heading_from_line)
+    standalone_markdown_heading_from_text(&text)
+}
+
+fn standalone_markdown_heading_from_text(text: &str) -> Option<String> {
+    let mut heading: Option<String> = None;
+    for line in text.lines() {
+        let stripped = strip_markdown_read_line_prefix(line).trim();
+        if stripped.is_empty() {
+            continue;
+        }
+        if let Some(candidate) = markdown_heading_from_line(stripped) {
+            if heading.is_some() {
+                return None;
+            }
+            heading = Some(candidate);
+            continue;
+        }
+        if markdown_line_is_non_answer_separator_heading(stripped) {
+            continue;
+        }
+        return None;
+    }
+    heading
 }
 
 fn markdown_read_body_matches_delivery(output: &str, delivery: &str) -> bool {
@@ -1650,7 +1672,22 @@ fn markdown_heading_from_line(line: &str) -> Option<String> {
         return None;
     }
     let rest = trimmed.get(hashes..)?.trim();
-    (!rest.is_empty()).then(|| rest.to_string())
+    if rest.is_empty() || message_is_non_answer_separator(rest) {
+        return None;
+    }
+    Some(rest.to_string())
+}
+
+fn markdown_line_is_non_answer_separator_heading(line: &str) -> bool {
+    let trimmed = strip_markdown_read_line_prefix(line).trim();
+    let hashes = trimmed.chars().take_while(|ch| *ch == '#').count();
+    if !(1..=6).contains(&hashes) {
+        return false;
+    }
+    trimmed
+        .get(hashes..)
+        .map(str::trim)
+        .is_some_and(message_is_non_answer_separator)
 }
 
 fn latest_scalar_observed_answer_from_loop_contract(
@@ -3082,6 +3119,9 @@ fn should_attach_execution_summary(
     if route.output_contract.exact_sentence_count.is_some() {
         return false;
     }
+    if delivery_matches_grounded_content_answer(loop_state, route, &loop_state.delivery_messages) {
+        return false;
+    }
     if matches!(
         route.output_contract.semantic_kind,
         crate::OutputSemanticKind::ScalarCount
@@ -3613,6 +3653,9 @@ fn delivery_contract_suppresses_execution_summary(
     if delivery_matches_synthesized_content_answer(loop_state, route, delivery_messages) {
         return true;
     }
+    if delivery_matches_grounded_content_answer(loop_state, route, delivery_messages) {
+        return true;
+    }
     if route.output_contract.response_shape != crate::OutputResponseShape::Scalar {
         return false;
     }
@@ -3677,6 +3720,54 @@ fn delivery_matches_synthesized_content_answer(
         delivery_text,
         loop_state,
     ) {
+        return false;
+    }
+    loop_state.executed_step_results.iter().any(|step| {
+        step.is_ok()
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+            && step
+                .output
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|output| !output.is_empty())
+    })
+}
+
+fn delivery_matches_grounded_content_answer(
+    loop_state: &LoopState,
+    route: &crate::RouteResult,
+    delivery_messages: &[String],
+) -> bool {
+    if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
+        return false;
+    }
+    if matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::FileToken
+    ) || matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::RawCommandOutput
+    ) {
+        return false;
+    }
+    let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
+        return false;
+    };
+    let delivery_text = delivery_text.trim();
+    if delivery_text.is_empty()
+        || crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+            delivery_text,
+            loop_state,
+        )
+        || crate::finalize::looks_like_planner_artifact(delivery_text)
+        || crate::finalize::looks_like_internal_trace_artifact(delivery_text)
+        || looks_like_structured_machine_output(delivery_text)
+        || looks_like_raw_command_snapshot(delivery_text)
+        || message_is_non_answer_separator(delivery_text)
+    {
         return false;
     }
     loop_state.executed_step_results.iter().any(|step| {
@@ -7213,6 +7304,7 @@ mod tests {
         build_execution_summary_message, build_execution_summary_messages,
         compare_paths_size_ratio_answer, content_evidence_step_failure_answer,
         content_evidence_terminal_respond_is_contractual_answer,
+        delivery_contract_suppresses_execution_summary,
         deterministic_missing_observed_target_answer,
         deterministic_observed_execution_status_answer,
         deterministic_structured_file_validation_from_read_range,
@@ -7227,7 +7319,8 @@ mod tests {
         final_answer_text_from_delivery, finalize_loop_reply, finalizer_requires_clarify,
         has_missing_file_search_evidence, latest_file_delivery_observation_is_missing,
         looks_like_raw_command_snapshot, looks_like_structured_machine_output,
-        missing_requested_success_marker, normalize_file_token_delivery_from_auto_locator,
+        markdown_heading_from_read_output, missing_requested_success_marker,
+        normalize_file_token_delivery_from_auto_locator,
         normalize_file_token_delivery_from_observed_paths,
         observed_execution_without_publishable_delivery_outcome,
         observed_execution_without_publishable_delivery_reply,
@@ -7621,7 +7714,7 @@ mod tests {
         loop_state.executed_step_results.push(ok_step_result(
             "step_1",
             "fs_basic",
-            r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
+            r#"{"action":"read_range","excerpt":"1|# Release Checklist","path":"release_checklist.md"}"#,
         ));
         let route = scalar_route_result();
         let ctx = crate::agent_engine::AgentRunContext {
@@ -7657,6 +7750,75 @@ mod tests {
     }
 
     #[test]
+    fn markdown_heading_direct_scalar_defers_when_read_evidence_has_body() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#,
+        ));
+        assert!(markdown_heading_from_read_output(
+            r#"{"action":"read_range","excerpt":"1|# Release Checklist\n2|\n3|1. Verify configuration loads correctly.","path":"release_checklist.md"}"#
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn direct_scalar_observed_answer_skips_separator_markdown_heading() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","excerpt":"1|# =========================\n2|# Image Edit","path":"configs/image.toml"}"#,
+        ));
+        let route = scalar_route_result();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+
+        let (answer, _) =
+            direct_scalar_observed_answer(None, &loop_state, Some(&ctx)).expect("heading answer");
+        assert_eq!(answer, "Image Edit");
+    }
+
+    #[test]
+    fn execution_summary_suppressed_for_grounded_content_answer() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","excerpt":"1|{\n2|  \"type\": \"object\",\n3|  \"additionalProperties\": false\n4|}","path":"prompts/schemas/direct_answer_gate.schema.json"}"#,
+        ));
+        loop_state.delivery_messages.push(
+            "`additionalProperties: false` makes future schema extension more brittle.".to_string(),
+        );
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigRiskAssessment;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "prompts/schemas/direct_answer_gate.schema.json".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+
+        assert!(delivery_contract_suppresses_execution_summary(
+            &loop_state,
+            Some(&ctx),
+            &loop_state.delivery_messages
+        ));
+        assert!(build_execution_summary_messages(
+            &loop_state,
+            Some(&ctx),
+            Some("Check the schema risks briefly.")
+        )
+        .is_empty());
+    }
+
+    #[test]
     fn observed_markdown_heading_scalar_replaces_repaired_strict_delivery() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state.executed_step_results.push(ok_step_result(
@@ -7681,7 +7843,7 @@ mod tests {
         let mut delivery = vec!["# Release Checklist".to_string()];
         let mut summary = None;
 
-        assert!(replace_delivery_with_observed_markdown_heading_scalar(
+        assert!(!replace_delivery_with_observed_markdown_heading_scalar(
             "task",
             &mut loop_state,
             Some(&ctx),
@@ -7689,10 +7851,10 @@ mod tests {
             &mut summary,
         ));
 
-        assert_eq!(delivery, vec!["Release Checklist".to_string()]);
-        assert!(summary.is_some());
+        assert_eq!(delivery, vec!["# Release Checklist".to_string()]);
+        assert!(summary.is_none());
         attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
-        assert_eq!(delivery, vec!["Release Checklist".to_string()]);
+        assert_eq!(delivery, vec!["# Release Checklist".to_string()]);
     }
 
     #[test]
@@ -7754,7 +7916,7 @@ mod tests {
         let mut delivery = vec!["# Service Notes".to_string()];
         let mut summary = None;
 
-        assert!(replace_delivery_with_observed_markdown_heading_scalar(
+        assert!(!replace_delivery_with_observed_markdown_heading_scalar(
             "task",
             &mut loop_state,
             Some(&ctx),
@@ -7762,10 +7924,10 @@ mod tests {
             &mut summary,
         ));
 
-        assert_eq!(delivery, vec!["Service Notes".to_string()]);
-        assert!(summary.is_some());
+        assert_eq!(delivery, vec!["# Service Notes".to_string()]);
+        assert!(summary.is_none());
         attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
-        assert_eq!(delivery, vec!["Service Notes".to_string()]);
+        assert_eq!(delivery, vec!["# Service Notes".to_string()]);
     }
 
     #[test]
@@ -7863,7 +8025,7 @@ mod tests {
             vec!["# Service Notes\n\nRustClaw test fixture service notes.".to_string()];
         let mut summary = None;
 
-        assert!(replace_delivery_with_observed_markdown_heading_scalar(
+        assert!(!replace_delivery_with_observed_markdown_heading_scalar(
             "task",
             &mut loop_state,
             Some(&ctx),
@@ -7871,8 +8033,11 @@ mod tests {
             &mut summary,
         ));
 
-        assert_eq!(delivery, vec!["Service Notes".to_string()]);
-        assert!(summary.is_some());
+        assert_eq!(
+            delivery,
+            vec!["# Service Notes\n\nRustClaw test fixture service notes.".to_string()]
+        );
+        assert!(summary.is_none());
     }
 
     #[test]

@@ -342,10 +342,11 @@ fn guard_config(
     }
     if lookup_json_path(&root, &split_field_path("telegram.sendfile.full_access"))
         .and_then(Value::as_bool)
-        .unwrap_or(true)
+        .unwrap_or(false)
     {
         risks.push("telegram.sendfile.full_access=true".to_string());
     }
+    add_skills_registry_risks(&target.real_path, &root, &mut risks);
 
     Ok(json!({
         "action": "guard_config",
@@ -355,6 +356,85 @@ fn guard_config(
         "risk_count": risks.len(),
         "risks": risks,
     }))
+}
+
+fn add_skills_registry_risks(path: &Path, root: &Value, risks: &mut Vec<String>) {
+    if !path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("skills_registry.toml"))
+    {
+        return;
+    }
+    let Some(skills) = root.get("skills").and_then(Value::as_array) else {
+        risks.push("skills registry has no skills array".to_string());
+        return;
+    };
+
+    let mut skill_names = std::collections::HashSet::new();
+    let mut aliases = std::collections::HashMap::<String, String>::new();
+    for entry in skills {
+        let Some(obj) = entry.as_object() else {
+            risks.push("skills registry contains a non-object skill entry".to_string());
+            continue;
+        };
+        let name = obj
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("(unnamed)");
+        if !skill_names.insert(name.to_ascii_lowercase()) {
+            risks.push(format!("duplicate skill name: {name}"));
+        }
+
+        let enabled = obj.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+        let planner_visible = obj
+            .get("planner_visible")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let prompt_missing = obj
+            .get("prompt_file")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none();
+        if enabled && planner_visible && prompt_missing {
+            risks.push(format!(
+                "enabled planner-visible skill {name} is missing prompt_file"
+            ));
+        }
+
+        let high_risk = obj
+            .get("risk_level")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.trim().eq_ignore_ascii_case("high"));
+        let side_effect = obj
+            .get("side_effect")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let explicitly_no_confirmation =
+            obj.get("requires_confirmation").and_then(Value::as_bool) == Some(false);
+        if enabled && (high_risk || side_effect) && explicitly_no_confirmation {
+            risks.push(format!(
+                "enabled high-risk or side-effect skill {name} explicitly disables confirmation"
+            ));
+        }
+
+        if let Some(values) = obj.get("aliases").and_then(Value::as_array) {
+            for alias in values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                let key = alias.to_ascii_lowercase();
+                if let Some(existing) = aliases.insert(key, name.to_string()) {
+                    risks.push(format!("alias {alias} is shared by {existing} and {name}"));
+                }
+            }
+        }
+    }
 }
 
 fn read_back(
@@ -941,6 +1021,85 @@ mod tests {
         )
         .expect("plan");
         assert_eq!(out["new_value"], "<redacted>");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn guard_config_does_not_invent_missing_full_access_risk() {
+        let root = temp_root("guard_missing_full_access");
+        let path = root.join("configs/image.toml");
+        std::fs::write(
+            &path,
+            "[image_vision]\nprovider = \"minimax\"\nmodel = \"MiniMax-M2.7\"\n",
+        )
+        .expect("write config");
+
+        let out = guard_config(
+            &root,
+            json!({
+                "path": "configs/image.toml",
+                "format": "toml"
+            })
+            .as_object()
+            .expect("object"),
+            false,
+        )
+        .expect("guard");
+
+        assert_eq!(out["risk_count"], 0);
+        assert_eq!(out["risks"].as_array().expect("risks array").len(), 0);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn guard_config_reports_structured_registry_risks() {
+        let root = temp_root("guard_registry");
+        let path = root.join("configs/skills_registry.toml");
+        std::fs::write(
+            &path,
+            r#"
+[[skills]]
+name = "alpha"
+enabled = true
+planner_visible = true
+aliases = ["same"]
+risk_level = "high"
+requires_confirmation = false
+
+[[skills]]
+name = "alpha"
+enabled = true
+planner_visible = true
+prompt_file = "prompts/skills/alpha.md"
+aliases = ["same"]
+"#,
+        )
+        .expect("write registry");
+
+        let out = guard_config(
+            &root,
+            json!({
+                "path": "configs/skills_registry.toml",
+                "format": "toml"
+            })
+            .as_object()
+            .expect("object"),
+            false,
+        )
+        .expect("guard");
+        let risks = out["risks"].as_array().expect("risks array");
+        let joined = risks
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(joined.contains("duplicate skill name: alpha"));
+        assert!(joined.contains("alias same is shared by alpha and alpha"));
+        assert!(joined.contains("enabled planner-visible skill alpha is missing prompt_file"));
+        assert!(joined.contains(
+            "enabled high-risk or side-effect skill alpha explicitly disables confirmation"
+        ));
         let _ = std::fs::remove_dir_all(root);
     }
 }

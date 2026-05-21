@@ -2408,6 +2408,7 @@ mod tests {
             "excerpt_kind_judgment",
             "recent_artifacts_judgment",
             "config_validation",
+            "config_risk_assessment",
             "package_manager_detection",
         ];
 

@@ -1002,7 +1002,11 @@ fn db_basic_scalar_candidate(value: &serde_json::Value) -> Option<String> {
     if column.is_empty() {
         return None;
     }
-    let row = value.get("rows")?.as_array()?.first()?.as_object()?;
+    let rows = value.get("rows")?.as_array()?;
+    if rows.len() != 1 {
+        return None;
+    }
+    let row = rows.first()?.as_object()?;
     value_scalar_text(row.get(column)?)
 }
 
@@ -4329,14 +4333,52 @@ fn compact_log_analyze_excerpt(value: &serde_json::Value) -> Option<String> {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    let level_counts = value
+        .get("level_counts")
+        .and_then(|v| v.as_object())
+        .map(|map| {
+            let mut pairs = map
+                .iter()
+                .filter_map(|(key, count)| count.as_u64().map(|count| (key.as_str(), count)))
+                .collect::<Vec<_>>();
+            pairs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+            pairs
+                .into_iter()
+                .map(|(key, count)| format!("{key}={count}"))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let recent_notable_lines = value
+        .get("recent_notable_lines")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .take(8)
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let total_lines = value
         .get("total_lines")
         .and_then(|v| v.as_u64())
         .unwrap_or_default();
 
     let mut sections = vec![format!("log_analyze path={path} total_lines={total_lines}")];
+    if !level_counts.is_empty() {
+        sections.push(format!("level_counts: {}", level_counts.join(", ")));
+    }
     if !keyword_counts.is_empty() {
         sections.push(format!("keyword_counts: {}", keyword_counts.join(", ")));
+    }
+    if !recent_notable_lines.is_empty() {
+        sections.push(format!(
+            "recent_notable_lines:\n- {}",
+            recent_notable_lines.join("\n- ")
+        ));
     }
     if !recent_matches.is_empty() {
         sections.push(format!(
@@ -11079,6 +11121,52 @@ version.workspace = true
             extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
             Some("orders\nusers")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_does_not_take_first_db_row_from_multi_row_query() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "db_basic",
+            r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: "Read a scalar value from the SQLite database".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "normalizer:act".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::None,
+                locator_hint: "data/app.sqlite".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .is_none()
         );
     }
 

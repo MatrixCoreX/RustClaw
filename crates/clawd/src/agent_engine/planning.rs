@@ -4853,6 +4853,18 @@ fn normalize_legacy_compatibility_actions(
         skip_legacy_semantic_rewrites,
         actions,
     );
+    let actions = rewrite_sqlite_table_probe_to_requested_schema_value(
+        route_result,
+        user_text,
+        original_user_text,
+        actions,
+    );
+    let actions = rewrite_sqlite_count_query_to_requested_schema_column(
+        route_result,
+        user_text,
+        original_user_text,
+        actions,
+    );
     let actions = rewrite_docker_readonly_run_cmd_to_docker_basic(
         state,
         skip_legacy_semantic_rewrites,
@@ -4954,16 +4966,16 @@ fn rustclaw_config_risk_assessment_target(
     actions
         .iter()
         .filter_map(planned_config_risk_observation_path)
-        .find(|path| is_rustclaw_main_config_path(path))
+        .find(|path| is_rustclaw_config_guard_path(path))
         .or_else(|| {
             auto_locator_path
                 .map(str::trim)
-                .filter(|path| is_rustclaw_main_config_path(path))
+                .filter(|path| is_rustclaw_config_guard_path(path))
         })
         .or_else(|| {
             route_result
                 .map(|route| route.output_contract.locator_hint.trim())
-                .filter(|path| is_rustclaw_main_config_path(path))
+                .filter(|path| is_rustclaw_config_guard_path(path))
         })
         .map(ToString::to_string)
 }
@@ -5210,6 +5222,16 @@ fn is_rustclaw_main_config_path(path: &str) -> bool {
     normalized == "configs/config.toml"
         || normalized.ends_with("/configs/config.toml")
         || normalized == "config.toml"
+}
+
+fn is_rustclaw_config_guard_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/").trim().to_ascii_lowercase();
+    if is_rustclaw_main_config_path(&normalized) {
+        return true;
+    }
+    let relative_configs_path = normalized.starts_with("configs/") && normalized.ends_with(".toml");
+    let absolute_configs_path = normalized.contains("/configs/") && normalized.ends_with(".toml");
+    relative_configs_path || absolute_configs_path
 }
 
 fn normalize_action_schema_aliases(
@@ -6028,9 +6050,9 @@ fn config_edit_action_is_route_guard(action: &AgentAction, route: &RouteResult) 
         return false;
     };
     let locator = route.output_contract.locator_hint.trim();
-    is_rustclaw_main_config_path(&path)
+    is_rustclaw_config_guard_path(&path)
         && (locator.is_empty()
-            || is_rustclaw_main_config_path(locator)
+            || is_rustclaw_config_guard_path(locator)
             || path
                 .replace('\\', "/")
                 .eq_ignore_ascii_case(&locator.replace('\\', "/")))
@@ -10498,12 +10520,66 @@ fn sqlite_locator_path_for_route(
     .map(ToString::to_string)
 }
 
+fn is_sqlite_database_path(path: &str) -> bool {
+    let lower = path.trim().to_ascii_lowercase();
+    lower.ends_with(".sqlite") || lower.ends_with(".db")
+}
+
+fn action_is_text_read_of_sqlite_path(action: &AgentAction) -> bool {
+    let Some(path) = sqlite_locator_path_from_action(action) else {
+        return false;
+    };
+    if !is_sqlite_database_path(&path) {
+        return false;
+    }
+    match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            let skill = skill.trim().to_ascii_lowercase();
+            if matches!(skill.as_str(), "read_file" | "fs_basic") {
+                return args
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .map(|action| {
+                        matches!(
+                            action.trim().to_ascii_lowercase().as_str(),
+                            "read_range"
+                                | "read_text_range"
+                                | "read"
+                                | "read_text"
+                                | "read_file"
+                                | "head"
+                        )
+                    })
+                    .unwrap_or(skill == "read_file");
+            }
+            skill == "system_basic"
+                && args
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .map(|action| {
+                        matches!(
+                            action.trim().to_ascii_lowercase().as_str(),
+                            "read_range" | "read_text_range" | "read" | "read_file"
+                        )
+                    })
+                    .unwrap_or(false)
+        }
+        AgentAction::CallCapability { .. }
+        | AgentAction::Think { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::SynthesizeAnswer { .. } => false,
+    }
+}
+
 fn action_should_be_sqlite_table_query(action: &AgentAction) -> bool {
     match action {
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
             let skill = skill.trim().to_ascii_lowercase();
             if skill == "db_basic" {
                 return false;
+            }
+            if action_is_text_read_of_sqlite_path(action) {
+                return true;
             }
             if skill == "read_file" || skill == "run_cmd" {
                 return true;
@@ -10544,13 +10620,18 @@ fn rewrite_sqlite_table_listing_plan_to_db_basic(
     if preserve_explicit_command {
         return actions;
     }
-    let Some(route) = route_result else {
-        return actions;
-    };
-    if !route_requests_sqlite_table_listing(route) {
+    let route_requested_listing = route_result.is_some_and(route_requests_sqlite_table_listing);
+    let sqlite_text_read_path = actions
+        .iter()
+        .find(|action| action_is_text_read_of_sqlite_path(action))
+        .and_then(sqlite_locator_path_from_action);
+    if !route_requested_listing && sqlite_text_read_path.is_none() {
         return actions;
     }
-    let Some(db_path) = sqlite_locator_path_for_route(route, auto_locator_path) else {
+    let Some(db_path) = route_result
+        .and_then(|route| sqlite_locator_path_for_route(route, auto_locator_path))
+        .or(sqlite_text_read_path)
+    else {
         return actions;
     };
     let mut rewritten = actions;
@@ -10716,6 +10797,425 @@ fn rewrite_sqlite_schema_version_plan_to_db_basic(
         info!("plan_rewrite_sqlite_schema_version_to_db_basic");
     }
     rewritten
+}
+
+fn rewrite_sqlite_count_query_to_requested_schema_column(
+    route_result: Option<&RouteResult>,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount {
+        return actions;
+    }
+    let mut rewritten = actions;
+    let mut changed = false;
+    for action in rewritten.iter_mut() {
+        let (AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }) =
+            action
+        else {
+            continue;
+        };
+        if !skill.eq_ignore_ascii_case("db_basic") {
+            continue;
+        }
+        let action_name = args
+            .get("action")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or("sqlite_query");
+        if !action_name.eq_ignore_ascii_case("sqlite_query") {
+            continue;
+        }
+        let Some(sql) = args.get("sql").and_then(Value::as_str).map(str::trim) else {
+            continue;
+        };
+        let Some(db_path) = args.get("db_path").and_then(Value::as_str).map(str::trim) else {
+            continue;
+        };
+        let Some((table, suffix)) = parse_sqlite_count_star_query(sql) else {
+            continue;
+        };
+        if sqlite_count_suffix_has_grouping(&suffix) {
+            continue;
+        }
+        let Some(column) = requested_schema_column_for_sqlite_count_rewrite(
+            route,
+            user_text,
+            original_user_text,
+            db_path,
+            &table,
+            &suffix,
+        ) else {
+            continue;
+        };
+        let rewritten_sql = format!(
+            "SELECT {} FROM {}{}",
+            quote_sqlite_identifier(&column),
+            quote_sqlite_identifier(&table),
+            suffix
+        );
+        args["sql"] = Value::String(rewritten_sql);
+        changed = true;
+    }
+    if changed {
+        info!("plan_rewrite_sqlite_count_query_to_requested_schema_column");
+    }
+    rewritten
+}
+
+fn rewrite_sqlite_table_probe_to_requested_schema_value(
+    route_result: Option<&RouteResult>,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        || matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ScalarCount
+                | crate::OutputSemanticKind::SqliteTableListing
+                | crate::OutputSemanticKind::SqliteTableNamesOnly
+                | crate::OutputSemanticKind::SqliteDatabaseKindJudgment
+                | crate::OutputSemanticKind::SqliteSchemaVersion
+        )
+    {
+        return actions;
+    }
+    let mut rewritten = actions;
+    let mut changed = false;
+    for action in rewritten.iter_mut() {
+        let (AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }) =
+            action
+        else {
+            continue;
+        };
+        if !skill.eq_ignore_ascii_case("db_basic") {
+            continue;
+        }
+        let action_name = args
+            .get("action")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        if !action_name.eq_ignore_ascii_case("list_tables") {
+            continue;
+        }
+        let Some(db_path) = args.get("db_path").and_then(Value::as_str).map(str::trim) else {
+            continue;
+        };
+        let Some(sql) =
+            sqlite_schema_value_query_for_route(route, user_text, original_user_text, db_path)
+        else {
+            continue;
+        };
+        args["action"] = Value::String("sqlite_query".to_string());
+        args["sql"] = Value::String(sql);
+        changed = true;
+    }
+    if changed {
+        info!("plan_rewrite_sqlite_table_probe_to_requested_schema_value");
+    }
+    rewritten
+}
+
+fn sqlite_schema_value_query_for_route(
+    route: &RouteResult,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    db_path: &str,
+) -> Option<String> {
+    let source = [
+        route.resolved_intent.as_str(),
+        route.output_contract.locator_hint.as_str(),
+        user_text,
+        original_user_text.unwrap_or_default(),
+    ]
+    .join("\n")
+    .to_ascii_lowercase();
+    let source_tokens = identifier_tokens(&source);
+    let table = requested_sqlite_table_for_source(db_path, &source_tokens)?;
+    let columns = sqlite_table_columns(db_path, &table)?;
+    let filters = sqlite_source_value_filters(db_path, &table, &columns, &source_tokens);
+    if filters.is_empty() {
+        return None;
+    }
+    let filter_columns = filters
+        .iter()
+        .map(|(column, _)| column.to_ascii_lowercase())
+        .collect::<std::collections::HashSet<_>>();
+    let target_columns = columns
+        .into_iter()
+        .filter(|column| {
+            let lower = column.to_ascii_lowercase();
+            identifier_tokens_contain_schema_name(&source_tokens, &lower)
+                && !filter_columns.contains(&lower)
+        })
+        .collect::<Vec<_>>();
+    if target_columns.len() != 1 {
+        return None;
+    }
+    let target_column = &target_columns[0];
+    let where_sql = filters
+        .iter()
+        .map(|(column, value)| {
+            format!(
+                "{} = {}",
+                quote_sqlite_identifier(column),
+                quote_sqlite_string_literal(value)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let sql = format!(
+        "SELECT {} FROM {} WHERE {}",
+        quote_sqlite_identifier(target_column),
+        quote_sqlite_identifier(&table),
+        where_sql
+    );
+    sqlite_query_single_scalar_preview(db_path, &sql).map(|_| sql)
+}
+
+fn requested_sqlite_table_for_source(
+    db_path: &str,
+    source_tokens: &std::collections::HashSet<String>,
+) -> Option<String> {
+    let tables = sqlite_database_table_names(db_path)?;
+    let candidates = tables
+        .into_iter()
+        .filter(|table| identifier_tokens_contain_schema_name(source_tokens, table))
+        .collect::<Vec<_>>();
+    (candidates.len() == 1).then(|| candidates[0].clone())
+}
+
+fn sqlite_database_table_names(db_path: &str) -> Option<Vec<String>> {
+    let path = resolve_sqlite_path_for_planner(db_path);
+    let conn = rusqlite::Connection::open(path).ok()?;
+    let mut stmt = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        .ok()?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .ok()?
+        .filter_map(Result::ok)
+        .filter(|table| !table.trim().is_empty())
+        .collect::<Vec<_>>();
+    (!rows.is_empty()).then_some(rows)
+}
+
+fn sqlite_source_value_filters(
+    db_path: &str,
+    table: &str,
+    columns: &[String],
+    source_tokens: &std::collections::HashSet<String>,
+) -> Vec<(String, String)> {
+    let mut filters = Vec::new();
+    for column in columns {
+        let lower = column.to_ascii_lowercase();
+        if !identifier_tokens_contain_schema_name(source_tokens, &lower) {
+            continue;
+        }
+        let Some(values) = sqlite_distinct_column_values(db_path, table, column, 100) else {
+            continue;
+        };
+        let matches = values
+            .into_iter()
+            .filter(|value| sqlite_value_mentioned_by_source(value, source_tokens))
+            .collect::<Vec<_>>();
+        if matches.len() == 1 {
+            filters.push((column.clone(), matches[0].clone()));
+        }
+    }
+    filters
+}
+
+fn sqlite_distinct_column_values(
+    db_path: &str,
+    table: &str,
+    column: &str,
+    limit: usize,
+) -> Option<Vec<String>> {
+    let path = resolve_sqlite_path_for_planner(db_path);
+    let conn = rusqlite::Connection::open(path).ok()?;
+    let sql = format!(
+        "SELECT DISTINCT {} FROM {} WHERE {} IS NOT NULL LIMIT {}",
+        quote_sqlite_identifier(column),
+        quote_sqlite_identifier(table),
+        quote_sqlite_identifier(column),
+        limit.clamp(1, 500)
+    );
+    let mut stmt = conn.prepare(&sql).ok()?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(sqlite_value_ref_to_string(row.get_ref(0)?))
+        })
+        .ok()?
+        .filter_map(Result::ok)
+        .flatten()
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>();
+    Some(rows)
+}
+
+fn sqlite_value_mentioned_by_source(
+    value: &str,
+    source_tokens: &std::collections::HashSet<String>,
+) -> bool {
+    let value_tokens = identifier_tokens(&value.to_ascii_lowercase());
+    !value_tokens.is_empty()
+        && value_tokens
+            .iter()
+            .all(|token| source_tokens.contains(token))
+}
+
+fn sqlite_query_single_scalar_preview(db_path: &str, sql: &str) -> Option<String> {
+    let path = resolve_sqlite_path_for_planner(db_path);
+    let conn = rusqlite::Connection::open(path).ok()?;
+    let mut stmt = conn.prepare(sql).ok()?;
+    if stmt.column_count() != 1 {
+        return None;
+    }
+    let mut rows = stmt.query([]).ok()?;
+    let row = rows.next().ok()??;
+    let value = sqlite_value_ref_to_string(row.get_ref(0).ok()?)?;
+    if rows.next().ok()?.is_some() {
+        return None;
+    }
+    Some(value)
+}
+
+fn sqlite_value_ref_to_string(value: rusqlite::types::ValueRef<'_>) -> Option<String> {
+    match value {
+        rusqlite::types::ValueRef::Null => None,
+        rusqlite::types::ValueRef::Integer(value) => Some(value.to_string()),
+        rusqlite::types::ValueRef::Real(value) => Some(value.to_string()),
+        rusqlite::types::ValueRef::Text(value) => {
+            Some(String::from_utf8_lossy(value).trim().to_string())
+        }
+        rusqlite::types::ValueRef::Blob(_) => None,
+    }
+}
+
+fn parse_sqlite_count_star_query(sql: &str) -> Option<(String, String)> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(
+            r#"(?is)^\s*select\s+count\s*\(\s*\*\s*\)(?:\s+as\s+(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[A-Za-z_][A-Za-z0-9_]*))?\s+from\s+(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|([A-Za-z_][A-Za-z0-9_]*))(?P<suffix>.*?)\s*;?\s*$"#,
+        )
+        .expect("sqlite count query regex")
+    });
+    let captures = re.captures(sql)?;
+    let table = (1..=4)
+        .filter_map(|idx| captures.get(idx).map(|m| m.as_str().trim()))
+        .find(|value| !value.is_empty())?
+        .to_string();
+    let suffix = captures
+        .name("suffix")
+        .map(|m| m.as_str().trim_end_matches(';').to_string())
+        .unwrap_or_default();
+    Some((table, suffix))
+}
+
+fn sqlite_count_suffix_has_grouping(suffix: &str) -> bool {
+    let padded = format!(" {} ", suffix.to_ascii_lowercase());
+    padded.contains(" group by ") || padded.contains(" having ")
+}
+
+fn requested_schema_column_for_sqlite_count_rewrite(
+    route: &RouteResult,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    db_path: &str,
+    table: &str,
+    sql_suffix: &str,
+) -> Option<String> {
+    let columns = sqlite_table_columns(db_path, table)?;
+    let source = [
+        route.resolved_intent.as_str(),
+        route.output_contract.locator_hint.as_str(),
+        user_text,
+        original_user_text.unwrap_or_default(),
+    ]
+    .join("\n")
+    .to_ascii_lowercase();
+    let source_tokens = identifier_tokens(&source);
+    let suffix_tokens = identifier_tokens(&sql_suffix.to_ascii_lowercase());
+    let candidates = columns
+        .into_iter()
+        .filter(|column| {
+            let lower = column.to_ascii_lowercase();
+            identifier_tokens_contain_schema_name(&source_tokens, &lower)
+                && !identifier_tokens_contain_schema_name(&suffix_tokens, &lower)
+        })
+        .collect::<Vec<_>>();
+    (candidates.len() == 1).then(|| candidates[0].clone())
+}
+
+fn sqlite_table_columns(db_path: &str, table: &str) -> Option<Vec<String>> {
+    let path = resolve_sqlite_path_for_planner(db_path);
+    let conn = rusqlite::Connection::open(path).ok()?;
+    let pragma = format!("PRAGMA table_info({})", quote_sqlite_identifier(table));
+    let mut stmt = conn.prepare(&pragma).ok()?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .ok()?
+        .filter_map(Result::ok)
+        .filter(|column| !column.trim().is_empty())
+        .collect::<Vec<_>>();
+    (!rows.is_empty()).then_some(rows)
+}
+
+fn resolve_sqlite_path_for_planner(db_path: &str) -> PathBuf {
+    let raw = Path::new(db_path);
+    if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(raw)
+    }
+}
+
+fn quote_sqlite_identifier(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+fn quote_sqlite_string_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+fn identifier_tokens(text: &str) -> std::collections::HashSet<String> {
+    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn identifier_tokens_contain_schema_name(
+    tokens: &std::collections::HashSet<String>,
+    schema_name: &str,
+) -> bool {
+    let normalized = schema_name.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+    if tokens.contains(&normalized) {
+        return true;
+    }
+    if let Some(singular) = normalized.strip_suffix('s') {
+        if singular.len() >= 3 && tokens.contains(singular) {
+            return true;
+        }
+    }
+    let plural = format!("{normalized}s");
+    tokens.contains(&plural)
 }
 
 fn split_archive_locator_pair(hint: &str) -> Option<(String, String)> {
@@ -13510,7 +14010,9 @@ mod tests {
         rewrite_pre_observation_concrete_respond_to_placeholder,
         rewrite_process_ps_run_cmd_to_process_basic, rewrite_rustclaw_config_validation_to_guard,
         rewrite_service_status_plan_to_service_control,
+        rewrite_sqlite_count_query_to_requested_schema_column,
         rewrite_sqlite_schema_version_plan_to_db_basic,
+        rewrite_sqlite_table_probe_to_requested_schema_value,
         rewrite_sqlite_table_listing_plan_to_db_basic,
         rewrite_terminal_placeholder_respond_to_synthesize_answer,
         rewrite_terminal_synthesis_placeholder_respond,
@@ -13840,6 +14342,50 @@ mod tests {
         }
         assert!(matches!(rewritten[1], AgentAction::SynthesizeAnswer { .. }));
         assert!(matches!(rewritten[2], AgentAction::Respond { .. }));
+    }
+
+    #[test]
+    fn sqlite_binary_text_read_fallback_rewrites_to_db_basic_list_tables_without_semantic_kind() {
+        let mut route = base_route_result();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_hint = "/tmp/app.sqlite".to_string();
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": "/tmp/app.sqlite",
+                    "mode": "head",
+                    "n": 120
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+        ];
+
+        let rewritten = rewrite_sqlite_table_listing_plan_to_db_basic(
+            Some(&route),
+            Some("/tmp/app.sqlite"),
+            false,
+            actions,
+        );
+
+        match &rewritten[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "db_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("list_tables")
+                );
+                assert_eq!(args.get("db_path").and_then(Value::as_str), Some("/tmp/app.sqlite"));
+            }
+            other => panic!("expected db_basic action, got {other:?}"),
+        }
+        assert!(matches!(rewritten[1], AgentAction::SynthesizeAnswer { .. }));
     }
 
     #[test]
@@ -14273,6 +14819,161 @@ mod tests {
             other => panic!("expected db_basic action, got {other:?}"),
         }
         assert!(matches!(rewritten[1], AgentAction::SynthesizeAnswer { .. }));
+    }
+
+    #[test]
+    fn sqlite_count_query_rewrites_to_requested_schema_column_when_count_conflicts_with_column_intent(
+    ) {
+        let tmp = TempDirGuard::new("sqlite_count_column_rewrite");
+        let db_path = tmp.path.join("orders.sqlite");
+        let conn = rusqlite::Connection::open(&db_path).expect("open sqlite");
+        conn.execute(
+            "CREATE TABLE orders (id INTEGER, user_id INTEGER, amount REAL, status TEXT)",
+            [],
+        )
+        .expect("create table");
+        let mut route = base_route_result();
+        route.resolved_intent =
+            "Read the amount of orders with status='pending' from the SQLite database".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = db_path.display().to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "db_basic".to_string(),
+            args: json!({
+                "action": "sqlite_query",
+                "db_path": db_path,
+                "sql": "SELECT COUNT(*) FROM orders WHERE status='pending';"
+            }),
+        }];
+
+        let rewritten = rewrite_sqlite_count_query_to_requested_schema_column(
+            Some(&route),
+            "Read the pending order amount.",
+            None,
+            actions,
+        );
+
+        let args = expect_planned_call(&rewritten[0], "db_basic", "sqlite_query");
+        assert_eq!(
+            args.get("sql").and_then(Value::as_str),
+            Some(r#"SELECT "amount" FROM "orders" WHERE status='pending'"#)
+        );
+    }
+
+    #[test]
+    fn sqlite_count_query_does_not_rewrite_scalar_count_contract() {
+        let tmp = TempDirGuard::new("sqlite_count_contract_preserve");
+        let db_path = tmp.path.join("users.sqlite");
+        let conn = rusqlite::Connection::open(&db_path).expect("open sqlite");
+        conn.execute("CREATE TABLE users (id INTEGER, name TEXT)", [])
+            .expect("create table");
+        let mut route = base_route_result();
+        route.resolved_intent = "Count rows in the users table".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+        route.output_contract.locator_hint = db_path.display().to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "db_basic".to_string(),
+            args: json!({
+                "action": "sqlite_query",
+                "db_path": db_path,
+                "sql": "SELECT COUNT(*) FROM users;"
+            }),
+        }];
+
+        let rewritten = rewrite_sqlite_count_query_to_requested_schema_column(
+            Some(&route),
+            "How many users are stored?",
+            None,
+            actions,
+        );
+
+        let args = expect_planned_call(&rewritten[0], "db_basic", "sqlite_query");
+        assert_eq!(
+            args.get("sql").and_then(Value::as_str),
+            Some("SELECT COUNT(*) FROM users;")
+        );
+    }
+
+    #[test]
+    fn sqlite_table_probe_rewrites_to_requested_schema_value_query() {
+        let tmp = TempDirGuard::new("sqlite_table_probe_value_rewrite");
+        let db_path = tmp.path.join("orders.sqlite");
+        let conn = rusqlite::Connection::open(&db_path).expect("open sqlite");
+        conn.execute(
+            "CREATE TABLE orders (id INTEGER, user_id INTEGER, amount REAL, status TEXT)",
+            [],
+        )
+        .expect("create table");
+        conn.execute(
+            "INSERT INTO orders (id, user_id, amount, status) VALUES (1, 1, 7.5, 'pending')",
+            [],
+        )
+        .expect("insert pending order");
+        let mut route = base_route_result();
+        route.resolved_intent =
+            "Read the amount from the order table where status is pending".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = db_path.display().to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "db_basic".to_string(),
+            args: json!({
+                "action": "list_tables",
+                "db_path": db_path,
+            }),
+        }];
+
+        let rewritten = rewrite_sqlite_table_probe_to_requested_schema_value(
+            Some(&route),
+            "Read the pending order amount.",
+            None,
+            actions,
+        );
+
+        let args = expect_planned_call(&rewritten[0], "db_basic", "sqlite_query");
+        assert_eq!(
+            args.get("sql").and_then(Value::as_str),
+            Some(r#"SELECT "amount" FROM "orders" WHERE "status" = 'pending'"#)
+        );
+    }
+
+    #[test]
+    fn sqlite_table_probe_keeps_table_listing_contract() {
+        let tmp = TempDirGuard::new("sqlite_table_probe_listing_preserve");
+        let db_path = tmp.path.join("orders.sqlite");
+        let conn = rusqlite::Connection::open(&db_path).expect("open sqlite");
+        conn.execute("CREATE TABLE orders (id INTEGER, status TEXT)", [])
+            .expect("create table");
+        let mut route = base_route_result();
+        route.resolved_intent = "List the tables in the database".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::SqliteTableNamesOnly;
+        route.output_contract.locator_hint = db_path.display().to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "db_basic".to_string(),
+            args: json!({
+                "action": "list_tables",
+                "db_path": db_path,
+            }),
+        }];
+
+        let rewritten = rewrite_sqlite_table_probe_to_requested_schema_value(
+            Some(&route),
+            "List the tables in the database.",
+            None,
+            actions,
+        );
+
+        let args = expect_planned_call(&rewritten[0], "db_basic", "list_tables");
+        assert!(args.get("sql").is_none());
     }
 
     #[test]
@@ -15015,6 +15716,51 @@ mod tests {
             args.get("path").and_then(Value::as_str),
             Some("/home/guagua/rustclaw/configs/config.toml")
         );
+        assert!(
+            normalized
+                .iter()
+                .all(|action| !planned_call_is(action, "fs_basic", "read_text_range")),
+            "normalized actions: {normalized:?}"
+        );
+    }
+
+    #[test]
+    fn config_risk_assessment_rewrites_registry_head_read_to_guard_config() {
+        let state = test_state();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = OutputSemanticKind::ConfigRiskAssessment;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "configs/skills_registry.toml".to_string();
+        let actions = vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "/home/guagua/rustclaw/configs/skills_registry.toml",
+                "mode": "head",
+                "n": 120,
+            }),
+        }];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "Structured RustClaw registry risk assessment.",
+            Some("/home/guagua/rustclaw/configs/skills_registry.toml"),
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "config_edit", "guard_config");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some("/home/guagua/rustclaw/configs/skills_registry.toml")
+        );
+        assert_eq!(args.get("format").and_then(Value::as_str), Some("toml"));
         assert!(
             normalized
                 .iter()
