@@ -562,6 +562,14 @@ fn parse_gate_semantic_kind(raw: &str) -> crate::OutputSemanticKind {
         "existence_with_path_summary" => crate::OutputSemanticKind::ExistenceWithPathSummary,
         "recent_scalar_equality_check" => crate::OutputSemanticKind::RecentScalarEqualityCheck,
         "git_commit_subject" => crate::OutputSemanticKind::GitCommitSubject,
+        "git_repository_state"
+        | "git_workspace_state"
+        | "git_state"
+        | "git_status"
+        | "git_branch"
+        | "git_current_branch"
+        | "git_remote"
+        | "git_changed_files" => crate::OutputSemanticKind::GitRepositoryState,
         "structured_keys" => crate::OutputSemanticKind::StructuredKeys,
         "config_validation" | "structured_config_validation" => {
             crate::OutputSemanticKind::ConfigValidation
@@ -1496,6 +1504,7 @@ fn direct_answer_gate_contract_allows_locatorless_execution(
         crate::OutputSemanticKind::ServiceStatus
         | crate::OutputSemanticKind::WorkspaceProjectSummary
         | crate::OutputSemanticKind::GitCommitSubject
+        | crate::OutputSemanticKind::GitRepositoryState
         | crate::OutputSemanticKind::DockerPs
         | crate::OutputSemanticKind::DockerImages
         | crate::OutputSemanticKind::DockerLogs
@@ -1906,11 +1915,19 @@ fn direct_answer_gate_chat_promotion_lacks_structured_target(
     current_user_request: &str,
     route: &crate::RouteResult,
     contract: &crate::IntentOutputContract,
+    reference_resolution: &DirectAnswerGateReferenceResolutionOut,
     has_structural_session_alias_target: bool,
 ) -> bool {
     if !route.is_chat_gate()
         || route.needs_clarify
         || has_structural_session_alias_target
+        || direct_answer_gate_reference_requires_clarify(reference_resolution)
+        || direct_answer_gate_contract_allows_locatorless_execution(
+            state,
+            current_user_request,
+            contract,
+        )
+        || matches!(contract.locator_kind, crate::OutputLocatorKind::None)
         || current_request_has_structural_execution_target(current_user_request)
         || current_request_resolves_structural_workspace_child_locator_surface(
             state,
@@ -2207,6 +2224,7 @@ fn apply_direct_answer_gate_outcome(
                     current_user_request,
                     route,
                     &contract,
+                    &gate.reference_resolution,
                     has_structural_session_alias_target,
                 ) {
                     append_route_reason(
@@ -2311,6 +2329,7 @@ fn apply_direct_answer_gate_outcome(
                 current_user_request,
                 route,
                 &contract,
+                &gate.reference_resolution,
                 has_structural_session_alias_target,
             ) {
                 append_route_reason(

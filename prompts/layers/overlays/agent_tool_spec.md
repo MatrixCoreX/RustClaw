@@ -527,6 +527,8 @@ Skill behavior notes (file/path):
 - action: `get|post_json`
 - required: `url`
 - optional: `headers`, `timeout_seconds`, `body` (`post_json` only)
+- optional validation hints: `expect_status`, `expect_success`, `expect_contains`, `accept_non_success`
+- Treat received HTTP statuses, including non-2xx, as observable response facts unless a validation hint requires a specific success/status/body condition.
 
 #### http_basic JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"http_basic","args":{...}}`

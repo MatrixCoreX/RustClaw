@@ -3,9 +3,10 @@
 //! **Ask main path:** Only `run_intent_normalizer` is used (resolved intent, resume_behavior,
 //! schedule_kind, first-layer decision, needs_clarify, and output contract in one LLM call).
 //!
-//! **Fallback when normalizer LLM fails / parse fails:** do not synthesize semantic execution
-//! routes locally. The fallback stays on AskClarify so semantic routing remains owned by the
-//! normalizer/planner LLM path instead of hard-match recovery code.
+//! **Fallback when normalizer LLM fails / parse fails:** stay on AskClarify unless the current
+//! request contains an explicit structured tool/capability domain with no competing locator.
+//! Those narrow fallbacks keep semantic routing owned by explicit contracts instead of
+//! natural-language hard-match recovery code.
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -691,6 +692,15 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         | "commit_title"
         | "latest_commit_subject"
         | "latest_commit_title" => OutputSemanticKind::GitCommitSubject,
+        "git_repository_state"
+        | "git_workspace_state"
+        | "git_state"
+        | "git_status"
+        | "git_branch"
+        | "git_current_branch"
+        | "git_remote"
+        | "git_changed_files"
+        | "git_rev_parse" => OutputSemanticKind::GitRepositoryState,
         "structured_keys"
         | "structured_key_names"
         | "structured_top_level_keys"
@@ -1065,6 +1075,24 @@ fn apply_current_turn_structural_contract_repair(
         }
     }
 
+    if output_contract.requires_content_evidence
+        && matches!(
+            output_contract.locator_kind,
+            OutputLocatorKind::Path
+                | OutputLocatorKind::Filename
+                | OutputLocatorKind::CurrentWorkspace
+        )
+        && matches!(
+            output_contract.semantic_kind,
+            OutputSemanticKind::ExistenceWithPath | OutputSemanticKind::ExistenceWithPathSummary
+        )
+        && explicit_surface_path_facts_fallback_decision(req, req_surface, workspace_root).is_some()
+    {
+        output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        output_contract.locator_hint = workspace_root.display().to_string();
+        reason = reason.or(Some("explicit_multi_path_facts_workspace_contract_repair"));
+    }
+
     reason
 }
 
@@ -1393,6 +1421,7 @@ fn semantic_kind_can_use_workspace_default_for_observation(kind: OutputSemanticK
             | OutputSemanticKind::ScalarCount
             | OutputSemanticKind::ExistenceWithPath
             | OutputSemanticKind::ExistenceWithPathSummary
+            | OutputSemanticKind::GitRepositoryState
     )
 }
 
@@ -1443,6 +1472,78 @@ fn resolved_existing_directory_from_current_request(state: &AppState, req: &str)
         | None => {}
     }
     resolve_unique_direct_child_directory_token(state, req)
+}
+
+fn resolved_directory_pair_from_current_request(
+    state: &AppState,
+    req: &str,
+) -> Option<(String, String)> {
+    let mut out = Vec::new();
+    for token in current_request_locator_tokens(req) {
+        if !strong_structural_locator_token(&token) {
+            continue;
+        }
+        let Some(path) = resolve_unique_directory_token_under_workspace(state, &token) else {
+            continue;
+        };
+        if !out
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(&path))
+        {
+            out.push(path);
+        }
+        if out.len() >= 2 {
+            break;
+        }
+    }
+    (out.len() == 2).then(|| (out.remove(0), out.remove(0)))
+}
+
+fn strong_structural_locator_token(token: &str) -> bool {
+    token.contains(['_', '-', '.']) || token.chars().any(|ch| ch.is_ascii_digit())
+}
+
+fn resolve_unique_directory_token_under_workspace(state: &AppState, token: &str) -> Option<String> {
+    let workspace_root = state.skill_rt.workspace_root.as_path();
+    if !workspace_root.is_dir() || token.trim().is_empty() {
+        return None;
+    }
+    let mut stack = vec![workspace_root.to_path_buf()];
+    let mut matches = Vec::new();
+    let mut visits = 0usize;
+    let max_visits = state.skill_rt.locator_scan_max_files.max(50_000);
+    while let Some(dir) = stack.pop() {
+        visits = visits.saturating_add(1);
+        if visits > max_visits {
+            break;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut children = entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let file_type = entry.file_type().ok()?;
+                file_type.is_dir().then(|| entry.path())
+            })
+            .collect::<Vec<_>>();
+        children.sort();
+        for child in children.into_iter().rev() {
+            if child
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case(token))
+            {
+                let canonical = child.canonicalize().unwrap_or(child.clone());
+                matches.push(canonical.display().to_string());
+                if matches.len() > 1 {
+                    return None;
+                }
+            }
+            stack.push(child);
+        }
+    }
+    matches.pop()
 }
 
 fn resolve_unique_direct_child_directory_token(state: &AppState, req: &str) -> Option<String> {
@@ -1884,7 +1985,7 @@ fn downgrade_executionless_route_to_direct_answer(
     output_contract: &IntentOutputContract,
     wants_file_delivery: bool,
     schedule_kind: ScheduleKind,
-    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+    _execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
 ) -> Option<&'static str> {
     if needs_clarify || !matches!(first_layer_decision, FirstLayerDecision::PlannerExecute) {
         return None;
@@ -1896,7 +1997,7 @@ fn downgrade_executionless_route_to_direct_answer(
         output_contract,
         wants_file_delivery,
         schedule_kind,
-        execution_recipe_hint,
+        None,
     ) {
         return None;
     }
@@ -2026,6 +2127,7 @@ fn output_semantic_kind_requires_fresh_evidence(kind: OutputSemanticKind) -> boo
             | OutputSemanticKind::ExistenceWithPath
             | OutputSemanticKind::ExistenceWithPathSummary
             | OutputSemanticKind::GitCommitSubject
+            | OutputSemanticKind::GitRepositoryState
             | OutputSemanticKind::StructuredKeys
             | OutputSemanticKind::ConfigValidation
             | OutputSemanticKind::ConfigRiskAssessment
@@ -3124,7 +3226,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("Allowed output_contract keys only: response_shape, exact_sentence_count, requires_content_evidence, delivery_required, locator_kind, delivery_intent, semantic_kind, locator_hint, self_extension. Do not emit exact_format, required_evidence, fields, examples, post_processing, or custom keys.".to_string());
     parts.push("locator_hint must be a clean concrete locator value or concrete target pair, not a full instruction sentence and not explanatory prose. If no clean locator is known, leave it empty and let needs_clarify/decision express the missing target.".to_string());
     parts.push("Allowed response_shape: free, one_sentence, strict, scalar, file_token. Allowed locator_kind: none, path, current_workspace, url, filename. Allowed delivery_intent: none, file_single, directory_lookup, directory_batch_files.".to_string());
-    parts.push("Allowed semantic_kind: none, raw_command_output, service_status, hidden_entries_check, file_names, directory_names, directory_entry_groups, file_paths, directory_purpose_summary, content_excerpt_summary, content_presence_check, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, execution_failed_step, generated_file_delivery, scalar_path_only, existence_with_path, existence_with_path_summary, recent_scalar_equality_check, git_commit_subject, structured_keys, config_validation, config_risk_assessment, package_manager_detection, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment, sqlite_schema_version, archive_list, archive_pack, archive_unpack, docker_ps, docker_images, docker_logs, docker_container_lifecycle.".to_string());
+    parts.push("Allowed semantic_kind: none, raw_command_output, service_status, hidden_entries_check, file_names, directory_names, directory_entry_groups, file_paths, directory_purpose_summary, content_excerpt_summary, content_presence_check, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, execution_failed_step, generated_file_delivery, scalar_path_only, existence_with_path, existence_with_path_summary, recent_scalar_equality_check, git_commit_subject, git_repository_state, structured_keys, config_validation, config_risk_assessment, package_manager_detection, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment, sqlite_schema_version, archive_list, archive_pack, archive_unpack, docker_ps, docker_images, docker_logs, docker_container_lifecycle.".to_string());
     parts.push("Allowed turn_type: task_request, task_append, task_replace, task_correct, task_scope_update, run_control, approval_decision, status_query, feedback_or_error, preference_or_memory, or empty string. clarify is a decision, never a turn_type or resume_behavior.".to_string());
     parts.push("state_patch must be a JSON object or null. Use null when there is no structured update; never output an empty string for state_patch. For ordered-entry follow-ups against an active ordered list, set state_patch.ordered_entry_ref to {\"index\":N,\"index_base\":1} for absolute item selection or {\"relative_offset\":K} for signed relative selection. When a standalone current REQUEST creates a new user-visible deliverable that later short corrections should edit, set state_patch.primary_task_update=\"replace\" and state_patch.active_task_boundary=\"new_deliverable\". For active-task visible corrections, set required_content_literals / replacement_pairs / forbidden_visible_literals as structured exact content literals, not language-specific phrase markers. Keep output-only/body-only/length/tone/count/format constraints in resolved_user_intent and output_contract, not in required_content_literals. For a clear deictic reference, set state_patch.deictic_reference={\"target\":\"current_action_result\"|\"current_turn_locator\"|\"comparison_result\"|\"unresolved_prior_object\"|\"missing_locator\"|\"ambiguous_locator\"}; unresolved/missing/ambiguous targets mean safe clarify. For runtime self-state questions about whether this assistant is waiting for user approval, set state_patch.runtime_status_query={\"kind\":\"approval_wait\",\"scope\":\"current_task\"}. The runtime consumes structured numbers/targets/status tokens, not language-specific ordinal words, pronouns, connectors, or status wording.".to_string());
     parts.push("Every enum field must be exactly one listed schema token. Do not output aliases, combined values, or explanatory prose in decision/output_contract/execution_recipe/turn_type/target_task_policy.".to_string());
@@ -3138,6 +3240,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("For a comparison where one side is a scalar field/value from a structured manifest or config file and the other side is the corresponding value mentioned in a README/docs file, use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, semantic_kind=\"recent_scalar_equality_check\", and response_shape=\"one_sentence\"/\"strict\" according to the requested final answer. This is a semantic contract for field/document evidence, not generic document summarization.".to_string());
     parts.push("For file/path metadata comparisons across concrete local targets (for example size/大小, modified time/修改时间, existence state, or other observable path facts), use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, semantic_kind=\"quantity_comparison\", and response_shape=\"scalar\"/\"one_sentence\"/\"strict\" according to the requested final answer. This is a semantic contract decision, not a phrase-list trigger; do not treat metadata comparison as document content summarization just because the user also asks for a short explanation.".to_string());
     parts.push("For git commit subject/title requests, use decision=\"planner_execute\", requires_content_evidence=true, response_shape=\"scalar\" or \"strict\" according to the user's requested format, and semantic_kind=\"git_commit_subject\". Do not publish the raw git oneline hash when the final answer asks for the subject/title only.".to_string());
+    parts.push("For read-only Git repository state observation such as current branch, branch list, status, remotes, changed files, or revision metadata, use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, locator_kind=\"current_workspace\" or \"none\", semantic_kind=\"git_repository_state\", and response_shape=\"scalar\"/\"strict\"/\"free\" according to the requested final answer. This is a tool capability contract; do not require a file/path locator unless the Git action needs a concrete path, such as reading a file at a revision.".to_string());
     parts.push("For structured document key-name requests against JSON/TOML/YAML/config files, use decision=\"planner_execute\", requires_content_evidence=true, response_shape=\"strict\" when the user asks only for the keys, and semantic_kind=\"structured_keys\". Keep locator_kind/locator_hint pointed at the structured file; do not treat key-name requests as file excerpts.".to_string());
     parts.push("For hidden or dot-prefixed directory entry checks, use decision=\"planner_execute\", requires_content_evidence=true, locator_kind=\"current_workspace\" or \"path\", and semantic_kind=\"hidden_entries_check\". When the final answer is constrained to count only, use response_shape=\"scalar\" with this same semantic_kind. When the final answer is constrained to yes/no plus a limited set of entries, use response_shape=\"strict\" so later stages do not prepend execution traces.".to_string());
     parts.push("For existence checks whose final answer is a presence judgment over a concrete file, directory, path, or local artifact, use decision=\"planner_execute\", requires_content_evidence=true, semantic_kind=\"existence_with_path\", and the narrowest locator_kind that matches the target scope. If the final answer asks only for yes/no or exists/not-exists, use response_shape=\"scalar\"; if it asks to include a path/locator or other evidence fields, use response_shape=\"strict\". Do not use semantic_kind=\"scalar_count\" merely because the requested final answer is short or binary; presence judgment is not numeric counting. If the same request also asks for a brief content-grounded purpose, summary, role, or explanation when found, use semantic_kind=\"existence_with_path_summary\" instead so planning observes both the path and bounded content before synthesis. Preserve the final answer wording constraint in resolved_user_intent so later stages do not prepend execution traces.".to_string());
@@ -3193,7 +3296,7 @@ fn render_compact_intent_normalizer_prompt(
         .map(str::to_string)
         .unwrap_or_else(|| compact_runtime_context_from_auth(auth_policy_context));
     parts.push(format!("LANG={}", request_language_hint));
-    parts.push("CONTRACT: output_contract must be a JSON object. hidden/dot-entry check => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"hidden_entries_check\". yes/no-only existence check => response_shape=\"scalar\", semantic_kind=\"existence_with_path\"; existence check that must return a path/locator/evidence field => response_shape=\"strict\", semantic_kind=\"existence_with_path\"; if it also needs a content-grounded purpose/summary/explanation when found, use semantic_kind=\"existence_with_path_summary\". exact file or mixed entry names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_names\". exact folder/directory names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"directory_names\". grouped files-vs-directories list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"directory_entry_groups\". exact file paths list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_paths\". local file/path metadata comparison => requires_content_evidence=true, semantic_kind=\"quantity_comparison\". git commit subject/title only => response_shape=\"scalar\", requires_content_evidence=true, semantic_kind=\"git_commit_subject\". current path only => response_shape=\"scalar\", semantic_kind=\"scalar_path_only\"; never use scalar_path_only for directory listings.".to_string());
+    parts.push("CONTRACT: output_contract must be a JSON object. hidden/dot-entry check => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"hidden_entries_check\". yes/no-only existence check => response_shape=\"scalar\", semantic_kind=\"existence_with_path\"; existence check that must return a path/locator/evidence field => response_shape=\"strict\", semantic_kind=\"existence_with_path\"; if it also needs a content-grounded purpose/summary/explanation when found, use semantic_kind=\"existence_with_path_summary\". exact file or mixed entry names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_names\". exact folder/directory names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"directory_names\". grouped files-vs-directories list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"directory_entry_groups\". exact file paths list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_paths\". local file/path metadata comparison => requires_content_evidence=true, semantic_kind=\"quantity_comparison\". git commit subject/title only => response_shape=\"scalar\", requires_content_evidence=true, semantic_kind=\"git_commit_subject\". read-only Git repository state => requires_content_evidence=true, semantic_kind=\"git_repository_state\". current path only => response_shape=\"scalar\", semantic_kind=\"scalar_path_only\"; never use scalar_path_only for directory listings.".to_string());
     // Keep memory and assistant recall context close to the current request so
     // compact head+tail truncation preserves both structure labels and goals.
     parts.push(compact_prompt_slot(
@@ -4250,6 +4353,15 @@ fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static str {
         | "commit_title"
         | "latest_commit_subject"
         | "latest_commit_title" => OutputSemanticKind::GitCommitSubject.as_str(),
+        "git_repository_state"
+        | "git_workspace_state"
+        | "git_state"
+        | "git_status"
+        | "git_branch"
+        | "git_current_branch"
+        | "git_remote"
+        | "git_changed_files"
+        | "git_rev_parse" => OutputSemanticKind::GitRepositoryState.as_str(),
         "one_line_comparison" | "single_line_comparison" => {
             OutputSemanticKind::RecentScalarEqualityCheck.as_str()
         }
@@ -5552,6 +5664,7 @@ fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>
         || semantic_kind == OutputSemanticKind::FilePaths.as_str()
         || semantic_kind == OutputSemanticKind::ContentPresenceCheck.as_str()
         || semantic_kind == OutputSemanticKind::GitCommitSubject.as_str()
+        || semantic_kind == OutputSemanticKind::GitRepositoryState.as_str()
     {
         contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
     }
@@ -6071,13 +6184,32 @@ pub(crate) async fn run_intent_normalizer(
     {
         Ok(v) => v,
         Err(err) => {
-            // Planner-first: do not recover semantic execution locally when the
-            // normalizer LLM is unavailable. Stay on AskClarify until the LLM path
-            // can classify the request.
             warn!(
                 "intent_normalizer llm failed, falling back to safe clarify: task_id={} err={}",
                 task.task_id, err
             );
+            if let Some(fallback) = explicit_surface_path_facts_fallback_decision(
+                req,
+                &req_surface,
+                &state.skill_rt.workspace_root,
+            ) {
+                info!(
+                    "{} intent_normalizer task_id={} llm_failed_explicit_surface_fallback reason={} input={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    fallback.reason,
+                    crate::truncate_for_log(req)
+                );
+                return normalizer_output_from_fallback(
+                    req,
+                    "llm_failed_structured_surface_fallback",
+                    fallback,
+                    None,
+                );
+            }
+            // Planner-first: do not recover semantic execution locally when the
+            // normalizer LLM is unavailable unless the request surface carries a
+            // narrow structured fallback handled above.
             let fallback = empty_clarify_decision(req, "normalizer_llm_failed");
             return normalizer_output_from_fallback(
                 req,
@@ -6225,6 +6357,56 @@ pub(crate) async fn run_intent_normalizer(
             }
         });
         let mut execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
+        if let Some(fallback) = explicit_surface_path_metadata_clarify_repair_decision(
+            req,
+            &req_surface,
+            &state.skill_rt.workspace_root,
+            needs_clarify,
+            first_layer_decision,
+            &output_contract,
+            wants_file_delivery,
+            schedule_kind,
+            execution_recipe_hint,
+        ) {
+            info!(
+                "{} intent_normalizer task_id={} clarify_explicit_surface_metadata_fallback reason={} input={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                fallback.reason,
+                crate::truncate_for_log(req)
+            );
+            return normalizer_output_from_fallback(
+                req,
+                "clarify_structured_surface_metadata_fallback",
+                fallback,
+                None,
+            );
+        }
+        if let Some(fallback) = explicit_surface_path_facts_clarify_repair_decision(
+            req,
+            &req_surface,
+            &state.skill_rt.workspace_root,
+            needs_clarify,
+            first_layer_decision,
+            &output_contract,
+            wants_file_delivery,
+            schedule_kind,
+            execution_recipe_hint,
+        ) {
+            info!(
+                "{} intent_normalizer task_id={} clarify_explicit_surface_fallback reason={} input={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                fallback.reason,
+                crate::truncate_for_log(req)
+            );
+            return normalizer_output_from_fallback(
+                req,
+                "clarify_structured_surface_fallback",
+                fallback,
+                None,
+            );
+        }
         let mut synced_route_label =
             route_label_from_first_layer_decision(first_layer_decision, execution_finalize_style);
         let structural_contract_repair = apply_current_turn_structural_contract_repair(
@@ -6629,7 +6811,8 @@ pub(crate) async fn run_intent_normalizer(
             &mut wants_file_delivery,
             &mut output_contract,
             state_patch.as_ref(),
-            resolved_existing_directory_from_current_request(state, req).is_some(),
+            resolved_existing_directory_from_current_request(state, req).is_some()
+                || resolved_directory_pair_from_current_request(state, req).is_some(),
             active_text_answer_candidate_repair_applied,
             &mut out.answer_candidate,
         ) {
@@ -7014,10 +7197,366 @@ pub(crate) async fn run_intent_normalizer(
         task.task_id,
         crate::truncate_for_log(&llm_out)
     );
-    // Planner-first: do not synthesize Act/ChatAct locally on parser failure.
+    if let Some(fallback) = parse_failed_explicit_capability_fallback_decision(
+        req,
+        &req_surface,
+        &state.skill_rt.workspace_root,
+    ) {
+        info!(
+            "{} intent_normalizer task_id={} parse_failed_explicit_capability_fallback reason={} input={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            fallback.reason,
+            crate::truncate_for_log(req)
+        );
+        return normalizer_output_from_fallback(
+            req,
+            "parse_failed_structured_capability_fallback",
+            fallback,
+            None,
+        );
+    }
+    if let Some(fallback) = explicit_surface_path_facts_fallback_decision(
+        req,
+        &req_surface,
+        &state.skill_rt.workspace_root,
+    ) {
+        info!(
+            "{} intent_normalizer task_id={} parse_failed_explicit_surface_fallback reason={} input={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            fallback.reason,
+            crate::truncate_for_log(req)
+        );
+        return normalizer_output_from_fallback(
+            req,
+            "parse_failed_structured_surface_fallback",
+            fallback,
+            None,
+        );
+    }
+    // Planner-first: do not synthesize Act/ChatAct locally on parser failure unless
+    // the request has an explicit structured capability token handled above.
     let _ = (resume_context, binding_context);
     let fallback = empty_clarify_decision(req, "normalizer_parse_failed");
     normalizer_output_from_fallback(req, "parse_failed_safe_clarify", fallback, None)
+}
+
+fn parse_failed_explicit_capability_fallback_decision(
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
+) -> Option<RouteDecision> {
+    if !ascii_token_present(req, "git")
+        || req_surface.has_explicit_path_or_url()
+        || req_surface.has_single_filename_candidate()
+        || req_surface.has_filename_candidates()
+        || req_surface.has_structured_target_refinement()
+        || req_surface.has_delivery_token_reference()
+    {
+        return None;
+    }
+
+    Some(RouteDecision {
+        resolved_user_intent: req.trim().to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "normalizer_parse_failed_explicit_git_repository_state".to_string(),
+        confidence: Some(0.55),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::GitRepositoryState,
+            locator_hint: workspace_root.display().to_string(),
+            ..Default::default()
+        },
+    })
+}
+
+fn explicit_surface_path_facts_fallback_decision(
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
+) -> Option<RouteDecision> {
+    let targets = explicit_surface_path_fact_targets(req_surface);
+    if req_surface.inline_json_shape.is_some()
+        || req_surface.has_delivery_token_reference()
+        || req_surface.has_deictic_reference()
+        || structured_target_refinement_blocks_explicit_path_facts(req_surface, &targets)
+    {
+        return None;
+    }
+    if targets.len() < 2 {
+        return None;
+    }
+    Some(RouteDecision {
+        resolved_user_intent: req.trim().to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "normalizer_unavailable_explicit_multi_path_facts".to_string(),
+        confidence: Some(0.50),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            locator_hint: workspace_root.display().to_string(),
+            ..Default::default()
+        },
+    })
+}
+
+fn explicit_surface_path_metadata_clarify_repair_decision(
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
+    needs_clarify: bool,
+    first_layer_decision: FirstLayerDecision,
+    output_contract: &IntentOutputContract,
+    wants_file_delivery: bool,
+    schedule_kind: ScheduleKind,
+    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+) -> Option<RouteDecision> {
+    if !(needs_clarify || matches!(first_layer_decision, FirstLayerDecision::Clarify)) {
+        return None;
+    }
+    let targets = explicit_surface_path_fact_targets(req_surface);
+    if req_surface.inline_json_shape.is_some()
+        || req_surface.has_delivery_token_reference()
+        || req_surface.has_deictic_reference()
+        || structured_target_refinement_blocks_explicit_path_facts(req_surface, &targets)
+        || output_contract.semantic_kind != OutputSemanticKind::QuantityComparison
+        || wants_file_delivery
+        || !matches!(schedule_kind, ScheduleKind::None)
+        || output_contract.delivery_required
+        || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        || matches!(
+            output_contract.response_shape,
+            OutputResponseShape::FileToken
+        )
+        || !matches!(output_contract.self_extension.mode, SelfExtensionMode::None)
+        || !matches!(
+            output_contract.self_extension.trigger,
+            SelfExtensionTrigger::None
+        )
+        || output_contract.self_extension.execute_now
+        || execution_recipe_hint.is_some_and(|spec| {
+            !matches!(
+                spec.kind,
+                crate::execution_recipe::ExecutionRecipeKind::None
+            )
+        })
+    {
+        return None;
+    }
+    if targets.len() < 2 {
+        return None;
+    }
+    Some(RouteDecision {
+        resolved_user_intent: req.trim().to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "normalizer_clarify_explicit_multi_path_metadata".to_string(),
+        confidence: Some(0.55),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::QuantityComparison,
+            locator_hint: workspace_root.display().to_string(),
+            ..Default::default()
+        },
+    })
+}
+
+fn explicit_surface_path_facts_clarify_repair_decision(
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
+    needs_clarify: bool,
+    first_layer_decision: FirstLayerDecision,
+    output_contract: &IntentOutputContract,
+    wants_file_delivery: bool,
+    schedule_kind: ScheduleKind,
+    _execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+) -> Option<RouteDecision> {
+    if !(needs_clarify || matches!(first_layer_decision, FirstLayerDecision::Clarify)) {
+        return None;
+    }
+    if route_has_structured_execution_signal(
+        output_contract,
+        wants_file_delivery,
+        schedule_kind,
+        None,
+    ) {
+        return None;
+    }
+    let mut decision =
+        explicit_surface_path_facts_fallback_decision(req, req_surface, workspace_root)?;
+    decision.reason = "normalizer_clarify_explicit_multi_path_facts".to_string();
+    decision.confidence = Some(0.55);
+    Some(decision)
+}
+
+fn explicit_surface_path_fact_targets(
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> Vec<String> {
+    let pair_targets = req_surface
+        .locator_target_pair
+        .as_ref()
+        .map(|(left, right)| vec![left.clone(), right.clone()])
+        .unwrap_or_default();
+    let candidates = if pair_targets.len() >= 2 {
+        pair_targets
+    } else {
+        req_surface.filename_candidates.clone()
+    };
+    let mut out = Vec::new();
+    for candidate in candidates {
+        let candidate = trim_structural_path_fact_candidate(&candidate);
+        if !candidate.is_empty()
+            && token_looks_like_supported_path_fact_target(&candidate)
+            && !out
+                .iter()
+                .any(|existing: &String| existing.eq_ignore_ascii_case(&candidate))
+        {
+            out.push(candidate);
+        }
+        if out.len() >= 8 {
+            break;
+        }
+    }
+    out
+}
+
+fn structured_target_refinement_blocks_explicit_path_facts(
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    targets: &[String],
+) -> bool {
+    let mentions_block = !req_surface.field_selector_mentions.is_empty()
+        && !req_surface
+            .field_selector_mentions
+            .iter()
+            .all(|selector| selector_matches_explicit_path_target(selector, targets));
+    mentions_block
+        || req_surface
+            .dotted_field_selector
+            .as_deref()
+            .is_some_and(|selector| !selector_matches_explicit_path_target(selector, targets))
+}
+
+fn selector_matches_explicit_path_target(selector: &str, targets: &[String]) -> bool {
+    let selector = selector.trim();
+    !selector.is_empty()
+        && targets.iter().any(|target| {
+            Path::new(target)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .is_some_and(|name| name.eq_ignore_ascii_case(selector))
+        })
+}
+
+fn trim_structural_path_fact_candidate(candidate: &str) -> String {
+    let trimmed = candidate
+        .trim()
+        .trim_matches(|ch: char| {
+            matches!(
+                ch,
+                '"' | '\''
+                    | '`'
+                    | ','
+                    | '，'
+                    | '。'
+                    | ':'
+                    | '：'
+                    | ';'
+                    | '；'
+                    | '('
+                    | ')'
+                    | '（'
+                    | '）'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '<'
+                    | '>'
+                    | '《'
+                    | '》'
+            )
+        })
+        .to_string();
+    if let Some(stripped) = trimmed.strip_suffix('.') {
+        if token_looks_like_supported_path_fact_target(stripped) {
+            return stripped.to_string();
+        }
+    }
+    trimmed
+}
+
+fn token_looks_like_supported_path_fact_target(token: &str) -> bool {
+    let token = token.trim();
+    if token.is_empty()
+        || token.starts_with("http://")
+        || token.starts_with("https://")
+        || crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(token)
+    {
+        return false;
+    }
+    let Some(name) = Path::new(token)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    else {
+        return false;
+    };
+    let Some((stem, extension)) = name.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty()
+        && matches!(
+            extension.to_ascii_lowercase().as_str(),
+            "md" | "txt"
+                | "json"
+                | "toml"
+                | "yaml"
+                | "yml"
+                | "rs"
+                | "log"
+                | "sqlite"
+                | "db"
+                | "csv"
+        )
+}
+
+fn ascii_token_present(text: &str, token: &str) -> bool {
+    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'))
+        .any(|candidate| candidate.eq_ignore_ascii_case(token))
 }
 
 fn is_bare_path_only_input_for_clarify(
@@ -11929,6 +12468,74 @@ mod tests {
     }
 
     #[test]
+    fn semantic_contract_repair_promotes_empty_path_locator_for_multi_path_facts() {
+        let req = "Inspecte ces chemins: scripts/nl_tests/fixtures/device_local/package.json et scripts/nl_tests/fixtures/device_local/nope.json; indique existence et type.";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let workspace_root = std::path::Path::new("/workspace");
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        };
+
+        super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            workspace_root,
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+        assert_eq!(contract.locator_hint, "/workspace");
+        assert_eq!(
+            contract.semantic_kind,
+            OutputSemanticKind::ExistenceWithPath
+        );
+    }
+
+    #[test]
+    fn semantic_contract_repair_replaces_combined_path_hint_for_multi_path_facts() {
+        let req = "Inspecte ces chemins: scripts/nl_tests/fixtures/device_local/package.json et scripts/nl_tests/fixtures/device_local/nope.json; indique existence et type.";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let workspace_root = std::path::Path::new("/workspace");
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::ExistenceWithPath,
+            locator_hint: "scripts/nl_tests/fixtures/device_local/package.json, scripts/nl_tests/fixtures/device_local/nope.json".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        };
+
+        super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            workspace_root,
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+        assert_eq!(contract.locator_hint, "/workspace");
+    }
+
+    #[test]
     fn scalar_file_contract_repair_ignores_invented_answer_candidate() {
         let req = "读取 package.json 里的 name 字段，只输出值";
         let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
@@ -13286,6 +13893,168 @@ mod tests {
     }
 
     #[test]
+    fn parse_failed_git_capability_fallback_builds_repository_state_contract() {
+        let req = "只告诉我当前 git 分支名。";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let fallback = super::parse_failed_explicit_capability_fallback_decision(
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+        )
+        .expect("explicit git capability fallback");
+
+        assert!(!fallback.needs_clarify);
+        assert_eq!(
+            fallback.output_contract.semantic_kind,
+            OutputSemanticKind::GitRepositoryState
+        );
+        assert_eq!(
+            fallback.output_contract.locator_kind,
+            OutputLocatorKind::CurrentWorkspace
+        );
+        assert!(fallback.output_contract.requires_content_evidence);
+    }
+
+    #[test]
+    fn parse_failed_git_capability_fallback_does_not_steal_path_targets() {
+        let req = "git show HEAD:README.md";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+
+        assert!(super::parse_failed_explicit_capability_fallback_decision(
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn explicit_surface_path_facts_fallback_builds_existence_contract() {
+        let req = "Inspecte ces chemins: scripts/nl_tests/fixtures/device_local/package.json et scripts/nl_tests/fixtures/device_local/nope.json; indique existence et type.";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let fallback = super::explicit_surface_path_facts_fallback_decision(
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+        )
+        .expect("explicit multi-path facts fallback");
+
+        assert!(!fallback.needs_clarify);
+        assert_eq!(
+            fallback.output_contract.semantic_kind,
+            OutputSemanticKind::ExistenceWithPath
+        );
+        assert_eq!(
+            fallback.output_contract.locator_kind,
+            OutputLocatorKind::CurrentWorkspace
+        );
+        assert!(fallback.output_contract.requires_content_evidence);
+    }
+
+    #[test]
+    fn explicit_surface_path_facts_clarify_repair_overrides_missing_path_clarify() {
+        let req = "Inspecte ces chemins: scripts/nl_tests/fixtures/device_local/package.json et scripts/nl_tests/fixtures/device_local/nope.json; indique existence et type.";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let fallback = super::explicit_surface_path_facts_clarify_repair_decision(
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            true,
+            FirstLayerDecision::Clarify,
+            &IntentOutputContract::default(),
+            false,
+            ScheduleKind::None,
+            None,
+        )
+        .expect("explicit multi-path clarify repair");
+
+        assert!(!fallback.needs_clarify);
+        assert_eq!(
+            fallback.output_contract.semantic_kind,
+            OutputSemanticKind::ExistenceWithPath
+        );
+        assert_eq!(
+            fallback.reason,
+            "normalizer_clarify_explicit_multi_path_facts"
+        );
+    }
+
+    #[test]
+    fn explicit_surface_path_metadata_clarify_repair_preserves_quantity_comparison() {
+        let req = "Inspect metadata for scripts/nl_tests/fixtures/device_local/package.json and scripts/nl_tests/fixtures/device_local/configs/app_config.toml.";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::QuantityComparison,
+            ..Default::default()
+        };
+        let fallback = super::explicit_surface_path_metadata_clarify_repair_decision(
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            true,
+            FirstLayerDecision::Clarify,
+            &contract,
+            false,
+            ScheduleKind::None,
+            None,
+        )
+        .expect("explicit metadata clarify repair");
+
+        assert!(!fallback.needs_clarify);
+        assert_eq!(
+            fallback.output_contract.semantic_kind,
+            OutputSemanticKind::QuantityComparison
+        );
+        assert_eq!(
+            fallback.output_contract.locator_kind,
+            OutputLocatorKind::CurrentWorkspace
+        );
+        assert_eq!(
+            fallback.reason,
+            "normalizer_clarify_explicit_multi_path_metadata"
+        );
+    }
+
+    #[test]
+    fn explicit_surface_path_facts_clarify_repair_preserves_structured_contract() {
+        let req = "Inspecte ces chemins: scripts/nl_tests/fixtures/device_local/package.json et scripts/nl_tests/fixtures/device_local/nope.json; indique existence et type.";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            ..Default::default()
+        };
+
+        assert!(super::explicit_surface_path_facts_clarify_repair_decision(
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            true,
+            FirstLayerDecision::Clarify,
+            &contract,
+            false,
+            ScheduleKind::None,
+            None,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn explicit_surface_path_facts_fallback_ignores_single_path() {
+        let req = "scripts/nl_tests/fixtures/device_local/package.json";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+
+        assert!(super::explicit_surface_path_facts_fallback_decision(
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+        )
+        .is_none());
+    }
+
+    #[test]
     fn workspace_scope_patch_sets_locator_hint_from_structured_scope() {
         let mut contract = IntentOutputContract {
             exact_sentence_count: None,
@@ -14155,6 +14924,76 @@ mod tests {
         assert_eq!(reason, None);
         assert_eq!(decision, FirstLayerDecision::PlannerExecute);
         assert!(contract.requires_content_evidence);
+    }
+
+    #[test]
+    fn active_text_repair_preserves_current_request_directory_pair_anchor() {
+        let workspace_root = make_temp_workspace_with_child("directory_pair_anchor", "seed");
+        for idx in 0..2500 {
+            std::fs::create_dir_all(workspace_root.join(format!("aaa_filler_{idx:04}")))
+                .expect("create filler");
+        }
+        std::fs::create_dir_all(workspace_root.join("fixtures/tmp/bundle_src")).expect("left");
+        std::fs::create_dir_all(workspace_root.join("fixtures/tmp/dynamic_guard_unpack_case"))
+            .expect("right");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = workspace_root.clone();
+        state.skill_rt.default_locator_search_dir = workspace_root.clone();
+        state.skill_rt.locator_scan_max_files = 10;
+        let request =
+            "bundle_src 와 dynamic_guard_unpack_case 를 재귀 비교하고 차이가 있는지 짧게 답해.";
+        assert!(super::resolved_directory_pair_from_current_request(&state, request).is_some());
+
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("Write a document outline".to_string()),
+                last_primary_task_output: Some("Outline draft".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let mut turn_type = Some(TurnType::TaskRequest);
+        let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+        let mut needs_clarify = false;
+        let mut wants_file_delivery = false;
+        let mut answer_candidate = String::new();
+        let mut contract = IntentOutputContract {
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            semantic_kind: OutputSemanticKind::None,
+            response_shape: OutputResponseShape::Free,
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_active_text_followup_route_repair(
+            request,
+            Some(&snapshot),
+            &mut turn_type,
+            &mut target_task_policy,
+            false,
+            &mut decision,
+            &mut finalize_style,
+            &mut needs_clarify,
+            super::ScheduleKind::None,
+            false,
+            &mut wants_file_delivery,
+            &mut contract,
+            None,
+            true,
+            false,
+            &mut answer_candidate,
+        );
+
+        assert_eq!(reason, None);
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+
+        let _ = std::fs::remove_dir_all(workspace_root);
     }
 
     #[test]

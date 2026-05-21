@@ -162,6 +162,124 @@ fn replace_placeholder_delivery_with_synthesis(task: &ClaimedTask, loop_state: &
     loop_state.last_user_visible_respond = Some(synthesis.to_string());
 }
 
+fn replace_raw_read_delivery_with_synthesis(
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+        || !latest_publishable_synthesis_step_matches(loop_state)
+    {
+        return false;
+    }
+    let Some(synthesis) = loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    else {
+        return false;
+    };
+    if crate::finalize::looks_like_planner_artifact(synthesis)
+        || crate::finalize::looks_like_internal_trace_artifact(synthesis)
+        || crate::finalize::parse_delivery_token(synthesis).is_some()
+    {
+        return false;
+    }
+    let Some(current_delivery) = current_user_visible_delivery_text(loop_state) else {
+        return false;
+    };
+    if current_delivery == synthesis
+        || !delivery_is_raw_read_observation(current_delivery, loop_state)
+    {
+        return false;
+    }
+
+    info!(
+        "final_result_replace_raw_read_delivery_with_synthesis task_id={} raw={}",
+        task.task_id,
+        crate::truncate_for_log(current_delivery)
+    );
+    loop_state.delivery_messages.clear();
+    append_delivery_message(
+        &task.task_id,
+        &mut loop_state.delivery_messages,
+        synthesis.to_string(),
+    );
+    loop_state.last_user_visible_respond = Some(synthesis.to_string());
+    true
+}
+
+fn delivery_is_raw_read_observation(delivery: &str, loop_state: &LoopState) -> bool {
+    let delivery = delivery.trim();
+    if delivery.is_empty()
+        || crate::finalize::is_execution_summary_message(delivery)
+        || message_is_non_answer_separator(delivery)
+    {
+        return false;
+    }
+    raw_read_range_output(delivery)
+        || read_range_excerpt_like(delivery)
+        || (crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+            delivery, loop_state,
+        ) && loop_state
+            .executed_step_results
+            .iter()
+            .rev()
+            .any(step_output_is_read_range))
+}
+
+fn step_output_is_read_range(step: &crate::executor::StepExecutionResult) -> bool {
+    if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+        return false;
+    }
+    step.output
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(raw_read_range_output)
+}
+
+fn raw_read_range_output(output: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(output.trim())
+        .ok()
+        .is_some_and(|value| {
+            matches!(
+                value.get("action").and_then(|value| value.as_str()),
+                Some("read_range" | "read_text_range")
+            ) && value
+                .get("excerpt")
+                .and_then(|value| value.as_str())
+                .is_some_and(|excerpt| !excerpt.trim().is_empty())
+        })
+}
+
+fn read_range_excerpt_like(output: &str) -> bool {
+    let mut numbered_lines = 0usize;
+    let mut total_lines = 0usize;
+    for line in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        total_lines += 1;
+        let Some((prefix, rest)) = line.split_once('|') else {
+            continue;
+        };
+        if !rest.trim().is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit()) {
+            numbered_lines += 1;
+        }
+    }
+    total_lines >= 3 && numbered_lines >= 3
+}
+
 fn route_requires_content_evidence(agent_run_context: Option<&AgentRunContext>) -> bool {
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
@@ -1829,6 +1947,24 @@ fn replace_delivery_with_loop_contract_observed_answer(
     else {
         return false;
     };
+    if latest_publishable_synthesis_step_matches(loop_state)
+        && current_user_visible_delivery_text(loop_state).is_some_and(|delivery| {
+            let delivery = delivery.trim();
+            loop_state
+                .last_publishable_synthesis_output
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|synthesis| {
+                    delivery == synthesis
+                        && !delivery_is_raw_read_observation(delivery, loop_state)
+                        && !crate::finalize::looks_like_planner_artifact(delivery)
+                        && !crate::finalize::looks_like_internal_trace_artifact(delivery)
+                        && crate::finalize::parse_delivery_token(delivery).is_none()
+                })
+        })
+    {
+        return false;
+    }
     if !loop_contract_observed_answer_satisfies_required_evidence(loop_state, answer_kind) {
         return false;
     }
@@ -2695,6 +2831,28 @@ fn prefer_observed_answer_for_exact_contract(
         });
     let scalar_value_contract =
         route.output_contract.response_shape == crate::OutputResponseShape::Scalar;
+    if current_delivery_is_publishable_synthesis
+        && latest_publishable_synthesis_step_matches(loop_state)
+        && !(has_prior_step_error && allow_prior_step_error_replacement)
+        && delivery_messages.last().is_some_and(|message| {
+            !delivery_is_raw_read_observation(message, loop_state)
+                && !crate::finalize::looks_like_planner_artifact(message)
+                && !crate::finalize::looks_like_internal_trace_artifact(message)
+                && crate::finalize::parse_delivery_token(message).is_none()
+        })
+    {
+        info!(
+            "delivery exact_contract_keep_latest_synthesis task_id={} answer={}",
+            task_id,
+            crate::truncate_for_log(
+                delivery_messages
+                    .last()
+                    .map(String::as_str)
+                    .unwrap_or_default()
+            )
+        );
+        return;
+    }
     if !current_delivery_is_publishable_synthesis
         && !scalar_value_contract
         && delivery_messages
@@ -2993,6 +3151,7 @@ fn output_contract_requests_exact_delivery(route: &crate::RouteResult) -> bool {
             | crate::OutputSemanticKind::DirectoryEntryGroups
             | crate::OutputSemanticKind::FilePaths
             | crate::OutputSemanticKind::GitCommitSubject
+            | crate::OutputSemanticKind::GitRepositoryState
             | crate::OutputSemanticKind::StructuredKeys
     )
 }
@@ -4165,6 +4324,51 @@ fn run_cmd_failure_direct_answer(
     Some(sentence)
 }
 
+fn db_basic_failure_direct_answer(
+    state: &AppState,
+    user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    failed_step: &crate::executor::StepExecutionResult,
+    raw_error: &str,
+    normalized_error: &str,
+) -> Option<String> {
+    let structured = crate::skills::parse_structured_skill_error(raw_error)?;
+    let effective_skill = if structured.skill.trim().is_empty() {
+        failed_step.skill.as_str()
+    } else {
+        structured.skill.as_str()
+    };
+    if !effective_skill.eq_ignore_ascii_case("db_basic") {
+        return None;
+    }
+    if !matches!(
+        structured.error_kind.as_str(),
+        "sqlite_open_failed"
+            | "sqlite_query_failed"
+            | "sqlite_execute_failed"
+            | "unsafe_sql"
+            | "confirmation_required"
+            | "invalid_input"
+            | "unsupported_action"
+    ) {
+        return None;
+    }
+    let target =
+        content_evidence_failed_step_target_label(loop_state, agent_run_context, failed_step);
+    let prefer_english = prefer_english_for_user_text(state, user_text);
+    Some(match (prefer_english, target) {
+        (true, Some(target)) => {
+            format!("The database request for `{target}` failed: {normalized_error}.")
+        }
+        (true, None) => format!("The database request failed: {normalized_error}."),
+        (false, Some(target)) => {
+            format!("数据库请求 `{target}` 执行失败：{normalized_error}。")
+        }
+        (false, None) => format!("数据库请求执行失败：{normalized_error}。"),
+    })
+}
+
 fn missing_content_target_label(
     agent_run_context: Option<&AgentRunContext>,
     error: &str,
@@ -4187,14 +4391,13 @@ fn missing_content_target_label(
 
 fn content_evidence_missing_target_answer(
     state: &AppState,
-    task: &ClaimedTask,
+    _task: &ClaimedTask,
     user_text: &str,
     agent_run_context: Option<&AgentRunContext>,
     error: &str,
 ) -> String {
     let target = missing_content_target_label(agent_run_context, error);
-    let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
-    if crate::fallback::fallback_prefers_english_for_language_hint(state, &language_hint) {
+    if prefer_english_for_user_text(state, user_text) {
         format!(
             "I couldn't find `{target}`, so I didn't read any content. Please confirm the path or filename and send it again."
         )
@@ -4324,6 +4527,30 @@ async fn content_evidence_step_failure_answer(
     if permission_denied || recoverable_skill_error || observable_run_cmd_error {
         return Some((
             default_answer,
+            crate::task_journal::TaskJournalFinalizerSummary {
+                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                contract_ok: true,
+                completion_ok: Some(true),
+                grounded_ok: Some(true),
+                format_ok: Some(true),
+                needs_clarify: Some(false),
+                used_evidence_ids_count: 1,
+                ..Default::default()
+            },
+        ));
+    }
+    if let Some(answer) = db_basic_failure_direct_answer(
+        state,
+        user_text,
+        loop_state,
+        agent_run_context,
+        failed_step,
+        raw_error,
+        error,
+    ) {
+        return Some((
+            answer,
             crate::task_journal::TaskJournalFinalizerSummary {
                 stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
                 disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
@@ -4475,6 +4702,7 @@ fn content_evidence_failure_suppresses_execution_summary(loop_state: &LoopState)
                 .filter(|error| !error.is_empty())
                 .map(|error| {
                     error_looks_like_os_permission_denied(error)
+                        || error_looks_like_missing_file_or_directory(error)
                         || crate::skills::is_observable_run_cmd_error(&step.skill, error)
                 })
         })
@@ -5934,6 +6162,126 @@ fn deterministic_structured_container_summary_answer(
         .find_map(|value| structured_container_from_extract_value(&value, prefer_english))
 }
 
+fn direct_db_basic_observed_answer(
+    state: &AppState,
+    user_text: &str,
+    loop_state: &crate::agent_engine::LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    if route.output_contract.delivery_required || !route.output_contract.requires_content_evidence {
+        return None;
+    }
+    if matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::FileToken
+    ) {
+        return None;
+    }
+    let prefer_english = prefer_english_for_user_text(state, user_text);
+    let answer = loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find(|step| {
+            step.is_ok()
+                && step.skill == "db_basic"
+                && step
+                    .output
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|output| !output.is_empty())
+        })
+        .and_then(|step| step.output.as_deref())
+        .and_then(db_basic_rows_answer_from_output)?;
+    if answer.trim().is_empty() {
+        return None;
+    }
+    Some((
+        if prefer_english {
+            answer
+        } else {
+            answer.replace(", ", "，")
+        },
+        crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: 1,
+            ..Default::default()
+        },
+    ))
+}
+
+fn db_basic_rows_answer_from_output(output: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
+    let result = value
+        .get("columns")
+        .and_then(|_| value.get("rows"))
+        .map(|_| &value)
+        .or_else(|| value.get("result"))
+        .or_else(|| value.get("extra").and_then(|extra| extra.get("result")))?;
+    let columns = result
+        .get("columns")
+        .and_then(|value| value.as_array())?
+        .iter()
+        .filter_map(|value| value.as_str().map(str::trim))
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if columns.is_empty() {
+        return None;
+    }
+    let rows = result.get("rows").and_then(|value| value.as_array())?;
+    if rows.is_empty() {
+        return Some("No rows returned.".to_string());
+    }
+    if rows.len() == 1 && columns.len() == 1 {
+        return rows
+            .first()
+            .and_then(|row| db_row_column_value(row, &columns[0], 0));
+    }
+    if columns.len() == 1 {
+        let lines = rows
+            .iter()
+            .filter_map(|row| db_row_column_value(row, &columns[0], 0))
+            .take(50)
+            .collect::<Vec<_>>();
+        return (!lines.is_empty()).then(|| lines.join("\n"));
+    }
+
+    let lines = rows
+        .iter()
+        .filter_map(|row| db_row_line(row, &columns))
+        .take(50)
+        .collect::<Vec<_>>();
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+fn db_row_line(row: &serde_json::Value, columns: &[String]) -> Option<String> {
+    let values = columns
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, column)| {
+            db_row_column_value(row, column, idx).map(|value| format!("{column}: {value}"))
+        })
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| values.join(", "))
+}
+
+fn db_row_column_value(row: &serde_json::Value, column: &str, index: usize) -> Option<String> {
+    match row {
+        serde_json::Value::Object(map) => map.get(column).and_then(json_scalar_display),
+        serde_json::Value::Array(values) => values.get(index).and_then(json_scalar_display),
+        _ => None,
+    }
+}
+
 fn structured_file_format_for_path(path: &str) -> Option<&'static str> {
     match Path::new(path)
         .extension()
@@ -6353,6 +6701,11 @@ async fn missing_delivery_after_observation_message(
     ) {
         return answer;
     }
+    if let Some((answer, _summary)) =
+        direct_db_basic_observed_answer(state, user_text, loop_state, agent_run_context)
+    {
+        return answer;
+    }
     let default_text = missing_delivery_after_observation_default_message(state, user_text);
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let contract = crate::fallback::UserResponseContract::tool_failure(
@@ -6422,6 +6775,10 @@ async fn observed_execution_without_publishable_delivery_reply(
                     loop_state,
                     agent_run_context,
                 )
+            })
+            .or_else(|| {
+                direct_db_basic_observed_answer(state, user_text, loop_state, agent_run_context)
+                    .map(|(answer, _summary)| answer)
             })
             .or_else(|| {
                 deterministic_missing_observed_target_answer(
@@ -6765,6 +7122,20 @@ pub(crate) async fn finalize_loop_reply(
 
     if loop_state.delivery_messages.is_empty() {
         if let Some((answer, summary)) =
+            direct_db_basic_observed_answer(state, user_text, &loop_state, agent_run_context)
+        {
+            finalizer_summary = Some(summary);
+            loop_state.last_user_visible_respond = Some(answer.clone());
+            append_delivery_message(&task.task_id, &mut loop_state.delivery_messages, answer);
+            info!(
+                "delivery fallback_from_db_basic_observed task_id={}",
+                task.task_id
+            );
+        }
+    }
+
+    if loop_state.delivery_messages.is_empty() {
+        if let Some((answer, summary)) =
             direct_non_builtin_skill_raw_answer(state, &loop_state, agent_run_context)
         {
             finalizer_summary = Some(summary);
@@ -6955,6 +7326,7 @@ pub(crate) async fn finalize_loop_reply(
     enforce_delivery_output_contract(state, task, user_text, &mut loop_state, agent_run_context)
         .await;
     replace_placeholder_delivery_with_synthesis(task, &mut loop_state);
+    replace_raw_read_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
     let replaced_contract_answer = replace_delivery_with_loop_contract_observed_answer(
         task,
         &mut loop_state,
@@ -7308,7 +7680,8 @@ mod tests {
         deterministic_missing_observed_target_answer,
         deterministic_observed_execution_status_answer,
         deterministic_structured_file_validation_from_read_range,
-        direct_config_edit_observed_answer, direct_file_token_from_observed_auto_locator_filename,
+        direct_config_edit_observed_answer, direct_db_basic_observed_answer,
+        direct_file_token_from_observed_auto_locator_filename,
         direct_file_token_from_observed_inventory, direct_non_builtin_skill_raw_answer,
         direct_publishable_observed_answer, direct_quantity_comparison_from_compare_paths,
         direct_rustclaw_config_risk_answer, direct_scalar_observed_answer,
@@ -7674,6 +8047,61 @@ mod tests {
             started_at: 1,
             finished_at: 2,
         }
+    }
+
+    #[test]
+    fn direct_db_basic_observed_answer_uses_latest_rows_after_synthesis_failure() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "db_basic",
+            r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]}"#,
+        ));
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "synthesize_answer".to_string(),
+            status: StepExecutionStatus::Error,
+            output: None,
+            error: Some("synthesis failed".to_string()),
+            started_at: 1,
+            finished_at: 2,
+        });
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_3",
+            "db_basic",
+            r#"{"columns":["id","name"],"rows":[{"id":1,"name":"Alice"},{"id":2,"name":"Bob"}]}"#,
+        ));
+
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+
+        let (answer, summary) = direct_db_basic_observed_answer(
+            &state,
+            "Read id and name from users limit 2.",
+            &loop_state,
+            Some(&ctx),
+        )
+        .expect("db rows fallback");
+
+        assert!(answer.contains("id: 1"));
+        assert!(answer.contains("name: Alice"));
+        assert!(answer.contains("id: 2"));
+        assert!(answer.contains("name: Bob"));
+        assert!(!answer.contains("orders"));
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
     }
 
     #[test]
@@ -10076,6 +10504,73 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn content_evidence_db_query_error_is_completion() {
+        let state = test_state();
+        let task = claimed_task("task-db-query-error");
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "query missing table".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "db_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": "sqlite_query",
+                        "db_path": "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite",
+                        "sql": "SELECT * FROM missing_table"
+                    }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(err_step_result(
+            "step_1",
+            "db_basic",
+            &format!(
+                "__RC_SKILL_ERROR__:{}",
+                serde_json::json!({
+                    "skill": "db_basic",
+                    "error_kind": "sqlite_query_failed",
+                    "error_text": "prepare query failed: no such table: missing_table",
+                    "platform": "linux"
+                })
+            ),
+        ));
+
+        let (answer, summary) = content_evidence_step_failure_answer(
+            &state,
+            &task,
+            "Read missing_table and explain the SQLite error.",
+            &loop_state,
+            Some(&agent_run_context),
+        )
+        .await
+        .expect("db query error should be publishable");
+
+        assert!(answer.contains("missing_table"));
+        assert!(answer.contains("no such table"));
+        assert_eq!(summary.completion_ok, Some(true));
+        assert_eq!(
+            summary.disposition,
+            Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        );
+    }
+
     #[test]
     fn execution_summary_normalizes_recoverable_crypto_account_error() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -11382,10 +11877,7 @@ mod tests {
                 || reply.text.to_ascii_lowercase().contains("does not exist")
                 || reply.text.to_ascii_lowercase().contains("no such file")
         );
-        assert_eq!(reply.messages.len(), 2);
-        assert!(crate::finalize::is_execution_summary_message(
-            &reply.messages[0]
-        ));
+        assert_eq!(reply.messages.len(), 1);
         assert_eq!(reply.messages.last(), Some(&reply.text));
         assert_eq!(
             reply
@@ -11394,6 +11886,37 @@ mod tests {
                 .and_then(|journal| journal.final_status),
             Some(crate::task_journal::TaskJournalFinalStatus::Success)
         );
+    }
+
+    #[test]
+    fn content_evidence_missing_target_answer_uses_english_for_non_chinese_request() {
+        let state = test_state();
+        let task = claimed_task("task-missing-read-target-french");
+        let answer = super::content_evidence_missing_target_answer(
+            &state,
+            &task,
+            "Valide plan/does_not_exist_builtin_tool_case.toml comme TOML et explique l'echec clairement.",
+            None,
+            "__RC_READ_FILE_NOT_FOUND__:plan/does_not_exist_builtin_tool_case.toml",
+        );
+
+        assert!(answer.starts_with("I couldn't find"), "answer: {answer}");
+        assert!(
+            !answer.contains("未找到"),
+            "non-Chinese missing-target fallback should not use Chinese: {answer}"
+        );
+    }
+
+    #[test]
+    fn content_evidence_failure_suppresses_execution_summary_for_missing_target() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(err_step_result(
+            "step_1",
+            "system_basic",
+            "__RC_READ_FILE_NOT_FOUND__:plan/does_not_exist_builtin_tool_case.toml",
+        ));
+
+        assert!(super::content_evidence_failure_suppresses_execution_summary(&loop_state));
     }
 
     #[tokio::test]
@@ -11446,12 +11969,12 @@ mod tests {
         .await
         .expect("finalize should return a missing-target answer");
 
-        assert!(reply.text.contains("未找到"), "text: {}", reply.text);
         assert!(
-            !reply.text.contains("I couldn't find"),
+            reply.text.contains("I couldn't find"),
             "text: {}",
             reply.text
         );
+        assert!(!reply.text.contains("未找到"), "text: {}", reply.text);
     }
 
     #[tokio::test]
@@ -11507,15 +12030,16 @@ mod tests {
         .await
         .expect("finalize should return a missing-target answer");
 
-        assert!(reply.text.contains("未找到"), "text: {}", reply.text);
+        assert!(
+            reply.text.contains("I couldn't find"),
+            "text: {}",
+            reply.text
+        );
         assert!(
             reply.text != "./NO_SUCH_RUSTCLAW_TEST_987654.txt",
             "missing target answer must not be reshaped into path-only scalar"
         );
-        assert_eq!(reply.messages.len(), 2);
-        assert!(crate::finalize::is_execution_summary_message(
-            &reply.messages[0]
-        ));
+        assert_eq!(reply.messages.len(), 1);
         assert_eq!(reply.messages.last(), Some(&reply.text));
     }
 
@@ -11561,10 +12085,7 @@ mod tests {
                 || reply.text.to_ascii_lowercase().contains("not found")
                 || reply.text.to_ascii_lowercase().contains("does not exist")
         );
-        assert_eq!(reply.messages.len(), 2);
-        assert!(crate::finalize::is_execution_summary_message(
-            &reply.messages[0]
-        ));
+        assert_eq!(reply.messages.len(), 1);
         assert_eq!(reply.messages.last(), Some(&reply.text));
         assert_eq!(
             reply
@@ -13207,12 +13728,49 @@ mod tests {
         .expect("finalize should succeed");
 
         assert_eq!(reply.text, "有，路径：/tmp/rustclaw.service");
-        assert_eq!(reply.messages.len(), 2);
-        assert!(reply.messages[0].contains("**执行过程**"));
-        assert!(reply.messages[0].contains("run_cmd"));
-        assert_eq!(reply.messages[1], "有，路径：/tmp/rustclaw.service");
+        assert_eq!(reply.messages, vec!["有，路径：/tmp/rustclaw.service"]);
         assert!(!reply.should_fail_task);
         assert!(!reply.is_llm_reply);
+    }
+
+    #[tokio::test]
+    async fn finalize_loop_reply_replaces_raw_read_delivery_with_latest_synthesis() {
+        let state = test_state();
+        let task = claimed_task("task-raw-read-delivery-synthesis");
+        let raw_read = r#"{"action":"read_range","mode":"head","excerpt":"1|alpha\n2|beta\n3|gamma","path":"/tmp/app.log"}"#;
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state
+            .executed_step_results
+            .push(ok_step_result("step_1", "fs_basic", raw_read));
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_2",
+            "synthesize_answer",
+            "검색 결과 없음",
+        ));
+        loop_state.delivery_messages.push(raw_read.to_string());
+        loop_state.last_user_visible_respond = Some(raw_read.to_string());
+        loop_state.last_publishable_synthesis_output = Some("검색 결과 없음".to_string());
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let reply = finalize_loop_reply(
+            &state,
+            &task,
+            "app.log 에서 impossible_keyword_987 을 찾아보고 결과를 짧게 말해.",
+            loop_state,
+            Some(&agent_run_context),
+        )
+        .await
+        .expect("finalize should use synthesis");
+
+        assert_eq!(reply.text, "검색 결과 없음");
+        assert_eq!(reply.messages, vec!["검색 결과 없음".to_string()]);
+        assert!(!reply.should_fail_task);
     }
 
     #[tokio::test]

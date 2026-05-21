@@ -232,7 +232,16 @@ fn name_patterns_from_args(obj: &serde_json::Map<String, Value>) -> Result<Vec<S
     let raw_patterns = string_values_from_args(
         obj,
         &[
-            "pattern", "patterns", "name", "names", "keyword", "keywords", "query", "queries",
+            "pattern",
+            "patterns",
+            "name",
+            "names",
+            "entry_name",
+            "entry_names",
+            "keyword",
+            "keywords",
+            "query",
+            "queries",
         ],
     );
     if raw_patterns.is_empty() {
@@ -253,7 +262,16 @@ fn optional_name_patterns_from_args(obj: &serde_json::Map<String, Value>) -> Vec
     string_values_from_args(
         obj,
         &[
-            "pattern", "patterns", "name", "names", "keyword", "keywords", "query", "queries",
+            "pattern",
+            "patterns",
+            "name",
+            "names",
+            "entry_name",
+            "entry_names",
+            "keyword",
+            "keywords",
+            "query",
+            "queries",
         ],
     )
     .iter()
@@ -1029,6 +1047,38 @@ mod tests {
         assert!(results.iter().any(|path| path.ends_with("image.toml")));
         assert!(!results.iter().any(|path| path.ends_with("audio_dir")));
         assert!(!results.iter().any(|path| path.ends_with("stock.toml")));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn find_name_accepts_entry_name_alias() {
+        let root = unique_temp_dir("entry-name-alias");
+        let nested = root.join("nested");
+        std::fs::create_dir_all(&nested).expect("create nested dir");
+        std::fs::write(nested.join("config.ini"), "").expect("write config");
+        std::fs::write(root.join("config.txt"), "").expect("write sibling");
+
+        let out = execute(json!({
+            "action": "find_name",
+            "entry_name": "config.ini",
+            "target_kind": "file",
+            "root": root.to_string_lossy().to_string(),
+            "max_depth": 3,
+            "max_results": 10
+        }))
+        .expect("find_name succeeds with entry_name alias");
+
+        assert_eq!(out.get("count").and_then(Value::as_u64), Some(1));
+        let results = out
+            .get("results")
+            .and_then(Value::as_array)
+            .expect("results array")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ends_with("nested/config.ini"));
 
         let _ = std::fs::remove_dir_all(root);
     }

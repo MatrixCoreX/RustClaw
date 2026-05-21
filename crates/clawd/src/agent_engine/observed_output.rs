@@ -1425,6 +1425,174 @@ fn inventory_dir_direct_answer_candidate(
     normalized_listing_text(&names.join("\n"))
 }
 
+fn tree_summary_display_name(entry: &serde_json::Value) -> Option<String> {
+    entry
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            entry
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .and_then(|path| Path::new(path).file_name().and_then(|name| name.to_str()))
+                .map(ToOwned::to_owned)
+        })
+}
+
+fn tree_summary_direct_answer_candidate(
+    state: Option<&AppState>,
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<String> {
+    if value.get("action").and_then(|v| v.as_str()) != Some("tree_summary") {
+        return None;
+    }
+    let tree = value.get("tree")?;
+    let children = tree.get("children").and_then(|v| v.as_array())?;
+    let mut dirs = Vec::new();
+    let mut files = Vec::new();
+    let mut other = Vec::new();
+    for child in children {
+        let mut name = tree_summary_display_name(child)?;
+        let kind = child
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .unwrap_or("");
+        match kind {
+            "dir" => {
+                if !name.ends_with('/') {
+                    name.push('/');
+                }
+                dirs.push(name);
+            }
+            "file" => files.push(name),
+            _ => other.push(name),
+        }
+    }
+    if dirs.is_empty() && files.is_empty() && other.is_empty() {
+        return Some(observed_t(
+            state,
+            "clawd.msg.tree_summary_empty",
+            "顶层为空",
+            "Top level is empty",
+            prefer_english,
+        ));
+    }
+    let mut parts = Vec::new();
+    if !dirs.is_empty() {
+        parts.push(format!(
+            "{} {}",
+            observed_t(
+                state,
+                "clawd.msg.tree_summary_dirs",
+                "目录",
+                "directories",
+                prefer_english,
+            ),
+            dirs.join(", ")
+        ));
+    }
+    if !files.is_empty() {
+        parts.push(format!(
+            "{} {}",
+            observed_t(
+                state,
+                "clawd.msg.tree_summary_files",
+                "文件",
+                "files",
+                prefer_english,
+            ),
+            files.join(", ")
+        ));
+    }
+    if !other.is_empty() {
+        parts.push(format!(
+            "{} {}",
+            observed_t(
+                state,
+                "clawd.msg.tree_summary_other",
+                "其它",
+                "other",
+                prefer_english,
+            ),
+            other.join(", ")
+        ));
+    }
+    let prefix = observed_t(
+        state,
+        "clawd.msg.tree_summary_top_level",
+        "顶层结构：",
+        "Top level: ",
+        prefer_english,
+    );
+    let separator = if prefer_english { "; " } else { "；" };
+    let mut answer = format!("{prefix}{}", parts.join(separator));
+    let truncated_nodes = value
+        .get("truncated_nodes")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let root_omitted = tree
+        .get("omitted_children")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    if truncated_nodes > 0 || root_omitted > 0 {
+        let count = truncated_nodes.max(root_omitted).to_string();
+        answer.push_str(&observed_t_with_vars(
+            state,
+            "clawd.msg.tree_summary_partial",
+            "（另有 {count} 项未显示）",
+            " ({count} more not shown)",
+            prefer_english,
+            &[("count", &count)],
+        ));
+    }
+    Some(answer)
+}
+
+fn dir_compare_direct_answer_candidate(
+    state: Option<&AppState>,
+    value: &serde_json::Value,
+    prefer_english: bool,
+) -> Option<String> {
+    if value.get("action").and_then(|v| v.as_str()) != Some("dir_compare") {
+        return None;
+    }
+    let counts = value.get("counts").and_then(|v| v.as_object())?;
+    let left_only = counts
+        .get("left_only")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let right_only = counts
+        .get("right_only")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let kind_mismatches = counts
+        .get("kind_mismatches")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    if left_only == 0 && right_only == 0 && kind_mismatches == 0 {
+        return Some(observed_t(
+            state,
+            "clawd.msg.dir_compare_no_diff",
+            "未发现差异。",
+            "No differences found.",
+            prefer_english,
+        ));
+    }
+    Some(if prefer_english {
+        format!(
+            "Differences found: left-only {left_only}, right-only {right_only}, kind mismatches {kind_mismatches}."
+        )
+    } else {
+        format!("发现差异：左侧独有 {left_only} 项，右侧独有 {right_only} 项，类型不一致 {kind_mismatches} 项。")
+    })
+}
+
 fn first_meaningful_excerpt_sentence(text: &str) -> Option<String> {
     let mut short_fallback = None;
     for line in text.lines() {
@@ -2286,7 +2454,7 @@ fn system_basic_existence_with_path_candidate(
                 return Some(candidate_not_found_text(state, prefer_english));
             }
             if facts.len() != 1 {
-                return None;
+                return multi_path_batch_facts_candidate(state, facts, prefer_english);
             }
             let entry = facts.first()?.as_object()?;
             let exists = entry
@@ -2315,6 +2483,45 @@ fn system_basic_existence_with_path_candidate(
         }
         _ => None,
     }
+}
+
+fn multi_path_batch_facts_candidate(
+    _state: Option<&AppState>,
+    facts: &[serde_json::Value],
+    prefer_english: bool,
+) -> Option<String> {
+    let lines = facts
+        .iter()
+        .filter_map(|entry| {
+            let entry = entry.as_object()?;
+            let path = path_batch_fact_preferred_path(entry).unwrap_or("-");
+            let exists = entry
+                .get("exists")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !exists {
+                return Some(if prefer_english {
+                    format!("{path}: not found")
+                } else {
+                    format!("{path}: 不存在")
+                });
+            }
+            let kind = entry
+                .get("fact")
+                .and_then(|v| v.as_object())
+                .and_then(|fact| fact.get("kind"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("unknown");
+            Some(if prefer_english {
+                format!("{path}: exists, type {}", display_path_kind(kind, true))
+            } else {
+                format!("{path}: 存在，类型：{}", display_path_kind(kind, false))
+            })
+        })
+        .collect::<Vec<_>>();
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 fn system_basic_scalar_existence_candidate(
@@ -3374,6 +3581,8 @@ fn structured_scalar_candidate(
                 None
             }
         }
+        "tree_summary" => tree_summary_direct_answer_candidate(state, &value, prefer_english),
+        "dir_compare" => dir_compare_direct_answer_candidate(state, &value, prefer_english),
         "extract_field" | "read_field" => {
             if route.is_some_and(|route| {
                 route.output_contract.response_shape != crate::OutputResponseShape::Scalar
@@ -3407,6 +3616,17 @@ fn structured_scalar_candidate(
                                 true,
                                 prefer_english,
                             ));
+                        }
+                        if route.is_some_and(|route| {
+                            route.output_contract.response_shape
+                                == crate::OutputResponseShape::Scalar
+                        }) && json_trimmed_str(&value, "match_strategy")
+                            .is_some_and(|strategy| strategy == "array_item_key_path")
+                        {
+                            return value_structured_text(
+                                field_value,
+                                value.get("value_text").and_then(|v| v.as_str()),
+                            );
                         }
                         return Some(structured_field_display_line(
                             state,
@@ -3608,6 +3828,19 @@ fn extract_field_has_non_exact_resolution(value: &serde_json::Value) -> bool {
     )
 }
 
+fn field_path_has_array_identity_selector(field_path: &str) -> bool {
+    let field_path = field_path.trim();
+    field_path.contains('[') && field_path.contains(']') && field_path.contains('=')
+}
+
+fn extract_field_should_return_value_only(value: &serde_json::Value, field_path: &str) -> bool {
+    field_path_has_array_identity_selector(field_path)
+        || matches!(
+            json_trimmed_str(value, "match_strategy"),
+            Some("array_item_key_path")
+        )
+}
+
 fn extract_fields_direct_answer_candidate(
     state: Option<&AppState>,
     value: &serde_json::Value,
@@ -3727,6 +3960,12 @@ fn extract_field_direct_answer_candidate(
             return Some(answer);
         }
         return None;
+    }
+    if extract_field_should_return_value_only(value, field_path) {
+        return value_structured_text(
+            field_value,
+            value.get("value_text").and_then(|v| v.as_str()),
+        );
     }
     Some(structured_field_display_line(
         state,
@@ -4730,6 +4969,8 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
                 "read_range" => read_range_observed_candidate(&value),
                 "inventory_dir" => inventory_dir_observed_candidate(&value),
                 "count_inventory" => count_inventory_observed_candidate(&value),
+                "tree_summary" => tree_summary_direct_answer_candidate(None, &value, true),
+                "dir_compare" => dir_compare_direct_answer_candidate(None, &value, true),
                 "validate_structured" => validate_structured_observed_candidate(&value),
                 "compare_paths" => compare_paths_observed_candidate(body),
                 "path_batch_facts" => path_batch_facts_observed_candidate(&value),
@@ -5171,6 +5412,18 @@ fn extract_direct_answer_from_generic_output_impl(
                             &value,
                             prefers_english_free_text,
                         )
+                    } else if action == Some("tree_summary") {
+                        tree_summary_direct_answer_candidate(
+                            state,
+                            &value,
+                            prefers_english_free_text,
+                        )
+                    } else if action == Some("dir_compare") {
+                        dir_compare_direct_answer_candidate(
+                            state,
+                            &value,
+                            prefers_english_free_text,
+                        )
                     } else if action == Some("count_inventory") {
                         count_inventory_direct_answer_candidate(
                             state,
@@ -5526,7 +5779,8 @@ fn observed_step_body(step: &crate::executor::StepExecutionResult) -> Option<Str
 
 fn observed_step_entry(step: &crate::executor::StepExecutionResult) -> Option<String> {
     let output = observed_step_body(step)?;
-    if crate::finalize::looks_like_planner_artifact(&output)
+    if !normalized_structured_observed_fact_allows_artifact_filter_bypass(&step.skill, &output)
+        && crate::finalize::looks_like_planner_artifact(&output)
         || crate::finalize::looks_like_internal_trace_artifact(&output)
     {
         return None;
@@ -5537,6 +5791,13 @@ fn observed_step_entry(step: &crate::executor::StepExecutionResult) -> Option<St
         step.skill,
         trim_for_observed_prompt(&output, 1800)
     ))
+}
+
+fn normalized_structured_observed_fact_allows_artifact_filter_bypass(
+    skill: &str,
+    output: &str,
+) -> bool {
+    skill == "archive_basic" && output.trim_start().starts_with("archive_basic action=")
 }
 
 fn observed_output_entries(loop_state: &LoopState) -> Vec<String> {
@@ -5976,8 +6237,8 @@ mod tests {
     use super::{
         answer_is_direct_observation_passthrough, archive_list_raw_passthrough_replacement,
         archive_list_summary_from_body, cross_turn_observed_output_entries,
-        extract_direct_answer_from_generic_output, extract_direct_scalar_from_generic_output,
-        extract_direct_scalar_from_generic_output_i18n,
+        dir_compare_direct_answer_candidate, extract_direct_answer_from_generic_output,
+        extract_direct_scalar_from_generic_output, extract_direct_scalar_from_generic_output_i18n,
         extract_direct_scalar_from_generic_output_with_locator_hint,
         extract_field_direct_answer_candidate, has_observed_answer_candidates,
         inventory_dir_direct_answer_candidate, normalize_system_basic_match_path,
@@ -5989,7 +6250,8 @@ mod tests {
         route_allows_path_batch_scalar_path_observed_answer, route_observation_facts_entry,
         route_requests_scalar_path_only, route_requires_synthesized_delivery,
         scalar_count_diagnostic_line_for_answer, scalar_route_prefers_structured_observed_answer,
-        structured_observed_body, AgentRunContext, OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
+        structured_observed_body, tree_summary_direct_answer_candidate, AgentRunContext,
+        OBSERVED_ANSWER_FALLBACK_PROMPT_TEMPLATE,
     };
     use crate::executor::{StepExecutionResult, StepExecutionStatus};
     use crate::{
@@ -6353,6 +6615,52 @@ mod tests {
             extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
             Some("llm.selected_vendor: minimax")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_reads_array_identity_field_value_without_label() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"archive_basic.group","resolved_field_path":"skills[name=archive_basic].group","match_strategy":"array_item_key_path","value_text":"system","value":"system","value_type":"string"}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint = "configs/skills_registry.toml".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("system")
+        );
+    }
+
+    #[test]
+    fn direct_answer_reads_array_identity_extract_field_value_without_label() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"extract_field","exists":true,"field_path":"skills.[name=archive_basic].group","resolved_field_path":"skills.[name=archive_basic].group","match_strategy":"exact_path","value_text":"system","value":"system","value_type":"string"}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint = "configs/skills_registry.toml".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("system")
         );
     }
 
@@ -6856,6 +7164,71 @@ version.workspace = true
         assert!(answer.contains("文件:"));
         assert!(answer.contains("- Cargo.toml"));
         assert!(answer.contains("- README.md"));
+    }
+
+    #[test]
+    fn tree_summary_direct_answer_lists_top_level_groups_without_false_truncation() {
+        let value = serde_json::json!({
+            "action": "tree_summary",
+            "path": "/tmp/root",
+            "resolved_path": "/tmp/root",
+            "truncated_nodes": 0,
+            "tree": {
+                "kind": "dir",
+                "path": "/tmp/root",
+                "child_count": 3,
+                "omitted_children": 0,
+                "children": [
+                    {
+                        "kind": "dir",
+                        "path": "/tmp/root/configs",
+                        "child_count": 1,
+                        "omitted_children": 0,
+                        "children": []
+                    },
+                    {
+                        "kind": "file",
+                        "path": "/tmp/root/package.json",
+                        "size_bytes": 10
+                    },
+                    {
+                        "kind": "dir",
+                        "path": "/tmp/root/logs",
+                        "child_count": 1,
+                        "omitted_children": 0,
+                        "children": []
+                    }
+                ]
+            }
+        });
+
+        let answer = tree_summary_direct_answer_candidate(None, &value, false).expect("answer");
+
+        assert!(answer.contains("顶层结构"), "answer: {answer}");
+        assert!(answer.contains("configs/"), "answer: {answer}");
+        assert!(answer.contains("logs/"), "answer: {answer}");
+        assert!(answer.contains("package.json"), "answer: {answer}");
+        assert!(!answer.contains("未显示"), "answer: {answer}");
+        assert!(!answer.contains("截断"), "answer: {answer}");
+    }
+
+    #[test]
+    fn dir_compare_direct_answer_reports_no_differences() {
+        let value = serde_json::json!({
+            "action": "dir_compare",
+            "left_path": "tmp/bundle_src",
+            "right_path": "tmp/dynamic_guard_unpack_case",
+            "counts": {
+                "left_only": 0,
+                "right_only": 0,
+                "kind_mismatches": 0,
+                "common": 3
+            }
+        });
+
+        let answer = dir_compare_direct_answer_candidate(None, &value, true).expect("answer");
+
+        assert_eq!(answer, "No differences found.");
     }
 
     #[test]
@@ -9446,6 +9819,32 @@ version.workspace = true
     }
 
     #[test]
+    fn direct_answer_formats_multi_path_facts_without_llm_synthesis() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","path":"package.json","resolved_path":"/tmp/repo/package.json","size_bytes":120},"path":"package.json"},{"exists":false,"path":"nope.json","error":"not found"}],"include_missing":true}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route_result.resolved_intent =
+            "Inspect explicit file paths and answer with existence and type".to_string();
+        route_result.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route_result.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route_result.output_contract.locator_hint = "/tmp/repo".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("multi path facts answer");
+        assert!(answer.contains("/tmp/repo/package.json: exists, type file"));
+        assert!(answer.contains("nope.json: not found"));
+    }
+
+    #[test]
     fn direct_answer_formats_scalar_existence_without_path_from_system_basic_path_batch_facts() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -11192,6 +11591,20 @@ version.workspace = true
             Some(
                 "archive_basic action=list archive=/tmp/test_bundle.zip total_entries=2\nentry name=notes.txt size_bytes=22\nentry name=nested/config.ini size_bytes=20"
             )
+        );
+    }
+
+    #[test]
+    fn archive_list_observed_fact_survives_artifact_filter() {
+        let mut loop_state = LoopState::new(2);
+        let body = "exit=0\nArchive:  /tmp/test_bundle.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n       22  2026-04-03 01:14   notes.txt\n       20  2026-04-03 01:14   nested/config.ini\n---------                     -------\n       42                     2 files";
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "archive_basic", body));
+
+        assert!(
+            has_observed_answer_candidates(&loop_state),
+            "normalized archive list facts should remain available for synthesis"
         );
     }
 

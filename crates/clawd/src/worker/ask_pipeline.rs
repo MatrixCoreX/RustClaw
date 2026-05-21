@@ -357,6 +357,7 @@ fn apply_ask_post_route(
     prebind_clarify_workspace_child_locator_from_current_request(state, prompt, &mut route_result);
     prebind_workspace_child_locator_from_resolved_prompt(state, resolved_prompt, &mut route_result);
     prebind_workspace_root_locator_from_resolved_prompt(state, resolved_prompt, &mut route_result);
+    prebind_quantity_compare_directory_pair_from_current_request(state, prompt, &mut route_result);
     if background_only_locator_route_should_force_clarify(
         state,
         prompt,
@@ -371,6 +372,8 @@ fn apply_ask_post_route(
         route_result.clarify_question = deictic_missing_locator_question(&route_result).to_string();
         append_route_reason(&mut route_result, "background_locator_requires_clarify");
     }
+    promote_locatorless_status_query_to_service_status(&mut route_result, turn_analysis);
+    promote_locatorless_git_capability_to_repository_state(&mut route_result);
     if locatorless_observation_route_should_force_clarify(
         state,
         prompt,
@@ -1044,6 +1047,171 @@ fn promote_clarify_observation_to_execute_with_locator(
     true
 }
 
+fn prebind_quantity_compare_directory_pair_from_current_request(
+    state: &AppState,
+    prompt: &str,
+    route_result: &mut crate::RouteResult,
+) -> bool {
+    if !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+    {
+        return false;
+    }
+    let semantic_quantity_comparison =
+        route_result.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison;
+    if !semantic_quantity_comparison
+        && !route_result.needs_clarify
+        && !route_result.is_execute_gate()
+    {
+        return false;
+    }
+    let Some((left, right)) =
+        workspace_directory_pair_from_current_request(state, prompt, !semantic_quantity_comparison)
+    else {
+        return false;
+    };
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route_result.output_contract.locator_hint = format!("{left} | {right}");
+    route_result.output_contract.requires_content_evidence = true;
+    route_result.needs_clarify = false;
+    route_result.clarify_question.clear();
+    route_result.set_planner_execute_finalize(
+        crate::post_route_policy::content_evidence_execution_finalize_style(
+            &route_result.output_contract,
+            false,
+        )
+        .unwrap_or(crate::ActFinalizeStyle::ChatWrapped),
+    );
+    append_route_reason(
+        route_result,
+        if semantic_quantity_comparison {
+            "quantity_compare_directory_pair_prebound_from_current_request"
+        } else {
+            "directory_pair_prebound_from_current_request"
+        },
+    );
+    true
+}
+
+fn workspace_directory_pair_from_current_request(
+    state: &AppState,
+    prompt: &str,
+    require_strong_locator_tokens: bool,
+) -> Option<(String, String)> {
+    let mut out = Vec::new();
+    for token in structural_locator_token_candidates(prompt) {
+        if require_strong_locator_tokens && !strong_structural_locator_token(&token) {
+            continue;
+        }
+        let Some(path) = resolve_unique_directory_basename_under(
+            &state.skill_rt.workspace_root,
+            &token,
+            directory_pair_locator_scan_limit(state),
+        ) else {
+            continue;
+        };
+        if !out
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(&path))
+        {
+            out.push(path);
+        }
+        if out.len() >= 2 {
+            break;
+        }
+    }
+    (out.len() == 2).then(|| (out.remove(0), out.remove(0)))
+}
+
+fn directory_pair_locator_scan_limit(state: &AppState) -> usize {
+    state.skill_rt.locator_scan_max_files.max(50_000)
+}
+
+fn strong_structural_locator_token(token: &str) -> bool {
+    token.contains(['_', '-', '.']) || token.chars().any(|ch| ch.is_ascii_digit())
+}
+
+fn structural_locator_token_candidates(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+            cur.push(ch.to_ascii_lowercase());
+        } else if !cur.is_empty() {
+            push_structural_locator_token(&cur, &mut out);
+            cur.clear();
+            if out.len() >= 16 {
+                break;
+            }
+        }
+    }
+    if !cur.is_empty() && out.len() < 16 {
+        push_structural_locator_token(&cur, &mut out);
+    }
+    out
+}
+
+fn push_structural_locator_token(token: &str, out: &mut Vec<String>) {
+    let token = token
+        .trim_matches(|ch: char| matches!(ch, '.' | '"' | '\'' | '`'))
+        .trim();
+    if token.len() < 2
+        || token.contains('/')
+        || token.contains('\\')
+        || crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(token)
+        || out.iter().any(|existing| existing == token)
+    {
+        return;
+    }
+    out.push(token.to_string());
+}
+
+fn resolve_unique_directory_basename_under(
+    workspace_root: &std::path::Path,
+    name: &str,
+    max_visits: usize,
+) -> Option<String> {
+    if !workspace_root.is_dir() || name.trim().is_empty() {
+        return None;
+    }
+    let mut stack = vec![workspace_root.to_path_buf()];
+    let mut matches = Vec::new();
+    let mut visits = 0usize;
+    while let Some(dir) = stack.pop() {
+        visits = visits.saturating_add(1);
+        if visits > max_visits {
+            break;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut children = entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let file_type = entry.file_type().ok()?;
+                file_type.is_dir().then(|| entry.path())
+            })
+            .collect::<Vec<_>>();
+        children.sort();
+        for child in children.into_iter().rev() {
+            if child
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|file_name| file_name.eq_ignore_ascii_case(name))
+            {
+                let canonical = child.canonicalize().unwrap_or(child.clone());
+                matches.push(canonical.display().to_string());
+                if matches.len() > 1 {
+                    return None;
+                }
+            }
+            stack.push(child);
+        }
+    }
+    matches.pop()
+}
+
 fn resolved_prompt_existing_workspace_locator(
     state: &AppState,
     resolved_prompt: &str,
@@ -1184,6 +1352,11 @@ fn background_only_locator_route_should_force_clarify(
     {
         return false;
     }
+    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+        && workspace_directory_pair_from_current_request(state, prompt, false).is_some()
+    {
+        return false;
+    }
 
     route_result.is_execute_gate()
         || route_result.output_contract.requires_content_evidence
@@ -1202,12 +1375,85 @@ fn semantic_kind_can_execute_without_locator(kind: crate::OutputSemanticKind) ->
             | crate::OutputSemanticKind::ServiceStatus
             | crate::OutputSemanticKind::WorkspaceProjectSummary
             | crate::OutputSemanticKind::GitCommitSubject
+            | crate::OutputSemanticKind::GitRepositoryState
             | crate::OutputSemanticKind::PackageManagerDetection
             | crate::OutputSemanticKind::DockerPs
             | crate::OutputSemanticKind::DockerImages
             | crate::OutputSemanticKind::DockerLogs
             | crate::OutputSemanticKind::DockerContainerLifecycle
     )
+}
+
+fn promote_locatorless_git_capability_to_repository_state(
+    route_result: &mut crate::RouteResult,
+) -> bool {
+    if !route_result.is_execute_gate()
+        || route_result.needs_clarify
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || !route_result.output_contract.locator_hint.trim().is_empty()
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || !route_mentions_git_capability(route_result)
+    {
+        return false;
+    }
+
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::GitRepositoryState;
+    append_route_reason(
+        route_result,
+        "locatorless_git_capability_promoted_to_git_repository_state",
+    );
+    true
+}
+
+fn route_mentions_git_capability(route_result: &crate::RouteResult) -> bool {
+    route_result
+        .visible_skill_candidates
+        .iter()
+        .any(|skill| skill == "git_basic")
+        || ascii_token_present(&route_result.resolved_intent, "git")
+        || ascii_token_present(&route_result.route_reason, "git")
+}
+
+fn ascii_token_present(text: &str, token: &str) -> bool {
+    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'))
+        .any(|candidate| candidate.eq_ignore_ascii_case(token))
+}
+
+fn promote_locatorless_status_query_to_service_status(
+    route_result: &mut crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    let Some(turn_analysis) = turn_analysis else {
+        return false;
+    };
+    if turn_analysis.turn_type != Some(crate::intent_router::TurnType::StatusQuery)
+        || !route_result.is_execute_gate()
+        || route_result.needs_clarify
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || !route_result.output_contract.locator_hint.trim().is_empty()
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
+    {
+        return false;
+    }
+
+    route_result.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    append_route_reason(
+        route_result,
+        "locatorless_status_query_promoted_to_service_status",
+    );
+    true
 }
 
 fn raw_command_output_has_explicit_command(state: &AppState, prompt: &str) -> bool {
@@ -2026,10 +2272,13 @@ mod tests {
         execution_user_request, locatorless_observation_route_should_force_clarify,
         prebind_clarify_workspace_child_locator_from_current_request,
         prebind_direct_file_delivery_locator_before_deictic_guard,
+        prebind_quantity_compare_directory_pair_from_current_request,
         prebind_workspace_child_locator_from_current_request,
         prebind_workspace_child_locator_from_resolved_prompt,
         prebind_workspace_root_locator_from_resolved_prompt,
         preserve_scalar_shape_from_normalizer_candidate_for_clarify,
+        promote_locatorless_git_capability_to_repository_state,
+        promote_locatorless_status_query_to_service_status,
         promote_structured_anchor_direct_answer_to_evidence, should_attempt_auto_locator,
         should_preserve_original_inline_structured_input, should_reuse_route_clarify_question,
         should_suppress_recent_execution_in_clarify_context,
@@ -2705,6 +2954,142 @@ mod tests {
     }
 
     #[test]
+    fn quantity_compare_prebinds_two_workspace_directories_from_current_request() {
+        let root = make_temp_root("quantity_dir_pair_prebind");
+        std::fs::create_dir_all(root.join("fixtures/tmp/bundle_src")).expect("left");
+        std::fs::create_dir_all(root.join("fixtures/tmp/dynamic_guard_unpack_case"))
+            .expect("right");
+        let state = test_state_with_root(root.clone());
+        let mut route = executable_filename_route();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "bundle_src vs dynamic_guard_unpack_case".to_string();
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+
+        assert!(
+            prebind_quantity_compare_directory_pair_from_current_request(
+                &state,
+                "bundle_src 와 dynamic_guard_unpack_case 를 재귀 비교하고 차이가 있는지 짧게 답해.",
+                &mut route,
+            )
+        );
+
+        assert!(!route.needs_clarify);
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+        );
+        assert!(route.output_contract.locator_hint.contains("bundle_src"));
+        assert!(route
+            .output_contract
+            .locator_hint
+            .contains("dynamic_guard_unpack_case"));
+
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        assert!(!background_only_locator_route_should_force_clarify(
+            &state,
+            "bundle_src 와 dynamic_guard_unpack_case 를 재귀 비교하고 차이가 있는지 짧게 답해.",
+            &route.resolved_intent,
+            &route,
+            None,
+            &snapshot,
+        ));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn directory_pair_prebinds_missing_locator_without_forcing_semantic_kind() {
+        let root = make_temp_root("directory_pair_missing_locator_prebind");
+        std::fs::create_dir_all(root.join("fixtures/tmp/bundle_src")).expect("left");
+        std::fs::create_dir_all(root.join("fixtures/tmp/dynamic_guard_unpack_case"))
+            .expect("right");
+        let state = test_state_with_root(root.clone());
+        let mut route = executable_filename_route();
+        route.needs_clarify = true;
+        route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+
+        assert!(
+            prebind_quantity_compare_directory_pair_from_current_request(
+                &state,
+                "bundle_src 와 dynamic_guard_unpack_case 를 재귀 비교하고 차이가 있는지 짧게 답해.",
+                &mut route,
+            )
+        );
+
+        assert!(!route.needs_clarify);
+        assert!(route.is_execute_gate());
+        assert_eq!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+        );
+        assert!(route
+            .output_contract
+            .locator_hint
+            .contains("fixtures/tmp/bundle_src"));
+        assert!(route
+            .output_contract
+            .locator_hint
+            .contains("fixtures/tmp/dynamic_guard_unpack_case"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn directory_pair_prebind_scan_reaches_late_structural_directory_tokens() {
+        let root = make_temp_root("directory_pair_late_structural_scan");
+        for idx in 0..2500 {
+            std::fs::create_dir_all(root.join(format!("aaa_filler_{idx:04}"))).expect("filler");
+        }
+        std::fs::create_dir_all(root.join("zz_fixture/tmp/bundle_src")).expect("left");
+        std::fs::create_dir_all(root.join("zz_fixture/tmp/dynamic_guard_unpack_case"))
+            .expect("right");
+        let mut state = test_state_with_root(root.clone());
+        state.skill_rt.locator_scan_max_files = 10;
+        let mut route = executable_filename_route();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+
+        assert!(
+            prebind_quantity_compare_directory_pair_from_current_request(
+                &state,
+                "bundle_src 와 dynamic_guard_unpack_case 를 재귀 비교하고 차이가 있는지 짧게 답해.",
+                &mut route,
+            )
+        );
+
+        assert!(!route.needs_clarify);
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+        );
+        assert!(route
+            .output_contract
+            .locator_hint
+            .contains("zz_fixture/tmp/bundle_src"));
+        assert!(route
+            .output_contract
+            .locator_hint
+            .contains("zz_fixture/tmp/dynamic_guard_unpack_case"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn locatorless_service_status_observation_does_not_clarify() {
         let state = test_state_with_root(make_temp_root("locatorless_service_status"));
         let mut route = executable_filename_route();
@@ -2727,6 +3112,88 @@ mod tests {
             &route,
             None,
             &snapshot,
+        ));
+    }
+
+    #[test]
+    fn locatorless_status_query_promotes_to_service_status_before_clarify_guards() {
+        let state = test_state_with_root(make_temp_root("locatorless_runtime_status_query"));
+        let mut route = executable_filename_route();
+        route.resolved_intent =
+            "Provide a brief runtime diagnostics overview from fresh system observation."
+                .to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        let analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::StatusQuery),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(promote_locatorless_status_query_to_service_status(
+            &mut route,
+            Some(&analysis),
+        ));
+        assert_eq!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ServiceStatus
+        );
+        assert!(!locatorless_observation_route_should_force_clarify(
+            &state,
+            "status overview",
+            &route,
+            Some(&analysis),
+            &snapshot,
+        ));
+        assert!(!unbound_targeted_evidence_route_should_force_clarify(
+            "status overview",
+            &route,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn locatorless_git_capability_promotes_to_repository_state_before_clarify_guards() {
+        let state = test_state_with_root(make_temp_root("locatorless_git_capability"));
+        let mut route = executable_filename_route();
+        route.resolved_intent =
+            "Observe git repository state from the current workspace.".to_string();
+        route.route_reason = "This requires git_basic readonly observation.".to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(promote_locatorless_git_capability_to_repository_state(
+            &mut route,
+        ));
+        assert_eq!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::GitRepositoryState
+        );
+        assert!(!locatorless_observation_route_should_force_clarify(
+            &state, "git", &route, None, &snapshot,
+        ));
+        assert!(!unbound_targeted_evidence_route_should_force_clarify(
+            "git", &route, &snapshot,
         ));
     }
 

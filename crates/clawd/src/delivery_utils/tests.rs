@@ -336,6 +336,27 @@ fn sync_output_payload_scalar_contract_preserves_execution_summary_message() {
 }
 
 #[test]
+fn sync_output_payload_git_repository_state_collapses_execution_summary_message() {
+    let contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Scalar,
+        semantic_kind: OutputSemanticKind::GitRepositoryState,
+        ..IntentOutputContract::default()
+    };
+    let mut text = "main".to_string();
+    let summary = format!(
+        "{}\n1. 调用技能 `git_basic`（action=current_branch）\n   输出：\n```text\nexit=0\nmain\n```",
+        crate::finalize::EXECUTION_SUMMARY_MESSAGE_PREFIX
+    );
+    let mut messages = vec![summary, text.clone()];
+
+    sync_output_payload(&contract, &mut text, &mut messages);
+
+    assert_eq!(text, "main");
+    assert_eq!(messages, vec!["main".to_string()]);
+}
+
+#[test]
 fn directory_purpose_summary_one_sentence_contract_preserves_multiline_listing() {
     let contract = IntentOutputContract {
         exact_sentence_count: None,

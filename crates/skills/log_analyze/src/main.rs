@@ -388,10 +388,8 @@ mod tests {
 
     #[test]
     fn default_analysis_keeps_warn_latency_visible() {
-        let dir = std::env::temp_dir().join(format!(
-            "rustclaw-log-analyze-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("rustclaw-log-analyze-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("create temp dir");
         let path = dir.join("app.log");
         std::fs::write(
@@ -414,18 +412,16 @@ mod tests {
         .map(ToString::to_string)
         .collect::<Vec<_>>();
 
-        let analysis = analyze_log_file(&path, path.display().to_string(), &keywords, 20)
-            .expect("analysis");
+        let analysis =
+            analyze_log_file(&path, path.display().to_string(), &keywords, 20).expect("analysis");
 
         assert_eq!(analysis.level_counts.get("warn"), Some(&1));
         assert_eq!(analysis.keyword_counts.get("warn"), Some(&1));
         assert_eq!(analysis.keyword_counts.get("latency"), Some(&1));
-        assert!(
-            analysis
-                .recent_notable_lines
-                .iter()
-                .any(|line| line.contains("latency increased"))
-        );
+        assert!(analysis
+            .recent_notable_lines
+            .iter()
+            .any(|line| line.contains("latency increased")));
         let _ = std::fs::remove_file(path);
         let _ = std::fs::remove_dir(dir);
     }

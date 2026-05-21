@@ -398,6 +398,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::ScalarPathOnly
         | OutputSemanticKind::ExistenceWithPath
         | OutputSemanticKind::GitCommitSubject
+        | OutputSemanticKind::GitRepositoryState
         | OutputSemanticKind::StructuredKeys
         | OutputSemanticKind::ConfigValidation
         | OutputSemanticKind::ConfigRiskAssessment
@@ -467,7 +468,9 @@ pub(crate) fn required_evidence_fields_for_output_contract(
         OutputSemanticKind::ScalarCount => {
             fields.insert("count");
         }
-        OutputSemanticKind::ScalarPathOnly | OutputSemanticKind::GitCommitSubject => {
+        OutputSemanticKind::ScalarPathOnly
+        | OutputSemanticKind::GitCommitSubject
+        | OutputSemanticKind::GitRepositoryState => {
             fields.insert("field_value");
         }
         OutputSemanticKind::ExistenceWithPath | OutputSemanticKind::ExistenceWithPathSummary => {

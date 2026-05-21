@@ -162,20 +162,52 @@ fn execute(args: Value, req_user_key: Option<&str>) -> Result<(String, Value), S
         &text
     };
 
-    if success {
-        let output = format!("status={status}\n{preview}");
-        Ok((
-            output.clone(),
-            json!({
-                "action": action,
-                "url": url,
-                "status_code": status,
-                "body_preview": preview,
-            }),
-        ))
-    } else {
-        Err(format!(
-            "http request returned non-success status={status}\n{preview}"
-        ))
+    Ok(http_observation(action, url, status, success, preview))
+}
+
+fn http_observation(
+    action: &str,
+    url: &str,
+    status: u16,
+    success_status: bool,
+    preview: &str,
+) -> (String, Value) {
+    let output = format!("status={status}\n{preview}");
+    (
+        output.clone(),
+        json!({
+            "action": action,
+            "url": url,
+            "status_code": status,
+            "success_status": success_status,
+            "body_preview": preview,
+        }),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::http_observation;
+
+    #[test]
+    fn http_non_success_response_is_structured_observation() {
+        let (text, extra) = http_observation(
+            "get",
+            "http://127.0.0.1:8787/missing",
+            404,
+            false,
+            "not found",
+        );
+
+        assert_eq!(text, "status=404\nnot found");
+        assert_eq!(extra.get("status_code").and_then(|v| v.as_u64()), Some(404));
+        assert_eq!(
+            extra.get("success_status").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            extra.get("body_preview").and_then(|v| v.as_str()),
+            Some("not found")
+        );
     }
 }
