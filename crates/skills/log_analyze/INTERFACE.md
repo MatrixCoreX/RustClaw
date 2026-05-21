@@ -7,6 +7,7 @@
 - `log_analyze` scans logs for notable errors/events and summarizes key findings.
 - It can target a specific log file, or a directory path whose newest log-like file will be analyzed automatically.
 - It can narrow results with keyword filters.
+- Even without explicit `keywords`, it returns structured severity evidence (`level_counts`, `recent_notable_lines`) so warning/error lines remain observable.
 
 ## Actions
 - No action field is required for baseline analysis.
@@ -18,6 +19,15 @@
 | analyze | `path` | no | string(path) | impl default | Log file path, or a directory path whose newest log-like file will be analyzed. |
 | analyze | `keywords` | no | array/string | - | Keyword filters for matching lines. |
 | analyze | `max_matches` | no | number | impl default | Cap for returned evidence rows. |
+
+## Output Fields
+- `requested_path`: path requested by the caller.
+- `path`: resolved log file path.
+- `total_lines`: number of scanned lines.
+- `keyword_counts`: counts for configured or default operational keywords.
+- `recent_matches`: recent keyword-matching lines.
+- `level_counts`: counts by detected log level (`warn`, `error`, `fatal`, `panic`, etc.).
+- `recent_notable_lines`: recent `warn` or higher severity lines, independent of keyword filters.
 
 ## Error Contract
 - Invalid/missing log path when path is provided.

@@ -30,6 +30,8 @@ struct LogAnalysis {
     total_lines: usize,
     keyword_counts: BTreeMap<String, usize>,
     recent_matches: Vec<String>,
+    level_counts: BTreeMap<String, usize>,
+    recent_notable_lines: Vec<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -85,9 +87,12 @@ fn execute(args: Value) -> Result<String, String> {
 
     let default_keywords = [
         "error",
+        "warn",
+        "warning",
         "failed",
         "timeout",
         "panic",
+        "latency",
         "queue full",
         "unauthorized",
     ];
@@ -109,7 +114,9 @@ fn execute(args: Value) -> Result<String, String> {
         "path": analysis.path,
         "total_lines": analysis.total_lines,
         "keyword_counts": analysis.keyword_counts,
-        "recent_matches": analysis.recent_matches
+        "recent_matches": analysis.recent_matches,
+        "level_counts": analysis.level_counts,
+        "recent_notable_lines": analysis.recent_notable_lines
     })
     .to_string())
 }
@@ -223,7 +230,9 @@ fn analyze_log_file(
     let text =
         std::fs::read_to_string(resolved_path).map_err(|err| format!("read log failed: {err}"))?;
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut level_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut matches = Vec::new();
+    let mut notable_lines = Vec::new();
     for (idx, line) in text.lines().enumerate() {
         let lower = line.to_ascii_lowercase();
         let mut hit = false;
@@ -231,6 +240,16 @@ fn analyze_log_file(
             if lower.contains(key) {
                 *counts.entry(key.clone()).or_insert(0) += 1;
                 hit = true;
+            }
+        }
+        if let Some(level) = log_level_from_line(line) {
+            *level_counts.entry(level.to_string()).or_insert(0) += 1;
+            if log_level_is_notable(level) {
+                notable_lines.push(format!(
+                    "{}: {}",
+                    idx + 1,
+                    sanitize_match_line(line, MATCH_LINE_MAX_CHARS)
+                ));
             }
         }
         if hit {
@@ -244,13 +263,36 @@ fn analyze_log_file(
     if matches.len() > max_matches {
         matches = matches[matches.len().saturating_sub(max_matches)..].to_vec();
     }
+    if notable_lines.len() > max_matches {
+        notable_lines = notable_lines[notable_lines.len().saturating_sub(max_matches)..].to_vec();
+    }
     Ok(LogAnalysis {
         requested_path,
         path: resolved_path.display().to_string(),
         total_lines: text.lines().count(),
         keyword_counts: counts,
         recent_matches: matches,
+        level_counts,
+        recent_notable_lines: notable_lines,
     })
+}
+
+fn log_level_from_line(line: &str) -> Option<&'static str> {
+    line.split(|ch: char| !ch.is_ascii_alphanumeric())
+        .find_map(|token| match token {
+            "TRACE" => Some("trace"),
+            "DEBUG" => Some("debug"),
+            "INFO" => Some("info"),
+            "WARN" | "WARNING" => Some("warn"),
+            "ERROR" | "ERR" => Some("error"),
+            "FATAL" | "CRITICAL" => Some("fatal"),
+            "PANIC" => Some("panic"),
+            _ => None,
+        })
+}
+
+fn log_level_is_notable(level: &str) -> bool {
+    matches!(level, "warn" | "error" | "fatal" | "panic")
 }
 
 fn candidate_priority(path: &std::path::Path) -> u8 {
@@ -309,7 +351,7 @@ fn workspace_root() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{candidate_priority, sanitize_match_line};
+    use super::{analyze_log_file, candidate_priority, log_level_from_line, sanitize_match_line};
     use std::path::Path;
 
     #[test]
@@ -330,5 +372,61 @@ mod tests {
         let out = sanitize_match_line(&long, 32);
         assert!(out.len() < long.len());
         assert!(out.ends_with("...(truncated)"));
+    }
+
+    #[test]
+    fn detects_standard_log_levels_as_structured_notable_lines() {
+        assert_eq!(
+            log_level_from_line("2026-04-01 10:02:20 WARN upstream latency increased"),
+            Some("warn")
+        );
+        assert_eq!(
+            log_level_from_line("2026-04-01 10:08:44 ERROR provider timeout"),
+            Some("error")
+        );
+    }
+
+    #[test]
+    fn default_analysis_keeps_warn_latency_visible() {
+        let dir = std::env::temp_dir().join(format!(
+            "rustclaw-log-analyze-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let path = dir.join("app.log");
+        std::fs::write(
+            &path,
+            "2026-04-01 10:00:00 INFO boot\n2026-04-01 10:02:20 WARN upstream latency increased to 820ms\n",
+        )
+        .expect("write log");
+        let keywords = [
+            "error",
+            "warn",
+            "warning",
+            "failed",
+            "timeout",
+            "panic",
+            "latency",
+            "queue full",
+            "unauthorized",
+        ]
+        .into_iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+        let analysis = analyze_log_file(&path, path.display().to_string(), &keywords, 20)
+            .expect("analysis");
+
+        assert_eq!(analysis.level_counts.get("warn"), Some(&1));
+        assert_eq!(analysis.keyword_counts.get("warn"), Some(&1));
+        assert_eq!(analysis.keyword_counts.get("latency"), Some(&1));
+        assert!(
+            analysis
+                .recent_notable_lines
+                .iter()
+                .any(|line| line.contains("latency increased"))
+        );
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir(dir);
     }
 }
