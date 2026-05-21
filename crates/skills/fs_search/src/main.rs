@@ -317,6 +317,15 @@ fn bool_arg(obj: &serde_json::Map<String, Value>, key: &str) -> bool {
     obj.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
+fn normalize_target_kind(value: &str) -> &str {
+    match value {
+        "files" => "file",
+        "dirs" | "directory" | "directories" | "folder" | "folders" => "dir",
+        "file" | "dir" | "any" => value,
+        _ => "any",
+    }
+}
+
 fn line_matches_query(line: &str, query: &str) -> bool {
     line.contains(query) || ordered_wildcard_query_matches(line, query)
 }
@@ -446,9 +455,9 @@ fn execute(args: Value) -> Result<Value, String> {
             {
                 "dir"
             } else {
-                target_kind.as_str()
+                normalize_target_kind(&target_kind)
             };
-            walk_collect_nodes(&search_root, scan_limits, &mut |p| {
+            let mut collect = |p: &Path| {
                 let name = p
                     .file_name()
                     .map(|s| normalize_locator_text(&s.to_string_lossy()))
@@ -470,7 +479,12 @@ fn execute(args: Value) -> Result<Value, String> {
                     results.push(to_rel(&root, p));
                 }
                 results.len() >= max_results
-            })?;
+            };
+            if target_kind == "dir" {
+                walk_collect_dirs(&search_root, scan_limits, &mut collect)?;
+            } else {
+                walk_collect_nodes(&search_root, scan_limits, &mut collect)?;
+            }
             Ok(json!({
                 "action": "find_name",
                 "root": to_rel(&root, &search_root),
@@ -754,6 +768,60 @@ fn walk_collect_nodes(
     walk_collect_nodes_inner(path, 0, limits, &mut scanned_files, &mut stop, f)
 }
 
+fn walk_collect_dirs(
+    path: &Path,
+    limits: ScanLimits,
+    f: &mut dyn FnMut(&Path) -> bool,
+) -> Result<(), String> {
+    let mut scanned_dirs = 0usize;
+    let mut stop = false;
+    walk_collect_dirs_inner(path, 0, limits, &mut scanned_dirs, &mut stop, f)
+}
+
+fn walk_collect_dirs_inner(
+    path: &Path,
+    depth: usize,
+    limits: ScanLimits,
+    scanned_dirs: &mut usize,
+    stop: &mut bool,
+    f: &mut dyn FnMut(&Path) -> bool,
+) -> Result<(), String> {
+    if *stop || !path.is_dir() {
+        return Ok(());
+    }
+    if *scanned_dirs >= limits.max_files {
+        return Ok(());
+    }
+    *scanned_dirs += 1;
+    if f(path) {
+        *stop = true;
+        return Ok(());
+    }
+    if depth >= limits.max_depth {
+        return Ok(());
+    }
+    let iter = std::fs::read_dir(path).map_err(|err| format!("read_dir failed: {err}"))?;
+    let mut dirs = Vec::new();
+    for entry in iter {
+        let entry = entry.map_err(|err| format!("dir entry failed: {err}"))?;
+        let p = entry.path();
+        if p.is_dir() {
+            if skip_default_scan_dir(&p) {
+                continue;
+            }
+            dirs.push(p);
+        }
+    }
+    dirs.sort();
+    for p in dirs {
+        if *stop {
+            return Ok(());
+        }
+        walk_collect_dirs_inner(&p, depth + 1, limits, scanned_dirs, stop, f)?;
+    }
+    Ok(())
+}
+
 fn walk_collect_nodes_inner(
     path: &Path,
     depth: usize,
@@ -886,6 +954,46 @@ mod tests {
             results.iter().any(|v| v.as_str().is_some_and(
                 |s| s.ends_with("prompts/layers/overlays/intent_normalizer_prompt.md")
             )),
+            "results={results:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn find_name_directory_target_ignores_unrelated_file_budget() {
+        let root = unique_temp_dir("dir-budget");
+        let noisy = root.join("a_many_files");
+        let target = root.join("z_parent/bundle_src");
+        std::fs::create_dir_all(&noisy).expect("create noisy dir");
+        std::fs::create_dir_all(&target).expect("create target dir");
+        std::fs::write(root.join("z_parent/readme.txt"), "nearby file\n")
+            .expect("write sibling file");
+        for idx in 0..8 {
+            std::fs::write(noisy.join(format!("noise_{idx}.txt")), "noise\n")
+                .expect("write noise file");
+        }
+
+        let out = execute(json!({
+            "action": "find_name",
+            "pattern": "bundle_src",
+            "root": root.to_string_lossy().to_string(),
+            "target_kind": "directory",
+            "max_depth": 4,
+            "max_files": 4,
+            "max_results": 5
+        }))
+        .expect("find_name succeeds");
+
+        assert_eq!(out.get("count").and_then(Value::as_u64), Some(1));
+        let results = out
+            .get("results")
+            .and_then(Value::as_array)
+            .expect("results array");
+        assert!(
+            results.iter().any(|v| v
+                .as_str()
+                .is_some_and(|s| s.ends_with("z_parent/bundle_src"))),
             "results={results:?}"
         );
 
