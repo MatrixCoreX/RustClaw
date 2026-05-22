@@ -373,7 +373,12 @@ fn apply_ask_post_route(
         route_result.clarify_question = deictic_missing_locator_question(&route_result).to_string();
         append_route_reason(&mut route_result, "background_locator_requires_clarify");
     }
-    promote_locatorless_status_query_to_service_status(&mut route_result, turn_analysis);
+    promote_locatorless_status_query_to_service_status(
+        state,
+        prompt,
+        &mut route_result,
+        turn_analysis,
+    );
     promote_locatorless_git_capability_to_repository_state(&mut route_result);
     if locatorless_observation_route_should_force_clarify(
         state,
@@ -930,6 +935,7 @@ fn unbound_model_context_target_route_should_force_clarify(
             crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
         )
         || current_request_has_structural_locator_surface_for_route(state, prompt, route_result)
+        || current_request_has_self_contained_structured_payload(prompt)
         || state_patch_allows_deictic_locator_guard_bypass(turn_analysis)
         || session_has_authoritative_deictic_anchor(prompt, route_result, session_snapshot)
         || active_session_has_structured_observation_anchor(session_snapshot)
@@ -957,6 +963,7 @@ fn unbound_targeted_evidence_route_should_force_clarify(
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
 ) -> bool {
     if current_request_has_concrete_locator_surface(prompt)
+        || current_request_has_self_contained_structured_payload(prompt)
         || session_has_authoritative_deictic_anchor(prompt, route_result, session_snapshot)
         || route_result.needs_clarify
         || !route_result.output_contract.locator_hint.trim().is_empty()
@@ -1553,6 +1560,8 @@ fn ascii_token_present(text: &str, token: &str) -> bool {
 }
 
 fn promote_locatorless_status_query_to_service_status(
+    state: &AppState,
+    prompt: &str,
     route_result: &mut crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> bool {
@@ -1570,7 +1579,15 @@ fn promote_locatorless_status_query_to_service_status(
             route_result.output_contract.locator_kind,
             crate::OutputLocatorKind::None | crate::OutputLocatorKind::CurrentWorkspace
         )
-        || route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || !matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None | crate::OutputSemanticKind::RawCommandOutput
+        )
+    {
+        return false;
+    }
+    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+        && raw_command_output_has_explicit_command(state, prompt)
     {
         return false;
     }
@@ -1603,6 +1620,7 @@ fn locatorless_observation_route_should_force_clarify(
         || route_result.output_contract.locator_kind != crate::OutputLocatorKind::None
         || !route_result.output_contract.locator_hint.trim().is_empty()
         || current_request_has_structural_locator_surface_for_route(state, prompt, route_result)
+        || current_request_has_self_contained_structured_payload(prompt)
         || state_patch_allows_deictic_locator_guard_bypass(turn_analysis)
         || session_has_authoritative_deictic_anchor(prompt, route_result, session_snapshot)
         || active_session_has_structured_observation_anchor(session_snapshot)
@@ -1616,6 +1634,10 @@ fn locatorless_observation_route_should_force_clarify(
     }
 
     true
+}
+
+fn current_request_has_self_contained_structured_payload(prompt: &str) -> bool {
+    crate::intent::surface_signals::inline_json_transform_request(prompt)
 }
 
 fn bare_topic_memory_expansion_route_should_force_clarify(
@@ -3017,6 +3039,34 @@ mod tests {
     }
 
     #[test]
+    fn unbound_model_context_target_allows_inline_csv_transform_payload() {
+        let state = test_state_with_root(make_temp_root("unbound_model_context_inline_csv"));
+        let mut route = executable_filename_route();
+        route.resolved_intent =
+            "Sort the embedded CSV records and render a markdown table.".to_string();
+        route.route_reason = "inline structured records can be transformed directly".to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(!unbound_model_context_target_route_should_force_clarify(
+            &state,
+            "这个 CSV 按 score 降序输出 markdown 表格：name,score\\nli,3\\nwang,8\\nzhao,5",
+            &route,
+            None,
+            &snapshot,
+        ));
+    }
+
+    #[test]
     fn unbound_model_context_target_allows_configured_raw_command_without_locator() {
         let mut state = test_state_with_root(make_temp_root("unbound_model_context_raw_command"));
         state.policy.command_intent.execute_prefixes = vec!["run ".to_string()];
@@ -3176,6 +3226,32 @@ mod tests {
         assert!(locatorless_observation_route_should_force_clarify(
             &state,
             "读一下那个文件前 3 行",
+            &route,
+            None,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn locatorless_inline_structured_payload_does_not_require_external_locator() {
+        let state = test_state_with_root(make_temp_root("locatorless_inline_payload"));
+        let mut route = executable_filename_route();
+        route.resolved_intent = r#"Count inline JSON array records."#.to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(!locatorless_observation_route_should_force_clarify(
+            &state,
+            r#"统计这个 JSON 数组中对象数量，只输出数字：[{"x":1},{"x":2}]"#,
             &route,
             None,
             &snapshot,
@@ -3371,6 +3447,8 @@ mod tests {
         };
 
         assert!(promote_locatorless_status_query_to_service_status(
+            &state,
+            "status overview",
             &mut route,
             Some(&analysis),
         ));
@@ -3388,6 +3466,50 @@ mod tests {
         assert!(!unbound_targeted_evidence_route_should_force_clarify(
             "status overview",
             &route,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn locatorless_raw_status_query_promotes_when_no_literal_command() {
+        let state = test_state_with_root(make_temp_root("locatorless_raw_status_query"));
+        let mut route = executable_filename_route();
+        route.resolved_intent =
+            "Check whether the local clawd process is present and summarize matches.".to_string();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        let analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::StatusQuery),
+            target_task_policy: None,
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(promote_locatorless_status_query_to_service_status(
+            &state,
+            "check whether the local clawd process is present",
+            &mut route,
+            Some(&analysis),
+        ));
+        assert_eq!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ServiceStatus
+        );
+        assert!(!locatorless_observation_route_should_force_clarify(
+            &state,
+            "check whether the local clawd process is present",
+            &route,
+            Some(&analysis),
             &snapshot,
         ));
     }

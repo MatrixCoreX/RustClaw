@@ -209,6 +209,7 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
                 &obj,
                 &["name_pattern", "basename_pattern", "filename_pattern"],
             );
+            let explicit_exact_basename = explicit_find_entries_exact_basename_selector(&obj);
             move_value_alias_if_missing(&mut obj, "root", &["path", "dir", "directory"]);
             move_existing_directory_alias_to_root(
                 &mut obj,
@@ -254,6 +255,12 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
                     "file_extensions",
                 ],
             );
+            move_value_alias_if_missing(&mut obj, "max_results", &["max_entries", "limit"]);
+            if obj.get("max_results").is_some() {
+                obj.remove("max_entries");
+                obj.remove("limit");
+            }
+            promote_extension_names_to_ext(&mut obj);
             if !explicit_name_pattern {
                 promote_globish_pattern_to_ext(&mut obj);
             }
@@ -281,6 +288,9 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             }
             let search_by_ext = obj.get("ext").is_some()
                 || string_field_matches(&obj, &["by", "mode", "match_kind"], &["ext", "extension"]);
+            if explicit_exact_basename && !search_by_ext {
+                obj.entry("exact".to_string()).or_insert(Value::Bool(true));
+            }
             obj.insert(
                 "action".to_string(),
                 Value::String(if search_by_ext { "find_ext" } else { "find_name" }.to_string()),
@@ -323,6 +333,13 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             obj.remove("action");
             Ok(rewrite_to("write_file", obj))
         }
+        "append_text" => {
+            move_value_alias_if_missing(&mut obj, "path", &["file", "file_path", "target"]);
+            move_value_alias_if_missing(&mut obj, "content", &["text", "data", "body"]);
+            obj.insert("append".to_string(), Value::Bool(true));
+            obj.remove("action");
+            Ok(rewrite_to("write_file", obj))
+        }
         "make_dir" => {
             move_value_alias_if_missing(&mut obj, "path", &["dir", "directory", "target"]);
             obj.remove("action");
@@ -334,7 +351,7 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
             Ok(rewrite_to("remove_file", obj))
         }
         _ => Err(format!(
-            "unsupported fs_basic action `{}`; allowed: stat_paths|list_dir|count_entries|read_text_range|find_entries|grep_text|compare_paths|write_text|make_dir|remove_path",
+            "unsupported fs_basic action `{}`; allowed: stat_paths|list_dir|count_entries|read_text_range|find_entries|grep_text|compare_paths|write_text|append_text|make_dir|remove_path",
             action
         )),
     }
@@ -421,6 +438,9 @@ fn normalize_fs_basic_args(args: &mut Value) -> bool {
             ("search_text", "grep_text"),
             ("compare", "compare_paths"),
             ("write_file", "write_text"),
+            ("append", "append_text"),
+            ("append_file", "append_text"),
+            ("append_line", "append_text"),
             ("mkdir", "make_dir"),
             ("remove_file", "remove_path"),
             ("delete_file", "remove_path"),
@@ -594,6 +614,44 @@ fn has_any_non_empty_arg(obj: &serde_json::Map<String, Value>, keys: &[&str]) ->
     keys.iter().any(|key| has_non_empty_arg(obj, key))
 }
 
+fn explicit_find_entries_exact_basename_selector(obj: &serde_json::Map<String, Value>) -> bool {
+    [
+        "name_pattern",
+        "basename_pattern",
+        "filename_pattern",
+        "filename",
+        "entry_name",
+    ]
+    .iter()
+    .any(|key| obj.get(*key).is_some_and(concrete_basename_selector_value))
+}
+
+fn concrete_basename_selector_value(value: &Value) -> bool {
+    match value {
+        Value::String(text) => concrete_basename_selector_text(text),
+        Value::Array(items) if !items.is_empty() => items
+            .iter()
+            .all(|item| item.as_str().is_some_and(concrete_basename_selector_text)),
+        _ => false,
+    }
+}
+
+fn concrete_basename_selector_text(text: &str) -> bool {
+    let trimmed = text.trim().trim_matches('"').trim_matches('\'').trim();
+    if trimmed.is_empty()
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains(['*', '?', '[', ']', '(', ')', '{', '}', '|'])
+    {
+        return false;
+    }
+    Path::new(trimmed)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::trim)
+        .is_some_and(|ext| !ext.is_empty())
+}
+
 fn promote_globish_pattern_to_ext(obj: &mut serde_json::Map<String, Value>) -> bool {
     if has_non_empty_arg(obj, "ext") {
         return false;
@@ -630,6 +688,36 @@ fn extension_from_globish_filter(text: &str) -> Option<String> {
         .contains('*')
         .then(|| ext.to_string())
         .or_else(|| cleaned.strip_prefix('.').map(ToString::to_string))
+}
+
+fn extension_selector_value(value: &Value) -> Option<Value> {
+    match value {
+        Value::String(text) => extension_from_globish_filter(text).map(Value::String),
+        Value::Array(items) => {
+            if items.is_empty() {
+                return None;
+            }
+            let mut extensions = Vec::with_capacity(items.len());
+            for item in items {
+                let ext = item.as_str().and_then(extension_from_globish_filter)?;
+                extensions.push(Value::String(ext));
+            }
+            Some(Value::Array(extensions))
+        }
+        _ => None,
+    }
+}
+
+fn promote_extension_names_to_ext(obj: &mut serde_json::Map<String, Value>) -> bool {
+    if has_non_empty_arg(obj, "ext") || has_non_empty_arg(obj, "pattern") {
+        return false;
+    }
+    let Some(ext) = obj.get("names").and_then(extension_selector_value) else {
+        return false;
+    };
+    obj.insert("ext".to_string(), ext);
+    obj.remove("names");
+    true
 }
 
 fn demote_existing_directory_pattern_to_root(obj: &mut serde_json::Map<String, Value>) -> bool {
@@ -923,6 +1011,40 @@ mod tests {
     }
 
     #[test]
+    fn fs_basic_find_entries_extension_names_alias_rewrites_to_find_ext() {
+        let args = json!({
+            "action": "find_entries",
+            "target": "scripts/nl_tests/fixtures/device_local",
+            "target_kind": "file",
+            "names": [".db", ".sqlite", ".sqlite3", ".db3"]
+        });
+        let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+            .unwrap()
+            .expect("rewrite");
+
+        assert_eq!(rewrite.runtime_tool, "fs_search");
+        assert_eq!(
+            rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+            Some("find_ext")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("root").and_then(|v| v.as_str()),
+            Some("scripts/nl_tests/fixtures/device_local")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("ext"),
+            Some(&json!(["db", "sqlite", "sqlite3", "db3"]))
+        );
+        assert_eq!(
+            rewrite
+                .runtime_args
+                .get("target_kind")
+                .and_then(|v| v.as_str()),
+            Some("file")
+        );
+    }
+
+    #[test]
     fn fs_basic_find_entries_directory_target_and_filter_rewrites_to_find_ext() {
         let args = json!({
             "action": "find_entries",
@@ -983,6 +1105,61 @@ mod tests {
             rewrite.runtime_args.get("root").and_then(|v| v.as_str()),
             Some(".")
         );
+    }
+
+    #[test]
+    fn fs_basic_find_entries_concrete_name_pattern_requests_exact_match() {
+        let args = json!({
+            "action": "find_entries",
+            "path": "scripts/nl_tests/fixtures/locator_smart",
+            "target_kind": "file",
+            "name_pattern": "Report.MD"
+        });
+        let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+            .unwrap()
+            .expect("rewrite");
+
+        assert_eq!(rewrite.runtime_tool, "fs_search");
+        assert_eq!(
+            rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+            Some("find_name")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("pattern").and_then(|v| v.as_str()),
+            Some("Report.MD")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("exact").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn fs_basic_find_entries_max_entries_rewrites_to_fs_search_max_results() {
+        let args = json!({
+            "action": "find_entries",
+            "root": "scripts/nl_tests/fixtures/locator_smart",
+            "target_kind": "file",
+            "pattern": "*abcd*",
+            "max_entries": 4
+        });
+        let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+            .unwrap()
+            .expect("rewrite");
+
+        assert_eq!(rewrite.runtime_tool, "fs_search");
+        assert_eq!(
+            rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+            Some("find_name")
+        );
+        assert_eq!(
+            rewrite
+                .runtime_args
+                .get("max_results")
+                .and_then(|v| v.as_u64()),
+            Some(4)
+        );
+        assert!(rewrite.runtime_args.get("max_entries").is_none());
     }
 
     #[test]
@@ -1146,6 +1323,30 @@ mod tests {
             Some(true)
         );
         assert!(rewrite.runtime_args.get("pattern").is_none());
+    }
+
+    #[test]
+    fn fs_basic_append_text_rewrites_to_append_write_file() {
+        let mut args = json!({"action":"append_line", "file":"memo.txt", "text":"beta\n"});
+        assert!(normalize_virtual_tool_arg_aliases("fs_basic", &mut args));
+        let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+            .unwrap()
+            .expect("rewrite");
+
+        assert_eq!(rewrite.runtime_tool, "write_file");
+        assert_eq!(
+            rewrite.runtime_args.get("path").and_then(|v| v.as_str()),
+            Some("memo.txt")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("content").and_then(|v| v.as_str()),
+            Some("beta\n")
+        );
+        assert_eq!(
+            rewrite.runtime_args.get("append").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert!(rewrite.runtime_args.get("action").is_none());
     }
 
     #[test]

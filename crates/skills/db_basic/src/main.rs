@@ -112,6 +112,7 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
         }
         _ => required_sql(obj)?,
     };
+    let sql = normalize_readonly_sql(&sql);
 
     let root = workspace_root();
     let db = resolve_path(&root, db_path)?;
@@ -221,6 +222,87 @@ fn required_sql(obj: &serde_json::Map<String, Value>) -> Result<String, SkillErr
         return Err(SkillError::new("invalid_input", "sql is empty"));
     }
     Ok(sql)
+}
+
+fn normalize_readonly_sql(sql: &str) -> String {
+    rewrite_table_valued_pragma_table_info(sql)
+}
+
+fn rewrite_table_valued_pragma_table_info(sql: &str) -> String {
+    let lower = sql.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let mut cursor = 0;
+    let mut rewritten = String::new();
+    let mut changed = false;
+
+    while let Some(rel) = lower[cursor..].find("pragma") {
+        let start = cursor + rel;
+        let after_pragma = start + "pragma".len();
+        if start > 0 && is_sql_ident_byte(bytes[start - 1]) {
+            cursor = after_pragma;
+            continue;
+        }
+        if after_pragma >= bytes.len() || !bytes[after_pragma].is_ascii_whitespace() {
+            cursor = after_pragma;
+            continue;
+        }
+
+        let mut idx = skip_ascii_ws(bytes, after_pragma);
+        if !lower[idx..].starts_with("table_info") {
+            cursor = after_pragma;
+            continue;
+        }
+        let after_table_info = idx + "table_info".len();
+        if after_table_info < bytes.len() && is_sql_ident_byte(bytes[after_table_info]) {
+            cursor = after_pragma;
+            continue;
+        }
+        idx = skip_ascii_ws(bytes, after_table_info);
+        if idx >= bytes.len() || bytes[idx] != b'(' {
+            cursor = after_pragma;
+            continue;
+        }
+        if !previous_sql_context_allows_table_valued_pragma(sql, start) {
+            cursor = after_pragma;
+            continue;
+        }
+
+        rewritten.push_str(&sql[cursor..start]);
+        rewritten.push_str("pragma_table_info");
+        cursor = idx;
+        changed = true;
+    }
+
+    if changed {
+        rewritten.push_str(&sql[cursor..]);
+        rewritten
+    } else {
+        sql.to_string()
+    }
+}
+
+fn skip_ascii_ws(bytes: &[u8], mut idx: usize) -> usize {
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+    idx
+}
+
+fn is_sql_ident_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn previous_sql_context_allows_table_valued_pragma(sql: &str, start: usize) -> bool {
+    let prefix = sql[..start].trim_end();
+    if prefix.ends_with(',') {
+        return true;
+    }
+    let token = prefix
+        .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .find(|part| !part.is_empty())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    matches!(token.as_str(), "from" | "join")
 }
 
 fn run_query(
@@ -439,5 +521,64 @@ mod tests {
                 .and_then(Value::as_str),
             Some("demo")
         );
+    }
+
+    #[test]
+    fn normalizes_table_valued_pragma_table_info_in_select_from_context() {
+        let sql = "SELECT name FROM PRAGMA table_info('users')";
+        assert_eq!(
+            normalize_readonly_sql(sql),
+            "SELECT name FROM pragma_table_info('users')"
+        );
+        let standalone = "PRAGMA table_info('users')";
+        assert_eq!(normalize_readonly_sql(standalone), standalone);
+    }
+
+    #[test]
+    fn sqlite_query_accepts_union_over_table_valued_pragma_alias() {
+        let db_path = temp_db_path("pragma-table-info-union");
+        execute(json!({
+            "action": "sqlite_execute",
+            "db_path": db_path,
+            "sql": "CREATE TABLE users(id INTEGER, name TEXT, email TEXT)",
+            "confirm": true,
+        }))
+        .expect("setup users");
+        execute(json!({
+            "action": "sqlite_execute",
+            "db_path": db_path,
+            "sql": "CREATE TABLE orders(id INTEGER, amount REAL, status TEXT)",
+            "confirm": true,
+        }))
+        .expect("setup orders");
+
+        let (text, extra) = execute(json!({
+            "action": "sqlite_query",
+            "db_path": db_path,
+            "sql": "SELECT tbl, name, type FROM (
+                SELECT 'users' AS tbl, name, type FROM PRAGMA table_info('users')
+                UNION ALL
+                SELECT 'orders' AS tbl, name, type FROM PRAGMA table_info('orders')
+            ) WHERE type LIKE '%TEXT%' ORDER BY tbl, name",
+        }))
+        .expect("sqlite_query should normalize table-valued PRAGMA syntax");
+
+        let value: Value = serde_json::from_str(&text).expect("text should be result json");
+        let rows = value.get("rows").and_then(Value::as_array).expect("rows");
+        let names = rows
+            .iter()
+            .filter_map(|row| {
+                Some(format!(
+                    "{}.{}",
+                    row.get("tbl")?.as_str()?,
+                    row.get("name")?.as_str()?
+                ))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["orders.status", "users.email", "users.name"]);
+        assert!(extra
+            .get("sql")
+            .and_then(Value::as_str)
+            .is_some_and(|sql| sql.contains("pragma_table_info")));
     }
 }

@@ -1,6 +1,6 @@
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::{self, BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -71,6 +71,29 @@ fn execute(args: Value) -> Result<(String, Value), String> {
 
     match action {
         "detect" => {
+            let project_path = detect_path_arg(obj)
+                .map(|path| resolve_path(&workspace_root(), &path))
+                .transpose()?;
+            if let Some(path) = project_path.as_deref() {
+                if let Some(project) = detect_project_manager(path) {
+                    let output = format!("package_manager={}", project.manager);
+                    return Ok((
+                        output.clone(),
+                        json!({
+                            "action":"detect",
+                            "manager":project.manager,
+                            "manager_scope":"project",
+                            "platform":std::env::consts::OS,
+                            "path":path.display().to_string(),
+                            "marker":project.marker,
+                            "candidate_order":project_manager_markers(),
+                            "system_candidate_order":package_manager_candidates(),
+                            "system_manager":detect_manager().unwrap_or_else(|| "unknown".to_string()),
+                            "output":output
+                        }),
+                    ));
+                }
+            }
             let mgr = detect_manager().unwrap_or_else(|| "unknown".to_string());
             let output = format!("package_manager={mgr}");
             Ok((
@@ -78,6 +101,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 json!({
                     "action":"detect",
                     "manager":mgr,
+                    "manager_scope":"system",
                     "platform":std::env::consts::OS,
                     "candidate_order":package_manager_candidates(),
                     "output":output
@@ -119,6 +143,18 @@ fn execute(args: Value) -> Result<(String, Value), String> {
     }
 }
 
+fn detect_path_arg(obj: &serde_json::Map<String, Value>) -> Option<String> {
+    ["path", "root", "project_path", "workspace"]
+        .iter()
+        .find_map(|key| {
+            obj.get(*key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+}
+
 fn package_manager_candidates() -> &'static [&'static str] {
     match std::env::consts::OS {
         "macos" => &[
@@ -143,6 +179,65 @@ fn detect_manager() -> Option<String> {
         }
     }
     None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProjectManagerDetection {
+    manager: &'static str,
+    marker: &'static str,
+}
+
+fn project_manager_markers() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("pnpm", "pnpm-lock.yaml"),
+        ("yarn", "yarn.lock"),
+        ("npm", "package-lock.json"),
+        ("bun", "bun.lockb"),
+        ("bun", "bun.lock"),
+        ("cargo", "Cargo.lock"),
+        ("cargo", "Cargo.toml"),
+        ("poetry", "poetry.lock"),
+        ("python", "pyproject.toml"),
+        ("npm", "package.json"),
+    ]
+}
+
+fn detect_project_manager(path: &Path) -> Option<ProjectManagerDetection> {
+    let dir = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent()?.to_path_buf()
+    };
+    project_manager_markers()
+        .iter()
+        .find(|(_manager, marker)| dir.join(marker).exists())
+        .map(|(manager, marker)| ProjectManagerDetection {
+            manager: *manager,
+            marker: *marker,
+        })
+}
+
+fn workspace_root() -> PathBuf {
+    std::env::var("WORKSPACE_ROOT")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+fn resolve_path(workspace_root: &Path, input: &str) -> Result<PathBuf, String> {
+    let raw = Path::new(input);
+    let mut normalized = PathBuf::new();
+    for comp in raw.components() {
+        match comp {
+            Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
+            Component::CurDir => {}
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    if raw.is_absolute() {
+        return Ok(normalized);
+    }
+    Ok(workspace_root.join(normalized))
 }
 
 fn install_packages(
@@ -403,16 +498,60 @@ fn truncate_for_log(s: &str) -> String {
     out
 }
 
-fn workspace_root() -> PathBuf {
-    std::env::var("WORKSPACE_ROOT")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-}
-
 fn now_ts() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "rustclaw-package-manager-{name}-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).expect("create temp dir");
+            Self { path }
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn detects_npm_project_from_package_lock() {
+        let root = TempDir::new("npm");
+        std::fs::write(root.path.join("package.json"), "{}").expect("write manifest");
+        std::fs::write(root.path.join("package-lock.json"), "{}").expect("write lock");
+
+        let detected = detect_project_manager(&root.path).expect("project manager");
+
+        assert_eq!(detected.manager, "npm");
+        assert_eq!(detected.marker, "package-lock.json");
+    }
+
+    #[test]
+    fn detects_cargo_project_from_manifest() {
+        let root = TempDir::new("cargo");
+        std::fs::write(root.path.join("Cargo.toml"), "[package]\nname=\"demo\"\n")
+            .expect("write cargo manifest");
+
+        let detected = detect_project_manager(&root.path).expect("project manager");
+
+        assert_eq!(detected.manager, "cargo");
+        assert_eq!(detected.marker, "Cargo.toml");
+    }
 }

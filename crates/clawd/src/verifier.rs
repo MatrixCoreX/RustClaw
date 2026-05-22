@@ -292,7 +292,7 @@ fn apply_default_creation_target_to_step(
                 default_make_dir_path(state, task),
                 issues,
             ),
-            Some("write_text") => set_or_anchor_creation_path(
+            Some("write_text" | "append_text") => set_or_anchor_creation_path(
                 state,
                 &step.step_id,
                 normalized_skill,
@@ -338,7 +338,7 @@ fn safe_autonomous_creation_step(
         {
             Some("make_dir") => value_as_non_empty_str(obj, "path")
                 .is_some_and(|path| path_is_safe_workspace_creation_target(state, path, true)),
-            Some("write_text") => value_as_non_empty_str(obj, "path")
+            Some("write_text" | "append_text") => value_as_non_empty_str(obj, "path")
                 .is_some_and(|path| path_is_safe_workspace_creation_target(state, path, false)),
             _ => false,
         },

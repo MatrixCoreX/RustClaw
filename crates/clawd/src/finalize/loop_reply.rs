@@ -2002,6 +2002,13 @@ fn delivery_message_is_json_object(message: &str) -> bool {
     )
 }
 
+fn delivery_message_is_json_container(message: &str) -> bool {
+    matches!(
+        serde_json::from_str::<serde_json::Value>(message.trim()),
+        Ok(serde_json::Value::Object(_) | serde_json::Value::Array(_))
+    )
+}
+
 fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
     match crate::language_policy::request_language_hint(user_text) {
         "zh-CN" => false,
@@ -2463,6 +2470,13 @@ fn direct_structured_observed_answer(
     {
         return None;
     }
+    if route.ask_mode.finalize_chat_wrapped()
+        && route.output_contract.requires_content_evidence
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+        && latest_path_batch_facts_has_implicit_metadata_fields(loop_state)
+    {
+        return None;
+    }
     if matches!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
@@ -2550,6 +2564,38 @@ fn latest_plan_requested_synthesis(loop_state: &LoopState) -> bool {
             .as_ref()
             .is_some_and(|plan| plan.raw_plan_text.contains("\"synthesize_answer\""))
     })
+}
+
+fn latest_path_batch_facts_has_implicit_metadata_fields(loop_state: &LoopState) -> bool {
+    let Some(observed) =
+        crate::agent_engine::observed_output::extract_latest_generic_successful_output(loop_state)
+    else {
+        return false;
+    };
+    if !matches!(observed.skill.as_str(), "fs_basic" | "system_basic") {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&observed.body) else {
+        return false;
+    };
+    if value.get("action").and_then(|value| value.as_str()) != Some("path_batch_facts")
+        || value.get("fields").is_some()
+    {
+        return false;
+    }
+    value
+        .get("facts")
+        .and_then(|value| value.as_array())
+        .is_some_and(|facts| {
+            facts.iter().any(|entry| {
+                entry
+                    .get("fact")
+                    .and_then(|value| value.as_object())
+                    .is_some_and(|fact| {
+                        fact.get("size_bytes").is_some() || fact.get("modified_ts").is_some()
+                    })
+            })
+        })
 }
 
 fn route_allows_latest_tail_read_range_delivery(route: &crate::RouteResult) -> bool {
@@ -3797,6 +3843,13 @@ fn delivery_contract_suppresses_execution_summary(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
+    if route.output_contract.response_shape == crate::OutputResponseShape::Strict
+        && delivery_messages
+            .iter()
+            .any(|message| delivery_message_is_json_container(message))
+    {
+        return true;
+    }
     if delivery_matches_latest_structured_scalar_observation(loop_state, route, delivery_messages) {
         return true;
     }
@@ -4974,11 +5027,23 @@ fn deterministic_missing_observed_target_answer(
         .is_some_and(|route| {
             route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
         });
+    let concise_existence = agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .is_some_and(|route| {
+            route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+                && !route.output_contract.delivery_required
+                && matches!(
+                    route.output_contract.response_shape,
+                    crate::OutputResponseShape::Scalar | crate::OutputResponseShape::OneSentence
+                )
+        });
     if prefer_english {
         if scalar_count {
             Some(format!(
                 "`{path}` does not exist, so the matching item count cannot be computed."
             ))
+        } else if concise_existence {
+            Some("not found".to_string())
         } else {
             Some(format!(
                 "I could not find `{path}`, so this request cannot be completed until the path is corrected."
@@ -4986,6 +5051,8 @@ fn deterministic_missing_observed_target_answer(
         }
     } else if scalar_count {
         Some(format!("`{path}` 不存在，无法统计匹配项数量。"))
+    } else if concise_existence {
+        Some("不存在".to_string())
     } else {
         Some(format!("未找到 `{path}`，请确认路径后再继续。"))
     }
@@ -6193,7 +6260,7 @@ fn direct_db_basic_observed_answer(
                     .is_some_and(|output| !output.is_empty())
         })
         .and_then(|step| step.output.as_deref())
-        .and_then(db_basic_rows_answer_from_output)?;
+        .and_then(|output| db_basic_rows_answer_from_output_for_route(route, output))?;
     if answer.trim().is_empty() {
         return None;
     }
@@ -6218,7 +6285,21 @@ fn direct_db_basic_observed_answer(
     ))
 }
 
-fn db_basic_rows_answer_from_output(output: &str) -> Option<String> {
+fn db_basic_rows_answer_from_output_for_route(
+    route: &crate::RouteResult,
+    output: &str,
+) -> Option<String> {
+    db_basic_rows_answer_from_output_with_scalar_count(
+        output,
+        route.output_contract.response_shape == crate::OutputResponseShape::Scalar
+            && route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount,
+    )
+}
+
+fn db_basic_rows_answer_from_output_with_scalar_count(
+    output: &str,
+    scalar_count: bool,
+) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
     let result = value
         .get("columns")
@@ -6238,6 +6319,14 @@ fn db_basic_rows_answer_from_output(output: &str) -> Option<String> {
         return None;
     }
     let rows = result.get("rows").and_then(|value| value.as_array())?;
+    if scalar_count {
+        if rows.len() == 1 && columns.len() == 1 {
+            return rows
+                .first()
+                .and_then(|row| db_row_column_value(row, &columns[0], 0));
+        }
+        return Some(rows.len().to_string());
+    }
     if rows.is_empty() {
         return Some("No rows returned.".to_string());
     }
@@ -8050,6 +8139,33 @@ mod tests {
     }
 
     #[test]
+    fn direct_structured_observed_answer_defers_implicit_metadata_path_facts() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"file","path":"tmp/test_bundle.zip","resolved_path":"/tmp/test_bundle.zip","size_bytes":272,"modified_ts":1776352013},"path":"/tmp/test_bundle.zip"}],"include_missing":true}"#,
+        ));
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/test_bundle.zip".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(direct_structured_observed_answer(Some(&state), &loop_state, Some(&ctx)).is_none());
+        assert!(super::latest_path_batch_facts_has_implicit_metadata_fields(
+            &loop_state
+        ));
+    }
+
+    #[test]
     fn direct_db_basic_observed_answer_uses_latest_rows_after_synthesis_failure() {
         let state = test_state();
         let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -8102,6 +8218,41 @@ mod tests {
             summary.disposition,
             Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
         );
+    }
+
+    #[test]
+    fn direct_db_basic_observed_answer_counts_rows_for_scalar_count_contract() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "db_basic",
+            r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]}"#,
+        ));
+
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+
+        let (answer, summary) = direct_db_basic_observed_answer(
+            &state,
+            "统计 SQLite 数据库的表数量，只输出数字",
+            &loop_state,
+            Some(&ctx),
+        )
+        .expect("scalar count fallback");
+
+        assert_eq!(answer, "3");
+        assert_eq!(summary.format_ok, Some(true));
     }
 
     #[test]
@@ -9926,6 +10077,31 @@ mod tests {
     }
 
     #[test]
+    fn execution_summary_skips_for_strict_json_container_delivery() {
+        let mut route = free_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "db_basic",
+            r#"{"columns":["id","name"],"rows":[{"id":1,"name":"Alice"}]}"#,
+        ));
+        let mut delivery = vec![
+            "**执行过程**\n1. 调用技能 `db_basic`".to_string(),
+            r#"[{"id":1,"name":"Alice"}]"#.to_string(),
+        ];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(delivery, vec![r#"[{"id":1,"name":"Alice"}]"#.to_string()]);
+    }
+
+    #[test]
     fn execution_summary_language_uses_original_user_request_before_resolved_text() {
         let mut route = free_route_result();
         route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
@@ -10653,6 +10829,38 @@ mod tests {
         assert!(answer.contains("configs/config_copy"));
         assert!(answer.contains("不存在"));
         assert!(answer.contains("无法统计"));
+    }
+
+    #[test]
+    fn deterministic_missing_observed_target_answer_respects_scalar_existence_shape() {
+        let state = test_state();
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":false,"path":"/home/guagua/rustclaw/document/nl_tool200/group_02/memo.txt","error":"not found"}],"include_missing":true}"#,
+        ));
+
+        let answer = deterministic_missing_observed_target_answer(
+            &state,
+            "检查 group_02 的 memo.txt 是否存在，只回答存在或不存在",
+            &loop_state,
+            Some(&agent_run_context),
+        )
+        .expect("missing existence observation should produce concise scalar answer");
+
+        assert_eq!(answer, "不存在");
     }
 
     #[test]

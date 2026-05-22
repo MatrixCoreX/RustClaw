@@ -1025,6 +1025,15 @@ fn apply_current_turn_structural_contract_repair(
         reason = Some("structured_file_scalar_repair");
     }
 
+    if output_contract.semantic_kind == OutputSemanticKind::StructuredKeys
+        && req_surface.dotted_field_selector.is_some()
+    {
+        output_contract.semantic_kind = OutputSemanticKind::None;
+        output_contract.response_shape = OutputResponseShape::Scalar;
+        output_contract.requires_content_evidence = true;
+        reason = Some("structured_field_selector_requires_scalar_value");
+    }
+
     if output_contract.semantic_kind == OutputSemanticKind::WorkspaceProjectSummary
         && !matches!(
             output_contract.locator_kind,
@@ -3327,6 +3336,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("For exact same/different comparison of two scalar/field values that still need observation, use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, response_shape=\"strict\", semantic_kind=\"recent_scalar_equality_check\". Keep the requested final line format in resolved_user_intent.".to_string());
     parts.push("For a comparison where one side is a scalar field/value from a structured manifest or config file and the other side is the corresponding value mentioned in a README/docs file, use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, semantic_kind=\"recent_scalar_equality_check\", and response_shape=\"one_sentence\"/\"strict\" according to the requested final answer. This is a semantic contract for field/document evidence, not generic document summarization.".to_string());
     parts.push("For file/path metadata comparisons across concrete local targets (for example size/大小, modified time/修改时间, existence state, or other observable path facts), use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, semantic_kind=\"quantity_comparison\", and response_shape=\"scalar\"/\"one_sentence\"/\"strict\" according to the requested final answer. This is a semantic contract decision, not a phrase-list trigger; do not treat metadata comparison as document content summarization just because the user also asks for a short explanation.".to_string());
+    parts.push("For local project package-manager, dependency-manager, frontend package-manager, or build-tool detection, use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, semantic_kind=\"package_manager_detection\", and locator_kind=\"current_workspace\" or \"path\" when the request names a project directory. This is a project capability contract based on manifest/lock-file observation; do not route it as generic file_names merely because marker filenames are inspected.".to_string());
     parts.push("For git commit subject/title requests, use decision=\"planner_execute\", requires_content_evidence=true, response_shape=\"scalar\" or \"strict\" according to the user's requested format, and semantic_kind=\"git_commit_subject\". Do not publish the raw git oneline hash when the final answer asks for the subject/title only.".to_string());
     parts.push("For read-only Git repository state observation such as current branch, branch list, status, remotes, changed files, or revision metadata, use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, locator_kind=\"current_workspace\" or \"none\", semantic_kind=\"git_repository_state\", and response_shape=\"scalar\"/\"strict\"/\"free\" according to the requested final answer. This is a tool capability contract; do not require a file/path locator unless the Git action needs a concrete path, such as reading a file at a revision.".to_string());
     parts.push("For structured document key-name requests against JSON/TOML/YAML/config files, use decision=\"planner_execute\", requires_content_evidence=true, response_shape=\"strict\" when the user asks only for the keys, and semantic_kind=\"structured_keys\". Keep locator_kind/locator_hint pointed at the structured file; do not treat key-name requests as file excerpts.".to_string());
@@ -6334,6 +6344,25 @@ pub(crate) async fn run_intent_normalizer(
                     None,
                 );
             }
+            if let Some(fallback) = parse_failed_explicit_capability_fallback_decision(
+                req,
+                &req_surface,
+                &state.skill_rt.workspace_root,
+            ) {
+                info!(
+                    "{} intent_normalizer task_id={} llm_failed_explicit_capability_fallback reason={} input={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    fallback.reason,
+                    crate::truncate_for_log(req)
+                );
+                return normalizer_output_from_fallback(
+                    req,
+                    "llm_failed_structured_capability_fallback",
+                    fallback,
+                    None,
+                );
+            }
             if let Some(fallback) = explicit_surface_path_facts_fallback_decision(
                 req,
                 &req_surface,
@@ -7535,7 +7564,7 @@ fn parse_failed_explicit_capability_fallback_decision(
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
     workspace_root: &Path,
 ) -> Option<RouteDecision> {
-    if !ascii_token_present(req, "git")
+    if !git_repository_state_surface_token_present(req)
         || req_surface.has_explicit_path_or_url()
         || req_surface.has_single_filename_candidate()
         || req_surface.has_filename_candidates()
@@ -7567,6 +7596,13 @@ fn parse_failed_explicit_capability_fallback_decision(
             ..Default::default()
         },
     })
+}
+
+fn git_repository_state_surface_token_present(req: &str) -> bool {
+    ascii_token_present(req, "git")
+        || ascii_token_present(req, "remote")
+        || ascii_token_present(req, "HEAD")
+        || ascii_token_present(req, "branch")
 }
 
 fn explicit_surface_path_facts_fallback_decision(
@@ -12853,6 +12889,49 @@ mod tests {
     }
 
     #[test]
+    fn dotted_structured_field_repair_overrides_structured_keys_contract() {
+        let req = "读取 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 中 app.name，只输出值";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
+                .to_string(),
+            semantic_kind: OutputSemanticKind::StructuredKeys,
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(2)
+                .expect("workspace root"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(
+            reason,
+            Some("structured_field_selector_requires_scalar_value")
+        );
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+        assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(
+            contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
+        );
+    }
+
+    #[test]
     fn planner_locator_contract_repair_requires_evidence_for_sparse_contract() {
         let req = "Read configs/config.toml and output the selected_vendor field and value";
         let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
@@ -13234,6 +13313,48 @@ mod tests {
         let repair = super::apply_explicit_command_execution_contract_repair(
             &runtime,
             "请执行 pwd，只输出命令结果",
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut contract,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(repair, Some("explicit_command_requires_fresh_execution"));
+        assert!(!needs_clarify);
+        assert!(clarify_question.is_empty());
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+        assert!(contract.locator_hint.is_empty());
+    }
+
+    #[test]
+    fn embedded_standalone_command_execution_repair_clears_spurious_clarify() {
+        let runtime = crate::CommandIntentRuntime {
+            all_result_suffixes: vec![],
+            execute_prefixes: vec!["执行".to_string()],
+            standalone_commands: vec!["pwd".to_string()],
+            default_locale: "zh-CN".to_string(),
+            verify_enforce_enabled: true,
+        };
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+        let mut needs_clarify = true;
+        let mut clarify_question = "请提供要读取或检查的具体文件、目录或路径。".to_string();
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Scalar,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            ..IntentOutputContract::default()
+        };
+
+        let repair = super::apply_explicit_command_execution_contract_repair(
+            &runtime,
+            "运行 pwd -P，只返回物理工作目录路径",
             &mut needs_clarify,
             &mut clarify_question,
             &mut contract,
@@ -14201,6 +14322,28 @@ mod tests {
             OutputLocatorKind::CurrentWorkspace
         );
         assert!(fallback.output_contract.requires_content_evidence);
+    }
+
+    #[test]
+    fn parse_failed_git_remote_fallback_builds_repository_state_contract() {
+        let req = "列出当前仓库 remote 名称和 URL";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let fallback = super::parse_failed_explicit_capability_fallback_decision(
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+        )
+        .expect("explicit git remote fallback");
+
+        assert!(!fallback.needs_clarify);
+        assert_eq!(
+            fallback.output_contract.semantic_kind,
+            OutputSemanticKind::GitRepositoryState
+        );
+        assert_eq!(
+            fallback.output_contract.response_shape,
+            OutputResponseShape::Strict
+        );
     }
 
     #[test]

@@ -10,7 +10,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 - Find filesystem entries by name or extension.
 - Search text content under a bounded root.
 - Compare explicit paths.
-- Write text, create directories, or remove files when confirmation permits.
+- Write or append text, create directories, or remove files when confirmation permits.
 
 ## Actions
 - `stat_paths`
@@ -21,6 +21,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 - `grep_text`
 - `compare_paths`
 - `write_text`
+- `append_text`
 - `make_dir`
 - `remove_path`
 
@@ -50,7 +51,8 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 | `grep_text` | `root` | no | string(path) | workspace | Search root or known file path. |
 | `grep_text` | `pattern` | no | string/string[] | - | Optional filename filter. |
 | `compare_paths` | `left_path`, `right_path` | yes | string(path) | - | Two explicit paths to compare. |
-| `write_text` | `path`, `content` | yes | string(path), string | - | Write text content. Requires confirmation. |
+| `write_text` | `path`, `content` | yes | string(path), string | - | Replace/write text content. Requires confirmation. |
+| `append_text` | `path`, `content` | yes | string(path), string | - | Append text content to an existing or new file. Include the requested newline in `content` when the user asks for a line append. Requires confirmation. |
 | `make_dir` | `path` | yes | string(path) | - | Create directory. Requires confirmation. |
 | `remove_path` | `path` | yes | string(path) | - | Remove one file. Requires confirmation. |
 
@@ -62,6 +64,7 @@ Use `{"type":"call_tool","tool":"fs_basic","args":{...}}` for filesystem tasks t
 - Grouped file-vs-directory inventory: use `list_dir` and preserve kind metadata (`entries` or `names_by_kind`); do not answer from a flat untyped name list when the contract is grouped.
 - Directory counts: use `count_entries`, not `run_cmd` pipelines, unless shell behavior itself is the task.
 - Raw file excerpts: use `read_text_range`; semantic document understanding belongs to `doc_parse`.
+- File appends: use `append_text`, not `read_text_range` and not `run_cmd` redirection.
 - Shell semantics, pipelines, or platform-specific commands belong to `run_cmd`.
 - Legacy `read_file`, `write_file`, `list_dir`, `make_dir`, `remove_file`, `fs_search`, and `system_basic` remain accepted for compatibility, but prefer `fs_basic` when this contract covers the task.
 

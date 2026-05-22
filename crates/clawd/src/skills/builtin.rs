@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde_json::Value;
+use std::io::{Read as IoRead, Seek as IoSeek, SeekFrom, Write as IoWrite};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt};
@@ -193,9 +194,10 @@ pub(crate) async fn execute_builtin_skill_with_task(
             Ok(String::from_utf8_lossy(clip).to_string())
         }
         "write_file" => {
-            ensure_only_keys(map, &["path", "content"])?;
+            ensure_only_keys(map, &["path", "content", "append"])?;
             let path = required_string(map, "path")?;
             let content = required_string(map, "content")?;
+            let append = optional_bool(map, "append").unwrap_or(false);
             if content.len() > crate::MAX_WRITE_FILE_BYTES {
                 return Err(builtin_error(
                     "write_file",
@@ -221,20 +223,71 @@ pub(crate) async fn execute_builtin_skill_with_task(
                     io_builtin_error("write_file", "mkdir", &err, Some(path), Some(parent))
                 })?;
             }
-            std::fs::write(&real_path, content).map_err(|err| {
-                io_builtin_error(
-                    "write_file",
-                    "write file",
-                    &err,
-                    Some(path),
-                    Some(&real_path),
-                )
-            })?;
-            Ok(format!(
-                "written {} bytes to {}",
-                content.len(),
-                real_path.display()
-            ))
+            if append {
+                let prepend_line_separator = append_needs_line_separator(&real_path, content)
+                    .map_err(|err| {
+                        io_builtin_error(
+                            "write_file",
+                            "inspect file before append",
+                            &err,
+                            Some(path),
+                            Some(&real_path),
+                        )
+                    })?;
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&real_path)
+                    .map_err(|err| {
+                        io_builtin_error(
+                            "write_file",
+                            "open file for append",
+                            &err,
+                            Some(path),
+                            Some(&real_path),
+                        )
+                    })?;
+                if prepend_line_separator {
+                    file.write_all(b"\n").map_err(|err| {
+                        io_builtin_error(
+                            "write_file",
+                            "append line separator",
+                            &err,
+                            Some(path),
+                            Some(&real_path),
+                        )
+                    })?;
+                }
+                file.write_all(content.as_bytes()).map_err(|err| {
+                    io_builtin_error(
+                        "write_file",
+                        "append file",
+                        &err,
+                        Some(path),
+                        Some(&real_path),
+                    )
+                })?;
+                Ok(format!(
+                    "appended {} bytes to {}",
+                    content.len() + usize::from(prepend_line_separator),
+                    real_path.display()
+                ))
+            } else {
+                std::fs::write(&real_path, content).map_err(|err| {
+                    io_builtin_error(
+                        "write_file",
+                        "write file",
+                        &err,
+                        Some(path),
+                        Some(&real_path),
+                    )
+                })?;
+                Ok(format!(
+                    "written {} bytes to {}",
+                    content.len(),
+                    real_path.display()
+                ))
+            }
         }
         "list_dir" => {
             ensure_only_keys(map, &["path", "names_only", "limit", "max_entries"])?;
@@ -530,6 +583,37 @@ fn optional_usize(map: &serde_json::Map<String, Value>, key: &str) -> Option<usi
         Value::String(value) => value.trim().parse::<usize>().ok(),
         _ => None,
     }
+}
+
+fn optional_bool(map: &serde_json::Map<String, Value>, key: &str) -> Option<bool> {
+    match map.get(key)? {
+        Value::Bool(value) => Some(*value),
+        Value::String(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => Some(true),
+            "false" | "0" | "no" | "off" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn append_needs_line_separator(path: &Path, content: &str) -> std::io::Result<bool> {
+    if content.is_empty() || content.starts_with('\n') || !content.ends_with('\n') {
+        return Ok(false);
+    }
+    let metadata = match std::fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(err),
+    };
+    if metadata.len() == 0 {
+        return Ok(false);
+    }
+    let mut file = std::fs::File::open(path)?;
+    file.seek(SeekFrom::End(-1))?;
+    let mut last = [0u8; 1];
+    file.read_exact(&mut last)?;
+    Ok(!matches!(last[0], b'\n' | b'\r'))
 }
 
 fn looks_detached_background_command(command: &str) -> bool {
@@ -1351,6 +1435,59 @@ mod tests {
             .expect("list_dir should succeed");
 
         assert_eq!(output, "a.txt\nb.txt");
+    }
+
+    #[tokio::test]
+    async fn write_file_append_preserves_existing_content() {
+        let root = TempDirGuard::new("write_file_append");
+        let path = root.path.join("notes/memo.txt");
+        fs::create_dir_all(path.parent().expect("parent")).expect("create notes");
+        fs::write(&path, "alpha\n").expect("write initial file");
+
+        let state = test_state(root.path.clone());
+        let output = execute_builtin_skill(
+            &state,
+            "write_file",
+            &json!({
+                "path": "notes/memo.txt",
+                "content": "beta\n",
+                "append": true
+            }),
+        )
+        .await
+        .expect("append write should succeed");
+
+        assert!(output.starts_with("appended "));
+        assert_eq!(
+            fs::read_to_string(path).expect("read file"),
+            "alpha\nbeta\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_file_append_line_separates_existing_non_newline_tail() {
+        let root = TempDirGuard::new("write_file_append_line_separator");
+        let path = root.path.join("notes/memo.txt");
+        fs::create_dir_all(path.parent().expect("parent")).expect("create notes");
+        fs::write(&path, "alpha").expect("write initial file");
+
+        let state = test_state(root.path.clone());
+        execute_builtin_skill(
+            &state,
+            "write_file",
+            &json!({
+                "path": "notes/memo.txt",
+                "content": "beta\n",
+                "append": true
+            }),
+        )
+        .await
+        .expect("append write should succeed");
+
+        assert_eq!(
+            fs::read_to_string(path).expect("read file"),
+            "alpha\nbeta\n"
+        );
     }
 
     #[tokio::test]
