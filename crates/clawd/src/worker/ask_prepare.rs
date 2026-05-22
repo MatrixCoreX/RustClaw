@@ -554,6 +554,7 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
         }
         "sqlite_schema_version" => Some(crate::OutputSemanticKind::SqliteSchemaVersion),
         "archive_list" => Some(crate::OutputSemanticKind::ArchiveList),
+        "archive_read" => Some(crate::OutputSemanticKind::ArchiveRead),
         "archive_pack" => Some(crate::OutputSemanticKind::ArchivePack),
         "archive_unpack" => Some(crate::OutputSemanticKind::ArchiveUnpack),
         "docker_ps" => Some(crate::OutputSemanticKind::DockerPs),

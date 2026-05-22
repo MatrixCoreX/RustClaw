@@ -29,6 +29,13 @@ struct Ctx {
     skipped_records: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InputShape {
+    Array,
+    SingleObject,
+    Csv,
+}
+
 fn main() -> Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -95,11 +102,7 @@ fn main() -> Result<()> {
 
 fn handle_transform(req: &Value) -> Result<Value> {
     let args = req.get("args").unwrap_or(req);
-    let mut data = args
-        .get("data")
-        .and_then(Value::as_array)
-        .cloned()
-        .ok_or_else(|| anyhow!("missing required args.data (array)"))?;
+    let (mut data, input_shape) = input_records_from_args(args)?;
     let input_count = data.len();
 
     let ops = args
@@ -140,6 +143,16 @@ fn handle_transform(req: &Value) -> Result<Value> {
             output_format
         ));
     }
+    let default_result_shape = match input_shape {
+        InputShape::SingleObject => "single_object",
+        InputShape::Array | InputShape::Csv => "array",
+    };
+    let result_shape = args
+        .get("result_shape")
+        .or_else(|| args.get("output_shape"))
+        .and_then(Value::as_str)
+        .unwrap_or(default_result_shape);
+    let output = transform_output_value(&data, &formatted, result_shape);
 
     Ok(json!({
         "status":"ok",
@@ -147,6 +160,7 @@ fn handle_transform(req: &Value) -> Result<Value> {
         "error": Value::Null,
         "result": data,
         "formatted": formatted,
+        "output": output,
         "stats": {
             "input_count": input_count,
             "output_count": data_len(&data),
@@ -154,6 +168,37 @@ fn handle_transform(req: &Value) -> Result<Value> {
             "warnings": ctx.warnings
         }
     }))
+}
+
+fn input_records_from_args(args: &Value) -> Result<(Vec<Value>, InputShape)> {
+    if let Some(data) = args.get("data").or_else(|| args.get("records")) {
+        match data {
+            Value::Array(items) => return Ok((items.clone(), InputShape::Array)),
+            Value::Object(_) => return Ok((vec![data.clone()], InputShape::SingleObject)),
+            Value::String(text) if input_format_is_csv(args) => {
+                return Ok((parse_csv_records(text)?, InputShape::Csv));
+            }
+            _ => {}
+        }
+    }
+    if let Some(text) = args
+        .get("csv_text")
+        .or_else(|| args.get("csv"))
+        .or_else(|| args.get("text").filter(|_| input_format_is_csv(args)))
+        .and_then(Value::as_str)
+    {
+        return Ok((parse_csv_records(text)?, InputShape::Csv));
+    }
+    Err(anyhow!(
+        "missing required structured input: args.data array/object or args.csv_text"
+    ))
+}
+
+fn input_format_is_csv(args: &Value) -> bool {
+    args.get("input_format")
+        .or_else(|| args.get("format"))
+        .and_then(Value::as_str)
+        .is_some_and(|format| format.eq_ignore_ascii_case("csv"))
 }
 
 fn apply_op(data: &mut Vec<Value>, op: &Value, ctx: &mut Ctx) -> Result<()> {
@@ -174,6 +219,7 @@ fn apply_op(data: &mut Vec<Value>, op: &Value, ctx: &mut Ctx) -> Result<()> {
             op_dedup(data, op);
             Ok(())
         }
+        "rename" | "rename_key" => op_rename(data, op, ctx),
         "project" => op_project(data, op, ctx),
         "group" => op_group(data, op, ctx),
         "aggregate" => op_aggregate(data, op, ctx),
@@ -288,6 +334,58 @@ fn op_dedup(data: &mut Vec<Value>, op: &Value) {
         }
     }
     *data = out;
+}
+
+fn op_rename(data: &mut Vec<Value>, op: &Value, ctx: &mut Ctx) -> Result<()> {
+    let mut mappings: Vec<(String, String)> = vec![];
+    if let Some(arr) = op.get("mappings").and_then(Value::as_array) {
+        for m in arr {
+            let from = m
+                .get("from")
+                .or_else(|| m.get("field"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("rename mapping requires `from`"))?;
+            let to = m
+                .get("to")
+                .or_else(|| m.get("alias"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("rename mapping requires `to`"))?;
+            mappings.push((from.to_string(), to.to_string()));
+        }
+    } else if let (Some(from), Some(to)) = (
+        op.get("from")
+            .or_else(|| op.get("field"))
+            .and_then(Value::as_str),
+        op.get("to")
+            .or_else(|| op.get("alias"))
+            .and_then(Value::as_str),
+    ) {
+        mappings.push((from.to_string(), to.to_string()));
+    }
+    if mappings.is_empty() {
+        return Err(anyhow!("rename requires `from`/`to` or `mappings`"));
+    }
+
+    for item in data.iter_mut() {
+        let Some(map) = item.as_object_mut() else {
+            if ctx.strict {
+                return Err(anyhow!("rename requires object records"));
+            }
+            ctx.skipped_records += 1;
+            continue;
+        };
+        for (from, to) in &mappings {
+            if let Some(value) = map.remove(from) {
+                map.insert(to.clone(), value);
+            } else if ctx.strict {
+                return Err(anyhow!("rename source field not found: {}", from));
+            } else {
+                ctx.warnings
+                    .push(format!("rename source field not found: {}", from));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn op_project(data: &mut Vec<Value>, op: &Value, _ctx: &mut Ctx) -> Result<()> {
@@ -611,7 +709,118 @@ fn coerce_string(v: &Value) -> String {
 }
 
 fn number_from_f64(v: f64) -> Number {
-    Number::from_f64(v).unwrap_or_else(|| Number::from(0))
+    if v.is_finite() && v.fract() == 0.0 && v >= i64::MIN as f64 && v <= i64::MAX as f64 {
+        Number::from(v as i64)
+    } else {
+        Number::from_f64(v).unwrap_or_else(|| Number::from(0))
+    }
+}
+
+fn transform_output_value(data: &[Value], formatted: &Value, result_shape: &str) -> Value {
+    if formatted
+        .as_str()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+    {
+        return formatted.clone();
+    }
+    match result_shape.trim().to_ascii_lowercase().as_str() {
+        "single_object" | "object" => data
+            .first()
+            .filter(|_| data.len() == 1)
+            .cloned()
+            .unwrap_or_else(|| Value::Array(data.to_vec())),
+        "scalar" | "value" | "single_value" => scalar_output_value(data),
+        _ => Value::Array(data.to_vec()),
+    }
+}
+
+fn scalar_output_value(data: &[Value]) -> Value {
+    let Some(first) = data.first() else {
+        return Value::Null;
+    };
+    if data.len() != 1 {
+        return Value::Array(data.to_vec());
+    }
+    match first {
+        Value::Object(map) if map.len() == 1 => map.values().next().cloned().unwrap_or(Value::Null),
+        _ => first.clone(),
+    }
+}
+
+fn parse_csv_records(text: &str) -> Result<Vec<Value>> {
+    let normalized = text
+        .replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\r", "\n");
+    let mut lines = normalized
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let header_line = lines
+        .next()
+        .ok_or_else(|| anyhow!("csv_text requires a header row"))?;
+    let headers = parse_csv_line(header_line);
+    if headers.len() < 2 || headers.iter().any(|header| header.trim().is_empty()) {
+        return Err(anyhow!("csv_text header must contain at least two columns"));
+    }
+    let mut out = Vec::new();
+    for line in lines {
+        let cells = parse_csv_line(line);
+        let mut map = Map::new();
+        for (idx, header) in headers.iter().enumerate() {
+            let cell = cells.get(idx).map(String::as_str).unwrap_or_default();
+            map.insert(header.trim().to_string(), parse_scalar_cell(cell));
+        }
+        out.push(Value::Object(map));
+    }
+    if out.is_empty() {
+        return Err(anyhow!("csv_text requires at least one data row"));
+    }
+    Ok(out)
+}
+
+fn parse_csv_line(line: &str) -> Vec<String> {
+    let mut cells = Vec::new();
+    let mut current = String::new();
+    let mut chars = line.chars().peekable();
+    let mut in_quotes = false;
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if in_quotes && chars.peek() == Some(&'"') => {
+                current.push('"');
+                chars.next();
+            }
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                cells.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    cells.push(current.trim().to_string());
+    cells
+}
+
+fn parse_scalar_cell(raw: &str) -> Value {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Value::String(String::new());
+    }
+    match trimmed.to_ascii_lowercase().as_str() {
+        "true" => return Value::Bool(true),
+        "false" => return Value::Bool(false),
+        "null" => return Value::Null,
+        _ => {}
+    }
+    if let Ok(value) = trimmed.parse::<i64>() {
+        return Value::Number(Number::from(value));
+    }
+    if let Ok(value) = trimmed.parse::<f64>() {
+        return Value::Number(number_from_f64(value));
+    }
+    Value::String(trimmed.to_string())
 }
 
 fn render_md_table(data: &[Value]) -> String {
@@ -689,4 +898,81 @@ fn collect_headers(data: &[Value]) -> Vec<String> {
 
 fn data_len(data: &[Value]) -> usize {
     data.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn csv_text_can_render_markdown_table() {
+        let out = handle_transform(&json!({
+            "args": {
+                "action": "transform_data",
+                "csv_text": "name,score\nalpha,7\nbeta,9",
+                "output_format": "md_table"
+            }
+        }))
+        .expect("csv transform");
+
+        let formatted = out
+            .get("formatted")
+            .and_then(Value::as_str)
+            .expect("formatted table");
+        assert!(formatted.contains("| name | score |"));
+        assert!(formatted.contains("| alpha | 7 |"));
+    }
+
+    #[test]
+    fn csv_text_accepts_escaped_newline_sequences() {
+        let out = handle_transform(&json!({
+            "args": {
+                "action": "transform_data",
+                "csv_text": "name,score\\nalpha,7\\nbeta,9",
+                "output_format": "md_table"
+            }
+        }))
+        .expect("escaped csv transform");
+
+        let formatted = out
+            .get("formatted")
+            .and_then(Value::as_str)
+            .expect("formatted table");
+        assert!(formatted.contains("| beta | 9 |"));
+    }
+
+    #[test]
+    fn single_object_rename_outputs_single_object_by_default() {
+        let out = handle_transform(&json!({
+            "args": {
+                "action": "transform_data",
+                "data": {"old_name": "alpha", "count": 2},
+                "ops": [{"op": "rename", "from": "old_name", "to": "new_name"}]
+            }
+        }))
+        .expect("object rename");
+
+        let output = out.get("output").expect("output");
+        assert_eq!(
+            output.get("new_name").and_then(Value::as_str),
+            Some("alpha")
+        );
+        assert_eq!(output.get("count").and_then(Value::as_i64), Some(2));
+        assert!(output.get("old_name").is_none());
+    }
+
+    #[test]
+    fn aggregate_can_request_scalar_output() {
+        let out = handle_transform(&json!({
+            "args": {
+                "action": "transform_data",
+                "data": [{"value": 4}, {"value": 6}, {"value": 5}],
+                "ops": [{"op": "aggregate", "aggregations": [{"op": "sum", "field": "value", "name": "total"}]}],
+                "result_shape": "scalar"
+            }
+        }))
+        .expect("aggregate scalar");
+
+        assert_eq!(out.get("output").and_then(Value::as_i64), Some(15));
+    }
 }

@@ -403,7 +403,8 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::ConfigValidation
         | OutputSemanticKind::ConfigRiskAssessment
         | OutputSemanticKind::SqliteDatabaseKindJudgment
-        | OutputSemanticKind::SqliteSchemaVersion => TaskOperation::Inspect,
+        | OutputSemanticKind::SqliteSchemaVersion
+        | OutputSemanticKind::ArchiveRead => TaskOperation::Inspect,
         OutputSemanticKind::QuantityComparison | OutputSemanticKind::RecentScalarEqualityCheck => {
             TaskOperation::Validate
         }
@@ -479,6 +480,7 @@ pub(crate) fn required_evidence_fields_for_output_contract(
             fields.insert("path");
         }
         OutputSemanticKind::ContentExcerptSummary
+        | OutputSemanticKind::ArchiveRead
         | OutputSemanticKind::WorkspaceProjectSummary
         | OutputSemanticKind::ExcerptKindJudgment => {
             fields.insert("content_excerpt");

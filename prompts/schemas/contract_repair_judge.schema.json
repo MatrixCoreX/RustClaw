@@ -113,6 +113,7 @@
             "sqlite_database_kind_judgment",
             "sqlite_schema_version",
             "archive_list",
+            "archive_read",
             "archive_pack",
             "archive_unpack",
             "docker_ps",

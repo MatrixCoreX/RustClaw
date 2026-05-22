@@ -18,6 +18,45 @@ struct Resp {
     text: String,
     extra: Option<Value>,
     error_text: Option<String>,
+    error_kind: Option<String>,
+}
+
+#[derive(Debug)]
+struct SkillError {
+    kind: &'static str,
+    text: String,
+    extra: Option<Value>,
+}
+
+impl SkillError {
+    fn new(kind: &'static str, text: impl Into<String>, extra: Option<Value>) -> Self {
+        Self {
+            kind,
+            text: text.into(),
+            extra,
+        }
+    }
+
+    fn invalid_input(text: impl Into<String>) -> Self {
+        Self::new("invalid_input", text, None)
+    }
+
+    fn not_found(path: &Path, role: &'static str) -> Self {
+        let path_text = path.display().to_string();
+        Self::new(
+            "not_found",
+            format!("{role} not found: {path_text}"),
+            Some(json!({"path": path_text, "role": role})),
+        )
+    }
+
+    fn unsupported_format(text: impl Into<String>) -> Self {
+        Self::new("unsupported_format", text, None)
+    }
+
+    fn command_failed(text: impl Into<String>) -> Self {
+        Self::new("command_failed", text, None)
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -34,13 +73,15 @@ fn main() -> anyhow::Result<()> {
                     text,
                     extra: Some(extra),
                     error_text: None,
+                    error_kind: None,
                 },
                 Err(err) => Resp {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    extra: None,
-                    error_text: Some(err),
+                    extra: err.extra,
+                    error_text: Some(err.text),
+                    error_kind: Some(err.kind.to_string()),
                 },
             },
             Err(err) => Resp {
@@ -49,6 +90,7 @@ fn main() -> anyhow::Result<()> {
                 text: String::new(),
                 extra: None,
                 error_text: Some(format!("invalid input: {err}")),
+                error_kind: Some("invalid_input".to_string()),
             },
         };
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
@@ -57,10 +99,10 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value) -> Result<(String, Value), String> {
+fn execute(args: Value) -> Result<(String, Value), SkillError> {
     let obj = args
         .as_object()
-        .ok_or_else(|| "args must be object".to_string())?;
+        .ok_or_else(|| SkillError::invalid_input("args must be object"))?;
     let action = obj.get("action").and_then(|v| v.as_str()).unwrap_or("list");
     let root = workspace_root();
 
@@ -72,6 +114,29 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 (
                     text.clone(),
                     json!({"action":"list","archive":archive.display().to_string(),"output":text}),
+                )
+            })
+        }
+        "read" => {
+            let archive = required_str_any(obj, &["archive", "archive_path", "path"])?;
+            let member = required_str_any(obj, &["member", "entry", "file", "file_path"])?;
+            let archive = resolve_path(&root, archive, false)?;
+            let member = normalize_archive_member(member)?;
+            read_archive_member(&archive, &member).map(|text| {
+                let payload = json!({
+                    "action":"read",
+                    "archive":archive.display().to_string(),
+                    "member":member,
+                    "content":text
+                });
+                (
+                    payload.to_string(),
+                    json!({
+                        "action":"read",
+                        "archive":archive.display().to_string(),
+                        "member":payload.get("member").and_then(Value::as_str).unwrap_or_default(),
+                        "content":payload.get("content").and_then(Value::as_str).unwrap_or_default()
+                    }),
                 )
             })
         }
@@ -119,37 +184,70 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 )
             })
         }
-        _ => Err("unsupported action; use list|pack|unpack".to_string()),
+        _ => Err(SkillError::invalid_input(
+            "unsupported action; use list|read|pack|unpack",
+        )),
     }
 }
 
-fn list_archive(archive: &Path) -> Result<String, String> {
+fn list_archive(archive: &Path) -> Result<String, SkillError> {
+    if !archive.is_file() {
+        return Err(SkillError::not_found(archive, "archive"));
+    }
     let name = archive.to_string_lossy().to_string();
     if name.ends_with(".zip") {
         run("unzip", &[String::from("-l"), name])
     } else if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
         run("tar", &[String::from("-tzf"), name])
     } else {
-        Err("unsupported archive format for list".to_string())
+        Err(SkillError::unsupported_format(
+            "unsupported archive format for list",
+        ))
     }
 }
 
-fn pack_archive(format: &str, source: &Path, archive: &Path) -> Result<String, String> {
+fn read_archive_member(archive: &Path, member: &str) -> Result<String, SkillError> {
+    if !archive.is_file() {
+        return Err(SkillError::not_found(archive, "archive"));
+    }
+    let name = archive.to_string_lossy().to_string();
+    if name.ends_with(".zip") {
+        run_raw_stdout("unzip", &[String::from("-p"), name, member.to_string()])
+    } else if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
+        run_raw_stdout("tar", &[String::from("-xOzf"), name, member.to_string()])
+    } else {
+        Err(SkillError::unsupported_format(
+            "unsupported archive format for read",
+        ))
+    }
+}
+
+fn pack_archive(format: &str, source: &Path, archive: &Path) -> Result<String, SkillError> {
+    if !source.exists() {
+        return Err(SkillError::not_found(source, "source"));
+    }
     let src = source.to_string_lossy().to_string();
     let out = archive.to_string_lossy().to_string();
     if let Some(parent) = archive.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| format!("mkdir failed: {err}"))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|err| SkillError::command_failed(format!("mkdir failed: {err}")))?;
     }
 
     match format {
         "zip" => run("zip", &[String::from("-r"), out, src]),
         "tar.gz" | "tgz" => run("tar", &[String::from("-czf"), out, src]),
-        _ => Err("unsupported format; use zip|tar.gz".to_string()),
+        _ => Err(SkillError::unsupported_format(
+            "unsupported format; use zip|tar.gz",
+        )),
     }
 }
 
-fn unpack_archive(archive: &Path, dest: &Path) -> Result<String, String> {
-    std::fs::create_dir_all(dest).map_err(|err| format!("mkdir failed: {err}"))?;
+fn unpack_archive(archive: &Path, dest: &Path) -> Result<String, SkillError> {
+    if !archive.is_file() {
+        return Err(SkillError::not_found(archive, "archive"));
+    }
+    std::fs::create_dir_all(dest)
+        .map_err(|err| SkillError::command_failed(format!("mkdir failed: {err}")))?;
     let arc = archive.to_string_lossy().to_string();
     let dst = dest.to_string_lossy().to_string();
     if arc.ends_with(".zip") {
@@ -159,22 +257,51 @@ fn unpack_archive(archive: &Path, dest: &Path) -> Result<String, String> {
         // Avoid GNU-only flags so both bsdtar (macOS) and GNU tar work.
         run("tar", &[String::from("-xzf"), arc, String::from("-C"), dst])
     } else {
-        Err("unsupported archive format for unpack".to_string())
+        Err(SkillError::unsupported_format(
+            "unsupported archive format for unpack",
+        ))
     }
 }
 
-fn run(bin: &str, args: &[String]) -> Result<String, String> {
+fn run(bin: &str, args: &[String]) -> Result<String, SkillError> {
     let output = Command::new(bin)
         .args(args)
         .output()
-        .map_err(|err| format!("run {bin} failed: {err}"))?;
+        .map_err(|err| SkillError::command_failed(format!("run {bin} failed: {err}")))?;
     let text = format_command_output(&output.stdout, &output.stderr);
     let exit_code = output.status.code().unwrap_or(-1);
     if output.status.success() {
         Ok(format!("exit={exit_code}\n{text}"))
     } else {
-        Err(format!("archive command failed: exit={exit_code}\n{text}"))
+        Err(SkillError::command_failed(format!(
+            "archive command failed: exit={exit_code}\n{text}"
+        )))
     }
+}
+
+fn run_raw_stdout(bin: &str, args: &[String]) -> Result<String, SkillError> {
+    let output = Command::new(bin)
+        .args(args)
+        .output()
+        .map_err(|err| SkillError::command_failed(format!("run {bin} failed: {err}")))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let exit_code = output.status.code().unwrap_or(-1);
+    if output.status.success() {
+        Ok(truncate_output(stdout))
+    } else {
+        let text = format_command_output(&output.stdout, &output.stderr);
+        Err(SkillError::command_failed(format!(
+            "archive command failed: exit={exit_code}\n{text}"
+        )))
+    }
+    .map(|text| {
+        if text.is_empty() && !stderr.trim().is_empty() {
+            truncate_output(stderr)
+        } else {
+            text
+        }
+    })
 }
 
 fn format_command_output(stdout: &[u8], stderr: &[u8]) -> String {
@@ -186,16 +313,54 @@ fn format_command_output(stdout: &[u8], stderr: &[u8]) -> String {
         }
         text.push_str(&String::from_utf8_lossy(stderr));
     }
+    truncate_output(text)
+}
+
+fn truncate_output(mut text: String) -> String {
     if text.len() > 10000 {
         text.truncate(10000);
     }
     text
 }
 
+fn normalize_archive_member(input: &str) -> Result<String, SkillError> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(SkillError::invalid_input("member is required"));
+    }
+    let raw = Path::new(trimmed);
+    if raw.is_absolute() {
+        return Err(SkillError::invalid_input(
+            "archive member must be a relative path",
+        ));
+    }
+    let mut parts = Vec::new();
+    for comp in raw.components() {
+        match comp {
+            Component::ParentDir => {
+                return Err(SkillError::invalid_input(
+                    "archive member with '..' is not allowed",
+                ));
+            }
+            Component::CurDir => {}
+            Component::Normal(part) => parts.push(part.to_string_lossy().to_string()),
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(SkillError::invalid_input(
+                    "archive member must be a relative path",
+                ));
+            }
+        }
+    }
+    if parts.is_empty() {
+        return Err(SkillError::invalid_input("member is required"));
+    }
+    Ok(parts.join("/"))
+}
+
 fn required_str_any<'a>(
     obj: &'a serde_json::Map<String, Value>,
     keys: &[&str],
-) -> Result<&'a str, String> {
+) -> Result<&'a str, SkillError> {
     for key in keys {
         if let Some(value) = obj
             .get(*key)
@@ -206,10 +371,10 @@ fn required_str_any<'a>(
             return Ok(value);
         }
     }
-    Err(format!(
+    Err(SkillError::invalid_input(format!(
         "{} is required",
         keys.first().copied().unwrap_or("value")
-    ))
+    )))
 }
 
 fn workspace_root() -> PathBuf {
@@ -223,12 +388,14 @@ fn resolve_path(
     workspace_root: &Path,
     input: &str,
     allow_absolute: bool,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, SkillError> {
     let raw = Path::new(input);
     let mut normalized = PathBuf::new();
     for comp in raw.components() {
         match comp {
-            Component::ParentDir => return Err("path with '..' is not allowed".to_string()),
+            Component::ParentDir => {
+                return Err(SkillError::invalid_input("path with '..' is not allowed"));
+            }
             Component::CurDir => {}
             other => normalized.push(other.as_os_str()),
         }
@@ -240,4 +407,70 @@ fn resolve_path(
         return Ok(normalized);
     }
     Ok(workspace_root.join(normalized))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_missing_archive_returns_structured_not_found() {
+        let path = std::env::temp_dir().join(format!(
+            "rustclaw_missing_archive_{}_{}.zip",
+            std::process::id(),
+            "unit"
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let err = list_archive(&path).expect_err("missing archive should fail");
+
+        assert_eq!(err.kind, "not_found");
+        assert!(err.text.contains("archive not found"));
+        let expected_path = path.display().to_string();
+        assert_eq!(
+            err.extra
+                .as_ref()
+                .and_then(|extra| extra.get("path"))
+                .and_then(Value::as_str),
+            Some(expected_path.as_str())
+        );
+        assert_eq!(
+            err.extra
+                .as_ref()
+                .and_then(|extra| extra.get("role"))
+                .and_then(Value::as_str),
+            Some("archive")
+        );
+    }
+
+    #[test]
+    fn archive_member_rejects_traversal() {
+        let err = normalize_archive_member("../secret.txt").expect_err("reject traversal");
+        assert_eq!(err.kind, "invalid_input");
+        assert!(err.text.contains(".."));
+    }
+
+    #[test]
+    fn read_archive_member_returns_member_content() {
+        let root = std::env::temp_dir().join(format!(
+            "rustclaw_archive_read_{}_{}",
+            std::process::id(),
+            "unit"
+        ));
+        let archive = root.join("bundle.tar.gz");
+        std::fs::create_dir_all(&root).expect("create temp archive test dir");
+        std::fs::write(root.join("notes.txt"), "fixture archive notes\n")
+            .expect("write archive member fixture");
+        let status = Command::new("tar")
+            .args(["-czf", archive.to_str().unwrap(), "notes.txt"])
+            .current_dir(&root)
+            .status()
+            .expect("create tar fixture");
+        assert!(status.success(), "tar fixture creation failed");
+
+        let content = read_archive_member(&archive, "notes.txt").expect("read member");
+
+        assert_eq!(content, "fixture archive notes\n");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

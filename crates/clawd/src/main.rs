@@ -52,6 +52,7 @@ mod memory;
 mod observed_facts;
 mod output_contract_verifier;
 mod output_paths;
+mod package_commands;
 mod pipeline_types;
 mod post_route_policy;
 mod prompt_utils;

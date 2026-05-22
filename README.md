@@ -211,6 +211,31 @@ Runtime code should not add per-language phrase tables or `prompt.contains(...)`
 
 RustClaw memory is split into short-term conversation records, structured user preferences, long-term fact cards, and retrieval indexes. The design goal is to make memory useful without letting old assistant output become a hidden instruction for a new task.
 
+### Core Boundaries
+
+Memory is scoped to the authenticated identity first, then to the current conversation. Channel IDs from Telegram, WeChat, Feishu, browser UI, and other adapters are normalized into the same task identity model, so a bound `user_key` can keep memory consistent across channels while still preserving `user_id` / `chat_id` level conversation state. Recent conversation state stores active-task anchors, alias bindings, and follow-up context separately from durable facts; it is allowed to help resolve “that file” or “the previous result”, but it is not treated as a new user instruction.
+
+The memory layer has three hard boundaries:
+
+- current user input always wins over recalled memory
+- memory text is background context unless a structured route or state patch explicitly binds it to the current turn
+- runtime code consumes memory through structured fields, source kinds, scores, safety flags, and use-policy decisions rather than per-language phrase branches
+
+This keeps old assistant output, task logs, and knowledge snippets from silently steering execution. If a recalled item conflicts with the current request, the route and planner prompts tell the model to prefer the current request.
+
+### Storage Model
+
+The main persisted memory stores are:
+
+- `memories`: short-term conversation records and task-visible snippets. Rows keep role, memory type, salience, safety state, timestamps, success state, and source metadata.
+- `conversation_states`: active per-chat state such as alias bindings, active task anchors, and follow-up state. This is session state, not durable knowledge.
+- `user_preferences`: structured user preferences such as response language, response style, response format, and agent display name.
+- `memory_facts`: durable fact cards with `fact_key`, `fact_value`, `fact_text`, source refs, confidence, status, expiry, and conflict-group metadata.
+- `long_term_memories`: legacy / fallback summary rows used only where the current memory use policy allows summary recall.
+- `memory_retrieval_index`: hybrid retrieval index over short-term records, preferences, fact cards, and knowledge snapshots.
+
+`configs/memory.toml` controls budgets, retention, long-term refresh intervals, write filters, preference extraction, retrieval limits, and embedding/index behavior. Defaults are conservative: short acknowledgement messages can be filtered, assistant replies are marked, and LLM-written preferences must pass confidence and runtime validation before they are stored.
+
 ### Write Path
 
 After an `ask` task finalizes, RustClaw can persist:
@@ -222,6 +247,8 @@ After an `ask` task finalizes, RustClaw can persist:
 Preference and fact writes go through a structured memory intent contract. The model is asked to emit `memory_actions` such as `upsert`, `delete`, `expire`, or `noop`; runtime code then validates action enum, kind, scope, confidence, source evidence, TTL, and safety fields before anything is stored. The runtime does not decide durable preference writes by matching a single natural-language phrase.
 
 Long-term summary refresh still exists as a fallback summary path, but durable knowledge is stored as fact cards first. A fact card keeps `fact_key`, `fact_value`, human-readable `fact_text`, `source_ref`, `source_memory_ids_json`, `reason`, `confidence`, `expires_at_ts`, `conflict_group`, and `status`. New active facts in the same conflict group supersede older facts, and expired or deleted facts are removed from retrieval.
+
+Memory writes are intentionally after-answer work. The user-visible response is saved first; then background memory refresh can run when configured. This prevents memory extraction latency from blocking normal replies and makes memory write failures non-fatal to the already completed task.
 
 ### Recall And Use Policy
 
@@ -235,6 +262,13 @@ Memory recall is built as a structured context and then filtered by a memory use
 
 The `photo_organize` skill, for example, declares a memory policy that allows preferences, relevant facts, and knowledge docs while excluding long-term summaries, recent events, assistant results, similar triggers, unfinished goals, and raw recent snippets.
 
+Each use-policy decision records what it included and why. Prompt builders receive already-filtered structured context rather than raw database rows. The common policy is:
+
+- new standalone tasks get stable facts and preferences, not old assistant results
+- follow-up turns can use recent observations and active aliases only when session state says the user is continuing the same task
+- planner prompts can see enough memory to avoid repeating work, but memory remains background and cannot override the current request
+- skill `_memory` payloads are cropped per skill registry policy so specialized skills only receive the memory sources they are expected to use
+
 ### Retrieval Index
 
 Hybrid recall uses `memory_retrieval_index` plus optional FTS. Each indexed row records `source_kind`, `source_ref`, memory kind, metadata, salience, success state, and embedding metadata:
@@ -244,6 +278,8 @@ Hybrid recall uses `memory_retrieval_index` plus optional FTS. Each indexed row 
 - `embedding_version`
 
 The default provider is `local-hash-v1`, which runs offline. Unsupported or unavailable embedding providers fall back to local hash so the runtime keeps working. Retrieval only uses cosine scoring when the stored embedding metadata matches the current provider spec; mismatched rows fall back to lexical, salience, recency, and success-state scoring. Set `reindex_on_startup = true` in `configs/memory.toml`, or start with an empty index, to rebuild the retrieval index from short-term records, preferences, fact cards, and KB snapshots.
+
+Retrieval combines several signals instead of trusting a single score: exact / lexical matches, vector similarity when compatible, salience, recency, source kind, success state, safety filter, and the current memory use policy. This makes the index useful for multilingual recall while keeping execution grounded in the route and output contracts.
 
 ### User Control
 
@@ -273,6 +309,16 @@ Recent records with safety flags are hidden by default in the UI. Fact-card deta
 
 Task journal summaries and traces include `memory_trace`. This records the stage, use policy, recalled source refs, inclusion reason, and character budget without copying raw memory text. It is intended for debugging why a task used memory while reducing the chance of leaking sensitive stored content.
 
+When debugging memory behavior, check these questions in order:
+
+- Was the request a new task or a follow-up bound to an active session?
+- Which stage built the memory context: route, planner, chat, schedule, image, or skill?
+- Did `memory_trace` include the expected `source_kind` / `source_ref`?
+- Did the use policy exclude recent assistant output or long-term summaries by design?
+- Was the index stale because embedding metadata changed or `reindex_on_startup` was false?
+- Did a fact conflict group supersede the older fact?
+- Was the item hidden because it was expired, deleted, low confidence, or safety-risk flagged?
+
 Useful code and config entry points:
 
 - `configs/memory.toml`
@@ -288,39 +334,54 @@ Useful code and config entry points:
 
 ```mermaid
 flowchart TD
-    User[User request] --> Task[POST /v1/tasks]
-    Task --> Worker[worker_once]
-    Worker --> Ask{kind=ask?}
-    Ask -->|yes| Normalizer[Intent normalizer]
-    Ask -->|run_skill| DirectSkill[Direct run_skill path]
+    User[User request] --> Ingress[Channel / UI / POST /v1/tasks]
+    Ingress --> Identity[Resolve identity<br/>user_key + user_id + chat_id]
+    Identity --> Session[(conversation_states<br/>aliases + active task anchors)]
+    Identity --> Worker[worker_once]
+    Worker --> Kind{Task kind}
+    Kind -->|run_skill| DirectSkill[Direct run_skill path]
+    Kind -->|ask| Snapshot[Session snapshot + local surface hints]
+    Session --> Snapshot
+    Snapshot --> Normalizer[Intent normalizer]
     Normalizer --> Bundle[Ask context bundle]
     Bundle --> Recall[Structured memory recall]
-    Recall --> Policy[Memory use policy]
-    Policy --> Route[Route prompt]
-    Policy --> Planner[Planner prompt]
-    Policy --> Chat[Chat prompt]
+    Index[(memory_retrieval_index)] --> Recall
+    Stores[(memories<br/>user_preferences<br/>memory_facts<br/>long_term_memories)] --> Index
+    Recall --> Safety[Safety / expiry / status filter]
+    Safety --> Policy[Memory use policy<br/>route / planner / chat / skill]
+    Policy --> RouteCtx[Route memory context]
+    Policy --> PlannerCtx[Planner memory context]
+    Policy --> ChatCtx[Chat memory context]
     Policy --> SkillArgs[Skill _memory args]
     SkillArgs --> SkillPolicy[Registry memory_policy crop]
-    SkillPolicy --> Runner[skill-runner / builtin / external skill]
-    Route --> Runtime[Runtime / planner execution]
-    Planner --> Runtime
-    Chat --> Visible[User-visible answer]
-    Runtime --> Visible
-    Runner --> Runtime
-    Visible --> Finalize[Finalize task result]
-    Finalize --> ShortTerm[(memories)]
-    Finalize -. optional .-> Intent[Memory intent extractor]
-    Intent --> Validate[Runtime schema / scope / safety validation]
+    RouteCtx --> PostRoute[Post-route policy<br/>contract + locator guards]
+    PlannerCtx --> Runtime[Planner / runtime loop]
+    ChatCtx --> Chat[Direct chat answer]
+    SkillPolicy --> SkillRuntime[skill-runner / builtin / external skill]
+    PostRoute --> Runtime
+    PostRoute --> Chat
+    DirectSkill --> SkillRuntime
+    SkillRuntime --> Runtime
+    Runtime --> Visible[User-visible answer]
+    Chat --> Visible
+    Visible --> Finalize[Finalize task result + journal]
+    Finalize --> RecentWrite[Short-term write filter]
+    RecentWrite --> Memories[(memories)]
+    Finalize -. optional .-> MemIntent[Structured memory intent extractor]
+    MemIntent --> Validate[Runtime enum / scope / confidence / safety validation]
     Validate --> Prefs[(user_preferences)]
     Validate --> Facts[(memory_facts)]
     Finalize -. optional .-> Summary[Long-term summary refresh]
-    Summary --> Facts
-    Prefs --> Index[(memory_retrieval_index)]
-    Facts --> Index
-    ShortTerm --> Index
-    Index --> Recall
-    Policy --> Journal[Task journal memory_trace]
-    Runtime --> Journal
+    Summary --> LongTerm[(long_term_memories)]
+    Facts --> Conflict[Conflict-group supersede / expire]
+    Conflict --> Facts
+    Memories --> Reindex[Index update / reindex_on_startup]
+    Prefs --> Reindex
+    Facts --> Reindex
+    LongTerm --> Reindex
+    Reindex --> Index
+    Policy --> Trace[Task journal memory_trace]
+    Runtime --> Trace
 ```
 
 ## Main Components

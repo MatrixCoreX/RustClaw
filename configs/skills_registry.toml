@@ -400,16 +400,23 @@ kind = "runner"
 planner_kind = "tool"
 group = "system"
 aliases = ["archive", "archive_tool"]
-description = "List, pack, and unpack zip/tar archives with structured archive actions instead of ad-hoc shell commands."
-semantic_tags = ["archive_list", "archive_pack", "archive_unpack"]
+description = "List, read, pack, and unpack zip/tar archives with structured archive actions instead of ad-hoc shell commands."
+semantic_tags = ["archive_list", "archive_read", "archive_pack", "archive_unpack"]
 preferred_over_run_cmd = true
-validation_actions = ["list"]
+validation_actions = ["list", "read"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/archive_basic.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 optional_bins = ["tar", "zip", "unzip"]
 platform_notes = ["Archive command dependency is action/format dependent."]
+planner_capabilities = [
+  { name = "archive.list", action = "list", effect = "observe", required = ["archive"], risk_level = "low", preferred = true },
+  { name = "archive.read", action = "read", effect = "observe", required = ["archive", "member"], risk_level = "low", preferred = true },
+  { name = "archive.pack", action = "pack", effect = "mutate", required = ["source", "archive"], optional = ["format"], risk_level = "high", preferred = true },
+  { name = "archive.unpack", action = "unpack", effect = "mutate", required = ["archive", "dest"], risk_level = "high", preferred = true },
+]
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["list", "read", "pack", "unpack"] }, archive = { type = "string" }, archive_path = { type = "string" }, path = { type = "string" }, member = { type = "string" }, entry = { type = "string" }, file = { type = "string" }, file_path = { type = "string" }, source = { type = "string" }, source_path = { type = "string" }, dest = { type = "string" }, dest_path = { type = "string" }, format = { type = "string" } } }
 
 [[skills]]
 name = "db_basic"
@@ -435,10 +442,10 @@ kind = "runner"
 planner_kind = "tool"
 group = "ops"
 aliases = ["docker", "docker_ops"]
-description = "Inspect Docker containers/images and perform targeted container lifecycle actions through structured Docker actions."
-semantic_tags = ["docker_ps", "docker_images", "docker_logs", "docker_container_lifecycle"]
+description = "Inspect Docker containers/images/version and perform targeted container lifecycle actions through structured Docker actions."
+semantic_tags = ["docker_ps", "docker_images", "docker_version", "docker_logs", "docker_container_lifecycle"]
 preferred_over_run_cmd = true
-validation_actions = ["ps", "images", "inspect"]
+validation_actions = ["ps", "images", "version", "inspect"]
 timeout_seconds = 30
 prompt_file = "prompts/skills/docker_basic.md"
 output_kind = "text"
@@ -730,7 +737,7 @@ kind = "runner"
 planner_kind = "tool"
 group = "system"
 aliases = ["transform_data", "data_transform", "table_transform"]
-description = "Transform structured JSON-array records: sort, filter, project, group, aggregate, and render JSON, markdown tables, or CSV."
+description = "Transform structured records from JSON arrays/objects or CSV: sort, filter, rename, project, group, aggregate, deduplicate, and render JSON, markdown tables, or CSV."
 timeout_seconds = 20
 prompt_file = "prompts/skills/transform.md"
 output_kind = "text"

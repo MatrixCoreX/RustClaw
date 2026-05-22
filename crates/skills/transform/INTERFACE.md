@@ -2,17 +2,18 @@
 
 ## Capability Summary
 
-`transform` is a structured JSON-array transformation engine.
+`transform` is a structured data transformation engine.
 
 Planner selection guidance:
-- Use `transform` when the request supplies or points to structured records and asks to sort, filter, deduplicate, project fields, group, aggregate, or render the result as JSON, markdown table, or CSV.
-- Inline JSON arrays are valid input; pass them directly as `data` instead of answering from chat when this skill is enabled.
+- Use `transform` when the request supplies or points to structured records and asks to sort, filter, deduplicate, rename keys, project fields, group, aggregate, or render the result as JSON, markdown table, or CSV.
+- Inline JSON arrays/objects are valid input; pass them directly as `data` instead of answering from chat when this skill is enabled.
+- Inline CSV is valid input; pass it as `csv_text` and set `output_format` for the requested rendering.
 - Preserve requested output formats such as markdown table by setting `output_format="md_table"`.
 
 Core capabilities:
 - nested path access (`a.b.c`)
 - type-normalized compare/sort
-- filter/sort/dedup/project/group/aggregate ops
+- filter/sort/dedup/rename/project/group/aggregate ops
 - output formats: `json`, `md_table`, `csv`
 - stable stats with warnings and skipped-record accounting
 
@@ -23,9 +24,11 @@ Core capabilities:
 ## Parameter Contract
 
 - `action` (required, string): `transform_data`
-- `data` (required, array): input records
+- `data` (required unless `csv_text` is used, array or object): input records; an object is treated as one record
+- `csv_text` (required unless `data` is used, string): CSV text with a header row
 - `ops` (optional, array): ordered operations
 - `output_format` (optional, string, default `json`): `json|md_table|csv`
+- `result_shape` (optional, string, default `array`; object input defaults to `single_object`): `array|single_object|scalar`
 - `strict` (optional, bool, default `true`): strict mode (unsupported/malformed ops fail)
 - `null_policy` (optional, string, default `keep`): `keep|drop|zero`
 
@@ -51,20 +54,29 @@ Core capabilities:
   - `field` optional
   - `fields` optional (preferred for multi-key)
 
-#### 4. `project`
+#### 4. `rename`
+- fields:
+  - `op`: `rename`
+  - `from` required for one mapping
+  - `to` required for one mapping
+  - `mappings` optional for multiple mappings:
+    - item shape: `{ "from": "old_name", "to": "new_name" }`
+- `rename` preserves all other fields.
+
+#### 5. `project`
 - fields:
   - `op`: `project`
   - `fields` optional (path list; key defaults to leaf field name)
   - `mappings` optional (explicit rename):
     - item shape: `{ "from": "a.b", "to": "alias_name" }`
 
-#### 5. `group`
+#### 6. `group`
 - fields:
   - `op`: `group`
   - `by` required (array; or `field` fallback)
   - `aggregations` optional (default count)
 
-#### 6. `aggregate`
+#### 7. `aggregate`
 - fields:
   - `op`: `aggregate`
   - `aggregations` required
@@ -124,6 +136,7 @@ Returned JSON inside `text` contains:
 - `error`: nullable message
 - `result`: transformed array
 - `formatted`: nullable string (for `md_table`/`csv`)
+- `output`: formatted string, result array, single object, or scalar according to `output_format` / `result_shape`
 - `stats`:
   - `input_count`
   - `output_count`

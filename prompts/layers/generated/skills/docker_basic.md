@@ -17,6 +17,7 @@
 ## Actions (from interface)
 - `ps`
 - `images`
+- `version`
 - `logs`
 - `restart`
 - `start`
@@ -30,12 +31,12 @@
 | `logs` | `container` | yes | string | - | Target container name/id. |
 | `logs` | `tail` | no | number | impl default | Number of log lines to show. |
 | `restart`/`start`/`stop`/`inspect` | `container` | yes | string | - | Target container name/id. |
-| `ps`/`images` | none | no | - | - | List containers/images. |
+| `ps`/`images`/`version` | none | no | - | - | List containers/images or inspect Docker version availability. |
 
 ## Error Contract (from interface)
 - Missing required `container` for container-specific actions.
 - Unsupported action names.
-- Read-only inspection actions (`ps`, `images`) return `status=ok` with `available=false` and readable output when the Docker CLI or daemon is unavailable, because that is still an environment observation.
+- Read-only inspection actions (`ps`, `images`, `version`) return `status=ok` with `available=false` and readable output when the Docker CLI or daemon is unavailable, because that is still an environment observation.
 - Container-specific lifecycle/log/inspect actions return Docker daemon/CLI errors with readable output.
 - For mutating/container-specific actions, non-zero `docker` command exit codes are returned as `status=error` with `error_text=docker command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including `action`, `exit_code`, `docker_args`, and `output`.

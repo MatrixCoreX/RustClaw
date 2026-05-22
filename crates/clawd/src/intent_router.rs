@@ -729,6 +729,9 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
             OutputSemanticKind::PackageManagerDetection
         }
         "archive_list" | "archive_listing" | "archive_contents" => OutputSemanticKind::ArchiveList,
+        "archive_read" | "archive_member_read" | "archive_file_read" => {
+            OutputSemanticKind::ArchiveRead
+        }
         "archive_pack" | "archive_create" | "archive_compress" => OutputSemanticKind::ArchivePack,
         "archive_unpack" | "archive_extract" | "archive_decompress" => {
             OutputSemanticKind::ArchiveUnpack
@@ -2137,6 +2140,7 @@ fn output_semantic_kind_requires_fresh_evidence(kind: OutputSemanticKind) -> boo
             | OutputSemanticKind::SqliteSchemaVersion
             | OutputSemanticKind::PackageManagerDetection
             | OutputSemanticKind::ArchiveList
+            | OutputSemanticKind::ArchiveRead
             | OutputSemanticKind::ArchivePack
             | OutputSemanticKind::ArchiveUnpack
             | OutputSemanticKind::DockerPs
@@ -2231,6 +2235,74 @@ fn active_task_turn_can_reuse_semantic_patch(
     !prompt_has_concrete_fileish_cue(surface)
         && !surface.is_structural_locator_only_reply()
         && surface.inline_json_shape.is_none()
+}
+
+fn active_prompt_surface_has_structured_execution_target(
+    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> bool {
+    surface.has_explicit_path_or_url()
+        || surface.locator_target_pair.is_some()
+        || surface.has_structured_target_refinement()
+        || surface.inline_json_shape.is_some()
+        || surface.has_delivery_token_reference()
+}
+
+fn active_followup_frame_has_structured_target(
+    frame: &crate::followup_frame::FollowupFrame,
+) -> bool {
+    let has_bound_target = frame
+        .bound_target
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|target| !target.is_empty());
+    if has_bound_target
+        && matches!(
+            frame.op_kind,
+            crate::followup_frame::FollowupOpKind::Read
+                | crate::followup_frame::FollowupOpKind::List
+                | crate::followup_frame::FollowupOpKind::Delivery
+                | crate::followup_frame::FollowupOpKind::ClarifyPending
+        )
+    {
+        return true;
+    }
+    frame.selected_entry_index.is_some() || frame.slice_spec.is_some()
+}
+
+fn active_observed_facts_have_structured_target(
+    facts: &crate::observed_facts::ObservedFacts,
+) -> bool {
+    facts
+        .bound_target
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|target| !target.is_empty())
+        || !facts.delivery_targets.is_empty()
+        || facts.selected_entry_index.is_some()
+        || facts.observed_entry_count.is_some()
+        || facts.slice_spec.is_some()
+}
+
+fn active_session_has_structured_execution_target(
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+) -> bool {
+    let Some(snapshot) = session_snapshot else {
+        return false;
+    };
+    if let Some(active_prompt) = active_primary_task_prompt(Some(snapshot)) {
+        let active_surface = crate::intent::surface_signals::analyze_prompt_surface(active_prompt);
+        if active_prompt_surface_has_structured_execution_target(&active_surface) {
+            return true;
+        }
+    }
+    snapshot
+        .active_followup_frame
+        .as_ref()
+        .is_some_and(active_followup_frame_has_structured_target)
+        || snapshot
+            .active_observed_facts
+            .as_ref()
+            .is_some_and(active_observed_facts_have_structured_target)
 }
 
 fn unresolved_deictic_observable_target_should_clarify(
@@ -2542,6 +2614,15 @@ fn apply_active_task_scope_refinement_repair(
         return None;
     }
 
+    let unresolved_observation_missing_locator = *needs_clarify
+        && output_contract.requires_content_evidence
+        && matches!(output_contract.locator_kind, OutputLocatorKind::None)
+        && output_contract.locator_hint.trim().is_empty()
+        && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None);
+    if unresolved_observation_missing_locator {
+        return None;
+    }
+
     let standalone_observation_without_missing_slot = !*needs_clarify
         && output_contract.requires_content_evidence
         && !output_contract.delivery_required;
@@ -2564,8 +2645,15 @@ fn apply_active_task_scope_refinement_repair(
         return None;
     }
 
-    *turn_type = Some(TurnType::TaskScopeUpdate);
-    *target_task_policy = Some(TargetTaskPolicy::ReuseActive);
+    let repair_reason = if active_session_has_structured_execution_target(session_snapshot) {
+        *turn_type = None;
+        *target_task_policy = None;
+        "active_task_scope_refinement_detached_from_structured_anchor"
+    } else {
+        *turn_type = Some(TurnType::TaskScopeUpdate);
+        *target_task_policy = Some(TargetTaskPolicy::ReuseActive);
+        "active_task_scope_refinement_repair"
+    };
     *needs_clarify = false;
     *first_layer_decision = FirstLayerDecision::DirectAnswer;
     *execution_finalize_style = ActFinalizeStyle::Plain;
@@ -2575,7 +2663,7 @@ fn apply_active_task_scope_refinement_repair(
     output_contract.delivery_intent = OutputDeliveryIntent::None;
     output_contract.semantic_kind = OutputSemanticKind::None;
     output_contract.locator_hint.clear();
-    Some("active_task_scope_refinement_repair")
+    Some(repair_reason)
 }
 
 fn output_contract_allows_chat_only_task_mutation(output_contract: &IntentOutputContract) -> bool {
@@ -6063,6 +6151,35 @@ pub(crate) async fn run_intent_normalizer(
                 "intent_normalizer prompt load failed, falling back to safe clarify: task_id={} err={}",
                 task.task_id, err
             );
+            if let Some(fallback) = inline_json_transform_fallback_decision(req) {
+                info!(
+                    "{} intent_normalizer task_id={} prompt_missing_inline_json_transform_fallback input={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    crate::truncate_for_log(req)
+                );
+                return normalizer_output_from_fallback(
+                    req,
+                    "prompt_missing_inline_json_transform_fallback",
+                    fallback,
+                    None,
+                );
+            }
+            if let Some(fallback) = directory_pair_fallback_decision(state, req) {
+                info!(
+                    "{} intent_normalizer task_id={} prompt_missing_directory_pair_fallback reason={} input={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    fallback.reason,
+                    crate::truncate_for_log(req)
+                );
+                return normalizer_output_from_fallback(
+                    req,
+                    "prompt_missing_directory_pair_fallback",
+                    fallback,
+                    None,
+                );
+            }
             let fallback = empty_clarify_decision(req, "normalizer_prompt_missing");
             return normalizer_output_from_fallback(
                 req,
@@ -6188,6 +6305,35 @@ pub(crate) async fn run_intent_normalizer(
                 "intent_normalizer llm failed, falling back to safe clarify: task_id={} err={}",
                 task.task_id, err
             );
+            if let Some(fallback) = inline_json_transform_fallback_decision(req) {
+                info!(
+                    "{} intent_normalizer task_id={} llm_failed_inline_json_transform_fallback input={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    crate::truncate_for_log(req)
+                );
+                return normalizer_output_from_fallback(
+                    req,
+                    "llm_failed_inline_json_transform_fallback",
+                    fallback,
+                    None,
+                );
+            }
+            if let Some(fallback) = directory_pair_fallback_decision(state, req) {
+                info!(
+                    "{} intent_normalizer task_id={} llm_failed_directory_pair_fallback reason={} input={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    fallback.reason,
+                    crate::truncate_for_log(req)
+                );
+                return normalizer_output_from_fallback(
+                    req,
+                    "llm_failed_directory_pair_fallback",
+                    fallback,
+                    None,
+                );
+            }
             if let Some(fallback) = explicit_surface_path_facts_fallback_decision(
                 req,
                 &req_surface,
@@ -6357,6 +6503,28 @@ pub(crate) async fn run_intent_normalizer(
             }
         });
         let mut execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
+        if let Some(fallback) = parsed_inline_json_transform_repair_decision(
+            req,
+            needs_clarify,
+            first_layer_decision,
+            wants_file_delivery,
+            schedule_kind,
+            execution_recipe_hint,
+        ) {
+            info!(
+                "{} intent_normalizer task_id={} parsed_inline_json_transform_repair reason={} input={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                fallback.reason,
+                crate::truncate_for_log(req)
+            );
+            return normalizer_output_from_fallback(
+                req,
+                "parsed_inline_json_transform_repair",
+                fallback,
+                None,
+            );
+        }
         if let Some(fallback) = explicit_surface_path_metadata_clarify_repair_decision(
             req,
             &req_surface,
@@ -7197,6 +7365,35 @@ pub(crate) async fn run_intent_normalizer(
         task.task_id,
         crate::truncate_for_log(&llm_out)
     );
+    if let Some(fallback) = inline_json_transform_fallback_decision(req) {
+        info!(
+            "{} intent_normalizer task_id={} parse_failed_inline_json_transform_fallback input={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            crate::truncate_for_log(req)
+        );
+        return normalizer_output_from_fallback(
+            req,
+            "parse_failed_inline_json_transform_fallback",
+            fallback,
+            None,
+        );
+    }
+    if let Some(fallback) = directory_pair_fallback_decision(state, req) {
+        info!(
+            "{} intent_normalizer task_id={} parse_failed_directory_pair_fallback reason={} input={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            fallback.reason,
+            crate::truncate_for_log(req)
+        );
+        return normalizer_output_from_fallback(
+            req,
+            "parse_failed_directory_pair_fallback",
+            fallback,
+            None,
+        );
+    }
     if let Some(fallback) = parse_failed_explicit_capability_fallback_decision(
         req,
         &req_surface,
@@ -7240,6 +7437,97 @@ pub(crate) async fn run_intent_normalizer(
     let _ = (resume_context, binding_context);
     let fallback = empty_clarify_decision(req, "normalizer_parse_failed");
     normalizer_output_from_fallback(req, "parse_failed_safe_clarify", fallback, None)
+}
+
+fn inline_json_transform_fallback_decision(req: &str) -> Option<RouteDecision> {
+    if !crate::intent::surface_signals::inline_json_transform_request(req) {
+        return None;
+    }
+
+    Some(RouteDecision {
+        resolved_user_intent: req.trim().to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "normalizer_unavailable_inline_json_transform".to_string(),
+        confidence: Some(0.82),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::None,
+            locator_hint: String::new(),
+            ..Default::default()
+        },
+    })
+}
+
+fn parsed_inline_json_transform_repair_decision(
+    req: &str,
+    needs_clarify: bool,
+    first_layer_decision: FirstLayerDecision,
+    wants_file_delivery: bool,
+    schedule_kind: ScheduleKind,
+    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+) -> Option<RouteDecision> {
+    if !needs_clarify && !matches!(first_layer_decision, FirstLayerDecision::Clarify) {
+        return None;
+    }
+    if wants_file_delivery || !matches!(schedule_kind, ScheduleKind::None) {
+        return None;
+    }
+    if execution_recipe_hint.is_some_and(|spec| {
+        !matches!(
+            spec.kind,
+            crate::execution_recipe::ExecutionRecipeKind::None
+        )
+    }) {
+        return None;
+    }
+
+    let mut decision = inline_json_transform_fallback_decision(req)?;
+    decision.reason = "parsed_inline_json_transform_contract_repair".to_string();
+    Some(decision)
+}
+
+fn directory_pair_fallback_decision(state: &AppState, req: &str) -> Option<RouteDecision> {
+    let enabled_skills = state.get_skills_list();
+    if !enabled_skills.is_empty() && !enabled_skills.contains("system_basic") {
+        return None;
+    }
+    let (left, right) = resolved_directory_pair_from_current_request(state, req)?;
+    if left.eq_ignore_ascii_case(&right) {
+        return None;
+    }
+
+    Some(RouteDecision {
+        resolved_user_intent: req.trim().to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "normalizer_unavailable_directory_pair".to_string(),
+        confidence: Some(0.62),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::None,
+            locator_hint: format!("{left} | {right}"),
+            ..Default::default()
+        },
+    })
 }
 
 fn parse_failed_explicit_capability_fallback_decision(
@@ -13929,6 +14217,160 @@ mod tests {
     }
 
     #[test]
+    fn inline_json_transform_fallback_builds_planner_execute_contract() {
+        let req = r#"{"action":"transform_data","data":[{"team":"A","score":5},{"team":"A","score":7},{"team":"B","score":3}],"ops":[{"op":"group","by":["team"],"aggregations":[{"op":"sum","field":"score","name":"total"}]}]}"#;
+        let fallback = super::inline_json_transform_fallback_decision(req)
+            .expect("structured inline transform fallback");
+        let out = normalizer_output_from_fallback(
+            req,
+            "llm_failed_inline_json_transform_fallback",
+            fallback,
+            None,
+        );
+
+        assert_eq!(out.first_layer_decision, FirstLayerDecision::PlannerExecute);
+        assert!(!out.needs_clarify);
+        assert_eq!(
+            out.output_contract.response_shape,
+            OutputResponseShape::Strict
+        );
+        assert!(out.output_contract.requires_content_evidence);
+        assert_eq!(out.output_contract.locator_kind, OutputLocatorKind::None);
+        assert_eq!(out.output_contract.semantic_kind, OutputSemanticKind::None);
+        assert_eq!(out.fallback_source, None);
+    }
+
+    #[test]
+    fn inline_json_transform_fallback_ignores_non_structured_text() {
+        let req = "please transform the score data someday";
+
+        assert!(super::inline_json_transform_fallback_decision(req).is_none());
+    }
+
+    #[test]
+    fn parsed_inline_json_transform_repair_builds_planner_execute_contract() {
+        let req = r#"把这个 JSON 对象里的 old_name 改成 new_name，只输出 JSON：{"old_name":"alpha","count":2}"#;
+        let fallback = super::parsed_inline_json_transform_repair_decision(
+            req,
+            true,
+            FirstLayerDecision::Clarify,
+            false,
+            ScheduleKind::None,
+            None,
+        )
+        .expect("parsed inline transform repair");
+
+        assert_eq!(
+            fallback.reason,
+            "parsed_inline_json_transform_contract_repair"
+        );
+        assert!(!fallback.needs_clarify);
+        assert_eq!(
+            fallback.output_contract.response_shape,
+            OutputResponseShape::Strict
+        );
+        assert!(fallback.output_contract.requires_content_evidence);
+        assert_eq!(
+            fallback.output_contract.locator_kind,
+            OutputLocatorKind::None
+        );
+    }
+
+    #[test]
+    fn parsed_inline_json_transform_repair_preserves_file_delivery_route() {
+        let req = r#"sort this JSON array by score descending: [{"name":"alpha","score":7}]"#;
+
+        assert!(super::parsed_inline_json_transform_repair_decision(
+            req,
+            true,
+            FirstLayerDecision::Clarify,
+            true,
+            ScheduleKind::None,
+            None
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn parsed_inline_json_transform_repair_preserves_clean_planner_route() {
+        let req = r#"计算这个 JSON 数组里 value 的总和，只输出数字：[{"value":4},{"value":6}]"#;
+
+        assert!(super::parsed_inline_json_transform_repair_decision(
+            req,
+            false,
+            FirstLayerDecision::PlannerExecute,
+            false,
+            ScheduleKind::None,
+            None
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn parsed_inline_json_transform_repair_preserves_direct_non_clarify_route() {
+        let req = r#"计算这个 JSON 数组里 value 的总和，只输出数字：[{"value":4},{"value":6}]"#;
+
+        assert!(super::parsed_inline_json_transform_repair_decision(
+            req,
+            false,
+            FirstLayerDecision::DirectAnswer,
+            false,
+            ScheduleKind::None,
+            None
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn directory_pair_fallback_builds_planner_execute_locator_contract() {
+        let root = make_temp_workspace_with_child("directory_pair_fallback", "seed");
+        std::fs::create_dir_all(root.join("fixtures/tmp/bundle_src")).expect("left");
+        std::fs::create_dir_all(root.join("fixtures/tmp/dynamic_guard_unpack_case"))
+            .expect("right");
+        let mut state = crate::AppState::test_default_with_fixture_provider();
+        state.skill_rt.workspace_root = root.clone();
+        state.skill_rt.default_locator_search_dir = root.clone();
+        let req =
+            "bundle_src 와 dynamic_guard_unpack_case 를 재귀 비교하고 차이가 있는지 짧게 답해.";
+        let fallback = super::directory_pair_fallback_decision(&state, req)
+            .expect("resolved directory pair fallback");
+        let out = normalizer_output_from_fallback(
+            req,
+            "llm_failed_directory_pair_fallback",
+            fallback,
+            None,
+        );
+
+        assert_eq!(out.first_layer_decision, FirstLayerDecision::PlannerExecute);
+        assert!(!out.needs_clarify);
+        assert_eq!(
+            out.output_contract.response_shape,
+            OutputResponseShape::Strict
+        );
+        assert!(out.output_contract.requires_content_evidence);
+        assert_eq!(out.output_contract.locator_kind, OutputLocatorKind::Path);
+        assert!(out.output_contract.locator_hint.contains("bundle_src"));
+        assert!(out
+            .output_contract
+            .locator_hint
+            .contains("dynamic_guard_unpack_case"));
+        assert_eq!(out.output_contract.semantic_kind, OutputSemanticKind::None);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn directory_pair_fallback_ignores_unresolved_text() {
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        assert!(super::directory_pair_fallback_decision(
+            &state,
+            "compare source_alpha and source_beta"
+        )
+        .is_none());
+    }
+
+    #[test]
     fn explicit_surface_path_facts_fallback_builds_existence_contract() {
         let req = "Inspecte ces chemins: scripts/nl_tests/fixtures/device_local/package.json et scripts/nl_tests/fixtures/device_local/nope.json; indique existence et type.";
         let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
@@ -14531,6 +14973,72 @@ mod tests {
         assert_eq!(reason, Some("active_task_scope_refinement_repair"));
         assert_eq!(turn_type, Some(TurnType::TaskScopeUpdate));
         assert_eq!(target_task_policy, Some(TargetTaskPolicy::ReuseActive));
+        assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+        assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+        assert!(!needs_clarify);
+        assert!(!contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+        assert!(contract.locator_hint.is_empty());
+    }
+
+    #[test]
+    fn scope_refinement_repair_detaches_from_structured_active_target() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("GET http://127.0.0.1:8787/v1/health".to_string()),
+                last_primary_task_output: Some("Service status: reachable (HTTP 200).".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+                source_request: "GET http://127.0.0.1:8787/v1/health".to_string(),
+                op_kind: crate::followup_frame::FollowupOpKind::Read,
+                bound_target: Some("http://127.0.0.1:8787/v1/health".to_string()),
+                source_task_id: "task-1".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+                ..crate::followup_frame::FollowupFrame::default()
+            }),
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let mut turn_type = Some(TurnType::TaskRequest);
+        let mut target_task_policy = Some(TargetTaskPolicy::Standalone);
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+        let mut needs_clarify = true;
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::None,
+            locator_hint: "current workspace".to_string(),
+            self_extension: Default::default(),
+        };
+
+        let reason = super::apply_active_task_scope_refinement_repair(
+            "A concept label without a concrete target.",
+            Some(&snapshot),
+            &mut turn_type,
+            &mut target_task_policy,
+            false,
+            &mut decision,
+            &mut finalize_style,
+            &mut needs_clarify,
+            super::ScheduleKind::None,
+            false,
+            &mut contract,
+            None,
+        );
+
+        assert_eq!(
+            reason,
+            Some("active_task_scope_refinement_detached_from_structured_anchor")
+        );
+        assert_eq!(turn_type, None);
+        assert_eq!(target_task_policy, None);
         assert_eq!(decision, FirstLayerDecision::DirectAnswer);
         assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
         assert!(!needs_clarify);

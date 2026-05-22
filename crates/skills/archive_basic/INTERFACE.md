@@ -4,7 +4,7 @@
 > Keep this spec aligned with `crates/skills/archive_basic/src/main.rs`.
 
 ## Capability Summary
-- `archive_basic` provides archive operations for listing archive contents, packing files/folders into an archive, and unpacking archives into a destination directory.
+- `archive_basic` provides archive operations for listing archive contents, reading one member from an archive, packing files/folders into an archive, and unpacking archives into a destination directory.
 - Supported archive types are `zip` and `tar.gz`/`tgz`.
 - `unpack` uses a non-interactive default overwrite strategy (zip: `unzip -o`; tar: `tar --overwrite`) to avoid hanging on interactive replace prompts.
 - Relative paths are resolved against `WORKSPACE_ROOT`.
@@ -13,6 +13,7 @@
 
 ## Actions
 - `list`: list entries in an archive file.
+- `read`: output the content of one member inside an archive.
 - `pack`: create an archive from a source path.
 - `unpack`: extract an archive into a destination directory.
 
@@ -21,6 +22,9 @@
 |---|---|---|---|---|---|
 | `list` | `action` | yes | string | - | Must be `list`. |
 | `list` | `archive` | yes | string(path) | - | Archive file path (relative to workspace or explicit absolute path). Runtime also accepts `archive_path` or `path` as aliases and normalizes to `archive`. |
+| `read` | `action` | yes | string | - | Must be `read`. |
+| `read` | `archive` | yes | string(path) | - | Archive file path (relative to workspace or explicit absolute path). Runtime also accepts `archive_path` or `path` as aliases and normalizes to `archive`. |
+| `read` | `member` | yes | string(relative path) | - | File path inside the archive. Runtime also accepts `entry`, `file`, or `file_path` as aliases. Must be relative and reject `..`. |
 | `pack` | `action` | yes | string | - | Must be `pack`. |
 | `pack` | `source` | yes | string(path) | - | Source file or directory to archive. |
 | `pack` | `archive` | yes | string(path) | - | Output archive file path. Parent dir is auto-created. Runtime also accepts `archive_path` as an alias and normalizes to `archive`. |
@@ -34,18 +38,22 @@
   - `args must be object`
   - `<key> is required` (for missing required string args, e.g. `archive is required`)
 - Action/format errors:
-  - `unsupported action; use list|pack|unpack`
+  - `unsupported action; use list|read|pack|unpack`
   - `unsupported format; use zip|tar.gz`
   - `unsupported archive format for list`
+  - `unsupported archive format for read`
   - `unsupported archive format for unpack`
 - Path safety errors:
   - `path with '..' is not allowed`
+  - `archive member must be a relative path`
+  - `archive member with '..' is not allowed`
 - Runtime/system errors:
   - `mkdir failed: <error>`
   - `run <bin> failed: <error>`
   - `archive command failed: exit=<code>\n<stdout/stderr>`
   - On malformed stdin JSON request: `invalid input: <serde error>`
-- Successful command execution output is returned in `text` as `exit=<code>\n<stdout/stderr>`.
+- Successful `list`/`pack`/`unpack` command execution output is returned in `text` as `exit=<code>\n<stdout/stderr>`.
+- Successful `read` returns a single-line JSON object in `text` with `action`, `archive`, `member`, and `content`.
 - Non-zero archive command exit codes are returned as `status=error` with `error_text=archive command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including `action`, relevant paths, and `output`.
 
@@ -63,19 +71,29 @@ Response:
 ### Example 2
 Request:
 ```json
-{"request_id":"demo-2","args":{"action":"pack","source":"tmp/data","archive":"tmp/data.zip","format":"zip"}}
+{"request_id":"demo-2","args":{"action":"read","archive":"tmp/sample.zip","member":"notes.txt"}}
 ```
 Response:
 ```json
-{"request_id":"demo-2","status":"ok","text":"exit=0\n  adding: ...","extra":{"action":"pack","format":"zip","source":"/workspace/tmp/data","archive":"/workspace/tmp/data.zip","output":"exit=0\n  adding: ..."},"error_text":null}
+{"request_id":"demo-2","status":"ok","text":"{\"action\":\"read\",\"archive\":\"/workspace/tmp/sample.zip\",\"member\":\"notes.txt\",\"content\":\"fixture archive notes\"}","extra":{"action":"read","archive":"/workspace/tmp/sample.zip","member":"notes.txt","content":"fixture archive notes"},"error_text":null}
 ```
 
 ### Example 3
 Request:
 ```json
-{"request_id":"demo-3","args":{"action":"unpack","archive":"tmp/data.tgz","dest":"tmp/out"}}
+{"request_id":"demo-3","args":{"action":"pack","source":"tmp/data","archive":"tmp/data.zip","format":"zip"}}
 ```
 Response:
 ```json
-{"request_id":"demo-3","status":"ok","text":"exit=0\n...","extra":{"action":"unpack","archive":"/workspace/tmp/data.tgz","dest":"/workspace/tmp/out","output":"exit=0\n..."},"error_text":null}
+{"request_id":"demo-3","status":"ok","text":"exit=0\n  adding: ...","extra":{"action":"pack","format":"zip","source":"/workspace/tmp/data","archive":"/workspace/tmp/data.zip","output":"exit=0\n  adding: ..."},"error_text":null}
+```
+
+### Example 4
+Request:
+```json
+{"request_id":"demo-4","args":{"action":"unpack","archive":"tmp/data.tgz","dest":"tmp/out"}}
+```
+Response:
+```json
+{"request_id":"demo-4","status":"ok","text":"exit=0\n...","extra":{"action":"unpack","archive":"/workspace/tmp/data.tgz","dest":"/workspace/tmp/out","output":"exit=0\n..."},"error_text":null}
 ```
