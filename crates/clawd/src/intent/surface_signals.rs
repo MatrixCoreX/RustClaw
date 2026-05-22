@@ -711,6 +711,9 @@ mod tests {
         assert!(inline_json_transform_request(
             r#"sort this JSON array by score descending: [{"name":"alpha","score":7}]"#
         ));
+        assert!(inline_json_transform_request(
+            r#"统计这个 JSON 数组中对象数量，只输出数字：[{"x":1},{"x":2}]"#
+        ));
         assert!(!inline_json_transform_request(
             r#"{"action":"read_field","path":"package.json","field_path":"name"}"#
         ));
@@ -719,6 +722,9 @@ mod tests {
         ));
         assert!(inline_json_transform_request(
             "render this CSV as a markdown table:name,score\\nalpha,7\\nbeta,9"
+        ));
+        assert!(inline_json_transform_request(
+            "这个 CSV 按 score 降序输出 markdown 表格：name,score\\nli,3\\nwang,8\\nzhao,5"
         ));
     }
 

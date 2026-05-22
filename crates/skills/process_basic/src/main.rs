@@ -79,20 +79,25 @@ fn execute(args: Value) -> Result<(String, Value), String> {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(30)
                 .min(200);
-            run_ps_snapshot(limit as usize).map(|text| {
+            let filter = string_arg(obj, &["filter", "query", "name"]);
+            run_ps_snapshot(limit as usize, filter.as_deref()).map(|text| {
                 (
                     text.clone(),
-                    json!({"action":"ps","exit_code":0,"limit":limit,"platform":std::env::consts::OS,"output":text}),
+                    json!({"action":"ps","exit_code":0,"limit":limit,"filter":filter,"platform":std::env::consts::OS,"output":text}),
                 )
             })
         }
-        "port_list" => run_port_list_snapshot()
-            .map(|(command_tool, text)| {
+        "port_list" => {
+            let filter = string_arg(obj, &["filter", "query", "port"]);
+            run_port_list_snapshot()
+                .map(|(command_tool, text)| {
+                    let text = filter_command_output(&text, filter.as_deref());
                 (
                     text.clone(),
-                    json!({"action":"port_list","exit_code":0,"platform":std::env::consts::OS,"command_tool":command_tool,"output":text}),
+                        json!({"action":"port_list","exit_code":0,"filter":filter,"platform":std::env::consts::OS,"command_tool":command_tool,"output":text}),
                 )
-            }),
+                })
+        }
         "kill" => {
             let pid = obj
                 .get("pid")
@@ -132,6 +137,16 @@ fn execute(args: Value) -> Result<(String, Value), String> {
     result
 }
 
+fn string_arg(obj: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        obj.get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
 fn run_command(bin: &str, args: &[&str], limit_lines: Option<usize>) -> Result<String, String> {
     let output = Command::new(bin)
         .args(args)
@@ -157,7 +172,7 @@ fn run_command(bin: &str, args: &[&str], limit_lines: Option<usize>) -> Result<S
     }
 }
 
-fn run_ps_snapshot(limit: usize) -> Result<String, String> {
+fn run_ps_snapshot(limit: usize, filter: Option<&str>) -> Result<String, String> {
     let output = Command::new("ps")
         .args(["-Ao", "pid=,ppid=,pcpu=,pmem=,comm="])
         .output()
@@ -176,6 +191,7 @@ fn run_ps_snapshot(limit: usize) -> Result<String, String> {
     let mut rows = stdout_text
         .lines()
         .filter_map(parse_ps_row)
+        .filter(|row| ps_row_matches_filter(row, filter))
         .collect::<Vec<_>>();
     rows.sort_by(|a, b| {
         b.cpu
@@ -191,11 +207,47 @@ fn run_ps_snapshot(limit: usize) -> Result<String, String> {
             row.pid, row.ppid, row.cpu, row.mem, row.comm
         ));
     }
+    if lines.len() == 1 {
+        if let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) {
+            lines.push(format!("no matching processes for filter: {filter}"));
+        }
+    }
     Ok(format!(
         "exit={}\n{}",
         output.status.code().unwrap_or(0),
         lines.join("\n")
     ))
+}
+
+fn ps_row_matches_filter(row: &PsRow, filter: Option<&str>) -> bool {
+    let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    let filter_lower = filter.to_ascii_lowercase();
+    row.comm.to_ascii_lowercase().contains(&filter_lower)
+        || row.pid.to_string() == filter
+        || row.ppid.to_string() == filter
+}
+
+fn filter_command_output(text: &str, filter: Option<&str>) -> String {
+    let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
+        return text.to_string();
+    };
+    let filter_lower = filter.to_ascii_lowercase();
+    let mut kept = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        if idx == 0 && line.trim_start().starts_with("exit=") {
+            kept.push(line.to_string());
+            continue;
+        }
+        if line.to_ascii_lowercase().contains(&filter_lower) {
+            kept.push(line.to_string());
+        }
+    }
+    if kept.len() == 1 {
+        kept.push(format!("no matching rows for filter: {filter}"));
+    }
+    kept.join("\n")
 }
 
 fn run_port_list_command(
@@ -349,4 +401,34 @@ fn now_ts() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ps_filter_matches_command_case_insensitively() {
+        let row = PsRow {
+            pid: 42,
+            ppid: 1,
+            cpu: 0.0,
+            mem: 0.0,
+            comm: "clawd".to_string(),
+        };
+
+        assert!(ps_row_matches_filter(&row, Some("CLAWD")));
+        assert!(!ps_row_matches_filter(&row, Some("telegramd")));
+    }
+
+    #[test]
+    fn command_output_filter_keeps_exit_and_matching_rows() {
+        let text = "exit=0\nLISTEN 0 128 0.0.0.0:8787 users:((\"clawd\",pid=1))\nLISTEN 0 128 0.0.0.0:5432";
+
+        let filtered = filter_command_output(text, Some("8787"));
+
+        assert!(filtered.starts_with("exit=0"));
+        assert!(filtered.contains("8787"));
+        assert!(!filtered.contains("5432"));
+    }
 }

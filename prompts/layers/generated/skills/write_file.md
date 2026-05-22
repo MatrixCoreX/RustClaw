@@ -1,15 +1,16 @@
 ## write_file — standalone base skill
 
-Independent base skill for writing file contents. Use `{"type":"call_skill","skill":"write_file","args":{"path":"...","content":"..."}}`. Do not use system_basic for writing files.
+Independent base skill for writing file contents. Use `{"type":"call_skill","skill":"write_file","args":{"path":"...","content":"..."}}`. Use `append=true` only when appending content to the existing file tail. Do not use system_basic for writing files.
 
 ## Capability
-- Writes text content to a file; creates parent directories if needed.
+- Writes or appends text content to a file; creates parent directories if needed.
 
 ## Parameter contract
 | Param | Required | Type | Default | Description |
 |-------|----------|------|---------|-------------|
 | `path` | yes | string(path) | - | Target file path. |
 | `content` | yes | string | - | Content to write. |
+| `append` | no | bool | `false` | Append `content` to the target instead of replacing the file. |
 
 ## Output
 - Confirmation with path and byte count.

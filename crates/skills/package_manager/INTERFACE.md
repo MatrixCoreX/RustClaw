@@ -4,9 +4,9 @@
 > Keep this spec aligned with the package_manager implementation.
 
 ## Capability Summary
-- `package_manager` detects available package managers and installs packages with optional dry-run/sudo controls.
+- `package_manager` detects available system package managers, detects project/workspace package or build tools from manifest/lock files, and installs packages with optional dry-run/sudo controls.
 - It supports direct manager-specific install and smart auto-detection install.
-- Detection is platform-aware: macOS prefers Homebrew first, while Linux prefers the native distro managers before Homebrew fallback. Successful responses include `extra.platform`; `detect` also includes `extra.candidate_order`.
+- Detection is platform-aware: macOS prefers Homebrew first, while Linux prefers the native distro managers before Homebrew fallback. When `detect.path` points at a project directory, project markers such as `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, `Cargo.toml`, or `Cargo.lock` take precedence. Successful responses include `extra.platform`; `detect` also includes `extra.candidate_order`, and project detection includes `extra.manager_scope="project"` plus `extra.marker`.
 
 ## Actions
 - `detect`
@@ -17,7 +17,7 @@
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
 | all | `action` | yes | string | - | Must be one of `detect|install|smart_install`. |
-| `detect` | none | no | - | - | Detect package manager and environment support. |
+| `detect` | `path` / `root` / `project_path` / `workspace` | no | string(path) | - | Optional project directory or manifest path. If supplied, detect project package/build tool from marker files before falling back to system manager. |
 | `install`/`smart_install` | `packages` or `package` | yes | array/string | - | Non-empty package list. |
 | `install` | `manager` | no | string | auto | Explicit package manager override. |
 | `install`/`smart_install` | `dry_run` | no | boolean | impl default | Preview install without changes. |

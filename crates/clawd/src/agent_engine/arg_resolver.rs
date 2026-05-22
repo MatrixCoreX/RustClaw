@@ -196,7 +196,7 @@ fn normalize_fs_search_arg_aliases(args: &mut Value) -> bool {
         &["search_root", "search_dir", "directory", "dir"],
     );
     changed |= move_string_alias_if_missing(obj, "pattern", &["name_pattern"]);
-    changed |= move_value_alias_if_missing(obj, "max_results", &["limit"]);
+    changed |= move_value_alias_if_missing(obj, "max_results", &["limit", "max_entries"]);
     changed |= normalize_fs_search_find_path_contract(obj);
     changed |= normalize_fs_search_action_aliases(obj);
     if obj.get("action").and_then(|value| value.as_str()).is_none()
@@ -633,6 +633,19 @@ mod tests {
         );
         assert!(args.get("path").is_none());
         assert!(args.get("target").is_none());
+    }
+
+    #[test]
+    fn fs_search_max_entries_alias_normalizes_to_max_results() {
+        let mut args = json!({
+            "action": "find_name",
+            "pattern": "abcd",
+            "search_root": "/tmp/workspace",
+            "max_entries": 4
+        });
+
+        assert!(normalize_skill_arg_aliases("fs_search", &mut args));
+        assert_eq!(args.get("max_results").and_then(|v| v.as_u64()), Some(4));
     }
 
     #[test]

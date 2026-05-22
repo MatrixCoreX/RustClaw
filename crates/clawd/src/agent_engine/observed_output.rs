@@ -1017,6 +1017,15 @@ fn db_basic_scalar_candidate(value: &serde_json::Value) -> Option<String> {
     value_scalar_text(row.get(column)?)
 }
 
+fn db_basic_count_candidate(value: &serde_json::Value) -> Option<String> {
+    let columns = value.get("columns")?.as_array()?;
+    let rows = value.get("rows")?.as_array()?;
+    if rows.len() == 1 && columns.len() == 1 {
+        return db_basic_scalar_candidate(value);
+    }
+    Some(rows.len().to_string())
+}
+
 fn db_basic_table_names(value: &serde_json::Value) -> Option<Vec<String>> {
     let columns = value.get("columns")?.as_array()?;
     let column_name = if columns.len() == 1 {
@@ -3467,6 +3476,7 @@ fn structured_scalar_candidate(
     if skill == "db_basic" {
         if let Some(route) = route {
             return match route.output_contract.semantic_kind {
+                crate::OutputSemanticKind::ScalarCount => db_basic_count_candidate(&value),
                 crate::OutputSemanticKind::SqliteTableNamesOnly => {
                     db_basic_table_names(&value).map(|names| names.join("\n"))
                 }
@@ -11945,6 +11955,35 @@ version.workspace = true
         assert!(
             extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn direct_scalar_counts_db_rows_for_scalar_count_contract() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "db_basic",
+            r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route_result.resolved_intent =
+            "统计 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的表数量，只输出数字"
+                .to_string();
+        route_result.output_contract.requires_content_evidence = true;
+        route_result.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("3")
         );
     }
 

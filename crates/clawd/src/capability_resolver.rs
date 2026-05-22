@@ -62,6 +62,9 @@ fn resolve_static_capability_action_for_state(
         "filesystem.grep_text" | "filesystem.search_text" => Some(("fs_basic", Some("grep_text"))),
         "filesystem.compare_paths" => Some(("fs_basic", Some("compare_paths"))),
         "filesystem.write_file" | "filesystem.write_text" => Some(("fs_basic", Some("write_text"))),
+        "filesystem.append_text" | "filesystem.append_file" => {
+            Some(("fs_basic", Some("append_text")))
+        }
         "filesystem.make_dir" | "filesystem.create_dir" => Some(("fs_basic", Some("make_dir"))),
         "filesystem.remove_path" | "filesystem.delete_path" => {
             Some(("fs_basic", Some("remove_path")))

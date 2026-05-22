@@ -20,7 +20,8 @@
 |---|---|---|---|---|---|
 | all | `action` | yes | string | - | Must be one of supported actions. |
 | `ps` | `limit` | no | number | impl default | Max number of process rows. |
-| `port_list` | none | no | - | - | List listening/used ports. |
+| `ps` | `filter` / `query` / `name` | no | string | - | Case-insensitive process command filter. |
+| `port_list` | `filter` / `query` / `port` | no | string | - | Optional substring filter, commonly a port number or process name. |
 | `kill` | `pid` | yes | number | - | Target process id. |
 | `kill` | `signal` | no | string | `TERM` | Signal name/number for termination. |
 | `tail_log` | `path` | yes | string(path) | - | Log file path to tail. |

@@ -223,7 +223,15 @@ fn name_matches_pattern(name_norm: &str, pattern_norm: &str) -> bool {
     pattern_stem(pattern_norm).is_some_and(|stem| name_norm.contains(stem))
 }
 
-fn path_name_matches_pattern(path: &Path, name_norm: &str, pattern_norm: &str) -> bool {
+fn path_name_matches_pattern(
+    path: &Path,
+    name_norm: &str,
+    pattern_norm: &str,
+    exact: bool,
+) -> bool {
+    if exact {
+        return name_norm == pattern_norm;
+    }
     path_extension_matches_pattern(path, pattern_norm)
         && name_matches_pattern(name_norm, pattern_norm)
 }
@@ -322,7 +330,7 @@ fn grep_text_name_fallback_matches(
             .unwrap_or_default();
         if patterns
             .iter()
-            .any(|pattern_norm| path_name_matches_pattern(p, &name, pattern_norm))
+            .any(|pattern_norm| path_name_matches_pattern(p, &name, pattern_norm, false))
         {
             results.push(to_rel(workspace_root, p));
         }
@@ -333,6 +341,22 @@ fn grep_text_name_fallback_matches(
 
 fn bool_arg(obj: &serde_json::Map<String, Value>, key: &str) -> bool {
     obj.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn exact_name_match_requested(obj: &serde_json::Map<String, Value>) -> bool {
+    if bool_arg(obj, "exact") || bool_arg(obj, "exact_name") {
+        return true;
+    }
+    obj.get("match_mode")
+        .or_else(|| obj.get("mode"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "exact" | "basename_exact" | "name_exact"
+            )
+        })
 }
 
 fn normalize_target_kind(value: &str) -> &str {
@@ -460,6 +484,7 @@ fn execute(args: Value) -> Result<Value, String> {
     match action.as_str() {
         "find_name" => {
             let pattern_norms = name_patterns_from_args(obj)?;
+            let exact_name = exact_name_match_requested(obj);
             let target_kind = obj
                 .get("target_kind")
                 .and_then(|v| v.as_str())
@@ -480,10 +505,9 @@ fn execute(args: Value) -> Result<Value, String> {
                     .file_name()
                     .map(|s| normalize_locator_text(&s.to_string_lossy()))
                     .unwrap_or_default();
-                if !pattern_norms
-                    .iter()
-                    .any(|pattern_norm| path_name_matches_pattern(p, &name, pattern_norm))
-                {
+                if !pattern_norms.iter().any(|pattern_norm| {
+                    path_name_matches_pattern(p, &name, pattern_norm, exact_name)
+                }) {
                     return false;
                 }
                 let kind = if p.is_dir() {
@@ -507,6 +531,7 @@ fn execute(args: Value) -> Result<Value, String> {
                 "action": "find_name",
                 "root": to_rel(&root, &search_root),
                 "patterns": pattern_norms,
+                "exact": exact_name,
                 "count": results.len(),
                 "results": results,
             }))
@@ -574,10 +599,9 @@ fn execute(args: Value) -> Result<Value, String> {
                         .file_name()
                         .map(|s| normalize_locator_text(&s.to_string_lossy()))
                         .unwrap_or_default();
-                    if !pattern_norms
-                        .iter()
-                        .any(|pattern_norm| path_name_matches_pattern(p, &name, pattern_norm))
-                    {
+                    if !pattern_norms.iter().any(|pattern_norm| {
+                        path_name_matches_pattern(p, &name, pattern_norm, false)
+                    }) {
                         return false;
                     }
                 }
@@ -1079,6 +1103,42 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(results.len(), 1);
         assert!(results[0].ends_with("nested/config.ini"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn find_name_exact_basename_avoids_stem_contains_match() {
+        let root = unique_temp_dir("exact-basename");
+        let _ = std::fs::remove_dir_all(&root);
+        let exact_dir = root.join("case_only");
+        let fuzzy_dir = root.join("fuzzy_top3");
+        std::fs::create_dir_all(&exact_dir).expect("create exact dir");
+        std::fs::create_dir_all(&fuzzy_dir).expect("create fuzzy dir");
+        std::fs::write(exact_dir.join("Report.MD"), "").expect("write exact report");
+        std::fs::write(fuzzy_dir.join("abcd_report.md"), "").expect("write fuzzy report");
+
+        let out = execute(json!({
+            "action": "find_name",
+            "pattern": "Report.MD",
+            "exact": true,
+            "target_kind": "file",
+            "root": root.to_string_lossy().to_string(),
+            "max_depth": 3,
+            "max_results": 10
+        }))
+        .expect("find_name succeeds with exact basename");
+
+        assert_eq!(out.get("count").and_then(Value::as_u64), Some(1));
+        let results = out
+            .get("results")
+            .and_then(Value::as_array)
+            .expect("results array")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].ends_with("case_only/Report.MD"));
 
         let _ = std::fs::remove_dir_all(root);
     }
