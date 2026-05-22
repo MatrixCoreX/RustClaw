@@ -1267,6 +1267,7 @@ fn route_uses_runtime_owned_observed_finalizer(route_result: &RouteResult) -> bo
             | crate::OutputSemanticKind::GitRepositoryState
             | crate::OutputSemanticKind::StructuredKeys
             | crate::OutputSemanticKind::ArchiveList
+            | crate::OutputSemanticKind::ArchiveRead
             | crate::OutputSemanticKind::ArchivePack
             | crate::OutputSemanticKind::ArchiveUnpack
             | crate::OutputSemanticKind::DockerPs
@@ -1624,6 +1625,16 @@ fn action_is_likely_mutating(action: &AgentAction) -> bool {
         AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
             match skill.trim().to_ascii_lowercase().as_str() {
                 "write_file" | "remove_file" | "make_dir" => true,
+                "fs_basic" => args
+                    .get("action")
+                    .and_then(|value| value.as_str())
+                    .map(|action| {
+                        matches!(
+                            action.trim().to_ascii_lowercase().as_str(),
+                            "write_text" | "make_dir" | "remove_path"
+                        )
+                    })
+                    .unwrap_or(false),
                 "service_control" => args
                     .get("action")
                     .and_then(|value| value.as_str())
@@ -2470,6 +2481,12 @@ fn directory_tree_auto_locator_deterministic_plan_result(
     if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
         return None;
     }
+    if crate::intent::surface_signals::inline_json_transform_request(user_text)
+        || original_user_text
+            .is_some_and(crate::intent::surface_signals::inline_json_transform_request)
+    {
+        return None;
+    }
     let actions = directory_tree_auto_locator_observation_plan(route_result, auto_locator_path)?;
     let actions = normalize_planned_actions_with_original_and_context(
         state,
@@ -2673,6 +2690,111 @@ fn explicit_command_deterministic_plan_result(
         }]
     }))
     .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn package_manager_available_for_plan(state: &AppState) -> bool {
+    let enabled_skills = state.get_skills_list();
+    enabled_skills.is_empty() || enabled_skills.contains("package_manager")
+}
+
+fn normalizer_answer_candidate_from_resolved_prompt(resolved_prompt: &str) -> Option<String> {
+    let (_intent, candidate) = resolved_prompt.rsplit_once("\nanswer_candidate:")?;
+    let candidate = candidate.trim();
+    (!candidate.is_empty()).then(|| candidate.to_string())
+}
+
+fn package_manager_detect_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.round_no > 1
+        || loop_state.has_tool_or_skill_output
+        || route.needs_clarify
+        || !route.is_execute_gate()
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::PackageManagerDetection
+        || !package_manager_available_for_plan(state)
+    {
+        return None;
+    }
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "package_manager".to_string(),
+            args: serde_json::json!({"action": "detect"}),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+fn package_manager_dry_run_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    original_user_text: &str,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.round_no > 1
+        || loop_state.has_tool_or_skill_output
+        || route.needs_clarify
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || !matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        )
+        || route.output_contract.delivery_required
+        || !package_manager_available_for_plan(state)
+    {
+        return None;
+    }
+    let packages = normalizer_answer_candidate_from_resolved_prompt(&route.resolved_intent)
+        .and_then(|candidate| {
+            crate::package_commands::package_install_packages_from_commandish_text(&candidate)
+        })
+        .or_else(|| {
+            crate::package_commands::package_install_packages_from_preview_text(original_user_text)
+        })?;
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "package_manager".to_string(),
+            args: serde_json::json!({
+                "action": "smart_install",
+                "packages": packages,
+                "dry_run": true,
+                "use_sudo": true
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
     Some(build_plan_result(
         goal,
         &raw_plan_text,
@@ -3309,7 +3431,6 @@ fn archive_list_auto_locator_target_path(
     if route.needs_clarify
         || !route.output_contract.requires_content_evidence
         || route.output_contract.delivery_required
-        || !route_expects_terminal_user_answer(route)
     {
         return None;
     }
@@ -3321,7 +3442,156 @@ fn archive_list_auto_locator_target_path(
             (!hint.is_empty()).then_some(hint)
         })
         .filter(|path| is_supported_archive_path(path))
+        .filter(|path| route_allows_archive_list_auto_locator(route, path))
         .map(ToString::to_string)
+}
+
+fn archive_read_locator_parts(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+    current_user_text: &str,
+) -> Option<(String, String)> {
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+    {
+        return None;
+    }
+
+    let hint = route.output_contract.locator_hint.trim();
+    let hint_parts =
+        if route.output_contract.semantic_kind == crate::OutputSemanticKind::ArchiveRead {
+            hint.split('|')
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+    let archive = auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .or_else(|| hint_parts.first().copied())
+        .or_else(|| (!hint.is_empty()).then_some(hint))
+        .filter(|path| is_supported_archive_path(path))?;
+
+    let member = if route.output_contract.semantic_kind == crate::OutputSemanticKind::ArchiveRead {
+        let mut parts = hint_parts;
+        if parts.len() >= 2 {
+            if parts
+                .first()
+                .is_some_and(|part| is_supported_archive_path(part))
+            {
+                parts.remove(0);
+            }
+            Some(parts.join("/"))
+        } else {
+            archive_entry_target_for_route_or_text(route, current_user_text, archive)
+        }
+    } else if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None | crate::OutputSemanticKind::ContentExcerptSummary
+    ) {
+        archive_entry_target_for_route_or_text(route, current_user_text, archive)
+    } else {
+        return None;
+    }?;
+
+    if !archive_member_path_is_safe(&member) {
+        return None;
+    }
+    Some((archive.to_string(), member))
+}
+
+fn archive_member_path_is_safe(member: &str) -> bool {
+    let member = member.trim();
+    if member.is_empty() {
+        return false;
+    }
+    let path = Path::new(member);
+    !path.is_absolute()
+        && path.components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
+}
+
+fn has_archive_read_observation(loop_state: &LoopState, archive: &str, member: &str) -> bool {
+    loop_state.executed_step_results.iter().rev().any(|step| {
+        if !step.is_ok() || step.skill != "archive_basic" {
+            return false;
+        }
+        let Some(output) = step.output.as_deref() else {
+            return false;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(output) else {
+            return false;
+        };
+        value.get("action").and_then(Value::as_str) == Some("read")
+            && value
+                .get("archive")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|observed| observed == archive)
+            && value
+                .get("member")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .is_some_and(|observed| observed == member)
+    })
+}
+
+fn archive_read_deterministic_plan_result(
+    goal: &str,
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+    current_user_text: &str,
+) -> Option<PlanResult> {
+    if !archive_basic_enabled_for_planning(state) {
+        return None;
+    }
+    let (archive, member) =
+        archive_read_locator_parts(route_result, auto_locator_path, current_user_text)?;
+    if has_archive_read_observation(loop_state, &archive, &member) {
+        return None;
+    }
+    let actions = vec![AgentAction::CallSkill {
+        skill: "archive_basic".to_string(),
+        args: serde_json::json!({
+            "action": "read",
+            "archive": archive,
+            "member": member,
+        }),
+    }];
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        if loop_state.round_no <= 1 {
+            PlanKind::Single
+        } else {
+            PlanKind::Incremental
+        },
+        &actions,
+    ))
+}
+
+fn route_allows_archive_list_auto_locator(route: &RouteResult, archive_path: &str) -> bool {
+    match route.output_contract.semantic_kind {
+        crate::OutputSemanticKind::ArchiveRead => false,
+        crate::OutputSemanticKind::ExistenceWithPath => {
+            archive_entry_target_for_route_or_text(route, &route.resolved_intent, archive_path)
+                .is_some()
+        }
+        crate::OutputSemanticKind::ArchiveList | crate::OutputSemanticKind::ScalarCount => true,
+        _ => route_expects_terminal_user_answer(route),
+    }
 }
 
 fn archive_list_auto_locator_deterministic_plan_result(
@@ -3372,15 +3642,621 @@ fn inline_json_transform_args_from_text(text: &str) -> Option<Value> {
     if !crate::intent::surface_signals::inline_json_transform_request(text) {
         return None;
     }
-    let raw = crate::extract_first_json_value_any(text)?;
-    let value = serde_json::from_str::<Value>(&raw).ok()?;
+    json_values_any(text)
+        .into_iter()
+        .rev()
+        .filter_map(explicit_transform_args_from_value)
+        .next()
+        .map(normalize_transform_args)
+        .or_else(|| derive_single_object_rename_args_from_text(text))
+}
+
+fn explicit_transform_args_from_value(value: Value) -> Option<Value> {
     let args = value
         .as_object()
         .filter(|obj| obj.get("skill").and_then(Value::as_str) == Some("transform"))
         .and_then(|obj| obj.get("args").cloned())
         .unwrap_or(value);
-    args.as_object()?;
-    Some(normalize_transform_args(args))
+    let obj = args.as_object()?;
+    let has_structured_input = obj.contains_key("data")
+        || obj.contains_key("records")
+        || obj.contains_key("csv_text")
+        || obj.contains_key("csv");
+    let has_structured_ops = obj
+        .get("ops")
+        .and_then(Value::as_array)
+        .is_some_and(|ops| !ops.is_empty());
+    (has_structured_input && has_structured_ops).then_some(args)
+}
+
+fn json_values_any(text: &str) -> Vec<Value> {
+    json_values_any_raw(text)
+        .into_iter()
+        .map(|(_, value)| value)
+        .collect()
+}
+
+fn json_values_any_raw(text: &str) -> Vec<(String, Value)> {
+    let bytes = text.as_bytes();
+    let mut values = Vec::new();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let opener = bytes[i];
+        if opener != b'{' && opener != b'[' {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let mut stack = vec![opener];
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut j = i + 1;
+        let mut consumed_until = None;
+        while j < bytes.len() {
+            let c = bytes[j];
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if c == b'\\' {
+                    escaped = true;
+                } else if c == b'"' {
+                    in_string = false;
+                }
+                j += 1;
+                continue;
+            }
+            match c {
+                b'"' => in_string = true,
+                b'{' | b'[' => stack.push(c),
+                b'}' | b']' => {
+                    let Some(last) = stack.pop() else {
+                        break;
+                    };
+                    let matched = matches!((last, c), (b'{', b'}') | (b'[', b']'));
+                    if !matched {
+                        break;
+                    }
+                    if stack.is_empty() {
+                        let raw = &text[start..=j];
+                        if let Ok(value) = serde_json::from_str::<Value>(raw) {
+                            values.push((raw.to_string(), value));
+                            consumed_until = Some(j + 1);
+                        }
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+        i = consumed_until.unwrap_or(start + 1);
+    }
+    values
+}
+
+fn route_has_inline_transform_contract(route_result: Option<&RouteResult>) -> bool {
+    route_result.is_some_and(|route| {
+        route
+            .route_reason
+            .contains("inline_json_transform_structured_execute")
+            || route
+                .route_reason
+                .contains("parsed_inline_json_transform_contract_repair")
+    })
+}
+
+fn transformable_input_value(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => !items.is_empty() && items.iter().any(Value::is_object),
+        Value::Object(obj) => {
+            if obj
+                .get("data")
+                .or_else(|| obj.get("records"))
+                .or_else(|| obj.get("input"))
+                .is_some_and(|item| {
+                    item.as_array().is_some_and(|items| {
+                        !items.is_empty() && items.iter().any(Value::is_object)
+                    }) || item.is_object()
+                })
+            {
+                return true;
+            }
+            !obj.is_empty()
+                && !obj.contains_key("action")
+                && !obj.contains_key("skill")
+                && !obj.contains_key("operation")
+        }
+        _ => false,
+    }
+}
+
+fn last_transformable_input_value(text: &str) -> Option<Value> {
+    last_transformable_input_value_with_raw(text).map(|(_, value)| value)
+}
+
+fn last_transformable_input_value_with_raw(text: &str) -> Option<(String, Value)> {
+    json_values_any_raw(text)
+        .into_iter()
+        .rev()
+        .find(|(_, value)| transformable_input_value(value))
+}
+
+fn remove_last_json_payload_from_text<'a>(text: &'a str, raw: &str) -> Option<String> {
+    let start = text.rfind(raw)?;
+    let end = start.saturating_add(raw.len());
+    let mut remaining = String::with_capacity(text.len().saturating_sub(raw.len()) + 1);
+    remaining.push_str(&text[..start]);
+    remaining.push(' ');
+    remaining.push_str(&text[end..]);
+    Some(remaining)
+}
+
+fn schema_field_token(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch == '-' || ch.is_ascii_alphanumeric())
+}
+
+fn schema_shaped_target_token(candidate: &str, source: &str) -> bool {
+    schema_field_token(candidate)
+        && candidate != source
+        && !candidate.chars().all(|ch| ch.is_ascii_uppercase())
+        && (candidate.contains('_')
+            || candidate.contains('-')
+            || candidate.chars().any(|ch| ch.is_ascii_digit())
+            || source.contains('_')
+            || source.contains('-')
+            || source.chars().any(|ch| ch.is_ascii_digit()))
+}
+
+fn schema_tokens_in_text(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        if ch == '_' || ch == '-' || ch.is_ascii_alphanumeric() {
+            current.push(ch);
+            continue;
+        }
+        if schema_field_token(&current) {
+            tokens.push(std::mem::take(&mut current));
+        } else {
+            current.clear();
+        }
+    }
+    if schema_field_token(&current) {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn derive_single_object_rename_args_from_text(text: &str) -> Option<Value> {
+    let (raw, input_value) = last_transformable_input_value_with_raw(text)?;
+    let input_obj = input_value.as_object()?;
+    if input_obj.is_empty() {
+        return None;
+    }
+    let instruction = remove_last_json_payload_from_text(text, &raw)?;
+    let tokens = schema_tokens_in_text(&instruction);
+    let input_keys = input_obj.keys().map(String::as_str).collect::<Vec<_>>();
+    let mut source_positions = tokens
+        .iter()
+        .enumerate()
+        .filter(|(_, token)| input_keys.iter().any(|key| key == &token.as_str()))
+        .collect::<Vec<_>>();
+    source_positions.dedup_by(|(_, left), (_, right)| left == right);
+    if source_positions.len() != 1 {
+        return None;
+    }
+    let (source_index, source_token) = source_positions[0];
+    let target_candidates = tokens
+        .iter()
+        .skip(source_index + 1)
+        .filter(|token| !input_keys.iter().any(|key| key == &token.as_str()))
+        .filter(|token| schema_shaped_target_token(token, source_token))
+        .fold(Vec::<&String>::new(), |mut acc, token| {
+            if !acc
+                .iter()
+                .any(|existing| existing.as_str() == token.as_str())
+            {
+                acc.push(token);
+            }
+            acc
+        });
+    if target_candidates.len() != 1 {
+        return None;
+    }
+    Some(normalize_transform_args(serde_json::json!({
+        "action": "transform_data",
+        "data": input_value,
+        "ops": [{
+            "op": "rename",
+            "from": source_token,
+            "to": target_candidates[0]
+        }],
+        "result_shape": "single_object",
+        "output_format": "json"
+    })))
+}
+
+fn answer_candidate_from_route(route_result: Option<&RouteResult>) -> Option<&str> {
+    let resolved = route_result?.resolved_intent.as_str();
+    let (_, candidate) = resolved.rsplit_once("\nanswer_candidate:")?;
+    Some(candidate.trim()).filter(|candidate| !candidate.is_empty())
+}
+
+fn parse_answer_candidate_value(candidate: &str) -> Option<Value> {
+    let trimmed = candidate.trim();
+    serde_json::from_str::<Value>(trimmed)
+        .ok()
+        .or_else(|| {
+            crate::extract_first_json_value_any(trimmed)
+                .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        })
+        .or_else(|| {
+            trimmed
+                .parse::<i64>()
+                .ok()
+                .map(|value| Value::Number(value.into()))
+        })
+        .or_else(|| {
+            trimmed
+                .parse::<f64>()
+                .ok()
+                .and_then(serde_json::Number::from_f64)
+                .map(Value::Number)
+        })
+}
+
+fn json_sort_key(value: &Value) -> String {
+    serde_json::to_string(value).unwrap_or_default()
+}
+
+fn json_rows_equal(left: &[Value], right: &[Value]) -> bool {
+    left.len() == right.len() && left.iter().zip(right).all(|(a, b)| a == b)
+}
+
+fn json_multiset_equal(left: &[Value], right: &[Value]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut left_keys = left.iter().map(json_sort_key).collect::<Vec<_>>();
+    let mut right_keys = right.iter().map(json_sort_key).collect::<Vec<_>>();
+    left_keys.sort();
+    right_keys.sort();
+    left_keys == right_keys
+}
+
+fn object_keys(value: &Value) -> Vec<String> {
+    value
+        .as_object()
+        .map(|obj| obj.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn common_object_keys(rows: &[Value]) -> Vec<String> {
+    let Some(first) = rows.first() else {
+        return Vec::new();
+    };
+    object_keys(first)
+        .into_iter()
+        .filter(|key| {
+            rows.iter()
+                .all(|row| row.as_object().is_some_and(|obj| obj.contains_key(key)))
+        })
+        .collect()
+}
+
+fn value_for_key<'a>(row: &'a Value, key: &str) -> &'a Value {
+    row.as_object()
+        .and_then(|obj| obj.get(key))
+        .unwrap_or(&Value::Null)
+}
+
+fn transform_cmp_values(a: &Value, b: &Value) -> std::cmp::Ordering {
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => a
+            .as_f64()
+            .partial_cmp(&b.as_f64())
+            .unwrap_or(std::cmp::Ordering::Equal),
+        (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
+        _ => json_sort_key(a).cmp(&json_sort_key(b)),
+    }
+}
+
+fn derive_sort_op_from_candidate(input: &[Value], output: &[Value]) -> Option<Value> {
+    if !json_multiset_equal(input, output) || json_rows_equal(input, output) {
+        return None;
+    }
+    for key in common_object_keys(input) {
+        let mut asc = input.to_vec();
+        asc.sort_by(|a, b| transform_cmp_values(value_for_key(a, &key), value_for_key(b, &key)));
+        if json_rows_equal(&asc, output) {
+            return Some(serde_json::json!({"op": "sort", "by": key, "order": "asc"}));
+        }
+        let mut desc = asc;
+        desc.reverse();
+        if json_rows_equal(&desc, output) {
+            return Some(serde_json::json!({"op": "sort", "by": key, "order": "desc"}));
+        }
+    }
+    None
+}
+
+fn numeric_value(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => text.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+fn numbers_equal(left: f64, right: f64) -> bool {
+    (left - right).abs() < 1e-9
+}
+
+fn derive_group_sum_op_from_candidate(input: &[Value], output: &[Value]) -> Option<Value> {
+    if input.is_empty() || output.is_empty() {
+        return None;
+    }
+    let input_keys = common_object_keys(input);
+    let output_keys = common_object_keys(output);
+    for group_key in input_keys.iter().filter(|key| output_keys.contains(key)) {
+        for input_value_key in input_keys.iter() {
+            if input_value_key == group_key {
+                continue;
+            }
+            if !input
+                .iter()
+                .any(|row| numeric_value(value_for_key(row, input_value_key)).is_some())
+            {
+                continue;
+            }
+            for output_value_key in output_keys.iter().filter(|key| *key != group_key) {
+                let mut sums: HashMap<String, f64> = HashMap::new();
+                for row in input {
+                    let group_value = value_for_key(row, group_key);
+                    let key = json_sort_key(group_value);
+                    let value = numeric_value(value_for_key(row, input_value_key))?;
+                    *sums.entry(key).or_insert(0.0) += value;
+                }
+                if sums.len() != output.len() {
+                    continue;
+                }
+                let mut matched = true;
+                for row in output {
+                    let group = json_sort_key(value_for_key(row, group_key));
+                    let Some(expected) = sums.get(&group) else {
+                        matched = false;
+                        break;
+                    };
+                    let Some(actual) = numeric_value(value_for_key(row, output_value_key)) else {
+                        matched = false;
+                        break;
+                    };
+                    if !numbers_equal(*expected, actual) {
+                        matched = false;
+                        break;
+                    }
+                }
+                if matched {
+                    return Some(serde_json::json!({
+                        "op": "group",
+                        "by": [group_key],
+                        "aggregations": [{
+                            "op": "sum",
+                            "field": input_value_key,
+                            "name": output_value_key
+                        }]
+                    }));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn derive_project_op_from_candidate(input: &[Value], output: &[Value]) -> Option<Value> {
+    if input.len() != output.len() || input.is_empty() {
+        return None;
+    }
+    let output_keys = common_object_keys(output);
+    if output_keys.is_empty() {
+        return None;
+    }
+    let input_keys = common_object_keys(input);
+    if !output_keys.iter().all(|key| input_keys.contains(key)) {
+        return None;
+    }
+    let projected = input
+        .iter()
+        .map(|row| {
+            let mut obj = serde_json::Map::new();
+            for key in &output_keys {
+                obj.insert(key.clone(), value_for_key(row, key).clone());
+            }
+            Value::Object(obj)
+        })
+        .collect::<Vec<_>>();
+    (projected == output).then(|| serde_json::json!({"op": "project", "fields": output_keys}))
+}
+
+fn derive_filter_op_from_candidate(input: &[Value], output: &[Value]) -> Option<Value> {
+    if output.is_empty() || output.len() >= input.len() {
+        return None;
+    }
+    for key in common_object_keys(input) {
+        let mut seen_values = std::collections::HashSet::new();
+        let candidate_values = output
+            .iter()
+            .filter_map(|row| {
+                let value = value_for_key(row, &key).clone();
+                seen_values.insert(json_sort_key(&value)).then_some(value)
+            })
+            .collect::<Vec<_>>();
+        for value in candidate_values {
+            let filtered = input
+                .iter()
+                .filter(|row| value_for_key(row, &key) == &value)
+                .cloned()
+                .collect::<Vec<_>>();
+            if filtered == output {
+                return Some(serde_json::json!({
+                    "op": "filter",
+                    "field": key,
+                    "cmp": "eq",
+                    "value": value
+                }));
+            }
+        }
+    }
+    None
+}
+
+fn derive_dedup_op_from_candidate(input: &[Value], output: &[Value]) -> Option<Value> {
+    if output.is_empty() || output.len() >= input.len() {
+        return None;
+    }
+    for key in common_object_keys(input) {
+        let mut seen = std::collections::HashSet::new();
+        let deduped = input
+            .iter()
+            .filter(|row| seen.insert(json_sort_key(value_for_key(row, &key))))
+            .cloned()
+            .collect::<Vec<_>>();
+        if deduped == output {
+            return Some(serde_json::json!({"op": "dedup", "field": key}));
+        }
+    }
+    None
+}
+
+fn derive_aggregate_scalar_op_from_candidate(input: &[Value], output: &Value) -> Option<Value> {
+    let target = numeric_value(output)?;
+    for key in common_object_keys(input) {
+        let values = input
+            .iter()
+            .map(|row| numeric_value(value_for_key(row, &key)))
+            .collect::<Option<Vec<_>>>()?;
+        let sum = values.iter().sum::<f64>();
+        if numbers_equal(sum, target) {
+            return Some(serde_json::json!({
+                "op": "aggregate",
+                "aggregations": [{"op": "sum", "field": key, "name": "value"}]
+            }));
+        }
+    }
+    None
+}
+
+fn derive_rename_op_from_candidate(input: &Value, output: &Value) -> Option<Value> {
+    let input_obj = input.as_object()?;
+    let output_obj = output.as_object()?;
+    let removed = input_obj
+        .iter()
+        .filter(|(key, _)| !output_obj.contains_key(*key))
+        .collect::<Vec<_>>();
+    let added = output_obj
+        .iter()
+        .filter(|(key, _)| !input_obj.contains_key(*key))
+        .collect::<Vec<_>>();
+    if removed.len() != 1 || added.len() != 1 {
+        return None;
+    }
+    let (from, removed_value) = removed[0];
+    let (to, added_value) = added[0];
+    if removed_value != added_value {
+        return None;
+    }
+    Some(serde_json::json!({"op": "rename", "from": from, "to": to}))
+}
+
+fn inline_json_transform_args_from_candidate(
+    text: &str,
+    route_result: Option<&RouteResult>,
+) -> Option<Value> {
+    if !crate::intent::surface_signals::inline_json_transform_request(text)
+        && !route_has_inline_transform_contract(route_result)
+    {
+        return None;
+    }
+    let input_value = last_transformable_input_value(text)?;
+    let candidate_value =
+        answer_candidate_from_route(route_result).and_then(parse_answer_candidate_value)?;
+    match (&input_value, &candidate_value) {
+        (Value::Array(input), Value::Array(output)) => {
+            let op = derive_sort_op_from_candidate(input, output)
+                .or_else(|| derive_group_sum_op_from_candidate(input, output))
+                .or_else(|| derive_project_op_from_candidate(input, output))
+                .or_else(|| derive_filter_op_from_candidate(input, output))
+                .or_else(|| derive_dedup_op_from_candidate(input, output))?;
+            Some(normalize_transform_args(serde_json::json!({
+                "action": "transform_data",
+                "data": input_value,
+                "ops": [op],
+                "output_format": "json"
+            })))
+        }
+        (Value::Array(input), scalar) => {
+            let op = derive_aggregate_scalar_op_from_candidate(input, scalar)?;
+            Some(normalize_transform_args(serde_json::json!({
+                "action": "transform_data",
+                "data": input_value,
+                "ops": [op],
+                "result_shape": "scalar",
+                "output_format": "json"
+            })))
+        }
+        (Value::Object(_), Value::Object(_)) => {
+            let op = derive_rename_op_from_candidate(&input_value, &candidate_value)?;
+            Some(normalize_transform_args(serde_json::json!({
+                "action": "transform_data",
+                "data": input_value,
+                "ops": [op],
+                "result_shape": "single_object",
+                "output_format": "json"
+            })))
+        }
+        _ => None,
+    }
+}
+
+fn answer_candidate_is_markdown_table(route_result: Option<&RouteResult>) -> bool {
+    answer_candidate_from_route(route_result).is_some_and(|candidate| {
+        let lines = candidate
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>();
+        lines.len() >= 2
+            && lines
+                .first()
+                .is_some_and(|line| line.starts_with('|') && line.ends_with('|'))
+            && lines
+                .get(1)
+                .is_some_and(|line| line.chars().all(|ch| matches!(ch, '|' | '-' | ':' | ' ')))
+    })
+}
+
+fn inline_csv_transform_args_from_text(
+    text: &str,
+    route_result: Option<&RouteResult>,
+) -> Option<Value> {
+    if !crate::intent::surface_signals::inline_json_transform_request(text)
+        || crate::extract_first_json_value_any(text).is_some()
+        || !answer_candidate_is_markdown_table(route_result)
+    {
+        return None;
+    }
+    let csv_lines = crate::intent::surface_signals::inline_csv_record_block(text)?;
+    Some(serde_json::json!({
+        "action": "transform_data",
+        "csv_text": csv_lines.join("\n"),
+        "ops": [],
+        "output_format": "md_table"
+    }))
 }
 
 fn inline_json_transform_deterministic_plan_result(
@@ -3388,6 +4264,7 @@ fn inline_json_transform_deterministic_plan_result(
     state: &AppState,
     loop_state: &LoopState,
     original_user_text: &str,
+    route_result: Option<&RouteResult>,
 ) -> Option<PlanResult> {
     if loop_state.round_no > 1
         || loop_state.has_tool_or_skill_output
@@ -3396,7 +4273,11 @@ fn inline_json_transform_deterministic_plan_result(
         return None;
     }
     let args = inline_json_transform_args_from_text(original_user_text)
-        .or_else(|| inline_json_transform_args_from_text(goal))?;
+        .or_else(|| inline_json_transform_args_from_text(goal))
+        .or_else(|| inline_json_transform_args_from_candidate(original_user_text, route_result))
+        .or_else(|| inline_json_transform_args_from_candidate(goal, route_result))
+        .or_else(|| inline_csv_transform_args_from_text(original_user_text, route_result))
+        .or_else(|| inline_csv_transform_args_from_text(goal, route_result))?;
     let actions = vec![AgentAction::CallSkill {
         skill: "transform".to_string(),
         args,
@@ -3946,7 +4827,13 @@ fn replace_structured_keys_read_plan(
             AgentAction::CallSkill { skill, args }
                 | AgentAction::CallTool { tool: skill, args }
                 if (skill.eq_ignore_ascii_case("config_basic")
-                    && args.get("action").and_then(Value::as_str) == Some("list_keys"))
+                    && args.get("action").and_then(Value::as_str) == Some("list_keys")
+                    && args
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|path| !path.is_empty())
+                        .is_some())
                     || (skill.eq_ignore_ascii_case("system_basic")
                         && args.get("action").and_then(Value::as_str) == Some("structured_keys"))
         )
@@ -3972,12 +4859,12 @@ fn replace_structured_keys_read_plan(
                         || (skill.eq_ignore_ascii_case("config_basic")
                             && matches!(
                                 args.get("action").and_then(Value::as_str),
-                                Some("read_field" | "read_fields")
+                                Some("read_field" | "read_fields" | "validate")
                             ))
                         || (skill.eq_ignore_ascii_case("system_basic")
                             && matches!(
                                 args.get("action").and_then(Value::as_str),
-                                Some("read_range" | "extract_field" | "extract_fields")
+                                Some("read_range" | "extract_field" | "extract_fields" | "validate_structured")
                             ))
         )
     }) {
@@ -3992,6 +4879,95 @@ fn replace_structured_keys_read_plan(
             "max_keys": 1000,
         }),
     }]
+}
+
+fn has_structured_keys_observation(loop_state: &LoopState, path: &str) -> bool {
+    let requested_path = path.trim();
+    loop_state.executed_step_results.iter().rev().any(|step| {
+        if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "config_basic") {
+            return false;
+        }
+        let Some(output) = step.output.as_deref() else {
+            return false;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(output) else {
+            return false;
+        };
+        if value.get("action").and_then(Value::as_str) != Some("structured_keys") {
+            return false;
+        }
+        if !value
+            .get("exists")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        if !value.get("keys").is_some_and(Value::is_array)
+            && !value.get("identity_values").is_some_and(Value::is_array)
+            && !value.get("indices_preview").is_some_and(Value::is_array)
+        {
+            return false;
+        }
+        if requested_path.is_empty() {
+            return true;
+        }
+        value
+            .get("resolved_path")
+            .or_else(|| value.get("path"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_some_and(|observed| observed == requested_path)
+    })
+}
+
+fn structured_keys_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    let path = structured_keys_locator_path(route_result, auto_locator_path)?;
+    if has_structured_keys_observation(loop_state, &path) {
+        return None;
+    }
+    let enabled_skills = state.get_skills_list();
+    if !enabled_skills.is_empty() && !enabled_skills.contains("config_basic") {
+        return None;
+    }
+    let actions = vec![AgentAction::CallTool {
+        tool: "config_basic".to_string(),
+        args: serde_json::json!({
+            "action": "list_keys",
+            "path": path,
+            "max_keys": 1000,
+        }),
+    }];
+    let raw_plan_text = serde_json::json!({
+        "steps": [{
+            "type": "call_tool",
+            "tool": "config_basic",
+            "args": actions
+                .first()
+                .and_then(|action| match action {
+                    AgentAction::CallTool { args, .. } => Some(args.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| serde_json::json!({})),
+        }]
+    })
+    .to_string();
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        if loop_state.round_no <= 1 {
+            PlanKind::Single
+        } else {
+            PlanKind::Incremental
+        },
+        &actions,
+    ))
 }
 
 fn action_is_structured_field_read_with_explicit_field(action: &AgentAction) -> bool {
@@ -4011,12 +4987,18 @@ fn action_is_structured_field_read_with_explicit_field(action: &AgentAction) -> 
             } else {
                 false
             };
-            is_field_read
-                && (json_trimmed_string_arg(args, &["field_path", "field", "key"]).is_some()
-                    || args
-                        .get("field_paths")
-                        .or_else(|| args.get("fields"))
-                        .is_some_and(|value| !string_list_from_value(Some(value)).is_empty()))
+            if !is_field_read {
+                return false;
+            }
+            if json_trimmed_string_arg(args, &["field_path", "field", "key"]).is_some() {
+                return true;
+            }
+            let field_count = args
+                .get("field_paths")
+                .or_else(|| args.get("fields"))
+                .map(|value| string_list_from_value(Some(value)).len())
+                .unwrap_or_default();
+            field_count == 1
         }
         AgentAction::CallCapability { .. }
         | AgentAction::Respond { .. }
@@ -5073,6 +6055,7 @@ fn normalize_planned_actions_with_original_and_context(
         loop_state,
         user_text,
         original_user_text,
+        plan_context,
         auto_locator_path,
         actions,
         skip_legacy_semantic_rewrites,
@@ -5169,6 +6152,7 @@ fn normalize_legacy_compatibility_actions(
     loop_state: &LoopState,
     user_text: &str,
     original_user_text: Option<&str>,
+    plan_context: Option<&str>,
     auto_locator_path: Option<&str>,
     actions: Vec<AgentAction>,
     skip_legacy_semantic_rewrites: bool,
@@ -5217,6 +6201,7 @@ fn normalize_legacy_compatibility_actions(
     let actions =
         strip_terminal_discussion_for_direct_skill_passthrough(state, route_result, actions);
     let actions = normalize_action_schema_aliases(state, route_result, actions);
+    let actions = rewrite_archive_basic_short_archive_to_active_bound_target(plan_context, actions);
     let actions = rewrite_invalid_rustclaw_config_section_field_reads_to_guard(
         route_result,
         auto_locator_path,
@@ -5283,10 +6268,19 @@ fn rewrite_rustclaw_config_validation_to_guard(
         .map(|action| {
             let Some((path, format, profile)) =
                 config_validation_action_target(&action, route_result, auto_locator_path)
+                    .map(|(path, format, profile)| (path, format, Some(profile)))
+                    .or_else(|| {
+                        plain_rustclaw_main_config_validation_action_target(
+                            &action,
+                            route_result,
+                            auto_locator_path,
+                        )
+                        .map(|(path, format)| (path, format, None))
+                    })
             else {
                 return action;
             };
-            if profile != ConfigValidationProfile::RustClawSemanticGuard {
+            if profile == Some(ConfigValidationProfile::SyntaxOnly) {
                 return action;
             }
             info!(
@@ -5600,6 +6594,69 @@ fn config_validation_action_target(
         .map(ToString::to_string)
         .or_else(|| Some("toml".to_string()));
     Some((path.to_string(), format, profile))
+}
+
+fn plain_rustclaw_main_config_validation_action_target(
+    action: &AgentAction,
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<(String, Option<String>)> {
+    if route_result.is_none_or(|route| !route.output_contract.requires_content_evidence) {
+        return None;
+    }
+    if route_result.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::ConfigValidation
+    }) {
+        return None;
+    }
+    let (skill, args) = match action {
+        AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
+        AgentAction::CallTool { tool, args } => (tool.as_str(), args),
+        _ => return None,
+    };
+    if config_validation_profile_from_args(args).is_some() {
+        return None;
+    }
+    let action_name = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    let is_validation = (skill.eq_ignore_ascii_case("config_basic")
+        && action_name.eq_ignore_ascii_case("validate"))
+        || (skill.eq_ignore_ascii_case("system_basic")
+            && action_name.eq_ignore_ascii_case("validate_structured"))
+        || (skill.eq_ignore_ascii_case("config_edit")
+            && action_name.eq_ignore_ascii_case("validate_config"));
+    if !is_validation {
+        return None;
+    }
+    let path = args
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            auto_locator_path
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+        })
+        .or_else(|| {
+            route_result
+                .map(|route| route.output_contract.locator_hint.trim())
+                .filter(|path| !path.is_empty())
+        })?;
+    if !is_rustclaw_main_config_path(path) {
+        return None;
+    }
+    let format = args
+        .get("format")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| Some("toml".to_string()));
+    Some((path.to_string(), format))
 }
 
 fn is_rustclaw_main_config_path(path: &str) -> bool {
@@ -6179,12 +7236,11 @@ fn rewrite_structured_scalar_field_read_plan_to_read_field(
     };
     if route.needs_clarify
         || route.output_contract.delivery_required
-        || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
         || !route.output_contract.requires_content_evidence
         || actions.iter().any(action_is_structured_scalar_field_read)
-        || !actions.iter().any(action_observes_bounded_file_content)
+        || !actions.iter().any(action_observes_structured_source)
         || actions.iter().any(|action| {
-            !action_observes_bounded_file_content(action)
+            !action_observes_structured_source(action)
                 && !matches!(
                     action,
                     AgentAction::SynthesizeAnswer { .. }
@@ -6204,6 +7260,11 @@ fn rewrite_structured_scalar_field_read_plan_to_read_field(
     else {
         return actions;
     };
+    if route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        && !actions.iter().any(action_is_readonly_config_observation)
+    {
+        return actions;
+    }
 
     info!(
         "plan_rewrite_structured_scalar_field_read_to_config_basic path={} field={}",
@@ -6227,9 +7288,9 @@ fn rewrite_structured_multi_field_read_plan_to_read_fields(
         || route.output_contract.delivery_required
         || !route.output_contract.requires_content_evidence
         || actions.iter().any(action_is_structured_scalar_field_read)
-        || !actions.iter().any(action_observes_bounded_file_content)
+        || !actions.iter().any(action_observes_structured_source)
         || actions.iter().any(|action| {
-            !action_observes_bounded_file_content(action)
+            !action_observes_structured_source(action)
                 && !matches!(
                     action,
                     AgentAction::SynthesizeAnswer { .. }
@@ -6255,6 +7316,10 @@ fn rewrite_structured_multi_field_read_plan_to_read_fields(
         field_paths
     );
     vec![config_basic_read_fields_action(path, field_paths)]
+}
+
+fn action_observes_structured_source(action: &AgentAction) -> bool {
+    action_observes_bounded_file_content(action) || action_is_readonly_config_observation(action)
 }
 
 fn action_is_structured_scalar_field_read(action: &AgentAction) -> bool {
@@ -6290,7 +7355,8 @@ fn structured_scalar_field_read_target_path(
 ) -> Option<String> {
     actions
         .iter()
-        .find_map(planned_bounded_file_read_path)
+        .find_map(planned_structured_config_observation_path)
+        .or_else(|| actions.iter().find_map(planned_bounded_file_read_path))
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .map(ToString::to_string)
@@ -6733,6 +7799,14 @@ fn current_turn_requests_config_edit(
             && config_actions
                 .iter()
                 .all(|action| config_edit_action_is_route_guard(action, route));
+    }
+    if route.output_contract.requires_content_evidence
+        && !config_actions.is_empty()
+        && config_actions
+            .iter()
+            .all(|action| config_edit_action_is_route_guard(action, route))
+    {
+        return true;
     }
     !config_actions.is_empty()
         && config_actions
@@ -7905,7 +8979,7 @@ fn normalize_archive_basic_args(mut args: Value, route_result: Option<&RouteResu
         .map(str::trim)
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if !matches!(action_name.as_str(), "list" | "pack" | "unpack")
+    if !matches!(action_name.as_str(), "list" | "read" | "pack" | "unpack")
         && unknown_archive_action_can_normalize_to_list(obj, route_result)
     {
         obj.insert("action".to_string(), Value::String("list".to_string()));
@@ -7969,6 +9043,25 @@ fn normalize_archive_basic_args(mut args: Value, route_result: Option<&RouteResu
                 &["archive_path", "path", "input", "input_path"],
             );
         }
+        "read" => {
+            normalize_arg_alias(
+                obj,
+                "archive",
+                &["archive_path", "path", "input", "input_path"],
+            );
+            normalize_arg_alias(
+                obj,
+                "member",
+                &[
+                    "entry",
+                    "entry_path",
+                    "member_path",
+                    "file",
+                    "file_path",
+                    "path_inside_archive",
+                ],
+            );
+        }
         _ => {}
     }
     args
@@ -7981,18 +9074,64 @@ fn unknown_archive_action_can_normalize_to_list(
     let Some(route) = route_result else {
         return false;
     };
-    if archive_list_auto_locator_target_path(Some(route), None).is_none()
-        || archive_args_have_pack_or_unpack_shape(obj)
-    {
+    if archive_args_have_pack_or_unpack_shape(obj) {
         return false;
     }
-    archive_arg_candidate_from_obj(obj)
-        .as_deref()
-        .or_else(|| {
-            let hint = route.output_contract.locator_hint.trim();
-            (!hint.is_empty()).then_some(hint)
+    let archive = archive_arg_candidate_from_obj(obj).or_else(|| {
+        let hint = route.output_contract.locator_hint.trim();
+        (!hint.is_empty()).then(|| hint.to_string())
+    });
+    let Some(archive) = archive.filter(|archive| is_supported_archive_path(archive)) else {
+        return false;
+    };
+    if archive_args_have_entry_selector(obj) {
+        return true;
+    }
+    archive_list_auto_locator_target_path(Some(route), Some(&archive)).is_some()
+}
+
+fn archive_args_have_entry_selector(obj: &serde_json::Map<String, Value>) -> bool {
+    [
+        "entry",
+        "entry_path",
+        "member",
+        "member_path",
+        "file",
+        "file_path",
+        "name",
+        "path_inside_archive",
+    ]
+    .iter()
+    .any(|key| {
+        obj.get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some_and(|value| !is_supported_archive_path(value))
+    }) || obj
+        .get("entries")
+        .and_then(Value::as_array)
+        .is_some_and(|entries| {
+            entries.iter().any(|value| {
+                value
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .is_some_and(|value| !is_supported_archive_path(value))
+            })
         })
-        .is_some_and(is_supported_archive_path)
+        || obj
+            .get("members")
+            .and_then(Value::as_array)
+            .is_some_and(|entries| {
+                entries.iter().any(|value| {
+                    value
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .is_some_and(|value| !is_supported_archive_path(value))
+                })
+            })
 }
 
 fn archive_args_have_pack_or_unpack_shape(obj: &serde_json::Map<String, Value>) -> bool {
@@ -8039,6 +9178,135 @@ fn normalize_archive_basic_schema_aliases(
             other => other,
         })
         .collect()
+}
+
+fn rewrite_archive_basic_short_archive_to_active_bound_target(
+    plan_context: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let targets = active_bound_archive_targets_from_plan_context(plan_context);
+    if targets.is_empty() {
+        return actions;
+    }
+    actions
+        .into_iter()
+        .enumerate()
+        .map(|(idx, action)| {
+            let AgentAction::CallSkill { skill, mut args } = action else {
+                return action;
+            };
+            if !skill.eq_ignore_ascii_case("archive_basic") {
+                return AgentAction::CallSkill { skill, args };
+            }
+            let Some(obj) = args.as_object_mut() else {
+                return AgentAction::CallSkill { skill, args };
+            };
+            let action_name = obj
+                .get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
+            if !action_name.eq_ignore_ascii_case("list") {
+                return AgentAction::CallSkill { skill, args };
+            }
+            let Some(current_archive) = obj
+                .get("archive")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+            else {
+                return AgentAction::CallSkill { skill, args };
+            };
+            let Some(target) = targets
+                .iter()
+                .find(|target| short_locator_matches_target_basename(&current_archive, target))
+            else {
+                return AgentAction::CallSkill { skill, args };
+            };
+            obj.insert("archive".to_string(), Value::String(target.clone()));
+            info!(
+                "plan_rewrite_archive_short_archive_to_active_bound_target idx={} from={} to={}",
+                idx, current_archive, target
+            );
+            AgentAction::CallSkill { skill, args }
+        })
+        .collect()
+}
+
+fn active_bound_archive_targets_from_plan_context(plan_context: Option<&str>) -> Vec<String> {
+    let Some(plan_context) = plan_context else {
+        return Vec::new();
+    };
+    let mut targets = Vec::new();
+    for line in plan_context.lines() {
+        let trimmed = line.trim_start();
+        let target = ["followup_bound_target:", "observed_bound_target:"]
+            .iter()
+            .find_map(|prefix| trimmed.strip_prefix(prefix))
+            .map(str::trim)
+            .filter(|target| is_supported_archive_path(target));
+        let Some(target) = target else {
+            continue;
+        };
+        if !targets
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(target))
+        {
+            targets.push(target.to_string());
+        }
+    }
+    targets
+}
+
+fn short_locator_matches_target_basename(locator: &str, target: &str) -> bool {
+    let locator = trim_archive_bound_locator_token(locator);
+    if locator.is_empty()
+        || locator.contains('/')
+        || locator.contains('\\')
+        || Path::new(&locator).is_absolute()
+        || Path::new(&locator).components().count() != 1
+        || !is_supported_archive_path(&locator)
+    {
+        return false;
+    }
+    Path::new(target)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.eq_ignore_ascii_case(&locator))
+        .unwrap_or(false)
+}
+
+fn trim_archive_bound_locator_token(token: &str) -> String {
+    token
+        .trim()
+        .trim_matches(|ch: char| {
+            matches!(
+                ch,
+                '"' | '\''
+                    | '`'
+                    | ','
+                    | '，'
+                    | '。'
+                    | ':'
+                    | '：'
+                    | ';'
+                    | '；'
+                    | '('
+                    | ')'
+                    | '（'
+                    | '）'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '<'
+                    | '>'
+                    | '《'
+                    | '》'
+            )
+        })
+        .to_string()
 }
 
 fn strip_directory_read_range_after_inventory_dir(actions: Vec<AgentAction>) -> Vec<AgentAction> {
@@ -8716,6 +9984,23 @@ fn action_targets_route_locator_artifact(
                             same_existing_or_display_path(parent, &action_path)
                         })
                 }
+                "fs_basic" => match args
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .map(|action| action.trim().to_ascii_lowercase())
+                    .as_deref()
+                {
+                    Some("write_text" | "remove_path") => {
+                        same_existing_or_display_path(&locator, &action_path)
+                    }
+                    Some("make_dir") => {
+                        same_existing_or_display_path(&locator, &action_path)
+                            || locator.parent().is_some_and(|parent| {
+                                same_existing_or_display_path(parent, &action_path)
+                            })
+                    }
+                    _ => false,
+                },
                 _ => false,
             }
         }
@@ -13614,6 +14899,7 @@ fn docker_readonly_action_from_command(command: &str) -> Option<&'static str> {
     match subcommand.as_str() {
         "ps" => Some("ps"),
         "images" => Some("images"),
+        "version" => Some("version"),
         "container" => match words.get(index + 1).map(|word| word.to_ascii_lowercase()) {
             Some(next) if matches!(next.as_str(), "ls" | "list" | "ps") => Some("ps"),
             _ => None,
@@ -14625,6 +15911,7 @@ pub(super) async fn plan_round_actions(
         state,
         loop_state,
         &original_user_text_for_policy,
+        route_result,
     ) {
         info!(
             "plan_deterministic_inline_json_transform task_id={} round={}",
@@ -14647,7 +15934,42 @@ pub(super) async fn plan_round_actions(
             return Ok(plan_result);
         }
     }
+    if let Some(plan_result) =
+        package_manager_detect_deterministic_plan_result(state, goal, route_result, loop_state)
+    {
+        info!(
+            "plan_deterministic_package_manager_detect task_id={} round={}",
+            task.task_id, loop_state.round_no
+        );
+        return Ok(plan_result);
+    }
+    if let Some(plan_result) = package_manager_dry_run_deterministic_plan_result(
+        state,
+        goal,
+        route_result,
+        loop_state,
+        &original_user_text_for_policy,
+    ) {
+        info!(
+            "plan_deterministic_package_manager_dry_run task_id={} round={}",
+            task.task_id, loop_state.round_no
+        );
+        return Ok(plan_result);
+    }
     if !explicit_command_request {
+        if let Some(plan_result) = structured_keys_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            auto_locator_path,
+        ) {
+            info!(
+                "plan_deterministic_structured_keys task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
         if let Some(plan_result) = scalar_path_directory_locator_search_deterministic_plan_result(
             goal,
             route_result,
@@ -14736,6 +16058,20 @@ pub(super) async fn plan_round_actions(
         ) {
             info!(
                 "plan_deterministic_directory_tree_auto_locator task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
+        if let Some(plan_result) = archive_read_deterministic_plan_result(
+            goal,
+            state,
+            route_result,
+            loop_state,
+            auto_locator_path,
+            &original_user_text_for_policy,
+        ) {
+            info!(
+                "plan_deterministic_archive_read task_id={} round={}",
                 task.task_id, loop_state.round_no
             );
             return Ok(plan_result);
@@ -15270,10 +16606,10 @@ mod tests {
     use super::{
         action_targets_config_edit, actions_use_ad_hoc_command_without_route_preferred_skill,
         archive_list_auto_locator_deterministic_plan_result,
-        broaden_default_read_range_for_structured_text, build_lightweight_skill_playbooks_text,
-        build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
-        can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
-        compact_skill_playbook_from_prompt,
+        archive_read_deterministic_plan_result, broaden_default_read_range_for_structured_text,
+        build_lightweight_skill_playbooks_text, build_lightweight_skill_quick_index_text,
+        build_lightweight_tool_spec, can_fallback_to_initial_plan_after_repair_failure,
+        classify_planning_prompt_class, compact_skill_playbook_from_prompt,
         content_excerpt_summary_auto_locator_deterministic_plan_result,
         directory_compare_locator_deterministic_plan_result,
         directory_tree_auto_locator_deterministic_plan_result, enforce_output_contract_tool_args,
@@ -15290,11 +16626,15 @@ mod tests {
         normalize_planned_actions, normalize_planned_actions_with_original,
         normalize_planned_actions_with_original_and_context, normalize_system_basic_schema_aliases,
         normalize_transform_schema_aliases, observation_only_plan_can_finalize_from_direct_output,
-        plan_repair_reason, registry_preferred_skill_names_for_route,
+        package_manager_detect_deterministic_plan_result,
+        package_manager_dry_run_deterministic_plan_result, plan_repair_reason,
+        registry_preferred_skill_names_for_route,
         replace_file_delivery_respond_only_with_path_observation,
         replace_scalar_count_plan_with_count_inventory,
         replace_scalar_path_respond_only_with_auto_locator_observation,
-        replace_workspace_synthesis_respond_only_plan, rewrite_archive_pack_plan_to_archive_basic,
+        replace_workspace_synthesis_respond_only_plan,
+        rewrite_archive_basic_short_archive_to_active_bound_target,
+        rewrite_archive_pack_plan_to_archive_basic,
         rewrite_archive_unpack_run_cmd_to_archive_basic,
         rewrite_config_change_preview_to_config_edit_plan,
         rewrite_config_validation_read_plan_to_validate,
@@ -15321,8 +16661,8 @@ mod tests {
         strip_terminal_discussion_for_observed_finalize,
         strip_terminal_discussion_for_scalar_path_observation,
         strip_terminal_placeholder_respond_for_exact_listing_contract,
-        strip_unresolved_template_reads_after_inventory_dir, structured_field_selectors, LoopState,
-        PlanningPromptClass,
+        strip_unresolved_template_reads_after_inventory_dir, structured_field_selectors,
+        structured_keys_deterministic_plan_result, LoopState, PlanningPromptClass,
     };
     use crate::agent_engine::CLAWD_LITERAL_COMMAND_ARG;
     use crate::{
@@ -16732,6 +18072,47 @@ mod tests {
     }
 
     #[test]
+    fn plain_main_config_validation_rewrites_to_guard_when_not_syntax_contract() {
+        let state = test_state();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Free,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "configs/config.toml".to_string();
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "validate",
+                    "path": "/home/guagua/rustclaw/configs/config.toml",
+                    "format": "toml",
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string()],
+            },
+        ];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "check main config for obvious configuration issues",
+            Some("/home/guagua/rustclaw/configs/config.toml"),
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "config_edit", "guard_config");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some("/home/guagua/rustclaw/configs/config.toml")
+        );
+        assert_eq!(args.get("format").and_then(Value::as_str), Some("toml"));
+    }
+
+    #[test]
     fn config_validation_contract_rewrites_broad_read_to_validate() {
         let mut route = base_route_result();
         route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
@@ -17210,6 +18591,56 @@ mod tests {
     }
 
     #[test]
+    fn scalar_structured_field_contract_rewrites_key_listing_to_read_field() {
+        let root = TempDirGuard::new("structured_scalar_field_list_keys_plan");
+        let config_dir = root.path.join("configs");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let config = config_dir.join("app_config.toml");
+        fs::write(&config, "[app]\nport = 8787\n").expect("write config");
+        let config_path = config.display().to_string();
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = config_path.clone();
+        route.resolved_intent =
+            format!("Read app.port from {config_path} and output only the value.");
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "config_basic".to_string(),
+                args: json!({
+                    "action": "list_keys",
+                    "path": config_path,
+                    "max_keys": 1000,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+        ];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "Read app.port from configs/app_config.toml and output only the value.",
+            None,
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 1, "normalized actions: {normalized:?}");
+        let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
+        assert_eq!(
+            args.get("field_path").and_then(Value::as_str),
+            Some("app.port")
+        );
+    }
+
+    #[test]
     fn structured_multi_field_contract_rewrites_broad_read_to_read_fields() {
         let root = TempDirGuard::new("structured_multi_field_plan");
         let config_dir = root.path.join("configs");
@@ -17268,6 +18699,62 @@ db_path = "data/test_contract.sqlite"
             Some(&route),
             &LoopState::new(1),
             "scripts/nl_tests/fixtures/device_local/configs/app_config.toml 의 paths.logs_dir 와 paths.db_path 값만 알려줘.",
+            None,
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 1, "normalized actions: {normalized:?}");
+        let args = expect_planned_call(&normalized[0], "config_basic", "read_fields");
+        let field_paths = args
+            .get("field_paths")
+            .and_then(Value::as_array)
+            .expect("field_paths");
+        assert_eq!(
+            field_paths,
+            &vec![json!("paths.logs_dir"), json!("paths.db_path")]
+        );
+    }
+
+    #[test]
+    fn structured_multi_field_contract_rewrites_key_listing_to_read_fields() {
+        let root = TempDirGuard::new("structured_multi_field_list_keys_plan");
+        let config_dir = root.path.join("configs");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let config = config_dir.join("app_config.toml");
+        fs::write(
+            &config,
+            r#"[paths]
+logs_dir = "logs"
+db_path = "data/test_contract.sqlite"
+"#,
+        )
+        .expect("write config");
+        let config_path = config.display().to_string();
+        let mut state = test_state();
+        state.skill_rt.workspace_root = root.path.clone();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = config_path.clone();
+        route.resolved_intent =
+            format!("Return paths.logs_dir and paths.db_path from {config_path}.");
+        let actions = vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "list_keys",
+                "path": config_path,
+                "max_keys": 1000,
+            }),
+        }];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "Return paths.logs_dir and paths.db_path from configs/app_config.toml.",
             None,
             actions,
         );
@@ -17430,6 +18917,158 @@ planner_kind = "tool"
             }
             other => panic!("expected archive_basic action, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn archive_basic_read_action_preserves_member_contract() {
+        let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
+        let actions = vec![AgentAction::CallSkill {
+            skill: "archive_basic".to_string(),
+            args: json!({
+                "action": "read",
+                "path": archive,
+                "entry": "notes.txt",
+            }),
+        }];
+
+        let normalized = normalize_archive_basic_schema_aliases(None, actions);
+
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "archive_basic");
+                assert_eq!(args.get("action").and_then(Value::as_str), Some("read"));
+                assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
+                assert_eq!(
+                    args.get("member").and_then(Value::as_str),
+                    Some("notes.txt")
+                );
+            }
+            other => panic!("expected archive_basic action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn archive_basic_short_list_archive_uses_active_bound_target() {
+        let bound_target = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
+        let actions = vec![AgentAction::CallSkill {
+            skill: "archive_basic".to_string(),
+            args: json!({
+                "action": "list",
+                "archive": "test_bundle.zip",
+            }),
+        }];
+        let plan_context = format!(
+            "### ACTIVE_EXECUTION_ANCHOR\nfollowup_op_kind: Read\nfollowup_bound_target: {bound_target}\nobserved_bound_target: {bound_target}"
+        );
+
+        let rewritten = rewrite_archive_basic_short_archive_to_active_bound_target(
+            Some(&plan_context),
+            actions,
+        );
+
+        match &rewritten[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "archive_basic");
+                assert_eq!(
+                    args.get("archive").and_then(Value::as_str),
+                    Some(bound_target)
+                );
+            }
+            other => panic!("expected archive_basic action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn package_manager_detect_uses_deterministic_skill_plan() {
+        let state = test_state_with_enabled_skills(&["package_manager"]);
+        let mut route = base_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = OutputSemanticKind::PackageManagerDetection;
+        let loop_state = LoopState::new(1);
+
+        let plan = package_manager_detect_deterministic_plan_result(
+            &state,
+            "detect package manager",
+            Some(&route),
+            &loop_state,
+        )
+        .expect("package manager detection should use deterministic plan");
+
+        assert_eq!(plan.steps.len(), 3);
+        let action = plan.steps[0].to_agent_action().expect("agent action");
+        let args = expect_planned_call(&action, "package_manager", "detect");
+        assert_eq!(args.get("action").and_then(Value::as_str), Some("detect"));
+    }
+
+    #[test]
+    fn package_manager_dry_run_uses_commandish_answer_candidate() {
+        let state = test_state_with_enabled_skills(&["package_manager"]);
+        let mut route = base_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.resolved_intent =
+            "Show package preview\nanswer_candidate: command: sudo -n apt-get install -y ripgrep"
+                .to_string();
+        let loop_state = LoopState::new(1);
+
+        let plan = package_manager_dry_run_deterministic_plan_result(
+            &state,
+            "dry-run package install",
+            Some(&route),
+            &loop_state,
+            "ripgrep 설치는 하지 말고 dry-run 으로 어떤 명령이 될지만 알려줘.",
+        )
+        .expect("package manager dry-run should use deterministic plan");
+
+        let action = plan.steps[0].to_agent_action().expect("agent action");
+        let args = expect_planned_call(&action, "package_manager", "smart_install");
+        assert_eq!(
+            args.get("packages")
+                .and_then(Value::as_array)
+                .map(|packages| {
+                    packages
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                }),
+            Some(vec!["ripgrep"])
+        );
+        assert_eq!(args.get("dry_run").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    fn package_manager_dry_run_falls_back_to_current_request_package_token() {
+        let state = test_state_with_enabled_skills(&["package_manager"]);
+        let mut route = base_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.resolved_intent =
+            "ripgrep install dry-run preview without executing installation".to_string();
+        let loop_state = LoopState::new(1);
+
+        let plan = package_manager_dry_run_deterministic_plan_result(
+            &state,
+            "dry-run package install",
+            Some(&route),
+            &loop_state,
+            "ripgrep 설치는 하지 말고 dry-run 으로 어떤 명령이 될지만 알려줘.",
+        )
+        .expect("package manager dry-run should extract the safe current-request package token");
+
+        let action = plan.steps[0].to_agent_action().expect("agent action");
+        let args = expect_planned_call(&action, "package_manager", "smart_install");
+        assert_eq!(
+            args.get("packages")
+                .and_then(Value::as_array)
+                .map(|packages| {
+                    packages
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                }),
+            Some(vec!["ripgrep"])
+        );
     }
 
     #[test]
@@ -17652,6 +19291,25 @@ planner_kind = "tool"
     }
 
     #[test]
+    fn docker_version_run_cmd_rewrites_to_docker_basic_version() {
+        let state = test_state_with_enabled_skills(&["docker_basic", "run_cmd"]);
+        let actions = vec![AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: json!({"command": "docker version"}),
+        }];
+
+        let rewritten = rewrite_docker_readonly_run_cmd_to_docker_basic(&state, false, actions);
+
+        match &rewritten[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "docker_basic");
+                assert_eq!(args.get("action").and_then(Value::as_str), Some("version"));
+            }
+            other => panic!("expected docker_basic action, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn docker_readonly_preserves_explicit_literal_run_cmd() {
         let state = test_state_with_enabled_skills(&["docker_basic", "run_cmd"]);
         let actions = vec![AgentAction::CallSkill {
@@ -17757,6 +19415,105 @@ planner_kind = "tool"
     }
 
     #[test]
+    fn archive_read_contract_plans_direct_member_read() {
+        let state = test_state_with_enabled_skills(&["archive_basic"]);
+        let mut route = base_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.resolved_intent =
+            "Read member notes.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"
+                .to_string();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | notes.txt".to_string();
+        let loop_state = LoopState::new(1);
+
+        let plan = archive_read_deterministic_plan_result(
+            "read archive member",
+            &state,
+            Some(&route),
+            &loop_state,
+            Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"),
+            "Read member notes.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
+        )
+        .expect("archive read plan");
+
+        assert_eq!(plan.steps.len(), 1);
+        let action = plan.steps[0].to_agent_action().expect("agent action");
+        let args = expect_planned_call(&action, "archive_basic", "read");
+        assert_eq!(
+            args.get("archive").and_then(Value::as_str),
+            Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip")
+        );
+        assert_eq!(
+            args.get("member").and_then(Value::as_str),
+            Some("notes.txt")
+        );
+    }
+
+    #[test]
+    fn archive_read_structural_member_target_plans_direct_read_without_semantic_label() {
+        let state = test_state_with_enabled_skills(&["archive_basic"]);
+        let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
+        let mut route = base_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.resolved_intent =
+            format!("Read the notes.txt content from archive {archive} and output only it");
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.delivery_required = false;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.locator_hint = archive.to_string();
+        let loop_state = LoopState::new(1);
+
+        let plan = archive_read_deterministic_plan_result(
+            "read archive member",
+            &state,
+            Some(&route),
+            &loop_state,
+            Some(archive),
+            &format!("Read {archive} member notes.txt"),
+        )
+        .expect("archive read plan from structural member target");
+
+        assert_eq!(plan.steps.len(), 1);
+        let action = plan.steps[0].to_agent_action().expect("agent action");
+        let args = expect_planned_call(&action, "archive_basic", "read");
+        assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
+        assert_eq!(
+            args.get("member").and_then(Value::as_str),
+            Some("notes.txt")
+        );
+    }
+
+    #[test]
+    fn archive_read_contract_rejects_unsafe_member_locator() {
+        let state = test_state_with_enabled_skills(&["archive_basic"]);
+        let mut route = base_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | ../secret.txt"
+                .to_string();
+        let loop_state = LoopState::new(1);
+
+        assert!(archive_read_deterministic_plan_result(
+            "read archive member",
+            &state,
+            Some(&route),
+            &loop_state,
+            Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"),
+            "Read member ../secret.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
+        )
+        .is_none());
+    }
+
+    #[test]
     fn transform_action_alias_and_sort_args_normalize_to_transform_data_ops() {
         let actions = vec![AgentAction::CallTool {
             tool: "transform".to_string(),
@@ -17797,9 +19554,14 @@ planner_kind = "tool"
         let current = r#"{"action":"transform_data","data":[{"name":"alpha","score":7},{"name":"beta","score":12}],"ops":[{"op":"filter","where":{"field":"score","gte":7}}]}"#;
         let goal = r#"older context: {"action":"transform_data","data":[{"stale":true}],"ops":[{"op":"project","fields":["stale"]}]}"#;
 
-        let plan =
-            inline_json_transform_deterministic_plan_result(goal, &state, &loop_state, current)
-                .expect("inline transform should produce deterministic plan");
+        let plan = inline_json_transform_deterministic_plan_result(
+            goal,
+            &state,
+            &loop_state,
+            current,
+            None,
+        )
+        .expect("inline transform should produce deterministic plan");
 
         assert_eq!(plan.steps.len(), 1);
         let step = &plan.steps[0];
@@ -17828,6 +19590,187 @@ planner_kind = "tool"
         assert_eq!(op.get("field").and_then(Value::as_str), Some("score"));
         assert_eq!(op.get("cmp").and_then(Value::as_str), Some("gte"));
         assert_eq!(op.get("value").and_then(Value::as_i64), Some(7));
+    }
+
+    #[test]
+    fn inline_json_transform_derives_group_sum_from_structured_candidate() {
+        let state = test_state_with_enabled_skills(&["transform"]);
+        let loop_state = LoopState::new(1);
+        let current = r#"对这个 JSON 数组按 team 分组求 amount 总和，只输出 JSON：[{"team":"A","amount":3},{"team":"A","amount":4},{"team":"B","amount":2}]"#;
+        let mut route = base_route_result();
+        route.resolved_intent =
+            "group inline records\nanswer_candidate: [{\"team\":\"A\",\"amount\":7},{\"team\":\"B\",\"amount\":2}]".to_string();
+
+        let plan = inline_json_transform_deterministic_plan_result(
+            current,
+            &state,
+            &loop_state,
+            current,
+            Some(&route),
+        )
+        .expect("inline transform should derive group sum");
+
+        assert_eq!(plan.steps.len(), 1);
+        let step = &plan.steps[0];
+        assert_eq!(step.action_type, "call_skill");
+        assert_eq!(step.skill, "transform");
+        let op = step
+            .args
+            .get("ops")
+            .and_then(Value::as_array)
+            .and_then(|ops| ops.first())
+            .and_then(Value::as_object)
+            .expect("group op");
+        assert_eq!(op.get("op").and_then(Value::as_str), Some("group"));
+        assert_eq!(
+            op.get("by")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(Value::as_str),
+            Some("team")
+        );
+        assert_eq!(
+            op.get("aggregations")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(|item| item.get("field"))
+                .and_then(Value::as_str),
+            Some("amount")
+        );
+    }
+
+    #[test]
+    fn inline_json_transform_derives_single_object_rename_after_context_json() {
+        let state = test_state_with_enabled_skills(&["transform"]);
+        let loop_state = LoopState::new(1);
+        let current = r#"把这个 JSON 对象里的 old_name 改成 new_name，只输出 JSON：{"old_name":"alpha","count":2}"#;
+        let goal = format!(
+            r#"background example: {{"kind":"ask","payload":{{"text":"hello"}}}}
+
+Structured inline transform request:
+{current}"#
+        );
+        let mut route = base_route_result();
+        route.route_reason = "inline_json_transform_structured_execute".to_string();
+        route.resolved_intent = r#"rename inline object
+answer_candidate: {"new_name":"alpha","count":2}"#
+            .to_string();
+
+        let plan = inline_json_transform_deterministic_plan_result(
+            &goal,
+            &state,
+            &loop_state,
+            "",
+            Some(&route),
+        )
+        .expect("context JSON should not steal inline object transform");
+
+        let step = &plan.steps[0];
+        assert_eq!(step.skill, "transform");
+        assert_eq!(
+            step.args.get("result_shape").and_then(Value::as_str),
+            Some("single_object")
+        );
+        assert!(step.args.get("data").is_some_and(Value::is_object));
+    }
+
+    #[test]
+    fn inline_json_transform_derives_single_object_rename_without_answer_candidate() {
+        let state = test_state_with_enabled_skills(&["transform"]);
+        let loop_state = LoopState::new(1);
+        let req = r#"把这个 JSON 对象里的 old_name 改成 new_name，只输出 JSON：{"old_name":"alpha","count":2}"#;
+
+        let plan =
+            inline_json_transform_deterministic_plan_result(req, &state, &loop_state, req, None)
+                .expect("single object rename should produce deterministic plan");
+
+        let step = &plan.steps[0];
+        assert_eq!(step.skill, "transform");
+        assert!(step.args.get("data").is_some_and(Value::is_object));
+        assert_eq!(
+            step.args.get("result_shape").and_then(Value::as_str),
+            Some("single_object")
+        );
+        assert_eq!(
+            step.args
+                .get("ops")
+                .and_then(Value::as_array)
+                .and_then(|ops| ops.first())
+                .and_then(|op| op.get("op"))
+                .and_then(Value::as_str),
+            Some("rename")
+        );
+    }
+
+    #[test]
+    fn inline_json_transform_derives_scalar_sum_after_context_json() {
+        let state = test_state_with_enabled_skills(&["transform"]);
+        let loop_state = LoopState::new(1);
+        let current = r#"计算这个 JSON 数组里 value 的总和，只输出数字：[ {"value": 4}, {"value": 6}, {"value": 5} ]"#;
+        let goal = format!(
+            r#"background example: {{"kind":"ask","payload":{{"text":"hello"}}}}
+
+Structured inline transform request:
+{current}"#
+        );
+        let mut route = base_route_result();
+        route.route_reason = "inline_json_transform_structured_execute".to_string();
+        route.resolved_intent = "sum inline records\nanswer_candidate: 15".to_string();
+
+        let plan = inline_json_transform_deterministic_plan_result(
+            &goal,
+            &state,
+            &loop_state,
+            "",
+            Some(&route),
+        )
+        .expect("context JSON should not steal scalar aggregate transform");
+
+        let step = &plan.steps[0];
+        assert_eq!(step.skill, "transform");
+        assert_eq!(
+            step.args.get("result_shape").and_then(Value::as_str),
+            Some("scalar")
+        );
+        let op = step
+            .args
+            .get("ops")
+            .and_then(Value::as_array)
+            .and_then(|ops| ops.first())
+            .and_then(Value::as_object)
+            .expect("aggregate op");
+        assert_eq!(op.get("op").and_then(Value::as_str), Some("aggregate"));
+    }
+
+    #[test]
+    fn inline_csv_transform_derives_markdown_table_from_escaped_newlines() {
+        let state = test_state_with_enabled_skills(&["transform"]);
+        let loop_state = LoopState::new(1);
+        let current = "把这个 CSV 转成 markdown 表格：name,score\\nalpha,7\\nbeta,9";
+        let mut route = base_route_result();
+        route.resolved_intent =
+            "render inline records\nanswer_candidate: | name | score |\n|------|-------|\n| alpha | 7 |\n| beta | 9 |".to_string();
+
+        let plan = inline_json_transform_deterministic_plan_result(
+            current,
+            &state,
+            &loop_state,
+            current,
+            Some(&route),
+        )
+        .expect("escaped newline CSV should produce deterministic transform");
+
+        assert_eq!(plan.steps.len(), 1);
+        let step = &plan.steps[0];
+        assert_eq!(step.skill, "transform");
+        assert_eq!(
+            step.args.get("csv_text").and_then(Value::as_str),
+            Some("name,score\nalpha,7\nbeta,9")
+        );
+        assert_eq!(
+            step.args.get("output_format").and_then(Value::as_str),
+            Some("md_table")
+        );
     }
 
     #[test]
@@ -21196,6 +23139,55 @@ version = "0.1.7"
     }
 
     #[test]
+    fn archive_entry_existence_scalar_shape_uses_archive_list() {
+        let state = test_state_with_enabled_skills(&["archive_basic"]);
+        let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.resolved_intent =
+            format!("Check whether archive member notes.txt is present in {archive}.");
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = archive.to_string();
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::default();
+        loop_state.round_no = 1;
+
+        let stat_plan = existence_with_path_locator_deterministic_plan_result(
+            "check archive member scalar existence",
+            Some(&route),
+            &loop_state,
+            Some(archive),
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 에 notes.txt 가 있는지만 말해. 압축 풀지 마.",
+        );
+        assert!(
+            stat_plan.is_none(),
+            "archive member scalar checks must not stat only the archive file"
+        );
+
+        let plan = archive_list_auto_locator_deterministic_plan_result(
+            "check archive member scalar existence",
+            &state,
+            Some(&route),
+            &loop_state,
+            Some(archive),
+        )
+        .expect("archive member scalar existence should inspect archive entries");
+
+        match &plan.steps[0].to_agent_action() {
+            Some(AgentAction::CallSkill { skill, args }) => {
+                assert_eq!(skill, "archive_basic");
+                assert_eq!(args.get("action").and_then(Value::as_str), Some("list"));
+                assert_eq!(args.get("archive").and_then(Value::as_str), Some(archive));
+            }
+            other => panic!("expected archive_basic list action, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn archive_file_existence_without_member_target_still_stats_archive() {
         let archive = "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip";
         let mut route = route_result(
@@ -23246,6 +25238,200 @@ version.workspace = true
         ];
 
         let state = test_state_with_enabled_skills(&["system_basic"]);
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "list structured keys",
+            None,
+            Some(&config_path),
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 1);
+        match &normalized[0] {
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                assert_eq!(skill, "config_basic");
+                assert_eq!(
+                    args.get("action").and_then(Value::as_str),
+                    Some("list_keys")
+                );
+                assert_eq!(
+                    args.get("path").and_then(Value::as_str),
+                    Some(config_path.as_str())
+                );
+            }
+            other => panic!("expected config_basic list_keys action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn structured_keys_contract_rewrites_validate_to_structured_keys() {
+        let root = TempDirGuard::new("structured_keys_validate_plan");
+        let config_path = root.path.join("config.toml");
+        fs::write(&config_path, "alpha = 1\n[beta]\nvalue = 2\n").expect("write config");
+        let config_path = config_path.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = config_path.clone();
+        let actions = vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "validate",
+                "path": config_path.clone(),
+                "format": "toml",
+                "validation_profile": "syntax_only",
+            }),
+        }];
+
+        let state = test_state_with_enabled_skills(&["config_basic"]);
+        let normalized = normalize_planned_actions_with_original(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "list structured keys",
+            None,
+            Some(&config_path),
+            actions,
+        );
+
+        assert_eq!(normalized.len(), 1);
+        let args = expect_planned_call(&normalized[0], "config_basic", "list_keys");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some(config_path.as_str())
+        );
+    }
+
+    #[test]
+    fn structured_keys_contract_uses_deterministic_list_keys_plan() {
+        let root = TempDirGuard::new("structured_keys_deterministic_plan");
+        let config_path = root.path.join("config.toml");
+        fs::write(&config_path, "alpha = 1\n[beta]\nvalue = 2\n").expect("write config");
+        let config_path = config_path.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = config_path.clone();
+        route.output_contract.delivery_required = false;
+
+        let state = test_state_with_enabled_skills(&["config_basic"]);
+        let loop_state = LoopState::new(2);
+        let plan = structured_keys_deterministic_plan_result(
+            &state,
+            "list structured keys",
+            Some(&route),
+            &loop_state,
+            Some(&config_path),
+        )
+        .expect("structured keys deterministic plan");
+
+        assert_eq!(plan.steps.len(), 1);
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        let action = plan.steps[0].to_agent_action().expect("agent action");
+        let args = expect_planned_call(&action, "config_basic", "list_keys");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some(config_path.as_str())
+        );
+    }
+
+    #[test]
+    fn structured_keys_retry_after_validation_uses_list_keys_plan() {
+        use crate::executor::{StepExecutionResult, StepExecutionStatus};
+
+        let root = TempDirGuard::new("structured_keys_retry_plan");
+        let config_path = root.path.join("config.toml");
+        fs::write(&config_path, "alpha = 1\n[beta]\nvalue = 2\n").expect("write config");
+        let config_path = config_path.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = config_path.clone();
+        route.output_contract.delivery_required = false;
+        let mut loop_state = LoopState::new(3);
+        loop_state.round_no = 2;
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                serde_json::json!({
+                    "action": "validate_structured",
+                    "path": config_path,
+                    "valid": true,
+                    "root_type": "object"
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        let state = test_state_with_enabled_skills(&["config_basic"]);
+        let plan = structured_keys_deterministic_plan_result(
+            &state,
+            "list structured keys",
+            Some(&route),
+            &loop_state,
+            Some(&config_path),
+        )
+        .expect("retry should collect structured keys evidence");
+
+        assert_eq!(plan.plan_kind, PlanKind::Incremental);
+        let action = plan.steps[0].to_agent_action().expect("agent action");
+        let args = expect_planned_call(&action, "config_basic", "list_keys");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some(config_path.as_str())
+        );
+    }
+
+    #[test]
+    fn structured_keys_contract_rewrites_multi_field_value_read_to_list_keys() {
+        let root = TempDirGuard::new("structured_keys_multi_field_plan");
+        let config_path = root.path.join("app_config.toml");
+        fs::write(
+            &config_path,
+            "[app]\nname = \"fixture\"\n[features]\nenabled = true\n[paths]\nlogs_dir = \"logs\"\n",
+        )
+        .expect("write config");
+        let config_path = config_path.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = config_path.clone();
+        route.output_contract.delivery_required = false;
+        let actions = vec![AgentAction::CallTool {
+            tool: "config_basic".to_string(),
+            args: json!({
+                "action": "read_fields",
+                "path": config_path.clone(),
+                "field_paths": ["app", "features", "paths"],
+            }),
+        }];
+
+        let state = test_state_with_enabled_skills(&["config_basic"]);
         let normalized = normalize_planned_actions_with_original(
             &state,
             Some(&route),

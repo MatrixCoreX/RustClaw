@@ -122,6 +122,7 @@ pub(crate) fn semantic_kind_can_bind_workspace_child_locator(
             | crate::OutputSemanticKind::ExistenceWithPath
             | crate::OutputSemanticKind::ExistenceWithPathSummary
             | crate::OutputSemanticKind::ArchiveList
+            | crate::OutputSemanticKind::ArchiveRead
     )
 }
 

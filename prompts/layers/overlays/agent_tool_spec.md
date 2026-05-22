@@ -363,18 +363,19 @@ Skill behavior notes (file/path):
   - invented fields outside `text|dry_run|send`
 
 ### archive_basic
-- action: `list|pack|unpack`
+- action: `list|read|pack|unpack`
 - required:
   - `list`: `archive`
+  - `read`: `archive`, `member` (member is the relative path inside the archive)
   - `pack`: `source`, `archive` (optional `format`, default `zip`)
   - `unpack`: `archive`, `dest`
-- emit canonical fields in plans; runtime/schema repair may normalize `archive_path` or `path` to `archive` for readonly list/unpack compatibility
+- emit canonical fields in plans; runtime/schema repair may normalize `archive_path` or `path` to `archive` for readonly read/list/unpack compatibility
 - relative paths resolve from workspace; explicit absolute paths are also valid when the user already supplied them exactly
-- reject `..` traversal; do not invent alternate archive or destination paths
+- reject `..` traversal in `member`; do not invent alternate archive, member, or destination paths
 
 #### archive_basic JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"archive_basic","args":{...}}`
-- `args.action` is required; must be one of `list|pack|unpack`.
+- `args.action` is required; must be one of `list|read|pack|unpack`.
 - Forbid unknown action names and missing path fields.
 
 ### audio_synthesize
@@ -449,8 +450,9 @@ Skill behavior notes (file/path):
 - Forbid unscoped destructive SQL without explicit confirmation.
 
 ### docker_basic
-- action: `ps|images|logs|restart|start|stop|inspect`
+- action: `ps|images|version|logs|restart|start|stop|inspect`
 - required:
+  - `ps|images|version`: no args
   - `logs`: `container` (optional `tail`)
   - `restart|start|stop|inspect`: `container`
 
@@ -462,15 +464,17 @@ Skill behavior notes (file/path):
 
 ### transform
 - action: `transform_data` only. Do not emit `action="transform"`.
-- required: `data` array.
-- For sort/filter/project/group/aggregate/dedup, encode operations in `ops` rather than ad hoc top-level shorthands.
+- required: `data` array/object or `csv_text` string.
+- For sort/filter/project/group/aggregate/dedup/rename, encode operations in `ops` rather than ad hoc top-level shorthands.
 - Sort op shape: `{"op":"sort","by":"<field>","order":"asc|desc"}`.
+- Rename op shape: `{"op":"rename","from":"<old_field>","to":"<new_field>"}`; it preserves other fields.
 - Markdown table output: set `output_format="md_table"`.
+- Scalar-only aggregate output: set `result_shape="scalar"`.
 
 #### transform JSON-schema style contract (strict)
 - Base shape: `{"type":"call_skill","skill":"transform","args":{"action":"transform_data","data":[...],"ops":[...]}}`
 - `args.action` must be `transform_data`.
-- `args.data` must contain the inline records or observed records to transform.
+- `args.data` must contain inline/observed JSON records, or `args.csv_text` must contain inline/observed CSV records.
 - Do not use top-level `sort_by`, `sort_field`, or `order_by`; represent sorting as an `ops` entry.
 
 ### fs_search

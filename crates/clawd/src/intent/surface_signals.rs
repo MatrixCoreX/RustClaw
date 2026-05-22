@@ -158,11 +158,86 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
 
 pub(crate) fn inline_json_transform_request(prompt: &str) -> bool {
     let Some(raw) = crate::extract_first_json_value_any(prompt) else {
-        return false;
+        return prompt_has_inline_csv_records(prompt);
     };
     serde_json::from_str::<serde_json::Value>(&raw)
         .ok()
-        .is_some_and(|value| value_has_structured_transform_request(&value))
+        .is_some_and(|value| {
+            value_has_structured_transform_request(&value)
+                || (value_has_transformable_inline_records(&value)
+                    && prompt_has_embedded_structured_payload_with_instruction(prompt, &raw))
+        })
+}
+
+fn prompt_has_inline_csv_records(prompt: &str) -> bool {
+    inline_csv_record_block(prompt).is_some()
+}
+
+pub(crate) fn inline_csv_record_block(prompt: &str) -> Option<Vec<String>> {
+    let lines = split_inline_record_lines(prompt);
+    for idx in 0..lines.len().saturating_sub(1) {
+        let header = parse_csv_surface_line(&lines[idx]);
+        if header.len() < 2 || !header.iter().all(|cell| is_plain_record_field_name(cell)) {
+            continue;
+        }
+        let mut block = vec![lines[idx].clone()];
+        let mut row_count = 0usize;
+        for row in lines.iter().skip(idx + 1) {
+            let cells = parse_csv_surface_line(row);
+            if cells.len() != header.len() {
+                break;
+            }
+            block.push(row.clone());
+            row_count += 1;
+        }
+        if row_count > 0 {
+            return Some(block);
+        }
+    }
+    None
+}
+
+fn split_inline_record_lines(prompt: &str) -> Vec<String> {
+    let normalized = prompt
+        .replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\r", "\n");
+    let mut lines = Vec::new();
+    for raw_line in normalized
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        lines.push(raw_line.to_string());
+        if let Some((idx, len)) = raw_line
+            .char_indices()
+            .filter(|(_, ch)| matches!(ch, ':' | '：'))
+            .map(|(idx, ch)| (idx, ch.len_utf8()))
+            .last()
+        {
+            let suffix = raw_line[idx + len..].trim();
+            if suffix.contains(',') && suffix != raw_line {
+                lines.push(suffix.to_string());
+            }
+        }
+    }
+    lines
+}
+
+fn parse_csv_surface_line(line: &str) -> Vec<&str> {
+    line.split(',')
+        .map(str::trim)
+        .filter(|cell| !cell.is_empty())
+        .collect()
+}
+
+fn is_plain_record_field_name(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|ch| ch == '_' || ch == '-' || ch.is_ascii_alphanumeric())
 }
 
 fn value_has_structured_transform_request(value: &serde_json::Value) -> bool {
@@ -184,6 +259,39 @@ fn value_has_structured_transform_request(value: &serde_json::Value) -> bool {
         .and_then(|item| item.as_array())
         .is_some_and(|ops| !ops.is_empty() && ops.iter().all(value_is_structured_transform_op));
     action_requests_transform && has_structural_ops && value_has_inline_transform_input(obj)
+}
+
+fn value_has_transformable_inline_records(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Array(items) => {
+            !items.is_empty() && items.iter().any(serde_json::Value::is_object)
+        }
+        serde_json::Value::Object(obj) => {
+            if value_has_inline_transform_input(obj) {
+                return true;
+            }
+            !obj.is_empty()
+                && !obj.contains_key("action")
+                && !obj.contains_key("skill")
+                && !obj.contains_key("operation")
+        }
+        _ => false,
+    }
+}
+
+fn prompt_has_embedded_structured_payload_with_instruction(prompt: &str, raw: &str) -> bool {
+    let trimmed = prompt.trim();
+    let raw_trimmed = raw.trim();
+    if trimmed.is_empty() || raw_trimmed.is_empty() || trimmed == raw_trimmed {
+        return false;
+    }
+    let Some(start) = trimmed.find(raw_trimmed) else {
+        return false;
+    };
+    let end = start.saturating_add(raw_trimmed.len());
+    let before = trimmed[..start].trim();
+    let after = trimmed[end..].trim();
+    !before.is_empty() || !after.is_empty()
 }
 
 fn value_has_inline_transform_input(obj: &serde_json::Map<String, serde_json::Value>) -> bool {
@@ -600,11 +708,17 @@ mod tests {
         assert!(inline_json_transform_request(
             r#"{"skill":"transform","args":{"action":"transform_data","records":[{"name":"alpha","score":7}],"ops":["sort"]}}"#
         ));
-        assert!(!inline_json_transform_request(
+        assert!(inline_json_transform_request(
             r#"sort this JSON array by score descending: [{"name":"alpha","score":7}]"#
         ));
         assert!(!inline_json_transform_request(
             r#"{"action":"read_field","path":"package.json","field_path":"name"}"#
+        ));
+        assert!(inline_json_transform_request(
+            "render this CSV as a markdown table:\nname,score\nalpha,7\nbeta,9"
+        ));
+        assert!(inline_json_transform_request(
+            "render this CSV as a markdown table:name,score\\nalpha,7\\nbeta,9"
         ));
     }
 

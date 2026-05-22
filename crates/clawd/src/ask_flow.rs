@@ -585,6 +585,7 @@ fn parse_gate_semantic_kind(raw: &str) -> crate::OutputSemanticKind {
             crate::OutputSemanticKind::PackageManagerDetection
         }
         "archive_list" => crate::OutputSemanticKind::ArchiveList,
+        "archive_read" => crate::OutputSemanticKind::ArchiveRead,
         "archive_pack" => crate::OutputSemanticKind::ArchivePack,
         "archive_unpack" => crate::OutputSemanticKind::ArchiveUnpack,
         "docker_ps" => crate::OutputSemanticKind::DockerPs,
@@ -639,7 +640,11 @@ fn ordered_entry_looks_like_workspace_artifact(entry: &str) -> bool {
         return false;
     }
     let path = Path::new(trimmed);
-    path.extension().is_some()
+    let has_filename_extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.chars().any(|ch| ch.is_ascii_alphabetic()));
+    has_filename_extension
         || trimmed.contains('/')
         || trimmed.contains('\\')
         || trimmed.starts_with('.')
@@ -887,6 +892,15 @@ fn output_contract_requests_package_manager_detection(
     )
 }
 
+fn route_has_package_manager_install_preview_candidate(route: &crate::RouteResult) -> bool {
+    normalizer_answer_candidate_from_resolved_prompt(&route.resolved_intent).is_some_and(
+        |candidate| {
+            crate::package_commands::package_install_packages_from_commandish_text(&candidate)
+                .is_some()
+        },
+    )
+}
+
 fn direct_answer_gate_can_skip_for_self_contained_payload(
     current_user_request: &str,
     route: Option<&crate::RouteResult>,
@@ -1015,11 +1029,13 @@ fn direct_answer_gate_promotion_depends_only_on_background_context(
     {
         return false;
     }
-    if direct_answer_gate_contract_allows_locatorless_execution(
+    if (direct_answer_gate_contract_allows_locatorless_execution(
         state,
         current_user_request,
         promoted_contract,
-    ) && !direct_answer_gate_reference_requires_clarify(reference_resolution)
+    ) || (package_manager_skill_available_for_plan(state)
+        && route_has_package_manager_install_preview_candidate(route)))
+        && !direct_answer_gate_reference_requires_clarify(reference_resolution)
     {
         return false;
     }
@@ -1623,6 +1639,12 @@ fn promote_direct_answer_gate_to_planner(
     let Some(route) = ctx.route_result.as_mut() else {
         return DirectAnswerPreflight::DirectAnswer;
     };
+    let package_install_preview_candidate = normalizer_answer_candidate_from_resolved_prompt(
+        &route.resolved_intent,
+    )
+    .filter(|candidate| {
+        crate::package_commands::package_install_packages_from_commandish_text(candidate).is_some()
+    });
     contract.requires_content_evidence = true;
     let finalize_style = planner_finalize_style_for_output_contract(&contract);
     route.output_contract = contract;
@@ -1631,6 +1653,10 @@ fn promote_direct_answer_gate_to_planner(
     route.clarify_question.clear();
     if !gate.resolved_user_intent.trim().is_empty() {
         route.resolved_intent = gate.resolved_user_intent.trim().to_string();
+        if let Some(candidate) = package_install_preview_candidate {
+            route.resolved_intent.push_str("\nanswer_candidate: ");
+            route.resolved_intent.push_str(candidate.trim());
+        }
     }
     append_route_reason(route, &format!("{reason_tag}:{}", gate.reason.trim()));
     DirectAnswerPreflight::PlannerExecute(ctx.clone())
@@ -1643,6 +1669,7 @@ fn promote_inline_json_transform_context_to_planner(
     let Some(route) = ctx.route_result.as_mut() else {
         return false;
     };
+    let answer_candidate = normalizer_answer_candidate_from_resolved_prompt(&route.resolved_intent);
     let mut contract = route.output_contract.clone();
     contract.requires_content_evidence = true;
     contract.delivery_required = false;
@@ -1662,6 +1689,10 @@ fn promote_inline_json_transform_context_to_planner(
     route.needs_clarify = false;
     route.clarify_question.clear();
     route.resolved_intent = current_user_request.trim().to_string();
+    if let Some(candidate) = answer_candidate {
+        route.resolved_intent.push_str("\nanswer_candidate: ");
+        route.resolved_intent.push_str(candidate.trim());
+    }
     append_route_reason(route, "inline_json_transform_structured_execute");
     true
 }
@@ -1921,6 +1952,8 @@ fn direct_answer_gate_chat_promotion_lacks_structured_target(
     if !route.is_chat_gate()
         || route.needs_clarify
         || has_structural_session_alias_target
+        || (package_manager_skill_available_for_plan(state)
+            && route_has_package_manager_install_preview_candidate(route))
         || direct_answer_gate_reference_requires_clarify(reference_resolution)
         || direct_answer_gate_contract_allows_locatorless_execution(
             state,
@@ -2101,6 +2134,9 @@ fn apply_direct_answer_gate_outcome(
         && crate::intent::surface_signals::inline_json_transform_request(current_user_request);
     let force_package_manager_detect_execution = package_manager_skill_supports_detection(state)
         && output_contract_requests_package_manager_detection(&route.output_contract);
+    let force_package_manager_install_preview_execution =
+        package_manager_skill_available_for_plan(state)
+            && route_has_package_manager_install_preview_candidate(route);
     if route_is_memory_update_ack_contract(route, has_alias_only_state_patch) {
         append_route_reason(route, "direct_answer_gate_memory_update_ignored");
         return DirectAnswerPreflight::DirectAnswer;
@@ -2121,6 +2157,7 @@ fn apply_direct_answer_gate_outcome(
         )
         .is_none()
         && !has_structural_session_alias_target
+        && !force_package_manager_install_preview_execution
     {
         append_route_reason(route, "direct_answer_gate_executionless_promotion_blocked");
         return DirectAnswerPreflight::Clarify(String::new());
@@ -3544,6 +3581,29 @@ fn chat_request_for_prompt(original_user_request: &str, semantic_request: &str) 
     )
 }
 
+fn direct_chat_answer_needs_repair(answer: &str) -> bool {
+    let trimmed = answer.trim();
+    trimmed.is_empty()
+        || crate::finalize::looks_like_planner_artifact(trimmed)
+        || crate::finalize::looks_like_internal_trace_artifact(trimmed)
+        || direct_chat_answer_has_unclosed_code_fence(trimmed)
+}
+
+fn direct_chat_answer_has_unclosed_code_fence(answer: &str) -> bool {
+    let fence_count = answer
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| line.starts_with("```"))
+        .count();
+    fence_count % 2 == 1
+}
+
+fn direct_chat_answer_repair_prompt(chat_prompt: &str, rejected_answer: &str) -> String {
+    format!(
+        "{chat_prompt}\n\n### Previous Draft Rejected\nThe previous draft is malformed or incomplete and cannot be shown to the user:\n{rejected_answer}\n\nReturn only a complete final answer for the same user request. Do not use a code fence unless the user explicitly requested code."
+    )
+}
+
 fn task_payload_text(task: &ClaimedTask) -> Option<String> {
     crate::task_payload_value(task)?
         .get("text")
@@ -3947,21 +4007,47 @@ pub(crate) async fn execute_ask_routed(
                     ("__REQUEST__", &request_for_chat_prompt),
                 ],
             );
-            crate::llm_gateway::run_with_fallback_with_prompt_source(
+            let raw_answer = crate::llm_gateway::run_with_fallback_with_prompt_source(
                 state,
                 task,
                 &chat_prompt,
                 &chat_prompt_source,
             )
             .await
-            .map(|answer| {
-                let answer = ensure_active_task_required_visible_literals(
-                    answer,
+            .map_err(|e| e.to_string())?;
+            let mut answer = ensure_active_task_required_visible_literals(
+                raw_answer,
+                agent_run_context.as_ref(),
+            );
+            if direct_chat_answer_needs_repair(&answer) {
+                tracing::warn!(
+                    "{} worker_once: ask direct_chat_answer_repair task_id={} rejected={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    crate::truncate_for_log(&answer)
+                );
+                let repair_prompt = direct_chat_answer_repair_prompt(&chat_prompt, &answer);
+                let repaired_answer = crate::llm_gateway::run_with_fallback_with_prompt_source(
+                    state,
+                    task,
+                    &repair_prompt,
+                    &chat_prompt_source,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+                let repaired_answer = ensure_active_task_required_visible_literals(
+                    repaired_answer,
                     agent_run_context.as_ref(),
                 );
-                ask_reply_with_chat_process(answer, &request_language_hint)
-            })
-            .map_err(|e| e.to_string())
+                if direct_chat_answer_needs_repair(&repaired_answer) {
+                    return Err(format!(
+                        "direct chat answer remained malformed after repair: {}",
+                        crate::truncate_for_log(&repaired_answer)
+                    ));
+                }
+                answer = repaired_answer;
+            }
+            Ok(ask_reply_with_chat_process(answer, &request_language_hint))
         }
         crate::FirstLayerDecision::PlannerExecute => {
             execute_via_planner_loop(
@@ -4068,6 +4154,7 @@ mod tests {
         direct_answer_gate_promotion_depends_only_on_background_context,
         direct_answer_gate_promotion_needs_unbound_deictic_clarify,
         direct_answer_gate_recent_execution_context, direct_answer_gate_route_context,
+        direct_chat_answer_needs_repair, direct_chat_answer_repair_prompt,
         ensure_active_task_required_visible_literals, forbidden_visible_literals_from_state_patch,
         locator_hint_mentions_current_request, normalizer_chat_direct_answer_candidate,
         output_contract_from_direct_answer_gate, preferred_route_clarify_question,
@@ -4082,6 +4169,24 @@ mod tests {
         DirectAnswerGateReferenceResolutionOut, DirectAnswerGateSelfExtensionOut,
         DirectAnswerPreflight,
     };
+
+    #[test]
+    fn direct_chat_answer_rejects_unclosed_code_fence() {
+        assert!(direct_chat_answer_needs_repair("```bash"));
+        assert!(direct_chat_answer_needs_repair("```text\nunfinished"));
+        assert!(!direct_chat_answer_needs_repair(
+            "我会只查看压缩包目录，不会解压。"
+        ));
+        assert!(!direct_chat_answer_needs_repair("```text\nok\n```"));
+    }
+
+    #[test]
+    fn direct_chat_answer_repair_prompt_preserves_request_context() {
+        let prompt = direct_chat_answer_repair_prompt("REQ: say hi", "```bash");
+        assert!(prompt.contains("REQ: say hi"));
+        assert!(prompt.contains("Previous Draft Rejected"));
+        assert!(prompt.contains("complete final answer"));
+    }
 
     fn chat_route_for_gate() -> crate::RouteResult {
         crate::RouteResult {
@@ -5363,6 +5468,9 @@ mod tests {
     fn inline_json_transform_context_promotion_uses_strict_execution_contract() {
         let mut route = chat_route_for_gate();
         route.route_reason = "executionless_route_downgraded_to_direct_answer".to_string();
+        route.resolved_intent =
+            "Transform inline JSON.\nanswer_candidate: [{\"city\":\"Tokyo\"},{\"city\":\"Osaka\"}]"
+                .to_string();
         let request = r#"{"action":"transform_data","data":[{"city":"Tokyo","temp":22},{"city":"Osaka","temp":24}],"ops":[{"op":"project","fields":["city"]}]}"#;
         let mut ctx = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
@@ -5386,7 +5494,10 @@ mod tests {
         assert!(route
             .route_reason
             .contains("inline_json_transform_structured_execute"));
-        assert_eq!(route.resolved_intent, request);
+        assert_eq!(
+            route.resolved_intent,
+            format!("{request}\nanswer_candidate: [{{\"city\":\"Tokyo\"}},{{\"city\":\"Osaka\"}}]")
+        );
     }
 
     #[test]
@@ -5472,6 +5583,41 @@ mod tests {
         assert!(route
             .route_reason
             .contains("direct_answer_gate_package_manager_detect_execute"));
+    }
+
+    #[test]
+    fn direct_answer_gate_promotes_package_install_preview_without_locator() {
+        let mut route = chat_route_for_gate();
+        route.route_reason =
+            "llm_semantic_contract_repair:dry_run_command_discovery_requires_local_observation; executionless_route_downgraded_to_direct_answer"
+                .to_string();
+        route.resolved_intent =
+            "package preview\nanswer_candidate: command: sudo -n apt-get install -y ripgrep"
+                .to_string();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut gate = gate_out("planner_execute", gate_contract(true, "none", "none"));
+        gate.resolved_user_intent =
+            "Show the package install dry-run preview without installing.".to_string();
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        let outcome = apply_direct_answer_gate_outcome(
+            &state,
+            &mut ctx,
+            "ripgrep 설치는 하지 말고 dry-run 으로 어떤 명령이 될지만 알려줘.",
+            gate,
+        );
+
+        assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(route.is_execute_gate());
+        assert!(route.output_contract.requires_content_evidence);
+        assert!(route.resolved_intent.contains("answer_candidate:"));
+        assert!(!route
+            .route_reason
+            .contains("direct_answer_gate_executionless_promotion_blocked"));
     }
 
     #[test]
@@ -5876,6 +6022,41 @@ mod tests {
                 false,
             )
         );
+    }
+
+    #[test]
+    fn recent_file_context_promotion_ignores_sentence_punctuation() {
+        let mut route = chat_route_for_gate();
+        route.resolved_intent = concat!(
+            "Acknowledge that no concrete target is bound.\n",
+            "answer_candidate: Understood. No file read triggered. If you need a specific path, name it."
+        )
+        .to_string();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            cross_turn_recent_execution_context: Some(
+                "### RECENT_EXECUTION_EVENTS\n\
+                 - ts=2 kind=ask request=read configs/config.toml result=ok\n\
+                 - ts=1 kind=ask request=read README.md result=ok"
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
+        let gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
+
+        let outcome = apply_direct_answer_gate_outcome(
+            &crate::AppState::test_default_with_fixture_provider(),
+            &mut ctx,
+            "Acknowledge only; no current target is bound.",
+            gate,
+        );
+
+        assert!(matches!(outcome, DirectAnswerPreflight::DirectAnswer));
+        let route = ctx.route_result.expect("route");
+        assert!(!route.is_execute_gate());
+        assert!(!route
+            .route_reason
+            .contains("direct_answer_gate_recent_file_context_execute"));
     }
 
     #[test]

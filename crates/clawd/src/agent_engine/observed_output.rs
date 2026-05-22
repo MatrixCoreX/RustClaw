@@ -739,6 +739,10 @@ fn scalar_count_diagnostic_line_for_answer(
         return None;
     }
     let observed = extract_latest_generic_successful_output(loop_state)?;
+    if observed.skill == "archive_basic" && archive_list_summary_from_body(&observed.body).is_some()
+    {
+        return None;
+    }
     let lines = observed
         .body
         .lines()
@@ -907,6 +911,9 @@ fn observed_request_prefers_english_template(
     }
     if hint.starts_with("en") {
         return true;
+    }
+    if hint == "mixed" {
+        return false;
     }
     if hint == "config_default" {
         return state
@@ -1100,6 +1107,12 @@ pub(crate) fn transform_skill_formatted_output_candidate(body: &str) -> Option<S
         .map(str::trim)
         .filter(|formatted| !formatted.is_empty())
         .map(ToString::to_string)
+        .or_else(|| {
+            value
+                .get("output")
+                .filter(|output| !output.is_null())
+                .and_then(|output| serde_json::to_string(output).ok())
+        })
         .or_else(|| {
             value
                 .get("result")
@@ -3432,6 +3445,24 @@ fn structured_scalar_candidate(
     if skill == "git_basic" {
         return git_basic_scalar_candidate(route, body);
     }
+    if skill == "archive_basic" {
+        let summary = archive_list_summary_from_body(body)?;
+        if route.is_some_and(route_requests_scalar_count) {
+            return Some(summary.entries.len().to_string());
+        }
+        return route
+            .filter(|route| route_requests_scalar_existence(route))
+            .and_then(|route| {
+                archive_entry_existence_direct_answer(
+                    state,
+                    route,
+                    Some(route.resolved_intent.as_str()),
+                    &summary,
+                    auto_locator_path.or(locator_hint),
+                    prefer_english,
+                )
+            });
+    }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
     if skill == "db_basic" {
         if let Some(route) = route {
@@ -3707,6 +3738,13 @@ fn structured_scalar_candidate(
         "count_inventory" => count_inventory_direct_answer_candidate(
             state,
             &value,
+            route.map(|route| route.output_contract.response_shape),
+            prefer_english,
+        ),
+        "structured_keys" => structured_keys_direct_answer_candidate(
+            state,
+            &value,
+            route.map(|route| route.resolved_intent.as_str()),
             route.map(|route| route.output_contract.response_shape),
             prefer_english,
         ),
@@ -4244,8 +4282,14 @@ fn structured_keys_presence_target_from_request(request: &str, keys: &[String]) 
         return observed_mentions.into_iter().next();
     }
     let mut candidate_mentions = Vec::new();
+    for token in explicit_structured_key_candidate_tokens(request) {
+        if keys.iter().any(|key| key.eq_ignore_ascii_case(&token)) {
+            continue;
+        }
+        push_unique_case_insensitive_string(&mut candidate_mentions, token);
+    }
     for token in tokens {
-        if !token.contains(['_', '-', '.', '$']) {
+        if !token_looks_like_structured_key_identifier(&token) {
             continue;
         }
         if keys.iter().any(|key| key.eq_ignore_ascii_case(&token)) {
@@ -4254,6 +4298,44 @@ fn structured_keys_presence_target_from_request(request: &str, keys: &[String]) 
         push_unique_case_insensitive_string(&mut candidate_mentions, token);
     }
     (candidate_mentions.len() == 1).then(|| candidate_mentions.remove(0))
+}
+
+fn token_looks_like_structured_key_identifier(token: &str) -> bool {
+    let token = token.trim();
+    token.contains(['_', '.', '$'])
+}
+
+fn explicit_structured_key_candidate_tokens(request: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let chars = request.char_indices().collect::<Vec<_>>();
+    let mut idx = 0usize;
+    while idx < chars.len() {
+        let (start, ch) = chars[idx];
+        if !matches!(ch, '`' | '\'' | '"') {
+            idx += 1;
+            continue;
+        }
+        let quote = ch;
+        let content_start = start + ch.len_utf8();
+        let mut end_idx = idx + 1;
+        while end_idx < chars.len() {
+            let (end, end_ch) = chars[end_idx];
+            if end_ch == quote {
+                let raw = request[content_start..end].trim();
+                let token = raw.trim_matches(|ch: char| matches!(ch, '.' | '-' | '_' | '$'));
+                if token.len() >= 2
+                    && !token.contains(['/', '\\'])
+                    && !token.chars().all(|ch| ch.is_ascii_digit())
+                {
+                    push_unique_case_insensitive_string(&mut tokens, token.to_string());
+                }
+                break;
+            }
+            end_idx += 1;
+        }
+        idx = end_idx.saturating_add(1);
+    }
+    tokens
 }
 
 fn structured_key_candidate_tokens(request: &str) -> Vec<String> {
@@ -4635,6 +4717,19 @@ fn archive_list_summary_from_body(body: &str) -> Option<ArchiveListSummary> {
         .or_else(|| archive_list_summary_from_raw_output(body, None))
 }
 
+fn archive_read_direct_answer_candidate(body: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    if value.get("action").and_then(|value| value.as_str()) != Some("read") {
+        return None;
+    }
+    value
+        .get("content")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|content| !content.is_empty())
+        .map(ToString::to_string)
+}
+
 fn archive_list_summary_from_value(value: &serde_json::Value) -> Option<ArchiveListSummary> {
     if value.get("action").and_then(|v| v.as_str())? != "list" {
         return None;
@@ -4803,6 +4898,234 @@ fn archive_list_summary_direct_answer(
             ("more", &more),
         ],
     ))
+}
+
+fn archive_entry_existence_direct_answer(
+    state: Option<&AppState>,
+    route: &crate::RouteResult,
+    request_text: Option<&str>,
+    summary: &ArchiveListSummary,
+    archive_hint: Option<&str>,
+    prefer_english: bool,
+) -> Option<String> {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ExistenceWithPath {
+        return None;
+    }
+    let archive_path = archive_hint
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .or(summary.archive.as_deref())
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (!hint.is_empty()).then_some(hint)
+        });
+    let target = archive_entry_target_for_observed_route(route, request_text, archive_path)?;
+    let exists = archive_list_contains_requested_entry(summary, &target)?;
+    let vars = [("entry", target.as_str())];
+    Some(if exists {
+        observed_t_with_vars(
+            state,
+            "clawd.msg.archive_entry_exists",
+            "压缩包中存在 {entry}。",
+            "Yes, {entry} exists in the archive.",
+            prefer_english,
+            &vars,
+        )
+    } else {
+        observed_t_with_vars(
+            state,
+            "clawd.msg.archive_entry_missing",
+            "压缩包中不存在 {entry}。",
+            "No, {entry} does not exist in the archive.",
+            prefer_english,
+            &vars,
+        )
+    })
+}
+
+fn archive_entry_target_for_observed_route(
+    route: &crate::RouteResult,
+    request_text: Option<&str>,
+    archive_path: Option<&str>,
+) -> Option<String> {
+    let mut path_candidates = Vec::new();
+    let mut filename_candidates = Vec::new();
+    for text in request_text
+        .into_iter()
+        .chain(std::iter::once(route.resolved_intent.as_str()))
+    {
+        for locator in
+            crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(text)
+        {
+            push_archive_entry_observed_candidate(
+                &mut path_candidates,
+                &mut filename_candidates,
+                &locator.locator_hint,
+                archive_path,
+            );
+        }
+        for filename in crate::delivery_utils::extract_filename_candidates(text) {
+            push_archive_entry_observed_candidate(
+                &mut path_candidates,
+                &mut filename_candidates,
+                &filename,
+                archive_path,
+            );
+        }
+    }
+    path_candidates
+        .into_iter()
+        .next()
+        .or_else(|| filename_candidates.into_iter().next())
+}
+
+fn push_archive_entry_observed_candidate(
+    path_candidates: &mut Vec<String>,
+    filename_candidates: &mut Vec<String>,
+    candidate: &str,
+    archive_path: Option<&str>,
+) {
+    let Some(candidate) = normalize_archive_entry_observed_candidate(candidate, archive_path)
+    else {
+        return;
+    };
+    let target = if candidate.contains('/') || candidate.contains('\\') {
+        path_candidates
+    } else {
+        filename_candidates
+    };
+    if !target
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(&candidate))
+    {
+        target.push(candidate);
+    }
+}
+
+fn normalize_archive_entry_observed_candidate(
+    candidate: &str,
+    archive_path: Option<&str>,
+) -> Option<String> {
+    let trimmed = candidate.trim().trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\''
+                | '`'
+                | ','
+                | '，'
+                | '。'
+                | ':'
+                | '：'
+                | ';'
+                | '；'
+                | '('
+                | ')'
+                | '（'
+                | '）'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | '《'
+                | '》'
+        )
+    });
+    if trimmed.is_empty()
+        || trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains("://")
+        || Path::new(trimmed).is_absolute()
+        || archive_candidate_has_supported_extension(trimmed)
+        || archive_path.is_some_and(|path| archive_candidate_matches_archive(trimmed, path))
+        || crate::intent::locator_extractor::candidate_looks_like_dotted_version_number(trimmed)
+    {
+        return None;
+    }
+    if !trimmed.contains('/')
+        && !trimmed.contains('\\')
+        && !archive_entry_observed_candidate_has_extension(trimmed)
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn archive_candidate_has_supported_extension(path: &str) -> bool {
+    let lower = path.trim().to_ascii_lowercase();
+    lower.ends_with(".zip") || lower.ends_with(".tar.gz") || lower.ends_with(".tgz")
+}
+
+fn archive_candidate_matches_archive(candidate: &str, archive_path: &str) -> bool {
+    let candidate_norm = candidate.replace('\\', "/");
+    let archive_norm = archive_path.trim().replace('\\', "/");
+    if candidate_norm.eq_ignore_ascii_case(&archive_norm) {
+        return true;
+    }
+    let archive_name = archive_norm
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(archive_norm.as_str());
+    candidate_norm.eq_ignore_ascii_case(archive_name)
+}
+
+fn archive_entry_observed_candidate_has_extension(candidate: &str) -> bool {
+    let basename = candidate
+        .rsplit(|ch| ch == '/' || ch == '\\')
+        .next()
+        .unwrap_or(candidate);
+    let Some((stem, ext)) = basename.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty()
+        && (1..=16).contains(&ext.len())
+        && ext.chars().all(|ch| ch.is_ascii_alphanumeric())
+}
+
+fn normalize_archive_entry_name(value: &str) -> String {
+    value
+        .trim()
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .to_string()
+}
+
+fn archive_list_contains_requested_entry(
+    summary: &ArchiveListSummary,
+    target: &str,
+) -> Option<bool> {
+    let target_norm = normalize_archive_entry_name(target);
+    if target_norm.is_empty() {
+        return None;
+    }
+    if summary
+        .entries
+        .iter()
+        .any(|entry| normalize_archive_entry_name(&entry.name).eq_ignore_ascii_case(&target_norm))
+    {
+        return Some(true);
+    }
+    if target_norm.contains('/') {
+        return Some(false);
+    }
+    let basename_matches = summary
+        .entries
+        .iter()
+        .filter(|entry| {
+            normalize_archive_entry_name(&entry.name)
+                .rsplit('/')
+                .next()
+                .is_some_and(|name| name.eq_ignore_ascii_case(&target_norm))
+        })
+        .take(2)
+        .count();
+    match basename_matches {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
 }
 
 fn archive_list_summary_observed_candidate(summary: &ArchiveListSummary) -> Option<String> {
@@ -5121,27 +5444,11 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
         .and_then(|ctx| ctx.auto_locator_path.as_deref())
         .filter(|path| !path.trim().is_empty());
     let prefer_full_path = route.is_some_and(route_requests_scalar_path_only);
-    let prefer_english = current_turn_request_text(route, agent_run_context)
-        .map(
-            |intent| match crate::language_policy::request_language_hint(intent) {
-                "en" => true,
-                "zh-CN" => false,
-                _ => state
-                    .policy
-                    .command_intent
-                    .default_locale
-                    .to_ascii_lowercase()
-                    .starts_with("en"),
-            },
-        )
-        .unwrap_or_else(|| {
-            state
-                .policy
-                .command_intent
-                .default_locale
-                .to_ascii_lowercase()
-                .starts_with("en")
-        });
+    let request_language_hint = current_turn_request_text(route, agent_run_context)
+        .map(crate::language_policy::request_language_hint)
+        .unwrap_or("config_default");
+    let prefer_english =
+        observed_request_prefers_english_template(Some(state), request_language_hint);
     if let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
         if route_needs_structured_scalar_pair_synthesis(loop_state, agent_run_context) {
             return None;
@@ -5356,7 +5663,26 @@ fn extract_direct_answer_from_generic_output_impl(
                     response_shape,
                     prefers_english_free_text,
                 ),
-                "archive_basic" => None,
+                "archive_basic" => {
+                    if let Some(answer) =
+                        archive_read_direct_answer_candidate(&observed_output.body)
+                    {
+                        Some(answer)
+                    } else {
+                        archive_list_summary_from_body(&observed_output.body).and_then(|summary| {
+                            route.and_then(|route| {
+                                archive_entry_existence_direct_answer(
+                                    state,
+                                    route,
+                                    current_turn_request_text(Some(route), agent_run_context),
+                                    &summary,
+                                    auto_locator_path.or(locator_hint),
+                                    prefers_english_presence_answer,
+                                )
+                            })
+                        })
+                    }
+                }
                 "log_analyze" => None,
                 "system_basic" | "config_basic" | "fs_basic" => {
                     let value = serde_json::from_str::<serde_json::Value>(&observed_output.body)
@@ -6708,6 +7034,59 @@ mod tests {
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
             Some("name: react-example\nversion: 1.0.0")
+        );
+    }
+
+    #[test]
+    fn direct_scalar_reads_structured_keys_value_list() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"structured_keys","exists":true,"container_type":"object","count":3,"keys":["app","features","paths"],"field_path":""}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/configs/app_config.toml".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("app\nfeatures\npaths")
+        );
+    }
+
+    #[test]
+    fn direct_answer_does_not_treat_root_level_as_missing_key() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "config_basic",
+            r#"{"action":"structured_keys","exists":true,"container_type":"object","count":3,"keys":["app","features","paths"],"field_path":""}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route_result.resolved_intent = "List root-level keys in app_config.toml only".to_string();
+        route_result.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint = "app_config.toml".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            original_user_request: Some(
+                "List root-level keys in scripts/nl_tests/fixtures/device_local/configs/app_config.toml only."
+                    .to_string(),
+            ),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("app\nfeatures\npaths")
         );
     }
 
@@ -11609,6 +11988,56 @@ version.workspace = true
     }
 
     #[test]
+    fn archive_read_direct_answer_returns_member_content() {
+        let mut loop_state = LoopState::new(2);
+        let body = r#"{"action":"read","archive":"/tmp/test_bundle.zip","member":"notes.txt","content":"fixture archive notes\n"}"#;
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "archive_basic", body));
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route.output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/test_bundle.zip | notes.txt".to_string();
+
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route),
+            auto_locator_path: Some("/tmp/test_bundle.zip | notes.txt".to_string()),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("fixture archive notes")
+        );
+    }
+
+    #[test]
+    fn archive_read_direct_answer_does_not_require_semantic_label() {
+        let mut loop_state = LoopState::new(2);
+        let body = r#"{"action":"read","archive":"/tmp/test_bundle.zip","member":"notes.txt","content":"fixture archive notes\n"}"#;
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "archive_basic", body));
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Free);
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/test_bundle.zip".to_string();
+
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route),
+            auto_locator_path: Some("/tmp/test_bundle.zip".to_string()),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("fixture archive notes")
+        );
+    }
+
+    #[test]
     fn archive_raw_passthrough_replacement_uses_structured_summary() {
         let mut loop_state = LoopState::new(2);
         let body = "exit=0\nArchive:  /tmp/test_bundle.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n       22  2026-04-03 01:14   notes.txt\n       20  2026-04-03 01:14   nested/config.ini\n---------                     -------\n       42                     2 files";
@@ -11623,6 +12052,64 @@ version.workspace = true
         assert!(replacement.contains("notes.txt"));
         assert!(replacement.contains("nested/config.ini"));
         assert!(!replacement.contains("Archive:"));
+    }
+
+    #[test]
+    fn archive_list_scalar_count_reads_entry_count_directly() {
+        let mut loop_state = LoopState::new(2);
+        let body = "exit=0\nArchive:  /tmp/test_bundle.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n       22  2026-04-03 01:14   notes.txt\n       20  2026-04-03 01:14   nested/config.ini\n---------                     -------\n       42                     2 files";
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "archive_basic", body));
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route.clone()),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("2")
+        );
+        assert!(scalar_count_diagnostic_line_for_answer("2", Some(&route), &loop_state).is_none());
+    }
+
+    #[test]
+    fn archive_entry_existence_reads_archive_list_directly() {
+        let mut loop_state = LoopState::new(2);
+        let body = "exit=0\nArchive:  /tmp/test_bundle.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n       22  2026-04-03 01:14   notes.txt\n       20  2026-04-03 01:14   nested/config.ini\n---------                     -------\n       42                     2 files";
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "archive_basic", body));
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Scalar);
+        route.resolved_intent =
+            "Check whether notes.txt exists in /tmp/test_bundle.zip without extraction."
+                .to_string();
+        route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/test_bundle.zip".to_string();
+
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route),
+            original_user_request: Some(
+                "/tmp/test_bundle.zip 에 notes.txt 가 있는지만 말해. 압축 풀지 마.".to_string(),
+            ),
+            auto_locator_path: Some("/tmp/test_bundle.zip".to_string()),
+            ..AgentRunContext::default()
+        };
+
+        let answer = extract_direct_scalar_from_generic_output_i18n(
+            &loop_state,
+            &AppState::test_default_with_fixture_provider(),
+            Some(&agent_run_context),
+        )
+        .expect("archive member existence should be answered from archive entries");
+        assert!(answer.contains("notes.txt"), "answer: {answer}");
+        assert!(answer.contains("exists"), "answer: {answer}");
+        assert!(!answer.contains("nested/config.ini"), "answer: {answer}");
     }
 
     #[test]

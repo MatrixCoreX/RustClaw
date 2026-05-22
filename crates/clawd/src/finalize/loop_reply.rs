@@ -375,7 +375,7 @@ fn step_error_has_missing_file_evidence(step: &crate::executor::StepExecutionRes
         structured.error_kind == "not_found"
             && matches!(
                 structured.skill.as_str(),
-                "read_file" | "system_basic" | "fs_search"
+                "read_file" | "system_basic" | "fs_search" | "archive_basic"
             )
     })
 }
@@ -10653,6 +10653,49 @@ mod tests {
         assert!(answer.contains("configs/config_copy"));
         assert!(answer.contains("不存在"));
         assert!(answer.contains("无法统计"));
+    }
+
+    #[test]
+    fn deterministic_missing_observed_target_answer_reports_missing_archive_path() {
+        let state = test_state();
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveList;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/tmp/missing_bundle.zip".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        let structured_error = serde_json::json!({
+            "skill": "archive_basic",
+            "error_kind": "not_found",
+            "error_text": "archive not found: scripts/nl_tests/fixtures/device_local/tmp/missing_bundle.zip",
+            "extra": {
+                "path": "scripts/nl_tests/fixtures/device_local/tmp/missing_bundle.zip",
+                "role": "archive"
+            },
+            "text": null
+        });
+        loop_state.executed_step_results.push(err_step_result(
+            "step_1",
+            "archive_basic",
+            &format!("__RC_SKILL_ERROR__:{structured_error}"),
+        ));
+
+        let answer = deterministic_missing_observed_target_answer(
+            &state,
+            "Try to list scripts/nl_tests/fixtures/device_local/tmp/missing_bundle.zip and report the failure clearly.",
+            &loop_state,
+            Some(&agent_run_context),
+        )
+        .expect("missing archive observation should produce a handled user answer");
+
+        assert!(answer.contains("missing_bundle.zip"));
+        assert!(answer.contains("could not find") || answer.contains("cannot be completed"));
     }
 
     #[test]

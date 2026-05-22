@@ -357,6 +357,7 @@ fn apply_ask_post_route(
     prebind_clarify_workspace_child_locator_from_current_request(state, prompt, &mut route_result);
     prebind_workspace_child_locator_from_resolved_prompt(state, resolved_prompt, &mut route_result);
     prebind_workspace_root_locator_from_resolved_prompt(state, resolved_prompt, &mut route_result);
+    prebind_active_bound_target_from_matching_locator_hint(&mut route_result, &session_snapshot);
     prebind_quantity_compare_directory_pair_from_current_request(state, prompt, &mut route_result);
     if background_only_locator_route_should_force_clarify(
         state,
@@ -458,9 +459,11 @@ fn apply_ask_post_route(
         append_route_reason(&mut route_result, "deictic_bare_locator_requires_clarify");
     }
     if direct_answer_from_structured_anchor_requires_evidence(
+        prompt,
         &route_result,
         &session_snapshot,
         has_authoritative_deictic_anchor,
+        turn_analysis,
     ) {
         promote_structured_anchor_direct_answer_to_evidence(&mut route_result);
     }
@@ -749,6 +752,130 @@ fn active_observed_facts_have_bound_target(
         .and_then(|facts| facts.bound_target.as_deref())
         .map(str::trim)
         .is_some_and(|target| !target.is_empty())
+}
+
+fn active_bound_targets(
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> Vec<&str> {
+    let mut targets = Vec::new();
+    if let Some(facts) = session_snapshot.active_observed_facts.as_ref() {
+        if let Some(target) = facts
+            .bound_target
+            .as_deref()
+            .map(str::trim)
+            .filter(|target| !target.is_empty())
+        {
+            targets.push(target);
+        }
+    }
+    if let Some(frame) = session_snapshot.active_followup_frame.as_ref() {
+        if matches!(
+            frame.op_kind,
+            crate::followup_frame::FollowupOpKind::Read
+                | crate::followup_frame::FollowupOpKind::List
+        ) {
+            if let Some(target) = frame
+                .bound_target
+                .as_deref()
+                .map(str::trim)
+                .filter(|target| !target.is_empty())
+            {
+                targets.push(target);
+            }
+        }
+    }
+    targets
+}
+
+fn single_component_locator_hint(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '"' | '\''
+                | '`'
+                | ','
+                | '，'
+                | '。'
+                | ':'
+                | '：'
+                | ';'
+                | '；'
+                | '('
+                | ')'
+                | '（'
+                | '）'
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '<'
+                | '>'
+                | '《'
+                | '》'
+        )
+    });
+    if trimmed.is_empty()
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || std::path::Path::new(trimmed).is_absolute()
+        || std::path::Path::new(trimmed).components().count() != 1
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn path_basename_eq(path: &str, basename: &str) -> bool {
+    let Some(candidate) = single_component_locator_hint(basename) else {
+        return false;
+    };
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.eq_ignore_ascii_case(&candidate))
+        .unwrap_or(false)
+}
+
+fn active_bound_target_for_locator_hint<'a>(
+    session_snapshot: &'a crate::conversation_state::ActiveSessionSnapshot,
+    locator_hint: &str,
+) -> Option<&'a str> {
+    let hint = single_component_locator_hint(locator_hint)?;
+    active_bound_targets(session_snapshot)
+        .into_iter()
+        .find(|target| path_basename_eq(target, &hint))
+}
+
+fn prebind_active_bound_target_from_matching_locator_hint(
+    route_result: &mut crate::RouteResult,
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> bool {
+    if route_result.needs_clarify
+        || !route_result.is_execute_gate()
+        || !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || route_result.wants_file_delivery
+        || semantic_kind_can_execute_without_locator(route_result.output_contract.semantic_kind)
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+    {
+        return false;
+    }
+    let locator_hint = route_result.output_contract.locator_hint.trim();
+    let Some(target) = active_bound_target_for_locator_hint(session_snapshot, locator_hint) else {
+        return false;
+    };
+    route_result.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route_result.output_contract.locator_hint = target.to_string();
+    append_route_reason(
+        route_result,
+        "active_bound_target_prebound_from_matching_locator_hint",
+    );
+    true
 }
 
 fn deictic_memory_only_route_should_force_clarify(
@@ -1702,10 +1829,67 @@ fn route_output_contract_requires_planner_execution(
         || !matches!(contract.semantic_kind, crate::OutputSemanticKind::None)
 }
 
+fn prompt_surface_has_current_turn_concrete_target(
+    surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> bool {
+    surface.has_explicit_path_or_url()
+        || surface.locator_target_pair.is_some()
+        || surface.field_selector_count > 0
+        || surface.dotted_field_selector.is_some()
+        || surface.has_delivery_token_reference()
+        || surface.has_deictic_reference()
+        || surface.inline_json_shape.is_some()
+        || !surface
+            .filename_candidates_excluding_field_selectors()
+            .is_empty()
+}
+
+fn active_text_mutation_can_stay_direct_answer_without_structured_anchor_evidence(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    if route_result.needs_clarify
+        || route_result.is_execute_gate()
+        || route_result.wants_file_delivery
+        || !matches!(route_result.schedule_kind, crate::ScheduleKind::None)
+        || route_output_contract_requires_planner_execution(&route_result.output_contract)
+    {
+        return false;
+    }
+    let Some(analysis) = turn_analysis else {
+        return false;
+    };
+    if !matches!(
+        analysis.turn_type,
+        Some(
+            crate::intent_router::TurnType::TaskAppend
+                | crate::intent_router::TurnType::TaskCorrect
+                | crate::intent_router::TurnType::TaskReplace
+                | crate::intent_router::TurnType::TaskScopeUpdate
+        )
+    ) || !matches!(
+        analysis.target_task_policy,
+        Some(
+            crate::intent_router::TargetTaskPolicy::ReuseActive
+                | crate::intent_router::TargetTaskPolicy::ReplaceActive
+        )
+    ) {
+        return false;
+    }
+    if analysis.attachment_processing_required {
+        return false;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
+    !prompt_surface_has_current_turn_concrete_target(&surface)
+}
+
 fn direct_answer_from_structured_anchor_requires_evidence(
+    prompt: &str,
     route_result: &crate::RouteResult,
     session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
     has_authoritative_deictic_anchor: bool,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> bool {
     if !has_authoritative_deictic_anchor
         || route_result.needs_clarify
@@ -1715,6 +1899,13 @@ fn direct_answer_from_structured_anchor_requires_evidence(
         || route_output_contract_requires_planner_execution(&route_result.output_contract)
         || !active_session_has_structured_observation_anchor(session_snapshot)
     {
+        return false;
+    }
+    if active_text_mutation_can_stay_direct_answer_without_structured_anchor_evidence(
+        prompt,
+        route_result,
+        turn_analysis,
+    ) {
         return false;
     }
     embedded_normalizer_answer_candidate(&route_result.resolved_intent).is_none_or(|candidate| {
@@ -2270,6 +2461,7 @@ mod tests {
         deictic_memory_only_route_should_force_clarify, deictic_missing_locator_question,
         direct_answer_from_structured_anchor_requires_evidence, effective_auto_locator_kind,
         execution_user_request, locatorless_observation_route_should_force_clarify,
+        prebind_active_bound_target_from_matching_locator_hint,
         prebind_clarify_workspace_child_locator_from_current_request,
         prebind_direct_file_delivery_locator_before_deictic_guard,
         prebind_quantity_compare_directory_pair_from_current_request,
@@ -2578,6 +2770,43 @@ mod tests {
             &route,
             &snapshot,
         ));
+    }
+
+    #[test]
+    fn active_bound_target_prebinds_matching_basename_locator_hint() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
+        route.output_contract.locator_hint = "test_bundle.zip".to_string();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveList;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+                op_kind: crate::followup_frame::FollowupOpKind::Read,
+                bound_target: Some(
+                    "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip".to_string(),
+                ),
+                ..crate::followup_frame::FollowupFrame::default()
+            }),
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(prebind_active_bound_target_from_matching_locator_hint(
+            &mut route, &snapshot,
+        ));
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+        );
+        assert_eq!(
+            route.output_contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"
+        );
+        assert!(route
+            .route_reason
+            .contains("active_bound_target_prebound_from_matching_locator_hint"));
     }
 
     #[test]
@@ -4011,7 +4240,11 @@ mod tests {
         route.output_contract = crate::IntentOutputContract::default();
 
         assert!(direct_answer_from_structured_anchor_requires_evidence(
-            &route, &snapshot, true
+            "What is the path and type for that entry?",
+            &route,
+            &snapshot,
+            true,
+            None
         ));
 
         promote_structured_anchor_direct_answer_to_evidence(&mut route);
@@ -4054,7 +4287,52 @@ mod tests {
         route.output_contract = crate::IntentOutputContract::default();
 
         assert!(!direct_answer_from_structured_anchor_requires_evidence(
-            &route, &snapshot, true
+            "What is that entry name?",
+            &route,
+            &snapshot,
+            true,
+            None
+        ));
+    }
+
+    #[test]
+    fn active_text_mutation_with_structured_anchor_stays_chat() {
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: Some(crate::conversation_state::ConversationState {
+                last_primary_task_prompt: Some("GET http://127.0.0.1:8787/v1/health".to_string()),
+                last_primary_task_output: Some("Service status: reachable (HTTP 200).".to_string()),
+                ..crate::conversation_state::ConversationState::default()
+            }),
+            active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+                source_request: "GET http://127.0.0.1:8787/v1/health".to_string(),
+                op_kind: crate::followup_frame::FollowupOpKind::Read,
+                bound_target: Some("http://127.0.0.1:8787/v1/health".to_string()),
+                source_task_id: "task-1".to_string(),
+                updated_at_ts: 1,
+                expires_at_ts: 2,
+                ..crate::followup_frame::FollowupFrame::default()
+            }),
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+        let analysis = crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::TaskScopeUpdate),
+            target_task_policy: Some(crate::intent_router::TargetTaskPolicy::ReuseActive),
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        };
+        let mut route = executable_filename_route();
+        route.ask_mode = crate::AskMode::direct_answer();
+        route.resolved_intent = "Clarify the current request without reading files.".to_string();
+        route.output_contract = crate::IntentOutputContract::default();
+
+        assert!(!direct_answer_from_structured_anchor_requires_evidence(
+            "A concept label without a concrete target.",
+            &route,
+            &snapshot,
+            true,
+            Some(&analysis)
         ));
     }
 

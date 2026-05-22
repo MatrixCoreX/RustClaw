@@ -72,6 +72,7 @@ fn execute(args: Value) -> Result<(String, Value), String> {
             ],
         ),
         "images" => run_docker_readonly("images", &["images"]),
+        "version" => run_docker_readonly("version", &["version"]),
         "logs" => {
             let container = required(obj, "container")?;
             let tail = obj
@@ -85,7 +86,9 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         "start" => run_docker("start", &["start", required(obj, "container")?]),
         "stop" => run_docker("stop", &["stop", required(obj, "container")?]),
         "inspect" => run_docker("inspect", &["inspect", required(obj, "container")?]),
-        _ => Err("unsupported action; use ps|images|logs|restart|start|stop|inspect".to_string()),
+        _ => Err(
+            "unsupported action; use ps|images|version|logs|restart|start|stop|inspect".to_string(),
+        ),
     }
 }
 

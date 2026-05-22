@@ -317,6 +317,7 @@ Output a single raw JSON object only (no markdown, no extra text, no code fences
   - sqlite_database_kind_judgment: user wants a grounded database-type judgment from the observed tables in a concrete sqlite/db file
   - sqlite_schema_version: user wants the SQLite schema-version metadata value from a concrete sqlite/db file
   - archive_list: user wants to inspect/list the contents of a concrete archive file such as zip/tar/tgz
+  - archive_read: user wants the content of a specific member inside a concrete archive file; set `locator_hint` as `<archive_path> | <member_path>` where `<member_path>` is the relative path inside the archive
   - archive_pack: user wants to create/compress an archive from a concrete source path
   - archive_unpack: user wants to extract/unpack a concrete archive into a destination path
   - docker_ps: user wants a structured Docker container list/status inventory, not raw command output
