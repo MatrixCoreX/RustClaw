@@ -723,6 +723,45 @@ mod tests {
     }
 
     #[test]
+    fn contract_matrix_snapshot_uses_post_route_policy_execution_contract() {
+        let mut route = route_result();
+        route.resolved_intent = "列出 document 目录下前 5 个文件名".to_string();
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
+        let pre_snapshot =
+            crate::contract_matrix::trace_snapshot_for_route(&route).expect("pre snapshot");
+        assert_eq!(
+            pre_snapshot
+                .get("contract_match")
+                .and_then(serde_json::Value::as_str),
+            Some("scalar_count")
+        );
+
+        let result = apply_post_route_policy(route, LocatorResolution::None);
+        let post_snapshot =
+            crate::contract_matrix::trace_snapshot_for_route(&result.execution_route_result)
+                .expect("post snapshot");
+
+        assert_eq!(
+            result.execution_route_result.output_contract.semantic_kind,
+            OutputSemanticKind::None
+        );
+        assert_eq!(
+            post_snapshot
+                .get("semantic_kind")
+                .and_then(serde_json::Value::as_str),
+            Some("none")
+        );
+        assert_eq!(
+            post_snapshot
+                .get("contract_match")
+                .and_then(serde_json::Value::as_str),
+            Some("generic_path_content")
+        );
+    }
+
+    #[test]
     fn scalar_count_contract_stays_for_true_scalar_shape() {
         let mut route = route_result();
         route.resolved_intent = "当前目录下有几个文件".to_string();
