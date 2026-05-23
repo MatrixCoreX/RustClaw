@@ -158,6 +158,30 @@ fn prompt_validation_templates_enable_strict_startup_gate_consistently() {
     );
 }
 
+#[test]
+fn docker_contract_matrix_template_stays_in_sync() {
+    let root = workspace_root();
+    let main_matrix = root.join("configs/task_contract_matrix.toml");
+    let docker_matrix = root.join("docker/config/task_contract_matrix.toml");
+
+    assert!(
+        docker_matrix.exists(),
+        "docker mounted config template must include task_contract_matrix.toml"
+    );
+    assert_eq!(
+        fs::read_to_string(&main_matrix).expect("read main contract matrix"),
+        fs::read_to_string(&docker_matrix).expect("read docker contract matrix"),
+        "docker task_contract_matrix.toml should stay identical to configs/task_contract_matrix.toml"
+    );
+
+    let entrypoint =
+        fs::read_to_string(root.join("docker/docker-entrypoint.sh")).expect("read entrypoint");
+    assert!(
+        entrypoint.contains("MOUNTED_CONTRACT_MATRIX_FILE"),
+        "docker entrypoint must sync mounted task_contract_matrix.toml overrides"
+    );
+}
+
 /// §3.5c-D14 守底：所有带“strict JSON / JSON only”输出约束的 overlay prompt
 /// 都必须被显式归类为：
 /// 1. 已有固定 schema 守底；或
