@@ -1,1 +1,1 @@
-{"case": 1, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["filesystem.remove_file"], "verifier_issue_any": ["MissingRequiredArg"], "needs_confirmation": false, "final_shape": "non_empty"}
+{"case": 1, "status": "succeeded", "first_layer": "planner_execute", "route_gate": "execute", "capability_any": ["filesystem.remove_file"], "verifier_issue_any": ["MissingRequiredArg"], "verifier_failure_attribution_any": ["model_error"], "needs_confirmation": false, "final_shape": "non_empty"}

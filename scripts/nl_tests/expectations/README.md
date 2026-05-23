@@ -38,6 +38,8 @@ Supported fields:
 - `verifier_approved`
 - `verifier_issue_any`
 - `verifier_issue_all`
+- `verifier_failure_attribution_any`
+- `verifier_failure_attribution_all`
 - `needs_confirmation`
 - `finalizer_stage`
 - `finalizer_fallback`
