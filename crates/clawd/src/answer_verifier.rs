@@ -217,9 +217,7 @@ fn markdown_table_separator_row(cells: &[String]) -> bool {
     cells.iter().all(|cell| {
         let value = cell.trim();
         value.len() >= 3
-            && value
-                .chars()
-                .all(|ch| matches!(ch, '-' | ':' | ' ' | '\t'))
+            && value.chars().all(|ch| matches!(ch, '-' | ':' | ' ' | '\t'))
             && value.chars().any(|ch| ch == '-')
     })
 }
@@ -241,16 +239,25 @@ fn observed_table_cells(journal: &crate::task_journal::TaskJournal) -> BTreeSet<
     cells
 }
 
-fn collect_observed_table_cells_from_value(value: &serde_json::Value, cells: &mut BTreeSet<String>) {
+fn collect_observed_table_cells_from_value(
+    value: &serde_json::Value,
+    cells: &mut BTreeSet<String>,
+) {
     if let Some(rows) = value.get("rows").and_then(|value| value.as_array()) {
         collect_observed_table_cells_from_rows(rows, cells);
     }
-    if let Some(rows) = value.pointer("/result/rows").and_then(|value| value.as_array()) {
+    if let Some(rows) = value
+        .pointer("/result/rows")
+        .and_then(|value| value.as_array())
+    {
         collect_observed_table_cells_from_rows(rows, cells);
     }
 }
 
-fn collect_observed_table_cells_from_rows(rows: &[serde_json::Value], cells: &mut BTreeSet<String>) {
+fn collect_observed_table_cells_from_rows(
+    rows: &[serde_json::Value],
+    cells: &mut BTreeSet<String>,
+) {
     for row in rows {
         match row {
             serde_json::Value::Object(map) => {

@@ -1046,7 +1046,9 @@ fn failure_attribution_for_structured_error_kind(
         "budget_exhausted" | "round_budget_exhausted" | "tool_budget_exhausted" => {
             Some(crate::contract_matrix::FailureAttribution::BudgetExhausted)
         }
-        "prompt_budget_error" => Some(crate::contract_matrix::FailureAttribution::PromptBudgetError),
+        "prompt_budget_error" => {
+            Some(crate::contract_matrix::FailureAttribution::PromptBudgetError)
+        }
         _ => None,
     }
 }

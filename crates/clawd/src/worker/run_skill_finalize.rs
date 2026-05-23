@@ -124,6 +124,11 @@ async fn finalize_run_skill_success(
     ));
     journal.record_final_answer(&clean_text);
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    if outcome.notify.unwrap_or(true) {
+        let notify_outcome =
+            super::maybe_notify_schedule_result(state, task, payload, true, &clean_text).await;
+        super::record_schedule_notify_outcome(&mut journal, notify_outcome);
+    }
     let result = journal.attach_to_result(json!({
         "text": clean_text,
         "delivery_meta": {
@@ -133,9 +138,6 @@ async fn finalize_run_skill_success(
         }
     }));
     repo::update_task_success(state, &task.task_id, &result.to_string())?;
-    if outcome.notify.unwrap_or(true) {
-        super::maybe_notify_schedule_result(state, task, payload, true, &clean_text).await;
-    }
     let _ = crate::memory::service::insert_memory_with_kind(
         state,
         task.user_id,
@@ -228,6 +230,9 @@ async fn finalize_run_skill_failure(
     ));
     journal.record_final_answer(err_text);
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+    let notify_outcome =
+        super::maybe_notify_schedule_result(state, task, payload, false, err_text).await;
+    super::record_schedule_notify_outcome(&mut journal, notify_outcome);
     error!(
         "worker_once: run_skill task_id={} skill={} failed: {}",
         task.task_id, skill_name, err_text
@@ -236,7 +241,6 @@ async fn finalize_run_skill_failure(
         "text": err_text,
     }));
     repo::update_task_failure_with_result(state, &task.task_id, &result.to_string(), err_text)?;
-    super::maybe_notify_schedule_result(state, task, payload, false, err_text).await;
     let _ = repo::insert_audit_log(
         state,
         Some(task.user_id),
