@@ -1,0 +1,1 @@
+{"case": 1, "status": "failed", "error_kind_any": ["evidence_extractor_failed"], "failure_attribution_any": ["code_gap"], "final_shape": "non_empty"}
