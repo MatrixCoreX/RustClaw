@@ -4170,6 +4170,128 @@ mod tests {
         DirectAnswerPreflight,
     };
 
+    fn schema_enum_strings(schema: &serde_json::Value, path: &[&str]) -> Vec<String> {
+        let mut node = schema;
+        for part in path {
+            node = node
+                .get(*part)
+                .unwrap_or_else(|| panic!("schema path `{}` not found", path.join(".")));
+        }
+        node.get("enum")
+            .and_then(serde_json::Value::as_array)
+            .unwrap_or_else(|| panic!("schema path `{}.enum` not found", path.join(".")))
+            .iter()
+            .filter_map(|value| value.as_str().map(str::to_string))
+            .collect()
+    }
+
+    #[test]
+    fn direct_answer_gate_schema_drift() {
+        const SCHEMA_RAW: &str =
+            include_str!("../../../prompts/schemas/direct_answer_gate.schema.json");
+        let schema: serde_json::Value =
+            serde_json::from_str(SCHEMA_RAW).expect("direct_answer_gate schema must be valid JSON");
+        assert_eq!(
+            schema.get("type").and_then(serde_json::Value::as_str),
+            Some("object")
+        );
+        assert_eq!(
+            schema.get("additionalProperties"),
+            Some(&serde_json::json!(false)),
+            "direct_answer_gate root must reject unknown fields after canonicalization"
+        );
+
+        let properties = schema
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("direct_answer_gate schema must have object properties");
+        for field in [
+            "decision",
+            "reason",
+            "confidence",
+            "clarify_question",
+            "resolved_user_intent",
+            "reference_resolution",
+            "output_contract",
+        ] {
+            assert!(
+                properties.contains_key(field),
+                "schema missing DirectAnswerGateOut field `{field}`"
+            );
+        }
+
+        let contract_properties = schema
+            .pointer("/properties/output_contract/properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("output_contract must have object properties");
+        for field in [
+            "response_shape",
+            "exact_sentence_count",
+            "requires_content_evidence",
+            "delivery_required",
+            "locator_kind",
+            "delivery_intent",
+            "semantic_kind",
+            "locator_hint",
+            "self_extension",
+        ] {
+            assert!(
+                contract_properties.contains_key(field),
+                "schema missing DirectAnswerGateContractOut field `{field}`"
+            );
+        }
+
+        let semantic_schema = schema_enum_strings(
+            &schema,
+            &[
+                "properties",
+                "output_contract",
+                "properties",
+                "semantic_kind",
+            ],
+        )
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        let semantic_rust = crate::OutputSemanticKind::ALL
+            .iter()
+            .map(|kind| kind.as_str().to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            semantic_schema, semantic_rust,
+            "direct_answer_gate semantic_kind enum must stay aligned with OutputSemanticKind::ALL"
+        );
+
+        let raw = serde_json::json!({
+            "decision": "planner_execute",
+            "reason": "needs fresh evidence",
+            "confidence": 0.9,
+            "clarify_question": "",
+            "resolved_user_intent": "List files",
+            "reference_resolution": {"target": "none"},
+            "output_contract": {
+                "response_shape": "strict",
+                "exact_sentence_count": null,
+                "requires_content_evidence": true,
+                "delivery_required": false,
+                "locator_kind": "path",
+                "delivery_intent": "none",
+                "semantic_kind": "file_names",
+                "locator_hint": "docs",
+                "self_extension": {
+                    "mode": "none",
+                    "trigger": "none",
+                    "execute_now": false
+                }
+            }
+        })
+        .to_string();
+        crate::prompt_utils::validate_against_schema::<DirectAnswerGateOut>(
+            &raw,
+            crate::prompt_utils::PromptSchemaId::DirectAnswerGate,
+        )
+        .expect("schema-conformant direct_answer_gate payload must deserialize");
+    }
+
     #[test]
     fn direct_chat_answer_rejects_unclosed_code_fence() {
         assert!(direct_chat_answer_needs_repair("```bash"));

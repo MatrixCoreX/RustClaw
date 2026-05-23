@@ -757,6 +757,8 @@ fn execution_evidence_prompt_block(journal: &crate::task_journal::TaskJournal) -
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use serde_json::json;
 
     use super::{
@@ -802,6 +804,71 @@ mod tests {
         .expect("schema should validate answer verifier output");
         assert!(!validated.value.pass);
         assert!(validated.value.should_retry);
+    }
+
+    #[test]
+    fn answer_verifier_schema_drift() {
+        const SCHEMA_RAW: &str =
+            include_str!("../../../prompts/schemas/answer_verifier.schema.json");
+        let schema: serde_json::Value =
+            serde_json::from_str(SCHEMA_RAW).expect("answer_verifier schema must be valid JSON");
+        assert_eq!(
+            schema.get("type").and_then(serde_json::Value::as_str),
+            Some("object"),
+            "answer_verifier schema root must be object"
+        );
+        assert_eq!(
+            schema.get("additionalProperties"),
+            Some(&json!(false)),
+            "answer_verifier schema must reject unknown fields after canonicalization"
+        );
+
+        let expected = [
+            "pass",
+            "missing_evidence_fields",
+            "answer_incomplete_reason",
+            "should_retry",
+            "retry_instruction",
+            "confidence",
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        let properties = schema
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .expect("schema must have object properties");
+        let actual = properties.keys().map(String::as_str).collect::<BTreeSet<_>>();
+        assert_eq!(
+            actual, expected,
+            "answer_verifier.schema.json properties drifted from AnswerVerifierOut"
+        );
+
+        let required = schema
+            .get("required")
+            .and_then(serde_json::Value::as_array)
+            .expect("schema must have required fields")
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            required, expected,
+            "answer_verifier.schema.json required set drifted from AnswerVerifierOut"
+        );
+
+        let raw = json!({
+            "pass": true,
+            "missing_evidence_fields": [],
+            "answer_incomplete_reason": "",
+            "should_retry": false,
+            "retry_instruction": "",
+            "confidence": 1.0
+        })
+        .to_string();
+        crate::prompt_utils::validate_against_schema::<AnswerVerifierOut>(
+            &raw,
+            crate::prompt_utils::PromptSchemaId::AnswerVerifier,
+        )
+        .expect("schema-conformant answer verifier payload must deserialize");
     }
 
     #[test]
