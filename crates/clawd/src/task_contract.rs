@@ -451,6 +451,13 @@ fn required_evidence_fields_for_route(route: &RouteResult) -> Vec<String> {
 pub(crate) fn required_evidence_fields_for_output_contract(
     output_contract: &crate::IntentOutputContract,
 ) -> Vec<String> {
+    crate::contract_matrix::required_evidence_for_output_contract(output_contract)
+        .unwrap_or_else(|| fallback_required_evidence_fields_for_output_contract(output_contract))
+}
+
+pub(crate) fn fallback_required_evidence_fields_for_output_contract(
+    output_contract: &crate::IntentOutputContract,
+) -> Vec<String> {
     let mut fields = BTreeSet::new();
     if output_contract.delivery_required
         || matches!(
@@ -491,6 +498,9 @@ pub(crate) fn required_evidence_fields_for_output_contract(
         OutputSemanticKind::DirectoryPurposeSummary => {
             fields.insert("candidates");
         }
+        OutputSemanticKind::RecentArtifactsJudgment => {
+            fields.insert("candidates");
+        }
         OutputSemanticKind::FileNames
         | OutputSemanticKind::DirectoryNames
         | OutputSemanticKind::DirectoryEntryGroups
@@ -511,8 +521,15 @@ pub(crate) fn required_evidence_fields_for_output_contract(
         | OutputSemanticKind::ConfigRiskAssessment
         | OutputSemanticKind::SqliteDatabaseKindJudgment
         | OutputSemanticKind::SqliteSchemaVersion
-        | OutputSemanticKind::RecentScalarEqualityCheck => {
+        | OutputSemanticKind::RecentScalarEqualityCheck
+        | OutputSemanticKind::ExecutionFailedStep
+        | OutputSemanticKind::DockerContainerLifecycle => {
             fields.insert("field_value");
+        }
+        OutputSemanticKind::GeneratedFileDelivery
+        | OutputSemanticKind::ArchivePack
+        | OutputSemanticKind::ArchiveUnpack => {
+            fields.insert("path");
         }
         OutputSemanticKind::QuantityComparison => {
             fields.insert("field_value");

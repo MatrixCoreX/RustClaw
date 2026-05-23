@@ -31,6 +31,7 @@ mod capability_resolver;
 mod channel_send;
 mod clarify_followup;
 mod clarify_state;
+mod contract_matrix;
 mod conversation_state;
 mod db_init;
 mod delivery_utils;

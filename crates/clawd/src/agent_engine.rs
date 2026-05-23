@@ -296,6 +296,11 @@ fn build_turn_analysis_prompt_block(
     }
     if let Some(route) = route_result {
         lines.push(crate::TaskContract::from_route_result(route).compact_prompt_line());
+        if let Some(contract_matrix_line) =
+            crate::contract_matrix::compact_prompt_line_for_route(route)
+        {
+            lines.push(contract_matrix_line);
+        }
     }
     if lines.is_empty() {
         "<none>".to_string()

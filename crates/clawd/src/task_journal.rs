@@ -363,6 +363,13 @@ fn step_trace_json(
     step: &TaskJournalStepTrace,
     requested: Option<&RequestedPlanCapability>,
 ) -> Value {
+    let structured_error = step
+        .error_excerpt
+        .as_deref()
+        .and_then(crate::skills::parse_structured_skill_error);
+    let failure_attribution =
+        structured_error_extra_string(structured_error.as_ref(), "failure_attribution");
+    let contract_policy = contract_policy_trace_json(structured_error.as_ref());
     json!({
         "step_id": &step.step_id,
         "skill": &step.skill,
@@ -370,11 +377,44 @@ fn step_trace_json(
         "requested_capability": requested.map(|value| value.capability.as_str()),
         "executed_skill": &step.skill,
         "status": step.status.as_str(),
+        "error_kind": structured_error.as_ref().map(|value| value.error_kind.as_str()),
+        "failure_attribution": failure_attribution.as_deref(),
+        "contract_policy": contract_policy,
         "output_excerpt": step.output_excerpt.as_deref(),
         "error_excerpt": step.error_excerpt.as_deref(),
         "started_at": step.started_at,
         "finished_at": step.finished_at,
     })
+}
+
+fn structured_error_extra_string(
+    structured_error: Option<&crate::skills::StructuredSkillError>,
+    key: &str,
+) -> Option<String> {
+    structured_error
+        .and_then(|value| value.extra.as_ref())
+        .and_then(|extra| extra.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn contract_policy_trace_json(
+    structured_error: Option<&crate::skills::StructuredSkillError>,
+) -> Option<Value> {
+    let structured_error = structured_error?;
+    if structured_error.error_kind != "contract_action_rejected" {
+        return None;
+    }
+    let extra = structured_error.extra.as_ref()?;
+    Some(json!({
+        "decision": extra.get("decision").and_then(Value::as_str),
+        "action": extra.get("action").and_then(Value::as_str),
+        "contract_match": extra.get("contract_match").and_then(Value::as_str),
+        "required_evidence": extra.get("required_evidence").cloned(),
+        "final_answer_shape": extra.get("final_answer_shape").and_then(Value::as_str),
+    }))
 }
 
 /// §3.1: 单条 ask 状态机 transition 的 JSON 序列化。
@@ -1110,6 +1150,62 @@ mod tests {
         assert_eq!(
             step.get("skill").and_then(Value::as_str),
             Some("system_basic")
+        );
+    }
+
+    #[test]
+    fn trace_json_includes_contract_policy_for_contract_rejection() {
+        let mut journal = TaskJournal::for_task("task-contract", "ask", "列出文件名");
+        let err = crate::skills::structured_skill_error_from_parts(
+            "run_cmd",
+            "contract_action_rejected",
+            "action `run_cmd` is rejected by contract `file_names`",
+            None,
+            Some(json!({
+                "failure_attribution": "contract_gap",
+                "decision": "rejected_not_allowed",
+                "action": "run_cmd",
+                "contract_match": "file_names",
+                "required_evidence": ["candidates"],
+                "final_answer_shape": "name_list",
+            })),
+        );
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "run_cmd".to_string(),
+            status: crate::executor::StepExecutionStatus::Error,
+            output: None,
+            error: Some(err),
+            started_at: 1,
+            finished_at: 1,
+        });
+
+        let trace = journal.to_trace_json();
+        let step = trace
+            .get("step_results")
+            .and_then(Value::as_array)
+            .and_then(|steps| steps.first())
+            .expect("step result should be present");
+
+        assert_eq!(
+            step.get("error_kind").and_then(Value::as_str),
+            Some("contract_action_rejected")
+        );
+        assert_eq!(
+            step.get("failure_attribution").and_then(Value::as_str),
+            Some("contract_gap")
+        );
+        assert_eq!(
+            step.get("contract_policy")
+                .and_then(|value| value.get("decision"))
+                .and_then(Value::as_str),
+            Some("rejected_not_allowed")
+        );
+        assert_eq!(
+            step.get("contract_policy")
+                .and_then(|value| value.get("contract_match"))
+                .and_then(Value::as_str),
+            Some("file_names")
         );
     }
 }
