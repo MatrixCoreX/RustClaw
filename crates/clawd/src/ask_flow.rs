@@ -1620,6 +1620,11 @@ fn direct_answer_gate_reference_requires_clarify(
 fn planner_finalize_style_for_output_contract(
     contract: &crate::IntentOutputContract,
 ) -> ActFinalizeStyle {
+    if let Some(style) =
+        crate::post_route_policy::content_evidence_execution_finalize_style(contract, false)
+    {
+        return style;
+    }
     if matches!(
         contract.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
@@ -1872,6 +1877,22 @@ fn current_request_has_context_binding_surface(current_user_request: &str) -> bo
         || surface.has_filename_candidates()
         || surface.locator_target_pair.is_some()
         || surface.has_deictic_reference()
+        || current_request_has_unbound_natural_locator_reference(current_user_request)
+}
+
+fn current_request_has_unbound_natural_locator_reference(current_user_request: &str) -> bool {
+    let lower = current_user_request.to_ascii_lowercase();
+    lower.contains("that file")
+        || lower.contains("that package file")
+        || lower.contains("that folder")
+        || lower.contains("that directory")
+        || lower.contains("selected file")
+        || current_user_request.contains("那个文件")
+        || current_user_request.contains("这个文件")
+        || current_user_request.contains("那个目录")
+        || current_user_request.contains("这个目录")
+        || current_user_request.contains("那个文件夹")
+        || current_user_request.contains("这个文件夹")
 }
 
 fn current_request_has_workspace_child_locator_surface(current_user_request: &str) -> bool {
@@ -1960,8 +1981,10 @@ fn direct_answer_gate_chat_promotion_lacks_structured_target(
             current_user_request,
             contract,
         )
+        || current_request_mentions_resolvable_gate_locator(state, current_user_request, contract)
         || matches!(contract.locator_kind, crate::OutputLocatorKind::None)
         || current_request_has_structural_execution_target(current_user_request)
+        || current_request_has_unbound_natural_locator_reference(current_user_request)
         || current_request_resolves_structural_workspace_child_locator_surface(
             state,
             current_user_request,
@@ -4473,6 +4496,35 @@ mod tests {
     }
 
     #[test]
+    fn direct_answer_gate_promotion_uses_matrix_finalize_style() {
+        let route = chat_route_for_gate();
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut contract = gate_contract(true, "current_workspace", "file_names");
+        contract.response_shape = "free".to_string();
+        let gate = gate_out("planner_execute", contract);
+        let state = crate::AppState::test_default_with_fixture_provider();
+
+        let outcome =
+            apply_direct_answer_gate_outcome(&state, &mut ctx, "list workspace files", gate);
+
+        assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+        let route = ctx.route_result.expect("route");
+        assert_eq!(route.ask_mode, crate::AskMode::planner_execute_plain());
+        assert_eq!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::FileNames
+        );
+        assert_eq!(
+            crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+                .map(|shape| shape.class().as_str()),
+            Some("strict_list")
+        );
+    }
+
+    #[test]
     fn direct_answer_gate_ignores_chat_promotion_without_structured_target() {
         let route = chat_route_for_gate();
         let mut ctx = crate::agent_engine::AgentRunContext {
@@ -5536,10 +5588,7 @@ mod tests {
 
         assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
         let route = ctx.route_result.expect("route");
-        assert_eq!(
-            route.ask_mode,
-            crate::AskMode::planner_execute_chat_wrapped()
-        );
+        assert_eq!(route.ask_mode, crate::AskMode::planner_execute_plain());
         assert!(route.is_execute_gate());
         assert!(route.output_contract.requires_content_evidence);
         assert_eq!(
