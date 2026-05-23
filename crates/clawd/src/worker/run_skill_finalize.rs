@@ -30,6 +30,51 @@ fn build_run_skill_step_result(
     }
 }
 
+fn record_run_skill_task_observation(
+    journal: &mut crate::task_journal::TaskJournal,
+    skill_name: &str,
+    status: &str,
+    text: Option<&str>,
+    error_text: Option<&str>,
+    validation: Option<&Value>,
+    extra: Option<&Value>,
+    notify: Option<bool>,
+) {
+    let mut payload = json!({
+        "source": "direct_run_skill",
+        "skill_name": skill_name,
+        "status": status,
+    });
+    if let Some(obj) = payload.as_object_mut() {
+        if let Some(text) = text {
+            obj.insert("text".to_string(), json!(text));
+        }
+        if let Some(error_text) = error_text {
+            obj.insert("error_text".to_string(), json!(error_text));
+        }
+        if let Some(validation) = validation {
+            obj.insert("validation".to_string(), validation.clone());
+        }
+        if let Some(extra) = extra {
+            obj.insert("extra".to_string(), extra.clone());
+        }
+        if let Some(notify) = notify {
+            obj.insert("notify".to_string(), json!(notify));
+        }
+    }
+    let payload_text = payload.to_string();
+    if let Some(observed_evidence) =
+        crate::task_journal::observed_evidence_from_output(Some(&payload_text))
+    {
+        journal.push_task_observation(json!({
+            "source": "direct_run_skill",
+            "skill": skill_name,
+            "status": status,
+            "observed_evidence": observed_evidence,
+        }));
+    }
+}
+
 async fn finalize_run_skill_success(
     state: &AppState,
     task: &crate::ClaimedTask,
@@ -63,6 +108,16 @@ async fn finalize_run_skill_success(
         Some(clean_text.clone()),
         None,
     ));
+    record_run_skill_task_observation(
+        &mut journal,
+        skill_name,
+        "ok",
+        Some(&clean_text),
+        None,
+        outcome.validation.as_ref(),
+        outcome.extra.as_ref(),
+        outcome.notify,
+    );
     journal.record_delivery_consistent(crate::task_journal::delivery_payload_consistent(
         &clean_text,
         &[],
@@ -157,6 +212,16 @@ async fn finalize_run_skill_failure(
         None,
         Some(err_text.to_string()),
     ));
+    record_run_skill_task_observation(
+        &mut journal,
+        skill_name,
+        "error",
+        None,
+        Some(err_text),
+        None,
+        None,
+        None,
+    );
     journal.record_delivery_consistent(crate::task_journal::delivery_payload_consistent(
         err_text,
         &[],
@@ -229,4 +294,100 @@ pub(crate) async fn finalize_run_skill_result(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{json, Value};
+
+    #[test]
+    fn direct_run_skill_observation_records_redacted_extra_evidence() {
+        let token = "sk-test_abcdefghijklmnopqrstuvwxyz1234567890";
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-1", "run_skill", "run_skill:demo");
+
+        super::record_run_skill_task_observation(
+            &mut journal,
+            "demo",
+            "ok",
+            Some("done"),
+            None,
+            Some(&json!({"ok": true})),
+            Some(&json!({
+                "api_token": token,
+                "result": {
+                    "path": "/tmp/output.txt",
+                    "exists": true
+                }
+            })),
+            Some(true),
+        );
+
+        let trace = journal.to_trace_json();
+        let trace_text = trace.to_string();
+        assert!(!trace_text.contains(token));
+        assert_eq!(
+            trace
+                .get("task_observations")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
+
+        let items = trace
+            .get("task_observations")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(|entry| entry.get("observed_evidence"))
+            .and_then(|evidence| evidence.get("items"))
+            .and_then(Value::as_array)
+            .expect("observed evidence items");
+
+        let token_item = items
+            .iter()
+            .find(|item| item.get("field").and_then(Value::as_str) == Some("extra.api_token"))
+            .expect("extra api token item");
+        assert_eq!(
+            token_item.get("redacted").and_then(Value::as_bool),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn direct_run_skill_failure_records_error_observation() {
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-2", "run_skill", "run_skill:demo");
+
+        super::record_run_skill_task_observation(
+            &mut journal,
+            "demo",
+            "error",
+            None,
+            Some("missing required field: path"),
+            None,
+            None,
+            None,
+        );
+
+        let trace = journal.to_trace_json();
+        let observed = trace
+            .get("task_observations")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(|entry| entry.get("observed_evidence"))
+            .expect("observed evidence");
+        assert_eq!(
+            observed.get("source").and_then(Value::as_str),
+            Some("step_output")
+        );
+        assert_eq!(
+            trace
+                .get("task_observations")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(|entry| entry.get("source"))
+                .and_then(Value::as_str),
+            Some("direct_run_skill")
+        );
+    }
 }
