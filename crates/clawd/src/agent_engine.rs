@@ -1177,6 +1177,41 @@ mod tests {
     }
 
     #[test]
+    fn turn_analysis_prompt_block_includes_contract_matrix_for_structured_route() {
+        let route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: "列出文件名".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "test".to_string(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                semantic_kind: crate::OutputSemanticKind::FileNames,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                ..Default::default()
+            },
+        };
+
+        let block = build_turn_analysis_prompt_block(None, Some(&route));
+
+        assert!(block.contains("- task_contract"));
+        assert!(block.contains("- contract_matrix"));
+        assert!(block.contains("required_evidence=candidates"));
+        assert!(block.contains("final_answer_shape=name_list"));
+        assert!(block.contains("allowed_actions="));
+        assert!(block.contains("fs_basic"));
+        assert!(block.contains("forbidden_actions="));
+    }
+
+    #[test]
     fn register_step_output_indexes_inventory_names_for_followup_paths() {
         let mut loop_state = LoopState::new(1);
         register_step_output(
