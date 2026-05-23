@@ -546,13 +546,6 @@ pub(crate) async fn verify_answer_observe_only(
     if !should_verify_answer(route_result, journal, candidate_answer) {
         return None;
     }
-    if structurally_satisfies_answer_contract(route_result, journal, candidate_answer) {
-        tracing::info!(
-            task_id = %task.task_id,
-            "answer_verifier_skipped_structural_satisfaction"
-        );
-        return None;
-    }
     if let Some(local_gap) = local_missing_evidence_verifier_gap(route_result, journal) {
         tracing::warn!(
             task_id = %task.task_id,
@@ -562,6 +555,13 @@ pub(crate) async fn verify_answer_observe_only(
             "answer_verifier_local_missing_evidence_gap"
         );
         return Some(local_gap);
+    }
+    if structural_satisfaction_can_skip_verifier(route_result, journal, candidate_answer) {
+        tracing::info!(
+            task_id = %task.task_id,
+            "answer_verifier_skipped_structural_satisfaction"
+        );
+        return None;
     }
     let resolved = match crate::bootstrap::load_required_prompt_template_for_state_with_meta(
         state,
@@ -662,6 +662,15 @@ pub(crate) async fn verify_answer_observe_only(
     Some(validation)
 }
 
+fn structural_satisfaction_can_skip_verifier(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    local_missing_evidence_verifier_gap(route_result, journal).is_none()
+        && structurally_satisfies_answer_contract(route_result, journal, candidate_answer)
+}
+
 pub(crate) fn local_missing_evidence_verifier_gap(
     route_result: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
@@ -752,7 +761,8 @@ mod tests {
 
     use super::{
         execution_evidence_prompt_block, local_missing_evidence_verifier_gap, should_verify_answer,
-        structurally_satisfies_answer_contract, AnswerVerifierOut,
+        structural_satisfaction_can_skip_verifier, structurally_satisfies_answer_contract,
+        AnswerVerifierOut,
     };
 
     fn route_with_mode(ask_mode: crate::AskMode) -> crate::RouteResult {
@@ -918,6 +928,47 @@ mod tests {
         });
 
         assert!(local_missing_evidence_verifier_gap(&route, &journal).is_none());
+    }
+
+    #[test]
+    fn structural_satisfaction_does_not_skip_missing_contract_evidence() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-structural-gap", "ask", "exists?");
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "action": "path_batch_facts",
+                    "facts": [{
+                        "path": "/tmp/a.txt",
+                        "exists": true
+                    }]
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "/tmp/a.txt exists"
+        ));
+        let gap =
+            local_missing_evidence_verifier_gap(&route, &journal).expect("missing kind evidence");
+        assert_eq!(gap.missing_evidence_fields, vec!["kind"]);
+        assert!(!structural_satisfaction_can_skip_verifier(
+            &route,
+            &journal,
+            "/tmp/a.txt exists"
+        ));
     }
 
     #[test]
