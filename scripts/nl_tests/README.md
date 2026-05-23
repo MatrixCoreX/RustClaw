@@ -82,7 +82,7 @@ Client-like continuous regression:
 - Generate or check a lightweight offline regression baseline:
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --write-baseline /tmp/rustclaw-client-like-baseline.jsonl`
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --expectations scripts/nl_tests/expectations/<name>.jsonl`
-  Expectation rows can assert route, planner capability/tool targets, exact planned `skill.action` refs when present in trace, executed tool/skill, structured `error_kind`, failure attribution, contract policy decision, contract match, evidence coverage, verifier approval, finalizer stage/fallback/grounding, final text substrings, and final answer shape without making a new LLM request.
+  Expectation rows can assert route, planner capability/tool targets, exact planned `skill.action` refs when present in trace, executed tool/skill, structured `error_kind`, failure attribution, contract policy decision, contract match, evidence coverage, verifier approval, finalizer stage/fallback/grounding, finalizer answer shape/class, final text substrings, and final answer shape without making a new LLM request.
 - Extract exact replay prompts and expectations from a finished or interrupted client-like run:
   `python3 scripts/nl_tests/extract_client_like_replay.py scripts/nl_suite_logs/client_like_continuous/<run_id> --case-jsonl /tmp/rustclaw-replay.jsonl --expectations /tmp/rustclaw-replay.expectations.jsonl`
   `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-jsonl /tmp/rustclaw-replay.jsonl --quality-guard --prompt-reply-only`

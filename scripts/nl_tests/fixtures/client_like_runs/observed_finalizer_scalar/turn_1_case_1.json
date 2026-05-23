@@ -21,6 +21,10 @@
           "finalizer_summary": {
             "stage": "observed_generic",
             "fallback": "raw_text",
+            "final_answer_shape": "single_path",
+            "final_answer_shape_class": "single_path",
+            "coarse_response_shape": "scalar",
+            "allows_model_language": false,
             "grounded_ok": true,
             "used_evidence_ids_count": 1
           },
