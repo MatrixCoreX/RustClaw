@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde::Deserialize;
 use serde_json::json;
 
@@ -87,6 +89,13 @@ pub(crate) fn structurally_satisfies_answer_contract(
                 candidate_answer,
             );
         }
+        if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::StrictList {
+            return matrix_strict_list_answer_is_grounded_in_successful_observation(
+                route_result,
+                journal,
+                candidate_answer,
+            );
+        }
     }
     if route_requires_single_file_delivery(route_result)
         && candidate_answer_has_grounded_existing_file_token(journal, candidate_answer)
@@ -114,6 +123,207 @@ pub(crate) fn structurally_satisfies_answer_contract(
         return true;
     }
     scalar_answer_is_grounded_in_successful_observation(route_result, journal, candidate_answer)
+}
+
+fn matrix_strict_list_answer_is_grounded_in_successful_observation(
+    _route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    let candidate_items = strict_list_answer_items(candidate_answer);
+    if candidate_items.is_empty() {
+        return false;
+    }
+    let observed_items = observed_strict_list_items(journal);
+    if observed_items.is_empty() {
+        return false;
+    }
+    let observed_variants = observed_items
+        .iter()
+        .flat_map(|item| strict_list_item_variants(item))
+        .collect::<BTreeSet<_>>();
+    let candidate_variants = candidate_items
+        .iter()
+        .flat_map(|item| strict_list_item_variants(item))
+        .collect::<BTreeSet<_>>();
+    candidate_items.iter().all(|item| {
+        strict_list_item_variants(item)
+            .iter()
+            .any(|item| observed_variants.contains(item))
+    }) && observed_items.iter().all(|item| {
+        strict_list_item_variants(item)
+            .iter()
+            .any(|item| candidate_variants.contains(item))
+    })
+}
+
+fn strict_list_answer_items(answer: &str) -> Vec<String> {
+    let mut items = Vec::new();
+    for line in answer.lines() {
+        let line = strip_list_marker(line);
+        if line.is_empty() || line.ends_with(':') || line.ends_with('：') {
+            continue;
+        }
+        let segments = line
+            .split([',', '，'])
+            .map(strip_list_marker)
+            .filter(|item| !item.is_empty())
+            .collect::<Vec<_>>();
+        items.extend(segments);
+    }
+    items.sort_by_key(|item| item.to_ascii_lowercase());
+    items.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    items
+}
+
+fn strip_list_marker(raw: &str) -> String {
+    let mut value = raw
+        .trim()
+        .trim_matches('`')
+        .trim()
+        .trim_start_matches(['-', '*', '•'])
+        .trim()
+        .to_string();
+    if let Some((prefix, rest)) = value.split_once('.') {
+        if prefix.chars().all(|ch| ch.is_ascii_digit()) {
+            value = rest.trim().to_string();
+        }
+    }
+    value.trim_matches('`').trim().to_string()
+}
+
+fn strict_list_item_variants(item: &str) -> Vec<String> {
+    let normalized = normalize_strict_list_item(item);
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+    let mut variants = vec![normalized.clone()];
+    if let Some(file_name) = std::path::Path::new(&normalized)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(normalize_strict_list_item)
+        .filter(|value| !value.is_empty() && value != &normalized)
+    {
+        variants.push(file_name);
+    }
+    variants.sort();
+    variants.dedup();
+    variants
+}
+
+fn normalize_strict_list_item(item: &str) -> String {
+    item.trim()
+        .trim_matches('`')
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn observed_strict_list_items(journal: &crate::task_journal::TaskJournal) -> Vec<String> {
+    let mut items = BTreeSet::new();
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            continue;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
+            continue;
+        };
+        collect_observed_strict_list_items_from_value(&value, &mut items);
+    }
+    items.into_iter().collect()
+}
+
+fn collect_observed_strict_list_items_from_value(
+    value: &serde_json::Value,
+    items: &mut BTreeSet<String>,
+) {
+    push_string_array_values(
+        value,
+        items,
+        &[
+            "keys",
+            "identity_values",
+            "names",
+            "paths",
+            "files",
+            "dirs",
+            "directories",
+            "results",
+            "tables",
+        ],
+    );
+    if let Some(names_by_kind) = value
+        .get("names_by_kind")
+        .and_then(|value| value.as_object())
+    {
+        for child in names_by_kind.values() {
+            push_array_strings(child, items);
+        }
+    }
+    for key in ["entries", "items", "facts", "rows"] {
+        if let Some(array) = value.get(key).and_then(|value| value.as_array()) {
+            for item in array {
+                collect_observed_list_item_object_fields(item, items);
+            }
+        }
+    }
+}
+
+fn push_string_array_values(
+    value: &serde_json::Value,
+    items: &mut BTreeSet<String>,
+    keys: &[&str],
+) {
+    for key in keys {
+        if let Some(child) = value.get(*key) {
+            push_array_strings(child, items);
+        }
+    }
+}
+
+fn push_array_strings(value: &serde_json::Value, items: &mut BTreeSet<String>) {
+    let Some(array) = value.as_array() else {
+        return;
+    };
+    for item in array {
+        if let Some(text) = item.as_str() {
+            push_observed_list_item(text, items);
+        } else {
+            collect_observed_list_item_object_fields(item, items);
+        }
+    }
+}
+
+fn collect_observed_list_item_object_fields(
+    value: &serde_json::Value,
+    items: &mut BTreeSet<String>,
+) {
+    let Some(map) = value.as_object() else {
+        return;
+    };
+    for key in [
+        "name",
+        "path",
+        "resolved_path",
+        "table",
+        "table_name",
+        "identity_value",
+    ] {
+        if let Some(text) = map.get(key).and_then(|value| value.as_str()) {
+            push_observed_list_item(text, items);
+        }
+    }
+}
+
+fn push_observed_list_item(text: &str, items: &mut BTreeSet<String>) {
+    let item = normalize_strict_list_item(text);
+    if !item.is_empty() {
+        items.insert(item);
+    }
 }
 
 fn matrix_scalar_answer_is_grounded_in_successful_observation(
@@ -1260,6 +1470,54 @@ mod tests {
             &route,
             &journal,
             "app, features"
+        ));
+    }
+
+    #[test]
+    fn matrix_strict_list_shape_rejects_unobserved_items() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-matrix-list", "ask", "list files");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "fs_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    json!({
+                        "action": "inventory_dir",
+                        "names_only": true,
+                        "names": ["README.md", "Cargo.toml"],
+                        "entries": [
+                            {"name": "README.md", "kind": "file", "path": "/tmp/repo/README.md"},
+                            {"name": "Cargo.toml", "kind": "file", "path": "/tmp/repo/Cargo.toml"}
+                        ]
+                    })
+                    .to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "- README.md\n- Cargo.toml"
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "- README.md\n- missing.txt"
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "The files are README.md and Cargo.toml."
         ));
     }
 
