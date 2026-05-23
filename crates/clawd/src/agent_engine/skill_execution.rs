@@ -233,6 +233,54 @@ fn contract_matrix_action_policy_error(
     ))
 }
 
+fn contract_matrix_arg_policy_error(
+    loop_state: &LoopState,
+    normalized_skill: &str,
+    exec_args: &Value,
+) -> Option<String> {
+    let policy = crate::contract_matrix::arg_policy_decision(
+        loop_state.output_contract.as_ref(),
+        normalized_skill,
+        exec_args,
+    )?;
+    if policy.is_allowed()
+        || policy.decision == crate::contract_matrix::ArgPolicyDecision::DeferredTemplateArg
+    {
+        return None;
+    }
+    let mut error_text = format!(
+        "action `{}` is missing target binding required by contract `{}`",
+        policy.action_key, policy.contract_match
+    );
+    if !policy.expected_target_args.is_empty() {
+        error_text.push_str(&format!(
+            "; expected target arg(s): {}",
+            policy.expected_target_args.join(", ")
+        ));
+    }
+    Some(crate::skills::structured_skill_error_from_parts(
+        normalized_skill,
+        "contract_arg_rejected",
+        &error_text,
+        None,
+        Some(json!({
+            "failure_attribution": "model_error",
+            "decision": policy.decision.as_str(),
+            "action": policy.action_key,
+            "contract_match": policy.contract_match,
+            "required_evidence": policy.required_evidence,
+            "missing_target_args": policy.missing_target_args,
+            "expected_target_args": policy.expected_target_args,
+            "final_answer_shape": policy.final_answer_shape,
+            "policy_mode": policy.policy_mode,
+            "evidence_scope": policy.evidence_scope,
+            "freshness": policy.freshness,
+            "artifact_kind": policy.artifact_kind,
+            "channel_visibility": policy.channel_visibility,
+        })),
+    ))
+}
+
 fn is_path_like_arg_key(key: &str) -> bool {
     let key = key.trim();
     matches!(
@@ -1435,6 +1483,19 @@ pub(super) async fn execute_prepared_skill_action(
             action_trace_kind,
         ));
     }
+    if let Some(err) = contract_matrix_arg_policy_error(loop_state, normalized_skill, &exec_args) {
+        return Ok(handle_preflight_argument_failure(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            normalized_skill,
+            classification_args,
+            &err,
+            action_trace_kind,
+        ));
+    }
     if let Some(err) = unresolved_runtime_template_argument_error(
         normalized_skill,
         &exec_args,
@@ -1603,10 +1664,10 @@ mod tests {
 
     use super::{
         build_auto_sudo_retry_args, contains_unresolved_runtime_template_arg,
-        contract_matrix_action_policy_error, handle_skill_step_failure, handle_skill_step_success,
-        preflight_failure_metadata, skill_extra_requests_user_input,
-        structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
-        AgentLoopGuardPolicy, LoopState,
+        contract_matrix_action_policy_error, contract_matrix_arg_policy_error,
+        handle_skill_step_failure, handle_skill_step_success, preflight_failure_metadata,
+        skill_extra_requests_user_input, structured_observation_path_argument_error,
+        unresolved_runtime_template_argument_error, AgentLoopGuardPolicy, LoopState,
     };
     use crate::{
         AgentRuntimeConfig, AppState, ClaimedTask, SkillViewsSnapshot, ToolsPolicy,
@@ -1787,6 +1848,62 @@ mod tests {
         let metadata = preflight_failure_metadata(&err);
         assert_eq!(metadata.reason, "contract_action_rejected");
         assert_eq!(metadata.error_kind, "contract_action_rejected");
+    }
+
+    #[test]
+    fn contract_matrix_preflight_rejects_missing_bound_target_arg() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.output_contract = Some(crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+            requires_content_evidence: true,
+            locator_kind: crate::OutputLocatorKind::Path,
+            ..crate::IntentOutputContract::default()
+        });
+        let args = serde_json::json!({
+            "action": "read_text_range",
+            "start_line": 1,
+            "end_line": 20
+        });
+
+        let err = contract_matrix_arg_policy_error(&loop_state, "fs_basic", &args)
+            .expect("contract arg policy should reject missing path");
+        let parsed = crate::skills::parse_structured_skill_error(&err)
+            .expect("contract arg policy error should be structured");
+
+        assert_eq!(parsed.error_kind, "contract_arg_rejected");
+        assert!(parsed.error_text.contains("expected target arg(s): path"));
+        assert_eq!(
+            parsed
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("decision")),
+            Some(&serde_json::json!("missing_target_binding"))
+        );
+        assert_eq!(
+            parsed
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("failure_attribution")),
+            Some(&serde_json::json!("model_error"))
+        );
+    }
+
+    #[test]
+    fn contract_matrix_preflight_defers_template_target_to_runtime_placeholder_check() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.output_contract = Some(crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+            requires_content_evidence: true,
+            locator_kind: crate::OutputLocatorKind::Path,
+            ..crate::IntentOutputContract::default()
+        });
+        let args = serde_json::json!({
+            "action": "read_text_range",
+            "path": "{{s1.path}}"
+        });
+
+        assert!(contract_matrix_arg_policy_error(&loop_state, "fs_basic", &args).is_none());
+        assert!(unresolved_runtime_template_argument_error("fs_basic", &args, &args).is_some());
     }
 
     #[test]
