@@ -400,6 +400,7 @@ fn next_requested_capability(
 fn step_trace_json(
     step: &TaskJournalStepTrace,
     requested: Option<&RequestedPlanCapability>,
+    route: Option<&crate::RouteResult>,
 ) -> Value {
     let structured_error = step
         .error_excerpt
@@ -419,12 +420,38 @@ fn step_trace_json(
         "error_kind": structured_error.as_ref().map(|value| value.error_kind.as_str()),
         "failure_attribution": failure_attribution.as_deref(),
         "contract_policy": contract_policy,
+        "contract": step_contract_trace_json(route, requested),
         "output_excerpt": step.output_excerpt.as_deref(),
         "observed_evidence": observed_evidence_for_step_trace(step),
         "error_excerpt": step.error_excerpt.as_deref(),
         "started_at": step.started_at,
         "finished_at": step.finished_at,
     })
+}
+
+fn step_contract_trace_json(
+    route: Option<&crate::RouteResult>,
+    requested: Option<&RequestedPlanCapability>,
+) -> Option<Value> {
+    let route = route?;
+    let contract = crate::contract_matrix::trace_snapshot_for_route(route)?;
+    let requested_action_ref = requested.and_then(|value| value.action_ref.as_deref());
+    let action_policy = requested_action_ref.and_then(|action_ref| {
+        crate::contract_matrix::action_trace_for_output_contract(&route.output_contract, action_ref)
+    });
+    Some(json!({
+        "contract_match": contract.get("contract_match").and_then(Value::as_str),
+        "semantic_kind": contract.get("semantic_kind").and_then(Value::as_str),
+        "policy_mode": contract.get("policy_mode").and_then(Value::as_str),
+        "required_evidence": contract.get("required_evidence").cloned(),
+        "evidence_expression": contract.get("evidence_expression").cloned(),
+        "final_answer_shape": contract.get("final_answer_shape").and_then(Value::as_str),
+        "final_answer_shape_class": contract.get("final_answer_shape_class").and_then(Value::as_str),
+        "coarse_response_shape": contract.get("coarse_response_shape").and_then(Value::as_str),
+        "allows_model_language": contract.get("allows_model_language").and_then(Value::as_bool),
+        "requested_action_ref": requested_action_ref,
+        "action_policy": action_policy,
+    }))
 }
 
 pub(crate) fn observed_evidence_for_step_trace(step: &TaskJournalStepTrace) -> Option<Value> {
@@ -1436,7 +1463,7 @@ impl TaskJournal {
             }).collect::<Vec<_>>(),
             "step_results": self.step_results.iter().map(|step| {
                 let requested = next_requested_capability(&mut requested_by_step_id, &step.step_id);
-                step_trace_json(step, requested.as_ref())
+                step_trace_json(step, requested.as_ref(), self.route_result.as_ref())
             }).collect::<Vec<_>>(),
             "task_observations": self.task_observations.clone(),
             "finalizer_summary": self
@@ -2409,5 +2436,93 @@ mod tests {
             .and_then(|value| value.get("hash"))
             .and_then(Value::as_str)
             .is_some_and(|hash| !hash.is_empty()));
+    }
+
+    #[test]
+    fn step_trace_includes_contract_and_action_policy_for_success() {
+        let mut journal = TaskJournal::for_task("task-step-contract", "ask", "列出文件名");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::FileNames,
+            requires_content_evidence: true,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.record_plan_result(&crate::PlanResult {
+            goal: "list file names".to_string(),
+            missing_slots: Vec::new(),
+            needs_confirmation: false,
+            steps: vec![crate::PlanStep {
+                step_id: "step_1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({"action": "list_dir", "path": "."}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }],
+            planner_notes: String::new(),
+            plan_kind: crate::PlanKind::Single,
+            raw_plan_text: String::new(),
+        });
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(json!({"items": [{"path": "README.md"}]}).to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let trace = journal.to_trace_json();
+        let step_contract = trace
+            .pointer("/step_results/0/contract")
+            .expect("step contract trace should be present");
+
+        assert_eq!(
+            step_contract.get("contract_match").and_then(Value::as_str),
+            Some("file_names")
+        );
+        assert_eq!(
+            step_contract
+                .get("final_answer_shape")
+                .and_then(Value::as_str),
+            Some("name_list")
+        );
+        assert_eq!(
+            step_contract
+                .get("action_policy")
+                .and_then(|value| value.get("decision"))
+                .and_then(Value::as_str),
+            Some("allowed")
+        );
+        assert_eq!(
+            step_contract
+                .get("action_policy")
+                .and_then(|value| value.get("action_ref"))
+                .and_then(Value::as_str),
+            Some("fs_basic.list_dir")
+        );
+        assert!(trace
+            .pointer("/step_results/0/observed_evidence/items")
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty()));
     }
 }
