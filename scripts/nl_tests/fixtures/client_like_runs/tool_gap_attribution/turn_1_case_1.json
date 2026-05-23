@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "data": {
+    "task_id": "fixture-tool-gap-attribution",
+    "status": "failed",
+    "result_json": {
+      "text": "No registered tool can provide the required evidence for this structured task.",
+      "messages": [
+        "No registered tool can provide the required evidence for this structured task."
+      ],
+      "task_journal": {
+        "summary": {
+          "input_text": "Use a missing structured capability",
+          "final_status": "failure",
+          "final_answer": "No registered tool can provide the required evidence for this structured task."
+        },
+        "trace": {
+          "rounds": [],
+          "step_results": [
+            {
+              "step_id": "step_1",
+              "executed_skill": "capability_resolver",
+              "status": "error",
+              "error_kind": "capability_unavailable",
+              "failure_attribution": "tool_gap",
+              "error_excerpt": "fixture capability unavailable"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "error": null
+}
