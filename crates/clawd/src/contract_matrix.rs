@@ -1920,6 +1920,36 @@ mod tests {
     }
 
     #[test]
+    fn contract_matrix_action_refs_have_registry_schemas() {
+        let matrix = load_workspace_matrix();
+        let registry_path = workspace_root().join("configs/skills_registry.toml");
+        let registry = SkillsRegistry::load_from_path(&registry_path).expect("load registry");
+        let mut missing = Vec::new();
+
+        for token in matrix.all_action_tokens() {
+            let Some(action_ref) = ActionRef::parse(&token) else {
+                continue;
+            };
+            let Some(skill) = registry.resolve_canonical(&action_ref.skill) else {
+                continue;
+            };
+            let Some(manifest) = registry.manifest(skill) else {
+                continue;
+            };
+            if manifest.input_schema.is_none() {
+                missing.push(format!("{}.input_schema", action_ref.skill));
+            }
+            if manifest.output_schema.is_none() {
+                missing.push(format!("{}.output_schema", action_ref.skill));
+            }
+        }
+        missing.sort();
+        missing.dedup();
+
+        assert!(missing.is_empty(), "missing registry schemas: {missing:?}");
+    }
+
+    #[test]
     fn contract_matrix_main_contracts_do_not_reference_backing_tools() {
         let matrix = load_workspace_matrix();
 
