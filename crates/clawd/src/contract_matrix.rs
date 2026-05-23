@@ -159,6 +159,76 @@ impl EvidenceExpression {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum EvidenceToken {
+    Candidates,
+    CommandOutput,
+    ContentExcerpt,
+    ContentMatch,
+    Count,
+    Exists,
+    ExistsFalse,
+    ExistsTrue,
+    FieldValue,
+    Kind,
+    Path,
+    SizeBytes,
+}
+
+impl EvidenceToken {
+    #[cfg(test)]
+    pub(crate) const ALL: &'static [Self] = &[
+        Self::Candidates,
+        Self::CommandOutput,
+        Self::ContentExcerpt,
+        Self::ContentMatch,
+        Self::Count,
+        Self::Exists,
+        Self::ExistsFalse,
+        Self::ExistsTrue,
+        Self::FieldValue,
+        Self::Kind,
+        Self::Path,
+        Self::SizeBytes,
+    ];
+
+    pub(crate) fn parse(raw: &str) -> Option<Self> {
+        match normalize_action_token(raw).as_str() {
+            "candidates" => Some(Self::Candidates),
+            "command_output" => Some(Self::CommandOutput),
+            "content_excerpt" => Some(Self::ContentExcerpt),
+            "content_match" => Some(Self::ContentMatch),
+            "count" => Some(Self::Count),
+            "exists" => Some(Self::Exists),
+            "exists_false" => Some(Self::ExistsFalse),
+            "exists_true" => Some(Self::ExistsTrue),
+            "field_value" => Some(Self::FieldValue),
+            "kind" => Some(Self::Kind),
+            "path" => Some(Self::Path),
+            "size_bytes" => Some(Self::SizeBytes),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Candidates => "candidates",
+            Self::CommandOutput => "command_output",
+            Self::ContentExcerpt => "content_excerpt",
+            Self::ContentMatch => "content_match",
+            Self::Count => "count",
+            Self::Exists => "exists",
+            Self::ExistsFalse => "exists_false",
+            Self::ExistsTrue => "exists_true",
+            Self::FieldValue => "field_value",
+            Self::Kind => "kind",
+            Self::Path => "path",
+            Self::SizeBytes => "size_bytes",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub(crate) struct MatrixContract {
@@ -710,8 +780,22 @@ impl ContractMatrix {
                         ));
                     }
                     let required = contract.normalized_required_evidence();
+                    for field in &required {
+                        if EvidenceToken::parse(field).is_none() {
+                            errors.push(format!(
+                                "contract `{key}` has unknown required_evidence `{field}`"
+                            ));
+                        }
+                    }
                     if !required.is_empty() && contract.evidence_expression().is_empty() {
                         errors.push(format!("contract `{key}` missing evidence_expression"));
+                    }
+                    for token in evidence_expression_tokens(&contract.evidence_expression) {
+                        if EvidenceToken::parse(&token).is_none() {
+                            errors.push(format!(
+                                "contract `{key}` has unknown evidence_expression token `{token}`"
+                            ));
+                        }
                     }
                     if !required.is_empty() && contract.observation_sources().is_empty() {
                         errors.push(format!("contract `{key}` missing observation_sources"));
@@ -747,11 +831,27 @@ impl ContractMatrix {
                 ));
             }
             let required = profile.normalized_required_evidence();
+            for field in &required {
+                if EvidenceToken::parse(field).is_none() {
+                    errors.push(format!(
+                        "generic profile `{}` has unknown required_evidence `{field}`",
+                        profile.name
+                    ));
+                }
+            }
             if !required.is_empty() && profile.evidence_expression().is_empty() {
                 errors.push(format!(
                     "generic profile `{}` missing evidence_expression",
                     profile.name
                 ));
+            }
+            for token in evidence_expression_tokens(&profile.evidence_expression) {
+                if EvidenceToken::parse(&token).is_none() {
+                    errors.push(format!(
+                        "generic profile `{}` has unknown evidence_expression token `{token}`",
+                        profile.name
+                    ));
+                }
             }
             if !required.is_empty() && profile.observation_sources().is_empty() {
                 errors.push(format!(
@@ -1158,6 +1258,23 @@ fn normalized_tokens(values: &[String]) -> Vec<String> {
         .collect()
 }
 
+fn evidence_expression_tokens(expression: &EvidenceExpression) -> Vec<String> {
+    let mut tokens = BTreeSet::new();
+    for value in expression
+        .all_of
+        .iter()
+        .chain(expression.one_of.iter())
+        .chain(expression.any_of.iter())
+        .chain(expression.negative_evidence.iter())
+    {
+        let normalized = normalize_action_token(value);
+        if !normalized.is_empty() {
+            tokens.insert(normalized);
+        }
+    }
+    tokens.into_iter().collect()
+}
+
 fn normalize_action_token(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
@@ -1478,6 +1595,44 @@ mod tests {
             assert_eq!(
                 FinalAnswerShape::parse(shape).map(FinalAnswerShape::as_str),
                 Some(shape)
+            );
+        }
+    }
+
+    #[test]
+    fn contract_matrix_evidence_tokens_are_typed() {
+        let matrix = load_workspace_matrix();
+        let mut configured = BTreeSet::new();
+
+        for contract in matrix.contracts.values() {
+            configured.extend(
+                contract
+                    .normalized_required_evidence()
+                    .into_iter()
+                    .filter(|field| !field.is_empty()),
+            );
+            configured.extend(evidence_expression_tokens(&contract.evidence_expression));
+        }
+        for profile in &matrix.generic_profiles {
+            configured.extend(
+                profile
+                    .normalized_required_evidence()
+                    .into_iter()
+                    .filter(|field| !field.is_empty()),
+            );
+            configured.extend(evidence_expression_tokens(&profile.evidence_expression));
+        }
+
+        let typed = EvidenceToken::ALL
+            .iter()
+            .map(|token| token.as_str().to_string())
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(configured, typed);
+        for token in configured {
+            assert_eq!(
+                EvidenceToken::parse(&token).map(EvidenceToken::as_str),
+                Some(token.as_str())
             );
         }
     }
