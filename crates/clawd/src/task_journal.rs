@@ -5,6 +5,8 @@ use serde_json::{json, Value};
 const MAX_OBSERVED_EVIDENCE_ITEMS: usize = 24;
 const MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS: usize = 240;
 const MAX_OBSERVED_EVIDENCE_KEYS: usize = 16;
+const MAX_OBSERVED_EVIDENCE_DEPTH: usize = 3;
+const MAX_OBSERVED_ARRAY_SAMPLES: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskJournalFinalStatus {
@@ -446,6 +448,9 @@ fn collect_json_observed_evidence(
     value: &Value,
     depth: usize,
 ) {
+    if depth > MAX_OBSERVED_EVIDENCE_DEPTH {
+        return;
+    }
     match value {
         Value::Object(map) => {
             if depth > 0 {
@@ -458,14 +463,39 @@ fn collect_json_observed_evidence(
                     format!("{prefix}.{key}")
                 };
                 collector.push(json_observed_evidence_item(source, &field, child));
-                if depth == 0 && key == "extra" && child.is_object() {
+                if depth < MAX_OBSERVED_EVIDENCE_DEPTH
+                    && matches!(child, Value::Object(_) | Value::Array(_))
+                {
+                    let child_source = if depth == 0 && key == "extra" {
+                        "json_output.extra"
+                    } else {
+                        source
+                    };
                     collect_json_observed_evidence(
                         collector,
-                        "json_output.extra",
+                        child_source,
                         &field,
                         child,
-                        1,
+                        depth + 1,
                     );
+                }
+            }
+        }
+        Value::Array(items) => {
+            if depth == 0 || prefix.is_empty() {
+                collector.push(json_observed_evidence_item(source, "value", value));
+            }
+            for (idx, child) in items.iter().take(MAX_OBSERVED_ARRAY_SAMPLES).enumerate() {
+                let field = if prefix.is_empty() {
+                    format!("[{idx}]")
+                } else {
+                    format!("{prefix}[{idx}]")
+                };
+                collector.push(json_observed_evidence_item(source, &field, child));
+                if depth < MAX_OBSERVED_EVIDENCE_DEPTH
+                    && matches!(child, Value::Object(_) | Value::Array(_))
+                {
+                    collect_json_observed_evidence(collector, source, &field, child, depth + 1);
                 }
             }
         }
@@ -1821,6 +1851,71 @@ mod tests {
                 .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
             Some(vec!["kind"])
         );
+    }
+
+    #[test]
+    fn trace_json_counts_nested_builtin_tool_evidence() {
+        let mut journal = TaskJournal::for_task("task-nested-evidence", "ask", "这个路径是否存在");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
+            locator_kind: crate::OutputLocatorKind::Path,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "action": "path_batch_facts",
+                    "facts": [{
+                        "path": "/tmp/present.txt",
+                        "exists": true,
+                        "kind": "file"
+                    }]
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let trace = journal.to_trace_json();
+        let coverage = trace
+            .get("evidence_coverage")
+            .expect("evidence coverage should be present");
+        assert_eq!(
+            coverage
+                .get("missing_evidence")
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+            Some(Vec::<&str>::new())
+        );
+        assert!(coverage
+            .get("observed_fields")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items
+                .iter()
+                .any(|item| item.as_str() == Some("facts[0].path"))));
     }
 
     #[test]
