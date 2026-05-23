@@ -1759,7 +1759,7 @@ fn normalize_action_token(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 
-fn fnv1a_hex(input: &str) -> String {
+pub(crate) fn fnv1a_hex(input: &str) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in input.as_bytes() {
         hash ^= u64::from(*byte);
