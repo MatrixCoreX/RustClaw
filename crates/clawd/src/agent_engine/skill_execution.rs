@@ -224,6 +224,11 @@ fn contract_matrix_action_policy_error(
             "preferred_actions": policy.preferred_actions,
             "evidence_expression": evidence_expression,
             "final_answer_shape": policy.final_answer_shape,
+            "policy_mode": policy.policy_mode,
+            "evidence_scope": policy.evidence_scope,
+            "freshness": policy.freshness,
+            "artifact_kind": policy.artifact_kind,
+            "channel_visibility": policy.channel_visibility,
         })),
     ))
 }

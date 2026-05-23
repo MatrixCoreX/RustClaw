@@ -236,6 +236,11 @@ pub(crate) struct MatrixContract {
     pub(crate) operation: String,
     pub(crate) target_object: String,
     pub(crate) delivery_shape: String,
+    pub(crate) policy_mode: String,
+    pub(crate) evidence_scope: String,
+    pub(crate) freshness: String,
+    pub(crate) artifact_kind: String,
+    pub(crate) channel_visibility: String,
     pub(crate) allowed_actions: Vec<String>,
     pub(crate) preferred_actions: Vec<String>,
     pub(crate) forbidden_actions: Vec<String>,
@@ -266,6 +271,33 @@ impl MatrixContract {
             configured
         }
     }
+
+    fn policy_mode(&self) -> String {
+        normalized_contract_field(&self.policy_mode, "enforce")
+    }
+
+    fn evidence_scope(&self) -> String {
+        normalized_contract_field(&self.evidence_scope, "current_task")
+    }
+
+    fn freshness(&self) -> String {
+        normalized_contract_field(&self.freshness, "current_task")
+    }
+
+    fn artifact_kind(&self) -> String {
+        if !self.artifact_kind.trim().is_empty() {
+            return normalized_contract_field(&self.artifact_kind, "text");
+        }
+        if normalize_action_token(&self.final_answer_shape) == "delivery_token_or_path" {
+            "file".to_string()
+        } else {
+            "text".to_string()
+        }
+    }
+
+    fn channel_visibility(&self) -> String {
+        normalized_contract_field(&self.channel_visibility, "user_visible")
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -277,6 +309,11 @@ pub(crate) struct GenericProfile {
     pub(crate) delivery_required: Option<bool>,
     pub(crate) response_shapes: Vec<String>,
     pub(crate) locator_kinds: Vec<String>,
+    pub(crate) policy_mode: String,
+    pub(crate) evidence_scope: String,
+    pub(crate) freshness: String,
+    pub(crate) artifact_kind: String,
+    pub(crate) channel_visibility: String,
     pub(crate) allowed_actions: Vec<String>,
     pub(crate) preferred_actions: Vec<String>,
     pub(crate) forbidden_actions: Vec<String>,
@@ -332,6 +369,35 @@ impl GenericProfile {
         } else {
             configured
         }
+    }
+
+    fn policy_mode(&self) -> String {
+        normalized_contract_field(&self.policy_mode, "enforce")
+    }
+
+    fn evidence_scope(&self) -> String {
+        normalized_contract_field(&self.evidence_scope, "current_task")
+    }
+
+    fn freshness(&self) -> String {
+        normalized_contract_field(&self.freshness, "current_task")
+    }
+
+    fn artifact_kind(&self) -> String {
+        if !self.artifact_kind.trim().is_empty() {
+            return normalized_contract_field(&self.artifact_kind, "text");
+        }
+        if self.delivery_required.unwrap_or(false)
+            || normalize_action_token(&self.final_answer_shape) == "delivery_token_or_path"
+        {
+            "file".to_string()
+        } else {
+            "text".to_string()
+        }
+    }
+
+    fn channel_visibility(&self) -> String {
+        normalized_contract_field(&self.channel_visibility, "user_visible")
     }
 }
 
@@ -620,6 +686,41 @@ impl<'a> MatchedContract<'a> {
         }
     }
 
+    fn policy_mode(&self) -> String {
+        match self {
+            Self::Semantic(contract) => contract.policy_mode(),
+            Self::Generic(profile) => profile.policy_mode(),
+        }
+    }
+
+    fn evidence_scope(&self) -> String {
+        match self {
+            Self::Semantic(contract) => contract.evidence_scope(),
+            Self::Generic(profile) => profile.evidence_scope(),
+        }
+    }
+
+    fn freshness(&self) -> String {
+        match self {
+            Self::Semantic(contract) => contract.freshness(),
+            Self::Generic(profile) => profile.freshness(),
+        }
+    }
+
+    fn artifact_kind(&self) -> String {
+        match self {
+            Self::Semantic(contract) => contract.artifact_kind(),
+            Self::Generic(profile) => profile.artifact_kind(),
+        }
+    }
+
+    fn channel_visibility(&self) -> String {
+        match self {
+            Self::Semantic(contract) => contract.channel_visibility(),
+            Self::Generic(profile) => profile.channel_visibility(),
+        }
+    }
+
     fn match_name(&self) -> &str {
         match self {
             Self::Semantic(contract) => contract.semantic_kind.as_str(),
@@ -800,6 +901,15 @@ impl ContractMatrix {
                     if !required.is_empty() && contract.observation_sources().is_empty() {
                         errors.push(format!("contract `{key}` missing observation_sources"));
                     }
+                    validate_contract_runtime_fields(
+                        &mut errors,
+                        &format!("contract `{key}`"),
+                        &contract.policy_mode,
+                        &contract.evidence_scope,
+                        &contract.freshness,
+                        &contract.artifact_kind,
+                        &contract.channel_visibility,
+                    );
                 }
                 None => errors.push(format!("missing contract for semantic `{key}`")),
             }
@@ -859,6 +969,15 @@ impl ContractMatrix {
                     profile.name
                 ));
             }
+            validate_contract_runtime_fields(
+                &mut errors,
+                &format!("generic profile `{}`", profile.name),
+                &profile.policy_mode,
+                &profile.evidence_scope,
+                &profile.freshness,
+                &profile.artifact_kind,
+                &profile.channel_visibility,
+            );
         }
         errors
     }
@@ -891,6 +1010,16 @@ impl ContractMatrix {
                     .evidence_expression
                     .stable_key(&contract.normalized_required_evidence()),
             );
+            input.push(':');
+            input.push_str(&contract.policy_mode());
+            input.push(':');
+            input.push_str(&contract.evidence_scope());
+            input.push(':');
+            input.push_str(&contract.freshness());
+            input.push(':');
+            input.push_str(&contract.artifact_kind());
+            input.push(':');
+            input.push_str(&contract.channel_visibility());
         }
         for profile in &self.generic_profiles {
             input.push('|');
@@ -912,6 +1041,16 @@ impl ContractMatrix {
                     .evidence_expression
                     .stable_key(&profile.normalized_required_evidence()),
             );
+            input.push(':');
+            input.push_str(&profile.policy_mode());
+            input.push(':');
+            input.push_str(&profile.evidence_scope());
+            input.push(':');
+            input.push_str(&profile.freshness());
+            input.push(':');
+            input.push_str(&profile.artifact_kind());
+            input.push(':');
+            input.push_str(&profile.channel_visibility());
         }
         fnv1a_hex(&input)
     }
@@ -993,6 +1132,11 @@ pub(crate) struct ContractActionPolicy {
     pub(crate) final_answer_shape_kind: FinalAnswerShape,
     pub(crate) final_answer_shape: String,
     pub(crate) evidence_expression: EvidenceExpression,
+    pub(crate) policy_mode: String,
+    pub(crate) evidence_scope: String,
+    pub(crate) freshness: String,
+    pub(crate) artifact_kind: String,
+    pub(crate) channel_visibility: String,
 }
 
 impl ContractActionPolicy {
@@ -1172,6 +1316,11 @@ pub(crate) fn trace_snapshot_for_output_contract(
         "requires_content_evidence": output_contract.requires_content_evidence,
         "delivery_required": output_contract.delivery_required,
         "contract_match": matched.match_name(),
+        "policy_mode": matched.policy_mode(),
+        "evidence_scope": matched.evidence_scope(),
+        "freshness": matched.freshness(),
+        "artifact_kind": matched.artifact_kind(),
+        "channel_visibility": matched.channel_visibility(),
         "required_evidence": required_evidence_for_output_contract(output_contract)
             .unwrap_or_else(|| matched.required_evidence()),
         "evidence_expression": matched
@@ -1213,6 +1362,11 @@ pub(crate) fn action_policy_for_output_contract(
         final_answer_shape_kind,
         final_answer_shape: final_answer_shape_kind.as_str().to_string(),
         evidence_expression: matched.evidence_expression(),
+        policy_mode: matched.policy_mode(),
+        evidence_scope: matched.evidence_scope(),
+        freshness: matched.freshness(),
+        artifact_kind: matched.artifact_kind(),
+        channel_visibility: matched.channel_visibility(),
     })
 }
 
@@ -1314,6 +1468,92 @@ fn normalized_tokens(values: &[String]) -> Vec<String> {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
+}
+
+fn normalized_contract_field(value: &str, default: &str) -> String {
+    let normalized = normalize_action_token(value);
+    if normalized.is_empty() {
+        default.to_string()
+    } else {
+        normalized
+    }
+}
+
+fn validate_contract_field(
+    errors: &mut Vec<String>,
+    context: &str,
+    field: &str,
+    raw: &str,
+    default: &str,
+    allowed: &[&str],
+) {
+    let value = normalized_contract_field(raw, default);
+    if !allowed.contains(&value.as_str()) {
+        errors.push(format!("{context} has invalid {field} `{raw}`"));
+    }
+}
+
+fn validate_contract_runtime_fields(
+    errors: &mut Vec<String>,
+    context: &str,
+    policy_mode: &str,
+    evidence_scope: &str,
+    freshness: &str,
+    artifact_kind: &str,
+    channel_visibility: &str,
+) {
+    validate_contract_field(
+        errors,
+        context,
+        "policy_mode",
+        policy_mode,
+        "enforce",
+        &["observe", "enforce"],
+    );
+    validate_contract_field(
+        errors,
+        context,
+        "evidence_scope",
+        evidence_scope,
+        "current_task",
+        &[
+            "current_step",
+            "current_task",
+            "active_task",
+            "conversation",
+            "long_term_memory",
+        ],
+    );
+    validate_contract_field(
+        errors,
+        context,
+        "freshness",
+        freshness,
+        "current_task",
+        &[
+            "realtime",
+            "current_task",
+            "active_task",
+            "conversation",
+            "long_term_memory",
+        ],
+    );
+    validate_contract_field(
+        errors,
+        context,
+        "artifact_kind",
+        artifact_kind,
+        "text",
+        &["text", "file", "image", "audio", "url"],
+    );
+    validate_contract_field(
+        errors,
+        context,
+        "channel_visibility",
+        channel_visibility,
+        "user_visible",
+        &["user_visible", "trace_only"],
+    );
 }
 
 fn evidence_expression_tokens(expression: &EvidenceExpression) -> Vec<String> {
@@ -1637,6 +1877,26 @@ matrix_version = "broken"
             Some("provider_safe_redacted")
         );
         assert_eq!(
+            snapshot.get("policy_mode").and_then(Value::as_str),
+            Some("enforce")
+        );
+        assert_eq!(
+            snapshot.get("evidence_scope").and_then(Value::as_str),
+            Some("current_task")
+        );
+        assert_eq!(
+            snapshot.get("freshness").and_then(Value::as_str),
+            Some("current_task")
+        );
+        assert_eq!(
+            snapshot.get("artifact_kind").and_then(Value::as_str),
+            Some("text")
+        );
+        assert_eq!(
+            snapshot.get("channel_visibility").and_then(Value::as_str),
+            Some("user_visible")
+        );
+        assert_eq!(
             snapshot
                 .get("evidence_expression")
                 .and_then(|value| value.get("all_of"))
@@ -1651,6 +1911,71 @@ matrix_version = "broken"
             .is_some_and(|items| items
                 .iter()
                 .any(|item| item.as_str() == Some("fs_basic.list_dir"))));
+    }
+
+    #[test]
+    fn generic_delivery_snapshot_defaults_to_file_artifact() {
+        let snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::None,
+            delivery_required: true,
+            ..IntentOutputContract::default()
+        })
+        .expect("trace snapshot");
+
+        assert_eq!(
+            snapshot.get("contract_match").and_then(Value::as_str),
+            Some("generic_delivery")
+        );
+        assert_eq!(
+            snapshot.get("artifact_kind").and_then(Value::as_str),
+            Some("file")
+        );
+    }
+
+    #[test]
+    fn contract_runtime_fields_are_validated() {
+        let err = parse_contract_matrix_source(
+            r#"
+schema_version = 1
+matrix_version = "invalid-runtime-field"
+failure_attribution = [
+  "model_error",
+  "schema_error",
+  "code_gap",
+  "contract_gap",
+  "tool_gap",
+  "permission_denied",
+  "budget_exhausted",
+  "prompt_budget_error",
+  "delivery_error",
+  "provider_error",
+]
+
+[trace_policy]
+evidence_storage = "redacted_excerpt_hash"
+provider_evidence_view = "provider_safe_redacted"
+raw_excerpt_policy = "no_full_raw_excerpt"
+max_items = 24
+max_excerpt_chars = 240
+
+[contracts.none]
+semantic_kind = "none"
+operation = "unknown"
+target_object = "unknown"
+delivery_shape = "summary"
+policy_mode = "maybe"
+allowed_actions = []
+preferred_actions = []
+forbidden_actions = []
+required_evidence = []
+final_answer_shape = "free"
+none_passthrough = true
+failure_policy = "no_retry"
+"#,
+        )
+        .expect_err("invalid runtime field should fail shape validation");
+
+        assert!(err.contains("invalid policy_mode"));
     }
 
     #[test]
