@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "data": {
+    "task_id": "fixture-prompt-budget-error-attribution",
+    "status": "failed",
+    "result_json": {
+      "text": "The task was stopped because the required contract block could not fit safely in the prompt budget.",
+      "messages": [
+        "The task was stopped because the required contract block could not fit safely in the prompt budget."
+      ],
+      "task_journal": {
+        "summary": {
+          "input_text": "Run a structured task with an oversized prompt context",
+          "final_status": "failure",
+          "final_stop_signal": "prompt_budget_error",
+          "final_failure_attribution": "prompt_budget_error",
+          "final_answer": "The task was stopped because the required contract block could not fit safely in the prompt budget."
+        },
+        "trace": {
+          "final_stop_signal": "prompt_budget_error",
+          "final_failure_attribution": "prompt_budget_error",
+          "rounds": [],
+          "step_results": []
+        }
+      }
+    }
+  },
+  "error": null
+}

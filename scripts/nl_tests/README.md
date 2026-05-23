@@ -7,6 +7,7 @@ All natural-language test scripts are centralized in this directory.
 Primary entry point:
 
 - `bash scripts/nl_tests/run_suite.sh --list`
+- `bash scripts/nl_tests/run_suite.sh contract_matrix_offline`
 - `bash scripts/nl_tests/run_suite.sh runtime_capability_boundary`
 - `bash scripts/nl_tests/run_suite.sh manual`
 - `bash scripts/nl_tests/run_suite.sh compound_single`
@@ -56,6 +57,8 @@ the structured-contract migration instead of expanded with more phrases.
 
 Client-like continuous regression:
 
+- Run the offline contract-matrix regression suite, including generator checks and attribution fixtures:
+  `bash scripts/nl_tests/run_suite.sh contract_matrix_offline`
 - Generate 100 deterministic contract-matrix seed cases without calling a model:
   `python3 scripts/nl_tests/generate_contract_matrix_cases.py --count 100 --check --report > /tmp/rustclaw-contract-cases.jsonl`
   Use `--batch N` to rotate the non-mandatory cases while preserving semantic/generic, phase, policy-decision, evidence-expression, and final-answer-shape coverage.
@@ -104,6 +107,14 @@ Client-like continuous regression:
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/contract_rejection_attribution --expectations scripts/nl_tests/expectations/contract_rejection_attribution_fixture.jsonl`
 - Offline budget-exhausted attribution fixture smoke:
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/budget_exhausted_attribution --expectations scripts/nl_tests/expectations/budget_exhausted_attribution_fixture.jsonl`
+- Offline code-gap/permission/schema/tool/provider/delivery/prompt-budget attribution fixture smoke:
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/code_gap_attribution --expectations scripts/nl_tests/expectations/code_gap_attribution_fixture.jsonl`
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/permission_denied_attribution --expectations scripts/nl_tests/expectations/permission_denied_attribution_fixture.jsonl`
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/schema_error_attribution --expectations scripts/nl_tests/expectations/schema_error_attribution_fixture.jsonl`
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/tool_gap_attribution --expectations scripts/nl_tests/expectations/tool_gap_attribution_fixture.jsonl`
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/provider_error_attribution --expectations scripts/nl_tests/expectations/provider_error_attribution_fixture.jsonl`
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/delivery_error_attribution --expectations scripts/nl_tests/expectations/delivery_error_attribution_fixture.jsonl`
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_tests/fixtures/client_like_runs/prompt_budget_error_attribution --expectations scripts/nl_tests/expectations/prompt_budget_error_attribution_fixture.jsonl`
 
 Self-extension regressions:
 

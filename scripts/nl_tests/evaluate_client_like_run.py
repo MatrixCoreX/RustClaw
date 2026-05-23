@@ -278,6 +278,20 @@ def collect_step_string_field(trace: dict[str, Any], field: str) -> list[str]:
     return values
 
 
+def collect_task_observation_string_field(trace: dict[str, Any], field: str) -> list[str]:
+    values: list[str] = []
+    observations = trace.get("task_observations")
+    if not isinstance(observations, list):
+        return values
+    for observation in observations:
+        if not isinstance(observation, dict):
+            continue
+        value = observation.get(field)
+        if isinstance(value, str) and value.strip():
+            values.append(value.strip())
+    return values
+
+
 def collect_contract_policy_decisions(trace: dict[str, Any]) -> list[str]:
     values: list[str] = []
     steps = trace.get("step_results")
@@ -380,9 +394,17 @@ def observe_file(path: Path) -> Observation:
         plan_action_refs=collect_plan_action_refs(trace if isinstance(trace, dict) else {}),
         requested_action_refs=collect_requested_action_refs(trace if isinstance(trace, dict) else {}),
         executed=collect_executed(trace if isinstance(trace, dict) else {}),
-        error_kinds=collect_step_string_field(trace if isinstance(trace, dict) else {}, "error_kind"),
-        failure_attributions=collect_step_string_field(
-            trace if isinstance(trace, dict) else {}, "failure_attribution"
+        error_kinds=(
+            collect_step_string_field(trace if isinstance(trace, dict) else {}, "error_kind")
+            + collect_task_observation_string_field(
+                trace if isinstance(trace, dict) else {}, "error_kind"
+            )
+        ),
+        failure_attributions=(
+            collect_step_string_field(trace if isinstance(trace, dict) else {}, "failure_attribution")
+            + collect_task_observation_string_field(
+                trace if isinstance(trace, dict) else {}, "failure_attribution"
+            )
         ),
         contract_policy_decisions=collect_contract_policy_decisions(trace if isinstance(trace, dict) else {}),
         verifier_approvals=collect_verifier_approved(trace if isinstance(trace, dict) else {}),

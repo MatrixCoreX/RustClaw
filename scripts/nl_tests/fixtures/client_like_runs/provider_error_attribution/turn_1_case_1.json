@@ -1,0 +1,34 @@
+{
+  "ok": true,
+  "data": {
+    "task_id": "fixture-provider-error-attribution",
+    "status": "failed",
+    "result_json": {
+      "text": "The model provider was unavailable.",
+      "messages": [
+        "The model provider was unavailable."
+      ],
+      "task_journal": {
+        "summary": {
+          "input_text": "Plan this task with the configured provider",
+          "final_status": "failure",
+          "final_answer": "The model provider was unavailable."
+        },
+        "trace": {
+          "rounds": [],
+          "step_results": [
+            {
+              "step_id": "step_1",
+              "executed_skill": "llm_provider",
+              "status": "error",
+              "error_kind": "provider_unavailable",
+              "failure_attribution": "provider_error",
+              "error_excerpt": "fixture provider unavailable"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "error": null
+}
