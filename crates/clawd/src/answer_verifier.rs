@@ -553,6 +553,16 @@ pub(crate) async fn verify_answer_observe_only(
         );
         return None;
     }
+    if let Some(local_gap) = local_missing_evidence_verifier_gap(route_result, journal) {
+        tracing::warn!(
+            task_id = %task.task_id,
+            missing_evidence_fields = ?local_gap.missing_evidence_fields,
+            answer_incomplete_reason = %local_gap.answer_incomplete_reason,
+            retry_instruction = %local_gap.retry_instruction,
+            "answer_verifier_local_missing_evidence_gap"
+        );
+        return Some(local_gap);
+    }
     let resolved = match crate::bootstrap::load_required_prompt_template_for_state_with_meta(
         state,
         ANSWER_VERIFIER_PROMPT_LOGICAL_PATH,
@@ -652,6 +662,36 @@ pub(crate) async fn verify_answer_observe_only(
     Some(validation)
 }
 
+pub(crate) fn local_missing_evidence_verifier_gap(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<AnswerVerifierOut> {
+    let task_contract = TaskContract::from_route_result(route_result);
+    if task_contract.intent_kind.as_str() != "planner_execute"
+        || task_contract.required_evidence_fields.is_empty()
+    {
+        return None;
+    }
+    let missing = crate::task_journal::missing_required_evidence_fields(route_result, journal);
+    if missing.is_empty() {
+        return None;
+    }
+    Some(AnswerVerifierOut {
+        pass: false,
+        missing_evidence_fields: missing.clone(),
+        answer_incomplete_reason: format!(
+            "missing required execution evidence: {}",
+            missing.join(",")
+        ),
+        should_retry: true,
+        retry_instruction: format!(
+            "Collect the missing required evidence fields before finalizing: {}.",
+            missing.join(", ")
+        ),
+        confidence: 0.9,
+    })
+}
+
 fn task_contract_prompt_block(task_contract: &TaskContract) -> String {
     task_contract.compact_prompt_line()
 }
@@ -694,7 +734,10 @@ fn execution_evidence_prompt_block(journal: &crate::task_journal::TaskJournal) -
 mod tests {
     use serde_json::json;
 
-    use super::{should_verify_answer, structurally_satisfies_answer_contract, AnswerVerifierOut};
+    use super::{
+        local_missing_evidence_verifier_gap, should_verify_answer,
+        structurally_satisfies_answer_contract, AnswerVerifierOut,
+    };
 
     fn route_with_mode(ask_mode: crate::AskMode) -> crate::RouteResult {
         crate::RouteResult {
@@ -783,6 +826,50 @@ mod tests {
             &journal,
             "please provide the missing path"
         ));
+    }
+
+    #[test]
+    fn local_missing_evidence_gap_reports_required_fields() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-local-gap", "ask", "exists?");
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(json!({"path": "/tmp/a.txt", "exists": true}).to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let gap =
+            local_missing_evidence_verifier_gap(&route, &journal).expect("missing kind evidence");
+        assert_eq!(gap.missing_evidence_fields, vec!["kind"]);
+        assert!(gap.should_retry);
+        assert!(gap.high_confidence_gap());
+    }
+
+    #[test]
+    fn local_missing_evidence_gap_skips_when_required_fields_are_observed() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-local-gap-ok", "ask", "list names");
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(json!({"names": ["Cargo.toml"]}).to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        assert!(local_missing_evidence_verifier_gap(&route, &journal).is_none());
     }
 
     #[test]
