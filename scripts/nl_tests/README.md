@@ -58,7 +58,7 @@ Client-like continuous regression:
 
 - Generate 100 deterministic contract-matrix seed cases without calling a model:
   `python3 scripts/nl_tests/generate_contract_matrix_cases.py --count 100 --check --report > /tmp/rustclaw-contract-cases.jsonl`
-  Use `--batch N` to rotate the non-mandatory cases while preserving semantic/generic, phase, policy-decision, and final-answer-shape coverage.
+  Use `--batch N` to rotate the non-mandatory cases while preserving semantic/generic, phase, policy-decision, evidence-expression, and final-answer-shape coverage.
   Add `--history /tmp/rustclaw-contract-history.jsonl --update-history` when running repeated batches; the generator prefers case ids not already in the local history file and appends the selected ids after a successful check.
 - Regenerate the safe aggregate case file:
   `python3 scripts/nl_tests/build_client_like_case_aggregate.py`

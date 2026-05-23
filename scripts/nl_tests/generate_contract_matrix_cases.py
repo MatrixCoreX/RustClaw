@@ -74,6 +74,44 @@ def normalized_evidence(contract: dict[str, Any]) -> list[str]:
     return sorted({normalize_token(item) for item in contract.get("required_evidence", []) if item})
 
 
+def normalized_list(values: list[Any]) -> list[str]:
+    return sorted({normalize_token(item) for item in values if isinstance(item, str) and item})
+
+
+def evidence_expression(contract: dict[str, Any]) -> dict[str, list[str]]:
+    raw = contract.get("evidence_expression") or {}
+    expression = {
+        "all_of": normalized_list(raw.get("all_of", [])),
+        "one_of": normalized_list(raw.get("one_of", [])),
+        "any_of": normalized_list(raw.get("any_of", [])),
+        "negative_evidence": normalized_list(raw.get("negative_evidence", [])),
+    }
+    if not any(expression.values()):
+        expression["all_of"] = normalized_evidence(contract)
+    return expression
+
+
+def evidence_expression_key(contract: dict[str, Any]) -> str:
+    expression = evidence_expression(contract)
+    return (
+        f"all_of={','.join(expression['all_of'])}|"
+        f"one_of={','.join(expression['one_of'])}|"
+        f"any_of={','.join(expression['any_of'])}|"
+        f"negative={','.join(expression['negative_evidence'])}"
+    )
+
+
+def trace_policy_key(matrix: dict[str, Any]) -> str:
+    policy = matrix.get("trace_policy", {})
+    return (
+        f"storage={normalize_token(str(policy.get('evidence_storage', 'redacted_excerpt_hash')))}|"
+        f"provider={normalize_token(str(policy.get('provider_evidence_view', 'provider_safe_redacted')))}|"
+        f"raw={normalize_token(str(policy.get('raw_excerpt_policy', 'no_full_raw_excerpt')))}|"
+        f"max_items={int(policy.get('max_items', 24))}|"
+        f"max_excerpt_chars={int(policy.get('max_excerpt_chars', 240))}"
+    )
+
+
 def matrix_hash(matrix: dict[str, Any]) -> str:
     contracts = matrix.get("contracts", {})
     profiles = matrix.get("generic_profiles", [])
@@ -82,9 +120,38 @@ def matrix_hash(matrix: dict[str, Any]) -> str:
         str(matrix.get("matrix_version", "")),
         str(len(contracts)),
         str(len(profiles)),
+        trace_policy_key(matrix),
     ]
     for key in sorted(contracts):
-        parts.append(f"{key}:{','.join(normalized_evidence(contracts[key]))}")
+        contract = contracts[key]
+        parts.append(
+            ":".join(
+                [
+                    key,
+                    ",".join(normalized_evidence(contract)),
+                    str(contract.get("final_answer_shape", "")),
+                    ",".join(normalized_list(contract.get("allowed_actions", []))),
+                    ",".join(normalized_list(contract.get("preferred_actions", []))),
+                    ",".join(normalized_list(contract.get("forbidden_actions", []))),
+                    evidence_expression_key(contract),
+                ]
+            )
+        )
+    for profile in profiles:
+        parts.append(
+            ":".join(
+                [
+                    "generic",
+                    str(profile.get("name", "")),
+                    ",".join(normalized_evidence(profile)),
+                    str(profile.get("final_answer_shape", "")),
+                    ",".join(normalized_list(profile.get("allowed_actions", []))),
+                    ",".join(normalized_list(profile.get("preferred_actions", []))),
+                    ",".join(normalized_list(profile.get("forbidden_actions", []))),
+                    evidence_expression_key(profile),
+                ]
+            )
+        )
     text = "|".join(parts)
     h = 0xCBF29CE484222325
     for byte in text.encode("utf-8"):
@@ -123,9 +190,10 @@ def base_case(
         "action_ref": action_ref,
         "expected_policy_decision": expected_decision,
         "required_evidence": normalized_evidence(contract),
+        "evidence_expression": evidence_expression(contract),
         "final_answer_shape": contract.get("final_answer_shape", ""),
-        "allowed_actions": sorted({normalize_token(item) for item in contract.get("allowed_actions", [])}),
-        "forbidden_actions": sorted({normalize_token(item) for item in contract.get("forbidden_actions", [])}),
+        "allowed_actions": normalized_list(contract.get("allowed_actions", [])),
+        "forbidden_actions": normalized_list(contract.get("forbidden_actions", [])),
         "failure_policy": contract.get("failure_policy", ""),
     }
 

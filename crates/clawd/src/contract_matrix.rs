@@ -25,6 +25,7 @@ pub(crate) struct ContractMatrix {
     pub(crate) matrix_version: String,
     pub(crate) failure_attribution: Vec<String>,
     pub(crate) policy: MatrixPolicy,
+    pub(crate) trace_policy: MatrixTracePolicy,
     pub(crate) generic_profiles: Vec<GenericProfile>,
     pub(crate) contracts: BTreeMap<String, MatrixContract>,
 }
@@ -36,6 +37,7 @@ impl Default for ContractMatrix {
             matrix_version: String::new(),
             failure_attribution: Vec::new(),
             policy: MatrixPolicy::default(),
+            trace_policy: MatrixTracePolicy::default(),
             generic_profiles: Vec::new(),
             contracts: BTreeMap::new(),
         }
@@ -60,6 +62,103 @@ impl Default for MatrixPolicy {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub(crate) struct MatrixTracePolicy {
+    pub(crate) evidence_storage: String,
+    pub(crate) provider_evidence_view: String,
+    pub(crate) raw_excerpt_policy: String,
+    pub(crate) max_items: usize,
+    pub(crate) max_excerpt_chars: usize,
+}
+
+impl Default for MatrixTracePolicy {
+    fn default() -> Self {
+        Self {
+            evidence_storage: "redacted_excerpt_hash".to_string(),
+            provider_evidence_view: "provider_safe_redacted".to_string(),
+            raw_excerpt_policy: "no_full_raw_excerpt".to_string(),
+            max_items: 24,
+            max_excerpt_chars: 240,
+        }
+    }
+}
+
+impl MatrixTracePolicy {
+    fn stable_key(&self) -> String {
+        format!(
+            "storage={}|provider={}|raw={}|max_items={}|max_excerpt_chars={}",
+            normalize_action_token(&self.evidence_storage),
+            normalize_action_token(&self.provider_evidence_view),
+            normalize_action_token(&self.raw_excerpt_policy),
+            self.max_items,
+            self.max_excerpt_chars,
+        )
+    }
+
+    fn to_trace_json(&self) -> Value {
+        json!({
+            "evidence_storage": normalize_action_token(&self.evidence_storage),
+            "provider_evidence_view": normalize_action_token(&self.provider_evidence_view),
+            "raw_excerpt_policy": normalize_action_token(&self.raw_excerpt_policy),
+            "max_items": self.max_items,
+            "max_excerpt_chars": self.max_excerpt_chars,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+#[serde(default)]
+pub(crate) struct EvidenceExpression {
+    pub(crate) all_of: Vec<String>,
+    pub(crate) one_of: Vec<String>,
+    pub(crate) any_of: Vec<String>,
+    pub(crate) negative_evidence: Vec<String>,
+}
+
+impl EvidenceExpression {
+    fn effective(&self, required_evidence: &[String]) -> Self {
+        let mut effective = Self {
+            all_of: normalized_tokens(&self.all_of),
+            one_of: normalized_tokens(&self.one_of),
+            any_of: normalized_tokens(&self.any_of),
+            negative_evidence: normalized_tokens(&self.negative_evidence),
+        };
+        if effective.is_empty() {
+            effective.all_of = normalized_tokens(required_evidence);
+        }
+        effective
+    }
+
+    fn is_empty(&self) -> bool {
+        self.all_of.is_empty()
+            && self.one_of.is_empty()
+            && self.any_of.is_empty()
+            && self.negative_evidence.is_empty()
+    }
+
+    fn stable_key(&self, required_evidence: &[String]) -> String {
+        let effective = self.effective(required_evidence);
+        format!(
+            "all_of={}|one_of={}|any_of={}|negative={}",
+            effective.all_of.join(","),
+            effective.one_of.join(","),
+            effective.any_of.join(","),
+            effective.negative_evidence.join(","),
+        )
+    }
+
+    pub(crate) fn to_trace_json(&self, required_evidence: &[String]) -> Value {
+        let effective = self.effective(required_evidence);
+        json!({
+            "all_of": effective.all_of,
+            "one_of": effective.one_of,
+            "any_of": effective.any_of,
+            "negative_evidence": effective.negative_evidence,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub(crate) struct MatrixContract {
@@ -76,11 +175,26 @@ pub(crate) struct MatrixContract {
     pub(crate) failure_policy: String,
     pub(crate) locator_kinds: Vec<String>,
     pub(crate) observation_sources: Vec<String>,
+    pub(crate) evidence_expression: EvidenceExpression,
 }
 
 impl MatrixContract {
     pub(crate) fn normalized_required_evidence(&self) -> Vec<String> {
         normalized_tokens(&self.required_evidence)
+    }
+
+    fn evidence_expression(&self) -> EvidenceExpression {
+        self.evidence_expression
+            .effective(&self.normalized_required_evidence())
+    }
+
+    fn observation_sources(&self) -> Vec<String> {
+        let configured = normalized_tokens(&self.observation_sources);
+        if configured.is_empty() {
+            normalized_tokens(&self.allowed_actions)
+        } else {
+            configured
+        }
     }
 }
 
@@ -99,6 +213,8 @@ pub(crate) struct GenericProfile {
     pub(crate) required_evidence: Vec<String>,
     pub(crate) final_answer_shape: String,
     pub(crate) failure_policy: String,
+    pub(crate) observation_sources: Vec<String>,
+    pub(crate) evidence_expression: EvidenceExpression,
 }
 
 impl GenericProfile {
@@ -132,6 +248,20 @@ impl GenericProfile {
 
     pub(crate) fn normalized_required_evidence(&self) -> Vec<String> {
         normalized_tokens(&self.required_evidence)
+    }
+
+    fn evidence_expression(&self) -> EvidenceExpression {
+        self.evidence_expression
+            .effective(&self.normalized_required_evidence())
+    }
+
+    fn observation_sources(&self) -> Vec<String> {
+        let configured = normalized_tokens(&self.observation_sources);
+        if configured.is_empty() {
+            normalized_tokens(&self.allowed_actions)
+        } else {
+            configured
+        }
     }
 }
 
@@ -406,6 +536,20 @@ impl<'a> MatchedContract<'a> {
         FinalAnswerShape::parse(self.final_answer_shape())
     }
 
+    pub(crate) fn evidence_expression(&self) -> EvidenceExpression {
+        match self {
+            Self::Semantic(contract) => contract.evidence_expression(),
+            Self::Generic(profile) => profile.evidence_expression(),
+        }
+    }
+
+    fn observation_sources(&self) -> Vec<String> {
+        match self {
+            Self::Semantic(contract) => contract.observation_sources(),
+            Self::Generic(profile) => profile.observation_sources(),
+        }
+    }
+
     fn match_name(&self) -> &str {
         match self {
             Self::Semantic(contract) => contract.semantic_kind.as_str(),
@@ -507,6 +651,46 @@ impl ContractMatrix {
         if self.matrix_version.trim().is_empty() {
             errors.push("matrix_version must not be empty".to_string());
         }
+        const EXPECTED_ATTRIBUTIONS: &[&str] = &[
+            "model_error",
+            "schema_error",
+            "code_gap",
+            "contract_gap",
+            "tool_gap",
+            "permission_denied",
+            "budget_exhausted",
+            "prompt_budget_error",
+            "delivery_error",
+            "provider_error",
+        ];
+        for expected in EXPECTED_ATTRIBUTIONS {
+            if !self
+                .failure_attribution
+                .iter()
+                .any(|value| normalize_action_token(value) == *expected)
+            {
+                errors.push(format!("missing failure attribution `{expected}`"));
+            }
+        }
+        if normalize_action_token(&self.trace_policy.evidence_storage) != "redacted_excerpt_hash" {
+            errors.push("trace_policy.evidence_storage must be redacted_excerpt_hash".to_string());
+        }
+        if normalize_action_token(&self.trace_policy.provider_evidence_view)
+            != "provider_safe_redacted"
+        {
+            errors.push(
+                "trace_policy.provider_evidence_view must be provider_safe_redacted".to_string(),
+            );
+        }
+        if normalize_action_token(&self.trace_policy.raw_excerpt_policy) != "no_full_raw_excerpt" {
+            errors.push("trace_policy.raw_excerpt_policy must be no_full_raw_excerpt".to_string());
+        }
+        if self.trace_policy.max_items == 0 {
+            errors.push("trace_policy.max_items must be positive".to_string());
+        }
+        if self.trace_policy.max_excerpt_chars == 0 {
+            errors.push("trace_policy.max_excerpt_chars must be positive".to_string());
+        }
         for kind in OutputSemanticKind::ALL {
             let key = kind.as_str();
             match self.contracts.get(key) {
@@ -524,6 +708,13 @@ impl ContractMatrix {
                             "contract `{key}` has unknown final_answer_shape `{}`",
                             contract.final_answer_shape
                         ));
+                    }
+                    let required = contract.normalized_required_evidence();
+                    if !required.is_empty() && contract.evidence_expression().is_empty() {
+                        errors.push(format!("contract `{key}` missing evidence_expression"));
+                    }
+                    if !required.is_empty() && contract.observation_sources().is_empty() {
+                        errors.push(format!("contract `{key}` missing observation_sources"));
                     }
                 }
                 None => errors.push(format!("missing contract for semantic `{key}`")),
@@ -555,23 +746,72 @@ impl ContractMatrix {
                     profile.name, profile.final_answer_shape
                 ));
             }
+            let required = profile.normalized_required_evidence();
+            if !required.is_empty() && profile.evidence_expression().is_empty() {
+                errors.push(format!(
+                    "generic profile `{}` missing evidence_expression",
+                    profile.name
+                ));
+            }
+            if !required.is_empty() && profile.observation_sources().is_empty() {
+                errors.push(format!(
+                    "generic profile `{}` missing observation_sources",
+                    profile.name
+                ));
+            }
         }
         errors
     }
 
     pub(crate) fn matrix_version_hash(&self) -> String {
         let mut input = format!(
-            "{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}",
             self.schema_version,
             self.matrix_version,
             self.contracts.len(),
-            self.generic_profiles.len()
+            self.generic_profiles.len(),
+            self.trace_policy.stable_key()
         );
         for (key, contract) in &self.contracts {
             input.push('|');
             input.push_str(key);
             input.push(':');
             input.push_str(&contract.normalized_required_evidence().join(","));
+            input.push(':');
+            input.push_str(&contract.final_answer_shape);
+            input.push(':');
+            input.push_str(&normalized_tokens(&contract.allowed_actions).join(","));
+            input.push(':');
+            input.push_str(&normalized_tokens(&contract.preferred_actions).join(","));
+            input.push(':');
+            input.push_str(&normalized_tokens(&contract.forbidden_actions).join(","));
+            input.push(':');
+            input.push_str(
+                &contract
+                    .evidence_expression
+                    .stable_key(&contract.normalized_required_evidence()),
+            );
+        }
+        for profile in &self.generic_profiles {
+            input.push('|');
+            input.push_str("generic:");
+            input.push_str(&profile.name);
+            input.push(':');
+            input.push_str(&profile.normalized_required_evidence().join(","));
+            input.push(':');
+            input.push_str(&profile.final_answer_shape);
+            input.push(':');
+            input.push_str(&normalized_tokens(&profile.allowed_actions).join(","));
+            input.push(':');
+            input.push_str(&normalized_tokens(&profile.preferred_actions).join(","));
+            input.push(':');
+            input.push_str(&normalized_tokens(&profile.forbidden_actions).join(","));
+            input.push(':');
+            input.push_str(
+                &profile
+                    .evidence_expression
+                    .stable_key(&profile.normalized_required_evidence()),
+            );
         }
         fnv1a_hex(&input)
     }
@@ -651,6 +891,7 @@ pub(crate) struct ContractActionPolicy {
     pub(crate) required_evidence: Vec<String>,
     pub(crate) final_answer_shape_kind: FinalAnswerShape,
     pub(crate) final_answer_shape: String,
+    pub(crate) evidence_expression: EvidenceExpression,
 }
 
 impl ContractActionPolicy {
@@ -773,6 +1014,7 @@ pub(crate) fn trace_snapshot_for_output_contract(
         "contract_matrix_version": matrix.matrix_version,
         "contract_matrix_hash": matrix.matrix_version_hash(),
         "schema_version": matrix.schema_version,
+        "trace_policy": matrix.trace_policy.to_trace_json(),
         "semantic_kind": output_contract.semantic_kind.as_str(),
         "response_shape": output_contract.response_shape.as_str(),
         "locator_kind": output_contract.locator_kind.as_str(),
@@ -782,6 +1024,10 @@ pub(crate) fn trace_snapshot_for_output_contract(
         "contract_match": matched.match_name(),
         "required_evidence": required_evidence_for_output_contract(output_contract)
             .unwrap_or_else(|| matched.required_evidence()),
+        "evidence_expression": matched
+            .evidence_expression()
+            .to_trace_json(&matched.required_evidence()),
+        "observation_sources": matched.observation_sources(),
         "final_answer_shape": matched
             .final_answer_shape_kind()
             .map(FinalAnswerShape::as_str)
@@ -815,6 +1061,7 @@ pub(crate) fn action_policy_for_output_contract(
         required_evidence: matched.required_evidence(),
         final_answer_shape_kind,
         final_answer_shape: final_answer_shape_kind.as_str().to_string(),
+        evidence_expression: matched.evidence_expression(),
     })
 }
 
@@ -1152,6 +1399,59 @@ mod tests {
             .failure_attribution
             .contains(&"model_error".to_string()));
         assert_eq!(matrix.policy.unknown_semantic, "reject");
+        assert_eq!(
+            matrix.trace_policy.evidence_storage,
+            "redacted_excerpt_hash"
+        );
+        assert_eq!(
+            matrix.trace_policy.provider_evidence_view,
+            "provider_safe_redacted"
+        );
+    }
+
+    #[test]
+    fn existence_contract_can_express_negative_evidence() {
+        let matrix = load_workspace_matrix();
+        let contract = matrix
+            .semantic_contract(OutputSemanticKind::ExistenceWithPath)
+            .expect("existence contract");
+        let expression = contract.evidence_expression();
+
+        assert_eq!(expression.all_of, vec!["kind", "path"]);
+        assert_eq!(expression.one_of, vec!["exists_false", "exists_true"]);
+        assert_eq!(expression.negative_evidence, vec!["exists_false"]);
+    }
+
+    #[test]
+    fn trace_snapshot_includes_evidence_expression_trace_policy_and_sources() {
+        let snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::FileNames,
+            ..IntentOutputContract::default()
+        })
+        .expect("trace snapshot");
+
+        assert_eq!(
+            snapshot
+                .get("trace_policy")
+                .and_then(|value| value.get("provider_evidence_view"))
+                .and_then(Value::as_str),
+            Some("provider_safe_redacted")
+        );
+        assert_eq!(
+            snapshot
+                .get("evidence_expression")
+                .and_then(|value| value.get("all_of"))
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(Value::as_str),
+            Some("candidates")
+        );
+        assert!(snapshot
+            .get("observation_sources")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items
+                .iter()
+                .any(|item| item.as_str() == Some("fs_basic.list_dir"))));
     }
 
     #[test]
