@@ -174,13 +174,18 @@ fn finalizer_summary_json(
     journal: &TaskJournal,
 ) -> Value {
     let evidence_coverage = route.map(|route| evidence_coverage_for_route(route, journal));
+    let final_answer_shape = route.and_then(|route| {
+        crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+    });
     json!({
         "stage": summary.stage.map(TaskJournalFinalizerStage::as_str),
         "disposition": summary.disposition.map(crate::finalize::FinalizerDisposition::as_str),
         "fallback": summary.fallback.map(TaskJournalFinalizerFallback::as_str),
-        "final_answer_shape": route
-            .and_then(|route| crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract))
-            .map(crate::contract_matrix::FinalAnswerShape::as_str),
+        "final_answer_shape": final_answer_shape.map(crate::contract_matrix::FinalAnswerShape::as_str),
+        "final_answer_shape_class": final_answer_shape.map(|shape| shape.class().as_str()),
+        "coarse_response_shape": final_answer_shape
+            .map(|shape| shape.coarse_response_shape().as_str()),
+        "allows_model_language": final_answer_shape.map(crate::contract_matrix::FinalAnswerShape::allows_model_language),
         "evidence_coverage_complete": evidence_coverage.as_ref().map(TaskJournalEvidenceCoverage::is_complete),
         "missing_evidence": evidence_coverage
             .as_ref()
@@ -1528,6 +1533,27 @@ mod tests {
                 .and_then(|v| v.get("final_answer_shape"))
                 .and_then(Value::as_str),
             Some("free")
+        );
+        assert_eq!(
+            summary
+                .get("finalizer_summary")
+                .and_then(|v| v.get("final_answer_shape_class"))
+                .and_then(Value::as_str),
+            Some("freeform")
+        );
+        assert_eq!(
+            summary
+                .get("finalizer_summary")
+                .and_then(|v| v.get("coarse_response_shape"))
+                .and_then(Value::as_str),
+            Some("free")
+        );
+        assert_eq!(
+            summary
+                .get("finalizer_summary")
+                .and_then(|v| v.get("allows_model_language"))
+                .and_then(Value::as_bool),
+            Some(true)
         );
         assert_eq!(
             summary
