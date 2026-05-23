@@ -1889,6 +1889,58 @@ primary_fallback_role = "primary"
     }
 
     #[test]
+    fn enforce_mode_blocks_skill_switch_disabled_even_when_contract_allows_action() {
+        let mut state = test_state();
+        let registry = state
+            .get_skills_registry()
+            .expect("test registry should be installed");
+        state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+            registry: Some(registry),
+            skills_list: Arc::new(
+                ["read_file", "run_cmd", "list_dir"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect::<HashSet<_>>(),
+            ),
+        })));
+        let task = test_task();
+        let route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route),
+                request_text: None,
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "fs_basic".to_string(),
+                    args: json!({"action": "list_dir", "path": "."}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+
+        assert!(!result.approved, "issues: {:?}", result.issues);
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::SkillNotVisible)));
+        assert!(!result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::ContractActionRejected)));
+        assert!(result
+            .blocked_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("not in planner visible skills")));
+    }
+
+    #[test]
     fn enforce_mode_allows_low_risk_action_under_low_risk_ceiling() {
         let state = test_state();
         let task = test_task();
