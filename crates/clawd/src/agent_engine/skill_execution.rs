@@ -216,7 +216,7 @@ fn contract_matrix_action_policy_error(
         &error_text,
         None,
         Some(json!({
-            "failure_attribution": "contract_gap",
+            "failure_attribution": crate::contract_matrix::FailureAttribution::ContractGap.as_str(),
             "decision": policy.decision.as_str(),
             "action": policy.action_key,
             "contract_match": policy.contract_match,
@@ -264,7 +264,7 @@ fn contract_matrix_arg_policy_error(
         &error_text,
         None,
         Some(json!({
-            "failure_attribution": "model_error",
+            "failure_attribution": crate::contract_matrix::FailureAttribution::ModelError.as_str(),
             "decision": policy.decision.as_str(),
             "action": policy.action_key,
             "contract_match": policy.contract_match,

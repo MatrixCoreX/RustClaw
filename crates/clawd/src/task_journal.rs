@@ -162,7 +162,7 @@ fn verify_trace_json(verify: &TaskJournalVerifySummary) -> Value {
             json!({
                 "step_id": &issue.step_id,
                 "kind": issue.kind.as_str(),
-                "failure_attribution": issue.kind.failure_attribution(),
+                "failure_attribution": issue.kind.failure_attribution().as_str(),
                 "detail": crate::truncate_for_log(&issue.detail),
             })
         }).collect::<Vec<_>>(),
@@ -1086,12 +1086,16 @@ pub(crate) struct TaskJournal {
     pub(crate) transitions: Vec<crate::AskTransition>,
 }
 
-pub(crate) fn stop_signal_failure_attribution(stop_signal: &str) -> Option<&'static str> {
+pub(crate) fn stop_signal_failure_attribution(
+    stop_signal: &str,
+) -> Option<crate::contract_matrix::FailureAttribution> {
     match stop_signal.trim() {
         "recipe_repair_budget_exhausted" | "answer_verifier_retry_exhausted" => {
-            Some("budget_exhausted")
+            Some(crate::contract_matrix::FailureAttribution::BudgetExhausted)
         }
-        "prompt_budget_error" => Some("prompt_budget_error"),
+        "prompt_budget_error" => {
+            Some(crate::contract_matrix::FailureAttribution::PromptBudgetError)
+        }
         _ => None,
     }
 }
@@ -1267,7 +1271,7 @@ impl TaskJournal {
     pub(crate) fn record_final_stop_signal(&mut self, stop_signal: impl Into<String>) {
         let stop_signal = stop_signal.into();
         self.final_failure_attribution =
-            stop_signal_failure_attribution(&stop_signal).map(str::to_string);
+            stop_signal_failure_attribution(&stop_signal).map(|kind| kind.as_str().to_string());
         self.final_stop_signal = Some(stop_signal);
     }
 
