@@ -961,6 +961,11 @@ fn contract_policy_trace_json(
         "preferred_actions": extra.get("preferred_actions").cloned(),
         "evidence_expression": extra.get("evidence_expression").cloned(),
         "final_answer_shape": extra.get("final_answer_shape").and_then(Value::as_str),
+        "policy_mode": extra.get("policy_mode").and_then(Value::as_str),
+        "evidence_scope": extra.get("evidence_scope").and_then(Value::as_str),
+        "freshness": extra.get("freshness").and_then(Value::as_str),
+        "artifact_kind": extra.get("artifact_kind").and_then(Value::as_str),
+        "channel_visibility": extra.get("channel_visibility").and_then(Value::as_str),
     }))
 }
 
