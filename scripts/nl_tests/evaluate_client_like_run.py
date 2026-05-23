@@ -34,7 +34,10 @@ Expectation JSONL rows are intentionally small and optional. Supported fields:
     "observed_evidence_any": ["candidates"],
     "observed_evidence_all": ["path", "exists"],
     "missing_evidence_empty": true,
-    "executed_none_of": ["run_cmd"]
+    "executed_none_of": ["run_cmd"],
+    "error_kind_any": ["contract_action_rejected"],
+    "failure_attribution_any": ["contract_gap"],
+    "contract_policy_decision_any": ["rejected_not_allowed"]
   }
 
 Use --write-baseline to capture the current observed route/plan/final shape.
@@ -233,6 +236,37 @@ def collect_requested_action_refs(trace: dict[str, Any]) -> list[str]:
     return refs
 
 
+def collect_step_string_field(trace: dict[str, Any], field: str) -> list[str]:
+    values: list[str] = []
+    steps = trace.get("step_results")
+    if not isinstance(steps, list):
+        return values
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        value = step.get(field)
+        if isinstance(value, str) and value.strip():
+            values.append(value.strip())
+    return values
+
+
+def collect_contract_policy_decisions(trace: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    steps = trace.get("step_results")
+    if not isinstance(steps, list):
+        return values
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        policy = step.get("contract_policy")
+        if not isinstance(policy, dict):
+            continue
+        value = policy.get("decision")
+        if isinstance(value, str) and value.strip():
+            values.append(value.strip())
+    return values
+
+
 def list_strings(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -253,6 +287,9 @@ class Observation:
     plan_action_refs: list[str]
     requested_action_refs: list[str]
     executed: list[str]
+    error_kinds: list[str]
+    failure_attributions: list[str]
+    contract_policy_decisions: list[str]
     verifier_approvals: list[bool]
     verifier_issue_kinds: list[str]
     verifier_needs_confirmation: list[bool]
@@ -298,6 +335,11 @@ def observe_file(path: Path) -> Observation:
         plan_action_refs=collect_plan_action_refs(trace if isinstance(trace, dict) else {}),
         requested_action_refs=collect_requested_action_refs(trace if isinstance(trace, dict) else {}),
         executed=collect_executed(trace if isinstance(trace, dict) else {}),
+        error_kinds=collect_step_string_field(trace if isinstance(trace, dict) else {}, "error_kind"),
+        failure_attributions=collect_step_string_field(
+            trace if isinstance(trace, dict) else {}, "failure_attribution"
+        ),
+        contract_policy_decisions=collect_contract_policy_decisions(trace if isinstance(trace, dict) else {}),
         verifier_approvals=collect_verifier_approved(trace if isinstance(trace, dict) else {}),
         verifier_issue_kinds=collect_verifier_issue_kinds(trace if isinstance(trace, dict) else {}),
         verifier_needs_confirmation=collect_verifier_needs_confirmation(trace if isinstance(trace, dict) else {}),
@@ -445,6 +487,50 @@ def evaluate(obs: Observation, expected: dict[str, Any]) -> list[str]:
         matched = [value for value in forbidden if value in obs.executed]
         if matched:
             failures.append(f"executed_none_of: forbidden executed value(s) {matched!r}, got {obs.executed!r}")
+    if "error_kind_any" in expected and not any_expected_present(expected["error_kind_any"], obs.error_kinds):
+        failures.append(f"error_kind_any: expected one of {expected['error_kind_any']!r}, got {obs.error_kinds!r}")
+    if "error_kind_all" in expected and not all_expected_present(expected["error_kind_all"], obs.error_kinds):
+        failures.append(f"error_kind_all: expected all {expected['error_kind_all']!r}, got {obs.error_kinds!r}")
+    if "error_kind_none_of" in expected:
+        forbidden = expected["error_kind_none_of"]
+        forbidden = forbidden if isinstance(forbidden, list) else [forbidden]
+        forbidden = [str(value) for value in forbidden if str(value).strip()]
+        matched = [value for value in forbidden if value in obs.error_kinds]
+        if matched:
+            failures.append(f"error_kind_none_of: forbidden error kind(s) {matched!r}, got {obs.error_kinds!r}")
+    if "failure_attribution_any" in expected and not any_expected_present(
+        expected["failure_attribution_any"], obs.failure_attributions
+    ):
+        failures.append(
+            f"failure_attribution_any: expected one of {expected['failure_attribution_any']!r}, got {obs.failure_attributions!r}"
+        )
+    if "failure_attribution_all" in expected and not all_expected_present(
+        expected["failure_attribution_all"], obs.failure_attributions
+    ):
+        failures.append(
+            f"failure_attribution_all: expected all {expected['failure_attribution_all']!r}, got {obs.failure_attributions!r}"
+        )
+    if "failure_attribution_none_of" in expected:
+        forbidden = expected["failure_attribution_none_of"]
+        forbidden = forbidden if isinstance(forbidden, list) else [forbidden]
+        forbidden = [str(value) for value in forbidden if str(value).strip()]
+        matched = [value for value in forbidden if value in obs.failure_attributions]
+        if matched:
+            failures.append(
+                f"failure_attribution_none_of: forbidden attribution(s) {matched!r}, got {obs.failure_attributions!r}"
+            )
+    if "contract_policy_decision_any" in expected and not any_expected_present(
+        expected["contract_policy_decision_any"], obs.contract_policy_decisions
+    ):
+        failures.append(
+            f"contract_policy_decision_any: expected one of {expected['contract_policy_decision_any']!r}, got {obs.contract_policy_decisions!r}"
+        )
+    if "contract_policy_decision_all" in expected and not all_expected_present(
+        expected["contract_policy_decision_all"], obs.contract_policy_decisions
+    ):
+        failures.append(
+            f"contract_policy_decision_all: expected all {expected['contract_policy_decision_all']!r}, got {obs.contract_policy_decisions!r}"
+        )
     if "verifier_approved" in expected:
         wanted = bool(expected["verifier_approved"])
         if not obs.verifier_approvals or wanted not in obs.verifier_approvals:
@@ -536,6 +622,9 @@ def baseline_row(obs: Observation) -> dict[str, Any]:
         "plan_action_refs": obs.plan_action_refs,
         "requested_action_refs": obs.requested_action_refs,
         "executed": obs.executed,
+        "error_kinds": obs.error_kinds,
+        "failure_attributions": obs.failure_attributions,
+        "contract_policy_decisions": obs.contract_policy_decisions,
         "verifier_approvals": obs.verifier_approvals,
         "verifier_issue_kinds": obs.verifier_issue_kinds,
         "verifier_needs_confirmation": obs.verifier_needs_confirmation,

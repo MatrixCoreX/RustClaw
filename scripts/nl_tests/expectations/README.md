@@ -20,7 +20,21 @@ Supported fields:
 - `route_gate`
 - `route_gate_any`
 - `capability_any`
+- `planned_action_any`
+- `planned_action_all`
+- `planned_action_none_of`
+- `requested_action_any`
+- `requested_action_none_of`
 - `executed_any`
+- `executed_none_of`
+- `error_kind_any`
+- `error_kind_all`
+- `error_kind_none_of`
+- `failure_attribution_any`
+- `failure_attribution_all`
+- `failure_attribution_none_of`
+- `contract_policy_decision_any`
+- `contract_policy_decision_all`
 - `verifier_approved`
 - `verifier_issue_any`
 - `verifier_issue_all`
@@ -31,6 +45,16 @@ Supported fields:
 - `finalizer_used_evidence_ids_min`
 - `final_contains`
 - `final_shape`
+- `contract_match`
+- `contract_match_any`
+- `contract_semantic_kind`
+- `contract_semantic_kind_any`
+- `contract_final_answer_shape`
+- `contract_final_answer_shape_any`
+- `required_evidence_all`
+- `observed_evidence_any`
+- `observed_evidence_all`
+- `missing_evidence_empty`
 
 Use the evaluator to generate a starting baseline from a known-good run:
 

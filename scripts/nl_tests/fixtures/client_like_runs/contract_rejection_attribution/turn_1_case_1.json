@@ -1,0 +1,88 @@
+{
+  "ok": true,
+  "data": {
+    "task_id": "fixture-contract-rejection-attribution",
+    "status": "failed",
+    "result_json": {
+      "text": "这个操作不符合当前任务的安全规则，请改用文件列表能力后再试。",
+      "messages": [
+        "这个操作不符合当前任务的安全规则，请改用文件列表能力后再试。"
+      ],
+      "task_journal": {
+        "summary": {
+          "input_text": "列出当前目录文件名",
+          "final_answer": "这个操作不符合当前任务的安全规则，请改用文件列表能力后再试。",
+          "final_status": "failed",
+          "route_result": {
+            "first_layer_decision": "planner_execute",
+            "routed_mode": "Act",
+            "route_gate_kind": "execute"
+          }
+        },
+        "trace": {
+          "rounds": [
+            {
+              "round_no": 1,
+              "plan_result": {
+                "steps": [
+                  {
+                    "step_id": "step_1",
+                    "action_type": "call_skill",
+                    "skill": "run_cmd",
+                    "action_ref": "run_cmd.exec"
+                  }
+                ]
+              },
+              "verify_result": {
+                "approved": true,
+                "mode": "ObserveOnly",
+                "issues": []
+              }
+            }
+          ],
+          "contract_matrix": {
+            "contract_match": "file_names",
+            "semantic_kind": "file_names",
+            "final_answer_shape": "name_list"
+          },
+          "evidence_coverage": {
+            "required_evidence": [
+              "candidates"
+            ],
+            "observed_fields": [],
+            "observed_canonical": [],
+            "missing_evidence": [
+              "candidates"
+            ]
+          },
+          "step_results": [
+            {
+              "step_id": "step_1",
+              "requested_action_type": "call_skill",
+              "requested_capability": "run_cmd",
+              "requested_action_ref": "run_cmd.exec",
+              "executed_skill": "run_cmd",
+              "status": "error",
+              "error_kind": "contract_action_rejected",
+              "failure_attribution": "contract_gap",
+              "contract_policy": {
+                "decision": "rejected_not_allowed",
+                "action": "run_cmd",
+                "contract_match": "file_names",
+                "required_evidence": [
+                  "candidates"
+                ],
+                "preferred_actions": [
+                  "fs_basic.list_dir"
+                ],
+                "final_answer_shape": "name_list"
+              },
+              "error_excerpt": "{\"ok\":false,\"skill\":\"run_cmd\",\"error_kind\":\"contract_action_rejected\",\"error_text\":\"action `run_cmd` is rejected by contract `file_names`\",\"extra\":{\"failure_attribution\":\"contract_gap\"}}"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "error": null
+}
