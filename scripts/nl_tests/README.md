@@ -62,8 +62,11 @@ Client-like continuous regression:
   Add `--history /tmp/rustclaw-contract-history.jsonl --update-history` when running repeated batches; the generator prefers case ids not already in the local history file and appends the selected ids after a successful check.
 - Generate 100 live NL replay rows from the same matrix coverage:
   `python3 scripts/nl_tests/generate_contract_matrix_cases.py --count 100 --check --nl --report > /tmp/rustclaw-contract-nl.jsonl`
+  Add `--expectations /tmp/rustclaw-contract-nl.expectations.jsonl` to write matching evaluator expectations for contract match, allowed-action phase plan refs, executed skill family, required evidence, missing-evidence status, and final answer shape.
   Run them through the client-like path with:
   `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-jsonl /tmp/rustclaw-contract-nl.jsonl --prompt-reply-only --quality-guard`
+  Then evaluate the finished run with:
+  `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --expectations /tmp/rustclaw-contract-nl.expectations.jsonl`
 - Regenerate the safe aggregate case file:
   `python3 scripts/nl_tests/build_client_like_case_aggregate.py`
 - Check the aggregate is up to date without rewriting it:
@@ -79,7 +82,7 @@ Client-like continuous regression:
 - Generate or check a lightweight offline regression baseline:
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --write-baseline /tmp/rustclaw-client-like-baseline.jsonl`
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --expectations scripts/nl_tests/expectations/<name>.jsonl`
-  Expectation rows can assert route, planner capability/tool targets, executed tool/skill, verifier approval, finalizer stage/fallback/grounding, final text substrings, and final answer shape without making a new LLM request.
+  Expectation rows can assert route, planner capability/tool targets, exact planned `skill.action` refs when present in trace, executed tool/skill, contract match, evidence coverage, verifier approval, finalizer stage/fallback/grounding, final text substrings, and final answer shape without making a new LLM request.
 - Extract exact replay prompts and expectations from a finished or interrupted client-like run:
   `python3 scripts/nl_tests/extract_client_like_replay.py scripts/nl_suite_logs/client_like_continuous/<run_id> --case-jsonl /tmp/rustclaw-replay.jsonl --expectations /tmp/rustclaw-replay.expectations.jsonl`
   `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-jsonl /tmp/rustclaw-replay.jsonl --quality-guard --prompt-reply-only`

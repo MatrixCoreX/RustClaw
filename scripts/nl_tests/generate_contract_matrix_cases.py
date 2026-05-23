@@ -3,7 +3,8 @@
 
 This is an offline seed generator. It does not call clawd or a model; live NL
 replay can consume the emitted contract ids, expected actions, evidence fields,
-and final answer shapes.
+and final answer shapes. With --nl --expectations it also writes evaluator
+expectation rows aligned with the emitted live replay case order.
 """
 
 from __future__ import annotations
@@ -252,6 +253,7 @@ def base_case(
         "final_answer_shape": contract.get("final_answer_shape", ""),
         "allowed_actions": normalized_list(contract.get("allowed_actions", [])),
         "forbidden_actions": normalized_list(contract.get("forbidden_actions", [])),
+        "none_passthrough": bool(contract.get("none_passthrough", False)),
         "failure_policy": contract.get("failure_policy", ""),
     }
 
@@ -271,7 +273,7 @@ def generated_prompt_for_case(case: dict[str, Any]) -> str:
     action_ref = case.get("action_ref")
     decision = case.get("expected_policy_decision")
     if phase == "allowed_action" and action_ref:
-        return f"{prompt} 优先使用能够产生证据的内置能力完成，不要跳过观察。"
+        return f"{prompt} 这是 contract action 覆盖用例：优先使用 {action_ref} 完成，不要跳过观察。"
     if phase == "negative_action" and action_ref and decision != "allowed":
         return (
             f"{prompt} 这是 contract policy 覆盖用例：如果 planner 倾向使用 {action_ref}，"
@@ -305,6 +307,77 @@ def as_nl_case(case: dict[str, Any]) -> dict[str, Any]:
     }
     row.update(case)
     return row
+
+
+def action_skill(action_ref: str) -> str:
+    return parse_action(action_ref)[0]
+
+
+def allowed_action_refs(case: dict[str, Any]) -> list[str]:
+    return sorted(
+        {
+            normalize_token(action)
+            for action in case.get("allowed_actions", [])
+            if isinstance(action, str) and normalize_token(action)
+        }
+    )
+
+
+def allowed_execution_skills(case: dict[str, Any]) -> list[str]:
+    ignored = {"respond", "synthesize_answer", "think"}
+    return sorted(
+        {
+            action_skill(action)
+            for action in allowed_action_refs(case)
+            if action_skill(action) not in ignored
+        }
+    )
+
+
+def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "case": case_index,
+        "contract_match": case["contract_id"],
+        "contract_final_answer_shape": case.get("final_answer_shape", ""),
+    }
+    semantic_kind = case.get("semantic_kind")
+    if case.get("contract_type") == "semantic" and semantic_kind:
+        row["contract_semantic_kind"] = semantic_kind
+
+    required_evidence = case.get("required_evidence") or []
+    if required_evidence:
+        row["required_evidence_all"] = required_evidence
+        row["missing_evidence_empty"] = True
+
+    actions = allowed_action_refs(case)
+    if actions and not case.get("none_passthrough"):
+        skills = allowed_execution_skills(case)
+        if skills:
+            row["executed_any"] = skills
+    if case.get("phase") == "allowed_action" and case.get("action_ref"):
+        row["planned_action_any"] = [str(case["action_ref"])]
+
+    if case.get("phase") == "negative_action":
+        action_ref = str(case.get("action_ref") or "")
+        forbidden_skills = {action_skill(action) for action in case.get("forbidden_actions", [])}
+        allowed_skills = set(allowed_execution_skills(case))
+        if action_ref:
+            skill = action_skill(action_ref)
+            if skill in forbidden_skills and skill not in allowed_skills:
+                row["executed_none_of"] = [skill]
+
+    return row
+
+
+def write_expectations(path: Path, cases: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "".join(
+            json.dumps(expectation_for_case(case, idx), ensure_ascii=False, sort_keys=True) + "\n"
+            for idx, case in enumerate(cases, 1)
+        ),
+        encoding="utf-8",
+    )
 
 
 def generate_all_cases(matrix: dict[str, Any]) -> list[dict[str, Any]]:
@@ -641,6 +714,11 @@ def main() -> int:
         action="store_true",
         help="emit client-like live NL JSONL rows with prompt/name/tags plus contract metadata",
     )
+    parser.add_argument(
+        "--expectations",
+        type=Path,
+        help="write evaluator expectations JSONL for the selected case order; intended for --nl replay",
+    )
     args = parser.parse_args()
 
     if args.update_history and args.history is None:
@@ -661,6 +739,9 @@ def main() -> int:
     output_cases = [as_nl_case(case) for case in cases] if args.nl else cases
     for case in output_cases:
         print(json.dumps(case, ensure_ascii=False, sort_keys=True))
+
+    if args.expectations is not None:
+        write_expectations(args.expectations, cases)
 
     if args.update_history and args.history is not None:
         append_history_case_ids(args.history, cases)
