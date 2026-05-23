@@ -22,6 +22,7 @@ Expectation JSONL rows are intentionally small and optional. Supported fields:
     "executed_any": ["fs_basic"],
     "verifier_approved": true,
     "verifier_issue_any": ["MissingRequiredArg"],
+    "verifier_failure_attribution_any": ["model_error"],
     "needs_confirmation": false,
     "final_contains": ["README.md"],
     "final_shape": "path|file_token|integer|list|non_empty|empty",
@@ -197,6 +198,27 @@ def collect_verifier_issue_kinds(trace: dict[str, Any]) -> list[str]:
     return kinds
 
 
+def collect_verifier_issue_attributions(trace: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    rounds = trace.get("rounds")
+    if not isinstance(rounds, list):
+        return values
+    for round_obj in rounds:
+        if not isinstance(round_obj, dict):
+            continue
+        verify = round_obj.get("verify_result")
+        issues = verify.get("issues") if isinstance(verify, dict) else None
+        if not isinstance(issues, list):
+            continue
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            value = issue.get("failure_attribution")
+            if isinstance(value, str) and value.strip():
+                values.append(value.strip())
+    return values
+
+
 def collect_verifier_needs_confirmation(trace: dict[str, Any]) -> list[bool]:
     values: list[bool] = []
     rounds = trace.get("rounds")
@@ -296,6 +318,7 @@ class Observation:
     contract_policy_decisions: list[str]
     verifier_approvals: list[bool]
     verifier_issue_kinds: list[str]
+    verifier_issue_attributions: list[str]
     verifier_needs_confirmation: list[bool]
     contract_match: str
     contract_semantic_kind: str
@@ -350,6 +373,7 @@ def observe_file(path: Path) -> Observation:
         contract_policy_decisions=collect_contract_policy_decisions(trace if isinstance(trace, dict) else {}),
         verifier_approvals=collect_verifier_approved(trace if isinstance(trace, dict) else {}),
         verifier_issue_kinds=collect_verifier_issue_kinds(trace if isinstance(trace, dict) else {}),
+        verifier_issue_attributions=collect_verifier_issue_attributions(trace if isinstance(trace, dict) else {}),
         verifier_needs_confirmation=collect_verifier_needs_confirmation(trace if isinstance(trace, dict) else {}),
         contract_match=(
             str(contract_matrix.get("contract_match") or "") if isinstance(contract_matrix, dict) else ""
@@ -574,6 +598,18 @@ def evaluate(obs: Observation, expected: dict[str, Any]) -> list[str]:
         failures.append(
             f"verifier_issue_all: expected all {expected['verifier_issue_all']!r}, got {obs.verifier_issue_kinds!r}"
         )
+    if "verifier_failure_attribution_any" in expected and not any_expected_present(
+        expected["verifier_failure_attribution_any"], obs.verifier_issue_attributions
+    ):
+        failures.append(
+            f"verifier_failure_attribution_any: expected one of {expected['verifier_failure_attribution_any']!r}, got {obs.verifier_issue_attributions!r}"
+        )
+    if "verifier_failure_attribution_all" in expected and not all_expected_present(
+        expected["verifier_failure_attribution_all"], obs.verifier_issue_attributions
+    ):
+        failures.append(
+            f"verifier_failure_attribution_all: expected all {expected['verifier_failure_attribution_all']!r}, got {obs.verifier_issue_attributions!r}"
+        )
     if "needs_confirmation" in expected:
         wanted = bool(expected["needs_confirmation"])
         if not obs.verifier_needs_confirmation or wanted not in obs.verifier_needs_confirmation:
@@ -658,6 +694,7 @@ def baseline_row(obs: Observation) -> dict[str, Any]:
         "contract_policy_decisions": obs.contract_policy_decisions,
         "verifier_approvals": obs.verifier_approvals,
         "verifier_issue_kinds": obs.verifier_issue_kinds,
+        "verifier_issue_attributions": obs.verifier_issue_attributions,
         "verifier_needs_confirmation": obs.verifier_needs_confirmation,
         "contract_match": obs.contract_match,
         "contract_semantic_kind": obs.contract_semantic_kind,
