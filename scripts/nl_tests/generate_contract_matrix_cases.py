@@ -19,6 +19,15 @@ from typing import Any
 DEFAULT_MATRIX = Path("configs/task_contract_matrix.toml")
 
 
+FIXTURE_ROOT = "scripts/nl_tests/fixtures/device_local"
+FIXTURE_DOC = f"{FIXTURE_ROOT}/docs/release_checklist.md"
+FIXTURE_DOCS_DIR = f"{FIXTURE_ROOT}/docs"
+FIXTURE_PACKAGE = f"{FIXTURE_ROOT}/package.json"
+FIXTURE_CONFIG = f"{FIXTURE_ROOT}/configs/app_config.toml"
+FIXTURE_DB = f"{FIXTURE_ROOT}/data/test_contract.sqlite"
+FIXTURE_ARCHIVE = f"{FIXTURE_ROOT}/tmp/test_bundle.zip"
+
+
 PROBE_ACTIONS = [
     "run_cmd",
     "fs_basic.list_dir",
@@ -34,6 +43,55 @@ PROBE_ACTIONS = [
     "health_check",
     "respond",
 ]
+
+
+NL_PROMPTS_BY_CONTRACT: dict[str, str] = {
+    "none": "不用执行任何操作，直接用一句话解释 RustClaw 是一个什么样的本地助手。",
+    "raw_command_output": "执行 pwd，并简短告诉我命令输出是什么。",
+    "service_status": "检查 clawd 服务当前状态，并用一句话说明来源。",
+    "hidden_entries_check": "检查当前目录有没有隐藏文件，如果有就列出几个例子。",
+    "file_names": f"列出 {FIXTURE_DOCS_DIR} 目录下的文件名，只输出文件名列表。",
+    "directory_names": f"列出 {FIXTURE_ROOT} 下的文件夹名，只输出名称列表。",
+    "directory_entry_groups": f"列出 {FIXTURE_ROOT} 下的直接子项，并按文件和文件夹分组。",
+    "file_paths": f"找出 {FIXTURE_ROOT} 下的 markdown 文件路径，只输出路径列表。",
+    "directory_purpose_summary": f"看一下 {FIXTURE_DOCS_DIR} 目录，然后一句话说明这些文件大概是做什么的。",
+    "content_excerpt_summary": f"读取 {FIXTURE_DOC} 前 20 行，并用三句话总结。",
+    "content_presence_check": f"检查 {FIXTURE_DOC} 里是否提到了 release，只回答是否有并给出依据。",
+    "excerpt_kind_judgment": f"读取 {FIXTURE_DOC} 开头内容，判断它更像清单、日志还是配置。",
+    "recent_artifacts_judgment": f"列出 {FIXTURE_DOCS_DIR} 最近修改的 2 个文件，再判断它们更像文档还是产物。",
+    "workspace_project_summary": f"快速看一下 {FIXTURE_ROOT}，用非技术用户能听懂的话总结它是什么项目。",
+    "scalar_count": f"数一下 {FIXTURE_DOCS_DIR} 目录直接子项有多少个，只输出数字。",
+    "quantity_comparison": f"比较 {FIXTURE_DOC} 和 {FIXTURE_PACKAGE} 哪个文件更大，并给出依据。",
+    "execution_failed_step": "执行一个会失败的只读检查命令：cat /definitely_missing_rustclaw_contract_case，然后说明失败原因。",
+    "generated_file_delivery": "写一个简单文本文件到 tmp/contract_matrix_generated_note.txt，内容是 RustClaw contract matrix test，然后把文件路径发给我。",
+    "scalar_path_only": f"只输出 {FIXTURE_PACKAGE} 的路径，不要解释。",
+    "existence_with_path": f"检查 {FIXTURE_PACKAGE} 是否存在，只回答存在性和路径。",
+    "existence_with_path_summary": f"检查 {FIXTURE_PACKAGE} 是否存在，如果存在就一句话说明它大概是什么文件。",
+    "recent_scalar_equality_check": "检查当前 git 分支名是否等于 main，只回答判断结果和依据。",
+    "git_commit_subject": "只告诉我最近一次 git 提交标题，不要解释。",
+    "git_repository_state": "检查这个仓库当前是否有未提交改动，用一句话说明。",
+    "structured_keys": f"读取 {FIXTURE_CONFIG} 的顶层键名，只输出键名列表。",
+    "config_validation": f"验证 {FIXTURE_CONFIG} 是否是可读配置，并简短说明结果。",
+    "config_risk_assessment": "检查 configs/config.toml 的风险配置项，简短说明是否有明显高风险设置。",
+    "sqlite_table_listing": f"列出 {FIXTURE_DB} 里的表，并简短说明。",
+    "sqlite_table_names_only": f"只输出 {FIXTURE_DB} 里的表名列表。",
+    "sqlite_database_kind_judgment": f"判断 {FIXTURE_DB} 更像业务库还是测试库，并给出依据。",
+    "sqlite_schema_version": f"读取 {FIXTURE_DB} 的 schema 版本，简短告诉我结果。",
+    "package_manager_detection": "检测这台机器可用的包管理器，并说明依据。",
+    "archive_list": f"列出 {FIXTURE_ARCHIVE} 里的成员列表。",
+    "archive_read": f"读取 {FIXTURE_ARCHIVE} 里的 notes.txt 内容片段，并简短总结。",
+    "archive_pack": f"把 {FIXTURE_DOCS_DIR} 打包成 tmp/contract_matrix_docs_bundle.zip，并告诉我生成路径。",
+    "archive_unpack": f"把 {FIXTURE_ARCHIVE} 解压到 tmp/contract_matrix_unpacked，并简短说明结果。",
+    "docker_ps": "列出当前 Docker 容器，如果没有也要说明观察结果。",
+    "docker_images": "列出当前 Docker 镜像，如果没有也要说明观察结果。",
+    "docker_logs": "查看最近一个 Docker 容器日志片段，如果没有容器就说明无法获取日志的原因。",
+    "docker_container_lifecycle": "检查 Docker 是否可用，并说明是否能执行容器生命周期操作。",
+}
+
+NL_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
+    "generic_path_content": f"看一下 {FIXTURE_DOC}，然后用一句适合新手的话说明它主要讲什么。",
+    "generic_delivery": "生成一个 tmp/contract_matrix_generic_delivery.txt 文件，内容是 generic delivery case，然后把文件发给我。",
+}
 
 
 def normalize_token(value: str) -> str:
@@ -196,6 +254,57 @@ def base_case(
         "forbidden_actions": normalized_list(contract.get("forbidden_actions", [])),
         "failure_policy": contract.get("failure_policy", ""),
     }
+
+
+def generated_prompt_for_case(case: dict[str, Any]) -> str:
+    contract_id = str(case.get("contract_id") or "")
+    if case.get("contract_type") == "generic":
+        prompt = NL_PROMPTS_BY_GENERIC_PROFILE.get(contract_id)
+    else:
+        prompt = NL_PROMPTS_BY_CONTRACT.get(contract_id)
+    if not prompt:
+        prompt = (
+            f"按 RustClaw 结构化任务 {contract_id} 做一次只读检查，"
+            "需要先观察证据，再按要求给出简短结果。"
+        )
+    phase = str(case.get("phase") or "")
+    action_ref = case.get("action_ref")
+    decision = case.get("expected_policy_decision")
+    if phase == "allowed_action" and action_ref:
+        return f"{prompt} 优先使用能够产生证据的内置能力完成，不要跳过观察。"
+    if phase == "negative_action" and action_ref and decision != "allowed":
+        return (
+            f"{prompt} 这是 contract policy 覆盖用例：如果 planner 倾向使用 {action_ref}，"
+            "runtime 应按 matrix 拦截或改用允许的工具。"
+        )
+    return prompt
+
+
+def as_nl_case(case: dict[str, Any]) -> dict[str, Any]:
+    contract_id = str(case.get("contract_id") or "unknown")
+    phase = str(case.get("phase") or "case")
+    name = f"contract_matrix_{contract_id}_{phase}"
+    if case.get("action_ref"):
+        name = f"{name}_{str(case['action_ref']).replace('.', '_')}"
+    tags = [
+        "contract_matrix",
+        "generated",
+        "live_nl",
+        str(case.get("contract_type") or "contract"),
+        contract_id,
+        phase,
+    ]
+    if case.get("expected_policy_decision"):
+        tags.append(str(case["expected_policy_decision"]))
+    row = {
+        "suite": "contract_matrix",
+        "name": name,
+        "tags": tags,
+        "prompt": generated_prompt_for_case(case),
+        "expect": "",
+    }
+    row.update(case)
+    return row
 
 
 def generate_all_cases(matrix: dict[str, Any]) -> list[dict[str, Any]]:
@@ -527,6 +636,11 @@ def main() -> int:
     parser.add_argument("--update-history", action="store_true")
     parser.add_argument("--report", action="store_true")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument(
+        "--nl",
+        action="store_true",
+        help="emit client-like live NL JSONL rows with prompt/name/tags plus contract metadata",
+    )
     args = parser.parse_args()
 
     if args.update_history and args.history is None:
@@ -544,7 +658,8 @@ def main() -> int:
                 print(f"ERROR: {error}", file=sys.stderr)
             return 1
 
-    for case in cases:
+    output_cases = [as_nl_case(case) for case in cases] if args.nl else cases
+    for case in output_cases:
         print(json.dumps(case, ensure_ascii=False, sort_keys=True))
 
     if args.update_history and args.history is not None:
