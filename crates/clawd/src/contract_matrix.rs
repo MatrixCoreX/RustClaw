@@ -1534,6 +1534,38 @@ pub(crate) fn trace_snapshot_for_output_contract(
     }))
 }
 
+pub(crate) fn action_trace_for_output_contract(
+    output_contract: &IntentOutputContract,
+    action_ref: &str,
+) -> Option<Value> {
+    let matrix = bundled_contract_matrix()?;
+    let matched = matrix.match_output_contract(output_contract)?;
+    let action = ActionRef::parse(action_ref)?;
+    let final_answer_shape_kind = matched.final_answer_shape_kind();
+    Some(json!({
+        "schema_version": 1,
+        "action_ref": action.as_key(),
+        "contract_match": matched.match_name(),
+        "decision": matched.action_policy(&action).as_str(),
+        "policy_mode": matched.policy_mode(),
+        "required_evidence": required_evidence_for_output_contract(output_contract)
+            .unwrap_or_else(|| matched.required_evidence()),
+        "evidence_expression": matched
+            .evidence_expression()
+            .to_trace_json(&matched.required_evidence()),
+        "final_answer_shape": final_answer_shape_kind
+            .map(FinalAnswerShape::as_str)
+            .unwrap_or_else(|| matched.final_answer_shape()),
+        "final_answer_shape_class": final_answer_shape_kind.map(|shape| shape.class().as_str()),
+        "coarse_response_shape": final_answer_shape_kind
+            .map(|shape| shape.coarse_response_shape().as_str()),
+        "allows_model_language": final_answer_shape_kind.map(FinalAnswerShape::allows_model_language),
+        "preferred_actions": normalized_tokens(matched.preferred_actions()),
+        "allowed_actions": normalized_tokens(matched.allowed_actions()),
+        "forbidden_actions": normalized_tokens(matched.forbidden_actions()),
+    }))
+}
+
 pub(crate) fn action_policy_for_output_contract(
     output_contract: Option<&IntentOutputContract>,
     normalized_skill: &str,
@@ -2308,6 +2340,40 @@ matrix_version = "broken"
         assert_eq!(
             snapshot.get("artifact_kind").and_then(Value::as_str),
             Some("file")
+        );
+    }
+
+    #[test]
+    fn action_trace_records_contract_decision_and_shape() {
+        let trace = action_trace_for_output_contract(
+            &IntentOutputContract {
+                semantic_kind: OutputSemanticKind::FileNames,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::CurrentWorkspace,
+                ..IntentOutputContract::default()
+            },
+            "fs_basic.list_dir",
+        )
+        .expect("action trace should resolve");
+
+        assert_eq!(
+            trace.get("contract_match").and_then(Value::as_str),
+            Some("file_names")
+        );
+        assert_eq!(
+            trace.get("decision").and_then(Value::as_str),
+            Some("allowed")
+        );
+        assert_eq!(
+            trace.get("final_answer_shape").and_then(Value::as_str),
+            Some("name_list")
+        );
+        assert_eq!(
+            trace
+                .get("required_evidence")
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+            Some(vec!["candidates"])
         );
     }
 
