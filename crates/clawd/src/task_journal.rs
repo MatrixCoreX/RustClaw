@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{json, Value};
 
@@ -624,6 +624,166 @@ fn stable_trace_hash(text: &str) -> String {
     format!("fnv64:{hash:016x}")
 }
 
+fn evidence_coverage_trace_json(route: &crate::RouteResult, journal: &TaskJournal) -> Value {
+    let required =
+        crate::task_contract::required_evidence_fields_for_output_contract(&route.output_contract);
+    let (observed_fields, observed_canonical) = observed_evidence_field_sets(journal);
+    let missing = required
+        .iter()
+        .filter(|field| !observed_canonical.contains(field.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    json!({
+        "schema_version": 1,
+        "required_evidence": required,
+        "observed_fields": observed_fields.into_iter().take(64).collect::<Vec<_>>(),
+        "observed_canonical": observed_canonical.into_iter().take(64).collect::<Vec<_>>(),
+        "missing_evidence": missing,
+    })
+}
+
+fn observed_evidence_field_sets(journal: &TaskJournal) -> (BTreeSet<String>, BTreeSet<String>) {
+    let mut observed_fields = BTreeSet::new();
+    let mut observed_canonical = BTreeSet::new();
+    for step in &journal.step_results {
+        let Some(evidence) = observed_evidence_for_step_trace(step) else {
+            continue;
+        };
+        let Some(items) = evidence.get("items").and_then(Value::as_array) else {
+            continue;
+        };
+        for item in items {
+            let Some(field) = item.get("field").and_then(Value::as_str) else {
+                continue;
+            };
+            let normalized = normalize_evidence_field(field);
+            if normalized.is_empty() {
+                continue;
+            }
+            observed_fields.insert(normalized.clone());
+            for canonical in canonical_evidence_fields_for_observed_field(&normalized) {
+                observed_canonical.insert(canonical);
+            }
+        }
+    }
+    (observed_fields, observed_canonical)
+}
+
+fn normalize_evidence_field(field: &str) -> String {
+    field
+        .trim()
+        .trim_matches('.')
+        .to_ascii_lowercase()
+        .replace('-', "_")
+}
+
+fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<String> {
+    let leaf = field.rsplit('.').next().unwrap_or(field);
+    let mut values = BTreeSet::new();
+    values.insert(field.to_string());
+    values.insert(leaf.to_string());
+
+    for (canonical, aliases) in [
+        (
+            "candidates",
+            &[
+                "candidates",
+                "items",
+                "names",
+                "paths",
+                "files",
+                "entries",
+                "results",
+                "facts",
+                "rows",
+                "tables",
+                "containers",
+                "images",
+                "members",
+            ][..],
+        ),
+        (
+            "content_excerpt",
+            &[
+                "content_excerpt",
+                "excerpt",
+                "body",
+                "content",
+                "text",
+                "lines",
+                "text_excerpt",
+            ][..],
+        ),
+        (
+            "content_match",
+            &[
+                "content_match",
+                "match",
+                "matches",
+                "grep_matches",
+                "lines",
+                "results",
+            ][..],
+        ),
+        (
+            "path",
+            &[
+                "path",
+                "resolved_path",
+                "file_path",
+                "target_path",
+                "output_path",
+                "archive_path",
+                "destination",
+            ][..],
+        ),
+        (
+            "field_value",
+            &[
+                "field_value",
+                "value",
+                "status",
+                "state",
+                "version",
+                "schema_version",
+                "package_manager",
+                "manager",
+                "subject",
+                "branch",
+                "commit",
+            ][..],
+        ),
+        (
+            "count",
+            &["count", "total", "length", "item_count", "row_count"][..],
+        ),
+        (
+            "size_bytes",
+            &["size_bytes", "bytes", "file_size", "size"][..],
+        ),
+        ("exists", &["exists", "found", "present"][..]),
+        ("kind", &["kind", "file_type", "type"][..]),
+        (
+            "command_output",
+            &[
+                "command_output",
+                "stdout",
+                "stderr",
+                "output",
+                "text_excerpt",
+            ][..],
+        ),
+    ] {
+        if aliases
+            .iter()
+            .any(|alias| *alias == leaf || *alias == field)
+        {
+            values.insert(canonical.to_string());
+        }
+    }
+    values.into_iter().collect()
+}
+
 fn structured_error_extra_string(
     structured_error: Option<&crate::skills::StructuredSkillError>,
     key: &str,
@@ -1034,6 +1194,10 @@ impl TaskJournal {
                 .route_result
                 .as_ref()
                 .and_then(crate::contract_matrix::trace_snapshot_for_route),
+            "evidence_coverage": self
+                .route_result
+                .as_ref()
+                .map(|route| evidence_coverage_trace_json(route, self)),
             "rounds": self.rounds.iter().map(|round| {
                 json!({
                     "round_no": round.round_no,
@@ -1538,6 +1702,115 @@ mod tests {
                         && item.get("hash").and_then(Value::as_str).is_some()
                 })
             }));
+    }
+
+    #[test]
+    fn trace_json_reports_required_vs_observed_evidence_coverage() {
+        let mut journal = TaskJournal::for_task("task-evidence-coverage", "ask", "列出文件名");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::FileNames,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(json!({"names": ["Cargo.toml", "README.md"]}).to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let trace = journal.to_trace_json();
+        let coverage = trace
+            .get("evidence_coverage")
+            .expect("evidence coverage should be present");
+        assert_eq!(
+            coverage
+                .get("required_evidence")
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+            Some(vec!["candidates"])
+        );
+        assert_eq!(
+            coverage
+                .get("missing_evidence")
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+            Some(Vec::<&str>::new())
+        );
+        assert!(coverage
+            .get("observed_canonical")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("candidates"))));
+    }
+
+    #[test]
+    fn trace_json_reports_missing_required_evidence() {
+        let mut journal = TaskJournal::for_task("task-evidence-missing", "ask", "这个路径是否存在");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
+            locator_kind: crate::OutputLocatorKind::Path,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(json!({"path": "/tmp/missing.txt", "exists": false}).to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let trace = journal.to_trace_json();
+        let coverage = trace
+            .get("evidence_coverage")
+            .expect("evidence coverage should be present");
+        assert_eq!(
+            coverage
+                .get("missing_evidence")
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+            Some(vec!["kind"])
+        );
     }
 
     #[test]
