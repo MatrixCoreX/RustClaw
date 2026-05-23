@@ -191,6 +191,12 @@ fn avoid_repeating_hint(
             Some("policy_block") | Some("permission_denied") => {
                 "do_not_bypass_policy; request_confirmation_or_stop_when_required"
             }
+            Some("contract_action_rejected") => {
+                "do_not_repeat_rejected_action; choose_contract_allowed_action_or_replan"
+            }
+            Some("contract_arg_rejected") => {
+                "do_not_repeat_missing_target_binding; bind_target_or_ask_for_clarification"
+            }
             _ => "do_not_repeat_same_tool_and_same_target; change_arguments_tool_or_plan",
         },
     }
@@ -206,6 +212,8 @@ fn retryable_from_status(
             error_kind,
             Some(
                 "policy_block"
+                    | "contract_action_rejected"
+                    | "contract_arg_rejected"
                     | "unsafe_sql"
                     | "path_outside_workspace"
                     | "confirmation_required"
@@ -298,6 +306,35 @@ mod tests {
         let ledger = build_attempt_ledger_compact(&loop_state);
         assert!(ledger.contains("\"error_kind\": \"unsafe_sql\""));
         assert!(ledger.contains("\"retryable\": false"));
+    }
+
+    #[test]
+    fn attempt_ledger_marks_contract_rejections_non_retryable() {
+        for (kind, hint) in [
+            (
+                "contract_action_rejected",
+                "do_not_repeat_rejected_action; choose_contract_allowed_action_or_replan",
+            ),
+            (
+                "contract_arg_rejected",
+                "do_not_repeat_missing_target_binding; bind_target_or_ask_for_clarification",
+            ),
+        ] {
+            let mut loop_state = crate::agent_engine::LoopState::new(3);
+            super::record_attempt(
+                &mut loop_state,
+                "fs_basic",
+                "action=read_text_range",
+                crate::executor::StepExecutionStatus::Error,
+                "",
+                Some(kind),
+                "contract preflight rejected the action",
+            );
+            let ledger = build_attempt_ledger_compact(&loop_state);
+            assert!(ledger.contains(&format!("\"error_kind\": \"{kind}\"")));
+            assert!(ledger.contains("\"retryable\": false"));
+            assert!(ledger.contains(hint));
+        }
     }
 
     #[test]
