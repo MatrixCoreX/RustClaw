@@ -1272,6 +1272,10 @@ impl TaskJournal {
                 .route_result
                 .as_ref()
                 .and_then(crate::contract_matrix::trace_snapshot_for_route),
+            "runtime_contract_snapshot": self
+                .route_result
+                .as_ref()
+                .and_then(crate::contract_matrix::runtime_contract_snapshot_for_route),
             "evidence_coverage": self
                 .route_result
                 .as_ref()
@@ -2034,6 +2038,21 @@ mod tests {
         );
         assert!(snapshot
             .get("contract_matrix_hash")
+            .and_then(Value::as_str)
+            .is_some_and(|hash| !hash.is_empty()));
+        let runtime_snapshot = trace
+            .get("runtime_contract_snapshot")
+            .expect("runtime contract snapshot should be present");
+        assert_eq!(
+            runtime_snapshot
+                .get("contract")
+                .and_then(|value| value.get("contract_match"))
+                .and_then(Value::as_str),
+            Some("file_names")
+        );
+        assert!(runtime_snapshot
+            .get("compact_contract_block")
+            .and_then(|value| value.get("hash"))
             .and_then(Value::as_str)
             .is_some_and(|hash| !hash.is_empty()));
     }
