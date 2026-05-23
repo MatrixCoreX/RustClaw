@@ -9,6 +9,8 @@ Expectation JSONL rows are intentionally small and optional. Supported fields:
   {
     "case": 12,
     "status": "succeeded",
+    "stop_signal": "recipe_repair_budget_exhausted",
+    "stop_failure_attribution": "budget_exhausted",
     "first_layer": "planner_execute",
     "first_layer_any": ["direct_answer", "planner_execute"],
     "routed_mode": "Act",
@@ -306,6 +308,8 @@ class Observation:
     file: str
     prompt: str
     status: str
+    stop_signal: str
+    stop_failure_attribution: str
     first_layer: str
     routed_mode: str
     route_gate: str
@@ -359,6 +363,16 @@ def observe_file(path: Path) -> Observation:
         file=path.name,
         prompt=compact(summary.get("input_text") if isinstance(summary, dict) else "", 1000),
         status=str(get_path(obj, "data", "status") or ""),
+        stop_signal=(
+            str(summary.get("final_stop_signal") or trace.get("final_stop_signal") or "")
+            if isinstance(summary, dict) and isinstance(trace, dict)
+            else ""
+        ),
+        stop_failure_attribution=(
+            str(summary.get("final_failure_attribution") or trace.get("final_failure_attribution") or "")
+            if isinstance(summary, dict) and isinstance(trace, dict)
+            else ""
+        ),
         first_layer=str(route.get("first_layer_decision") or "") if isinstance(route, dict) else "",
         routed_mode=str(route.get("routed_mode") or "") if isinstance(route, dict) else "",
         route_gate=str(route.get("route_gate_kind") or "") if isinstance(route, dict) else "",
@@ -469,6 +483,8 @@ def evaluate(obs: Observation, expected: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     checks = {
         "status": obs.status,
+        "stop_signal": obs.stop_signal,
+        "stop_failure_attribution": obs.stop_failure_attribution,
         "first_layer": obs.first_layer,
         "routed_mode": obs.routed_mode,
         "route_gate": obs.route_gate,
@@ -682,6 +698,8 @@ def baseline_row(obs: Observation) -> dict[str, Any]:
         "turn": obs.turn,
         "prompt": obs.prompt,
         "status": obs.status,
+        "stop_signal": obs.stop_signal,
+        "stop_failure_attribution": obs.stop_failure_attribution,
         "first_layer": obs.first_layer,
         "routed_mode": obs.routed_mode,
         "route_gate": obs.route_gate,

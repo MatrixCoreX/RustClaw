@@ -1,0 +1,37 @@
+{
+  "ok": true,
+  "data": {
+    "task_id": "fixture-budget-exhausted-attribution",
+    "status": "failed",
+    "result_json": {
+      "text": "我已经按闭环流程继续检查、应用和验证，但修复次数已达到上限（3/2），当前还没有验证通过。",
+      "messages": [
+        "我已经按闭环流程继续检查、应用和验证，但修复次数已达到上限（3/2），当前还没有验证通过。"
+      ],
+      "task_journal": {
+        "summary": {
+          "input_text": "继续修复直到验证通过",
+          "final_status": "failure",
+          "final_stop_signal": "recipe_repair_budget_exhausted",
+          "final_failure_attribution": "budget_exhausted",
+          "final_answer": "我已经按闭环流程继续检查、应用和验证，但修复次数已达到上限（3/2），当前还没有验证通过。",
+          "task_metrics": {
+            "used_evidence_ids_count": 0,
+            "delivery_consistent": true
+          }
+        },
+        "trace": {
+          "final_stop_signal": "recipe_repair_budget_exhausted",
+          "final_failure_attribution": "budget_exhausted",
+          "rounds": [],
+          "step_results": [],
+          "task_metrics": {
+            "used_evidence_ids_count": 0,
+            "delivery_consistent": true
+          }
+        }
+      }
+    }
+  },
+  "error": null
+}

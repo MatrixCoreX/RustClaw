@@ -13,6 +13,10 @@ assert only the fields that matter for that regression:
 Supported fields:
 
 - `status`
+- `stop_signal`
+- `stop_signal_any`
+- `stop_failure_attribution`
+- `stop_failure_attribution_any`
 - `first_layer`
 - `first_layer_any`
 - `routed_mode`

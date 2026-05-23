@@ -1079,9 +1079,21 @@ pub(crate) struct TaskJournal {
     pub(crate) task_metrics: TaskJournalTaskMetrics,
     pub(crate) final_answer: Option<String>,
     pub(crate) final_status: Option<TaskJournalFinalStatus>,
+    pub(crate) final_stop_signal: Option<String>,
+    pub(crate) final_failure_attribution: Option<String>,
     /// §3.1: ask 状态机 transition 序列。由 `log_ask_transition` 在每次状态切换时
     /// 追加。Stage A 仅占位，Stage B 起 logger 接入，Stage D 进 journal JSON 输出。
     pub(crate) transitions: Vec<crate::AskTransition>,
+}
+
+pub(crate) fn stop_signal_failure_attribution(stop_signal: &str) -> Option<&'static str> {
+    match stop_signal.trim() {
+        "recipe_repair_budget_exhausted" | "answer_verifier_retry_exhausted" => {
+            Some("budget_exhausted")
+        }
+        "prompt_budget_error" => Some("prompt_budget_error"),
+        _ => None,
+    }
 }
 
 fn summarize_verify_result(
@@ -1252,6 +1264,13 @@ impl TaskJournal {
         self.final_status = Some(final_status);
     }
 
+    pub(crate) fn record_final_stop_signal(&mut self, stop_signal: impl Into<String>) {
+        let stop_signal = stop_signal.into();
+        self.final_failure_attribution =
+            stop_signal_failure_attribution(&stop_signal).map(str::to_string);
+        self.final_stop_signal = Some(stop_signal);
+    }
+
     pub(crate) fn merge_from(&mut self, other: &TaskJournal) {
         if self.task_id.is_none() {
             self.task_id = other.task_id.clone();
@@ -1316,6 +1335,12 @@ impl TaskJournal {
         if self.final_status.is_none() {
             self.final_status = other.final_status.clone();
         }
+        if self.final_stop_signal.is_none() {
+            self.final_stop_signal = other.final_stop_signal.clone();
+        }
+        if self.final_failure_attribution.is_none() {
+            self.final_failure_attribution = other.final_failure_attribution.clone();
+        }
     }
 
     pub(crate) fn attach_to_result(&self, mut result: Value) -> Value {
@@ -1347,6 +1372,8 @@ impl TaskJournal {
             "step_count": self.step_results.len(),
             "task_observation_count": self.task_observations.len(),
             "final_status": self.final_status.map(TaskJournalFinalStatus::as_str),
+            "final_stop_signal": self.final_stop_signal.as_deref().map(crate::truncate_for_log),
+            "final_failure_attribution": self.final_failure_attribution.as_deref(),
             "input_text": crate::truncate_for_log(&self.input_text),
             "context_bundle_summary": self.context_bundle_summary.as_deref().map(crate::truncate_for_log),
             "memory_trace": self.memory_trace.clone(),
@@ -1374,6 +1401,8 @@ impl TaskJournal {
         json!({
             "task_id": self.task_id.as_deref(),
             "kind": self.kind.as_deref(),
+            "final_stop_signal": self.final_stop_signal.as_deref().map(crate::truncate_for_log),
+            "final_failure_attribution": self.final_failure_attribution.as_deref(),
             "memory_trace": self.memory_trace.clone(),
             "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
             "route_result": self.route_result.as_ref().map(route_result_json),
@@ -1454,8 +1483,9 @@ mod tests {
 
     use super::{
         delivery_payload_consistent, evidence_coverage_for_route, TaskJournal,
-        TaskJournalFinalizerFallback, TaskJournalFinalizerStage, TaskJournalFinalizerSummary,
-        TaskJournalRoundTrace, TaskJournalVerifyIssue, TaskJournalVerifySummary,
+        TaskJournalFinalStatus, TaskJournalFinalizerFallback, TaskJournalFinalizerStage,
+        TaskJournalFinalizerSummary, TaskJournalRoundTrace, TaskJournalVerifyIssue,
+        TaskJournalVerifySummary,
     };
 
     #[test]
@@ -1767,6 +1797,33 @@ mod tests {
         assert_eq!(
             issue.get("failure_attribution").and_then(Value::as_str),
             Some("contract_gap")
+        );
+    }
+
+    #[test]
+    fn final_stop_signal_records_budget_failure_attribution() {
+        let mut journal = TaskJournal::for_task("task-budget", "ask", "继续修复直到通过");
+        journal.record_final_status(TaskJournalFinalStatus::Failure);
+        journal.record_final_stop_signal("recipe_repair_budget_exhausted");
+
+        let summary = journal.to_summary_json();
+        let trace = journal.to_trace_json();
+
+        assert_eq!(
+            summary.get("final_stop_signal").and_then(Value::as_str),
+            Some("recipe_repair_budget_exhausted")
+        );
+        assert_eq!(
+            summary
+                .get("final_failure_attribution")
+                .and_then(Value::as_str),
+            Some("budget_exhausted")
+        );
+        assert_eq!(
+            trace
+                .get("final_failure_attribution")
+                .and_then(Value::as_str),
+            Some("budget_exhausted")
         );
     }
 

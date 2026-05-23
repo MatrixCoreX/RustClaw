@@ -80,6 +80,9 @@ pub(crate) fn build_from_loop_state(
     } else {
         journal.record_used_evidence_ids_count(0);
     }
+    if let Some(stop_signal) = loop_state.last_stop_signal.as_deref() {
+        journal.record_final_stop_signal(stop_signal.to_string());
+    }
     journal.record_delivery_consistent(delivery_consistent);
     journal.record_final_answer(final_text.to_string());
     journal.record_final_status(final_status);
@@ -114,5 +117,42 @@ mod tests {
 
         assert_eq!(journal.task_metrics.used_evidence_ids_count, Some(3));
         assert_eq!(journal.task_metrics.delivery_consistent, Some(true));
+    }
+
+    #[test]
+    fn build_from_loop_state_records_budget_stop_signal() {
+        let task = ClaimedTask {
+            task_id: "task-budget".to_string(),
+            user_id: 1,
+            chat_id: 1,
+            user_key: None,
+            channel: "test".to_string(),
+            external_user_id: None,
+            external_chat_id: None,
+            kind: "ask".to_string(),
+            payload_json: "{}".to_string(),
+        };
+        let mut loop_state = LoopState::new(2);
+        loop_state.last_stop_signal = Some("recipe_repair_budget_exhausted".to_string());
+
+        let journal = build_from_loop_state(
+            &task,
+            "继续修复",
+            &loop_state,
+            None,
+            None,
+            true,
+            "修复次数已达到上限。",
+            TaskJournalFinalStatus::Failure,
+        );
+
+        assert_eq!(
+            journal.final_stop_signal.as_deref(),
+            Some("recipe_repair_budget_exhausted")
+        );
+        assert_eq!(
+            journal.final_failure_attribution.as_deref(),
+            Some("budget_exhausted")
+        );
     }
 }
