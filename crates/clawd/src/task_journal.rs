@@ -2,6 +2,10 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
 
+const MAX_OBSERVED_EVIDENCE_ITEMS: usize = 24;
+const MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS: usize = 240;
+const MAX_OBSERVED_EVIDENCE_KEYS: usize = 16;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskJournalFinalStatus {
     Success,
@@ -381,10 +385,243 @@ fn step_trace_json(
         "failure_attribution": failure_attribution.as_deref(),
         "contract_policy": contract_policy,
         "output_excerpt": step.output_excerpt.as_deref(),
+        "observed_evidence": observed_evidence_for_step_trace(step),
         "error_excerpt": step.error_excerpt.as_deref(),
         "started_at": step.started_at,
         "finished_at": step.finished_at,
     })
+}
+
+pub(crate) fn observed_evidence_for_step_trace(step: &TaskJournalStepTrace) -> Option<Value> {
+    observed_evidence_from_output(step.output_excerpt.as_deref())
+}
+
+pub(crate) fn observed_evidence_from_output(output: Option<&str>) -> Option<Value> {
+    let output = output.map(str::trim).filter(|value| !value.is_empty())?;
+    let mut collector = ObservedEvidenceCollector::default();
+    let format = match serde_json::from_str::<Value>(output) {
+        Ok(value) => {
+            collect_json_observed_evidence(&mut collector, "json_output", "", &value, 0);
+            "json"
+        }
+        Err(_) => {
+            collector.push(text_observed_evidence_item(output));
+            "text"
+        }
+    };
+    if collector.items.is_empty() {
+        return None;
+    }
+    let item_count = collector.total_count;
+    Some(json!({
+        "schema_version": 1,
+        "source": "step_output",
+        "format": format,
+        "storage": "redacted_excerpt_hash",
+        "item_count": item_count,
+        "truncated": item_count > collector.items.len(),
+        "items": collector.items,
+    }))
+}
+
+#[derive(Default)]
+struct ObservedEvidenceCollector {
+    items: Vec<Value>,
+    total_count: usize,
+}
+
+impl ObservedEvidenceCollector {
+    fn push(&mut self, item: Value) {
+        self.total_count += 1;
+        if self.items.len() < MAX_OBSERVED_EVIDENCE_ITEMS {
+            self.items.push(item);
+        }
+    }
+}
+
+fn collect_json_observed_evidence(
+    collector: &mut ObservedEvidenceCollector,
+    source: &str,
+    prefix: &str,
+    value: &Value,
+    depth: usize,
+) {
+    match value {
+        Value::Object(map) => {
+            if depth > 0 {
+                collector.push(json_observed_evidence_item(source, prefix, value));
+            }
+            for (key, child) in map {
+                let field = if prefix.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                collector.push(json_observed_evidence_item(source, &field, child));
+                if depth == 0 && key == "extra" && child.is_object() {
+                    collect_json_observed_evidence(
+                        collector,
+                        "json_output.extra",
+                        &field,
+                        child,
+                        1,
+                    );
+                }
+            }
+        }
+        _ => collector.push(json_observed_evidence_item(source, "value", value)),
+    }
+}
+
+fn json_observed_evidence_item(source: &str, field: &str, value: &Value) -> Value {
+    let sensitive_field = evidence_field_is_sensitive(field);
+    let mut item = serde_json::Map::new();
+    item.insert("field".to_string(), json!(field));
+    item.insert("source".to_string(), json!(source));
+    item.insert("kind".to_string(), json!(json_value_kind(value)));
+    match value {
+        Value::Object(map) => {
+            item.insert(
+                "keys".to_string(),
+                json!(map
+                    .keys()
+                    .take(MAX_OBSERVED_EVIDENCE_KEYS)
+                    .collect::<Vec<_>>()),
+            );
+            item.insert("key_count".to_string(), json!(map.len()));
+        }
+        Value::Array(items) => {
+            item.insert("count".to_string(), json!(items.len()));
+            item.insert(
+                "sample_kinds".to_string(),
+                json!(items
+                    .iter()
+                    .take(MAX_OBSERVED_EVIDENCE_KEYS)
+                    .map(json_value_kind)
+                    .collect::<Vec<_>>()),
+            );
+        }
+        Value::Null => {
+            item.insert("excerpt".to_string(), json!("null"));
+            item.insert("hash".to_string(), json!(stable_trace_hash("null")));
+        }
+        Value::Bool(value) => {
+            let text = value.to_string();
+            item.insert("excerpt".to_string(), json!(text));
+            item.insert("hash".to_string(), json!(stable_trace_hash(&text)));
+        }
+        Value::Number(value) => {
+            let text = value.to_string();
+            item.insert("excerpt".to_string(), json!(text));
+            item.insert("hash".to_string(), json!(stable_trace_hash(&text)));
+        }
+        Value::String(value) => {
+            if sensitive_field || text_looks_sensitive(value) {
+                item.insert("redacted".to_string(), json!(true));
+            } else {
+                item.insert("excerpt".to_string(), json!(evidence_excerpt(value)));
+                item.insert("hash".to_string(), json!(stable_trace_hash(value)));
+            }
+        }
+    }
+    Value::Object(item)
+}
+
+fn text_observed_evidence_item(output: &str) -> Value {
+    let excerpt = redacted_text_excerpt(output);
+    json!({
+        "field": "text_excerpt",
+        "source": "text_output",
+        "kind": "text",
+        "excerpt": excerpt,
+        "hash": stable_trace_hash(output),
+    })
+}
+
+fn json_value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn evidence_field_is_sensitive(field: &str) -> bool {
+    let normalized = field.to_ascii_lowercase().replace(['-', '.'], "_");
+    [
+        "secret",
+        "token",
+        "password",
+        "passwd",
+        "credential",
+        "api_key",
+        "apikey",
+        "access_key",
+        "private_key",
+        "cookie",
+        "authorization",
+        "auth_header",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
+}
+
+fn evidence_excerpt(text: &str) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.len() <= MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS {
+        return collapsed;
+    }
+    let mut out =
+        crate::utf8_safe_prefix(&collapsed, MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS).to_string();
+    out.push_str("...(truncated)");
+    out
+}
+
+fn redacted_text_excerpt(text: &str) -> String {
+    let redacted = text
+        .split_whitespace()
+        .map(|token| {
+            if text_looks_sensitive(token) {
+                "[redacted]"
+            } else {
+                token
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    evidence_excerpt(&redacted)
+}
+
+fn text_looks_sensitive(text: &str) -> bool {
+    let trimmed =
+        text.trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '-');
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return false;
+    }
+    if trimmed.len() < 24 {
+        return false;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("sk-") || lower.starts_with("sk_") {
+        return true;
+    }
+    let dense_chars = trimmed
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | '+'))
+        .count();
+    dense_chars * 100 / trimmed.len().max(1) >= 85
+}
+
+fn stable_trace_hash(text: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv64:{hash:016x}")
 }
 
 fn structured_error_extra_string(
@@ -1212,6 +1449,95 @@ mod tests {
                 .and_then(Value::as_str),
             Some("file_names")
         );
+    }
+
+    #[test]
+    fn trace_json_includes_redacted_observed_evidence_for_json_output() {
+        let mut journal = TaskJournal::for_task("task-observed-evidence", "ask", "读取配置");
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "config_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "action": "read_fields",
+                    "count": 2,
+                    "extra": {
+                        "field_value": "enabled",
+                        "api_key": "sk-test-super-secret-token-value-1234567890"
+                    }
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let trace = journal.to_trace_json();
+        let observed = trace
+            .get("step_results")
+            .and_then(Value::as_array)
+            .and_then(|steps| steps.first())
+            .and_then(|step| step.get("observed_evidence"))
+            .expect("observed evidence should be present");
+        assert_eq!(observed.get("format").and_then(Value::as_str), Some("json"));
+        assert_eq!(
+            observed.get("storage").and_then(Value::as_str),
+            Some("redacted_excerpt_hash")
+        );
+
+        let items = observed
+            .get("items")
+            .and_then(Value::as_array)
+            .expect("observed evidence items should be present");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("extra.field_value")
+                && item.get("excerpt").and_then(Value::as_str) == Some("enabled")
+                && item.get("hash").and_then(Value::as_str).is_some()
+        }));
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("extra.api_key")
+                && item.get("redacted").and_then(Value::as_bool) == Some(true)
+                && item.get("excerpt").is_none()
+        }));
+        assert!(!serde_json::to_string(observed)
+            .expect("serialize observed evidence")
+            .contains("sk-test-super-secret-token-value"));
+    }
+
+    #[test]
+    fn trace_json_includes_observed_evidence_for_text_output() {
+        let mut journal = TaskJournal::for_task("task-observed-text", "ask", "运行命令");
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "run_cmd".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some("first line\nsecond line".to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let trace = journal.to_trace_json();
+        let observed = trace
+            .get("step_results")
+            .and_then(Value::as_array)
+            .and_then(|steps| steps.first())
+            .and_then(|step| step.get("observed_evidence"))
+            .expect("observed evidence should be present");
+        assert_eq!(observed.get("format").and_then(Value::as_str), Some("text"));
+        assert!(observed
+            .get("items")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.get("field").and_then(Value::as_str) == Some("text_excerpt")
+                        && item.get("excerpt").and_then(Value::as_str)
+                            == Some("first line second line")
+                        && item.get("hash").and_then(Value::as_str).is_some()
+                })
+            }));
     }
 
     #[test]
