@@ -96,6 +96,12 @@ pub(crate) fn structurally_satisfies_answer_contract(
                 candidate_answer,
             );
         }
+        if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::Table {
+            return matrix_table_answer_is_grounded_in_successful_observation(
+                journal,
+                candidate_answer,
+            );
+        }
     }
     if route_requires_single_file_delivery(route_result)
         && candidate_answer_has_grounded_existing_file_token(journal, candidate_answer)
@@ -155,6 +161,124 @@ fn matrix_strict_list_answer_is_grounded_in_successful_observation(
             .iter()
             .any(|item| candidate_variants.contains(item))
     })
+}
+
+fn matrix_table_answer_is_grounded_in_successful_observation(
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    let candidate_cells = markdown_table_data_cells(candidate_answer);
+    if candidate_cells.is_empty() {
+        return false;
+    }
+    let observed_cells = observed_table_cells(journal);
+    if observed_cells.is_empty() {
+        return false;
+    }
+    candidate_cells.is_subset(&observed_cells) && observed_cells.is_subset(&candidate_cells)
+}
+
+fn markdown_table_data_cells(answer: &str) -> BTreeSet<String> {
+    let rows = answer
+        .lines()
+        .map(markdown_table_row_cells)
+        .filter(|cells| !cells.is_empty())
+        .collect::<Vec<_>>();
+    if rows.len() < 3 || !markdown_table_separator_row(&rows[1]) {
+        return BTreeSet::new();
+    }
+    let mut cells = BTreeSet::new();
+    for row in rows.iter().skip(2) {
+        for cell in row {
+            let normalized = normalize_strict_list_item(cell);
+            if !normalized.is_empty() {
+                cells.insert(normalized);
+            }
+        }
+    }
+    cells
+}
+
+fn markdown_table_row_cells(line: &str) -> Vec<String> {
+    let trimmed = line.trim();
+    if !trimmed.contains('|') {
+        return Vec::new();
+    }
+    trimmed
+        .trim_matches('|')
+        .split('|')
+        .map(str::trim)
+        .filter(|cell| !cell.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn markdown_table_separator_row(cells: &[String]) -> bool {
+    cells.iter().all(|cell| {
+        let value = cell.trim();
+        value.len() >= 3
+            && value
+                .chars()
+                .all(|ch| matches!(ch, '-' | ':' | ' ' | '\t'))
+            && value.chars().any(|ch| ch == '-')
+    })
+}
+
+fn observed_table_cells(journal: &crate::task_journal::TaskJournal) -> BTreeSet<String> {
+    let mut cells = BTreeSet::new();
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            continue;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
+            continue;
+        };
+        collect_observed_table_cells_from_value(&value, &mut cells);
+    }
+    cells
+}
+
+fn collect_observed_table_cells_from_value(value: &serde_json::Value, cells: &mut BTreeSet<String>) {
+    if let Some(rows) = value.get("rows").and_then(|value| value.as_array()) {
+        collect_observed_table_cells_from_rows(rows, cells);
+    }
+    if let Some(rows) = value.pointer("/result/rows").and_then(|value| value.as_array()) {
+        collect_observed_table_cells_from_rows(rows, cells);
+    }
+}
+
+fn collect_observed_table_cells_from_rows(rows: &[serde_json::Value], cells: &mut BTreeSet<String>) {
+    for row in rows {
+        match row {
+            serde_json::Value::Object(map) => {
+                for value in map.values() {
+                    push_observed_table_cell(value, cells);
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for value in values {
+                    push_observed_table_cell(value, cells);
+                }
+            }
+            value => push_observed_table_cell(value, cells),
+        }
+    }
+}
+
+fn push_observed_table_cell(value: &serde_json::Value, cells: &mut BTreeSet<String>) {
+    let text = match value {
+        serde_json::Value::String(value) => value.trim().to_string(),
+        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        _ => String::new(),
+    };
+    let normalized = normalize_strict_list_item(&text);
+    if !normalized.is_empty() {
+        cells.insert(normalized);
+    }
 }
 
 fn strict_list_answer_items(answer: &str) -> Vec<String> {
@@ -1518,6 +1642,58 @@ mod tests {
             &route,
             &journal,
             "The files are README.md and Cargo.toml."
+        ));
+    }
+
+    #[test]
+    fn matrix_table_shape_requires_markdown_table_answer() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
+        route.output_contract.locator_hint = "data/app.sqlite".to_string();
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-matrix-table", "ask", "list tables");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "db_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    json!({
+                        "columns": ["name"],
+                        "rows": [
+                            {"name": "orders"},
+                            {"name": "users"}
+                        ]
+                    })
+                    .to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "| name |\n| --- |\n| orders |\n| users |"
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "orders, users"
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "| name |\n| --- |\n| orders |"
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "| name |\n| --- |\n| orders |\n| payments |"
         ));
     }
 
