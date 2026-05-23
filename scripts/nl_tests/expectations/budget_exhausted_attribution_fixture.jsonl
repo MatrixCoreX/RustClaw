@@ -1,0 +1,1 @@
+{"case": 1, "status": "failed", "stop_signal": "recipe_repair_budget_exhausted", "stop_failure_attribution": "budget_exhausted", "final_shape": "non_empty"}
