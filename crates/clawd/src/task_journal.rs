@@ -624,15 +624,25 @@ fn stable_trace_hash(text: &str) -> String {
     format!("fnv64:{hash:016x}")
 }
 
+pub(crate) fn missing_required_evidence_fields(
+    route: &crate::RouteResult,
+    journal: &TaskJournal,
+) -> Vec<String> {
+    let required =
+        crate::task_contract::required_evidence_fields_for_output_contract(&route.output_contract);
+    let (_, observed_canonical) = observed_evidence_field_sets(journal);
+    required
+        .iter()
+        .filter(|field| !observed_canonical.contains(field.as_str()))
+        .cloned()
+        .collect::<Vec<_>>()
+}
+
 fn evidence_coverage_trace_json(route: &crate::RouteResult, journal: &TaskJournal) -> Value {
     let required =
         crate::task_contract::required_evidence_fields_for_output_contract(&route.output_contract);
     let (observed_fields, observed_canonical) = observed_evidence_field_sets(journal);
-    let missing = required
-        .iter()
-        .filter(|field| !observed_canonical.contains(field.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
+    let missing = missing_required_evidence_fields(route, journal);
     json!({
         "schema_version": 1,
         "required_evidence": required,
