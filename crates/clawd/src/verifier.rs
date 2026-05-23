@@ -42,6 +42,7 @@ pub(crate) enum VerifyIssueKind {
     RecipeInspectBeforeMutateRequired,
     RecipeValidationAfterMutateRequired,
     RecipeTargetScopeRequired,
+    ContractActionRejected,
 }
 
 impl Default for VerifyIssueKind {
@@ -66,6 +67,7 @@ impl VerifyIssueKind {
             Self::RecipeInspectBeforeMutateRequired => "RecipeInspectBeforeMutateRequired",
             Self::RecipeValidationAfterMutateRequired => "RecipeValidationAfterMutateRequired",
             Self::RecipeTargetScopeRequired => "RecipeTargetScopeRequired",
+            Self::ContractActionRejected => "ContractActionRejected",
         }
     }
 }
@@ -742,6 +744,7 @@ fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
             | VerifyIssueKind::RecipeInspectBeforeMutateRequired
             | VerifyIssueKind::RecipeValidationAfterMutateRequired
             | VerifyIssueKind::RecipeTargetScopeRequired
+            | VerifyIssueKind::ContractActionRejected
     )
 }
 
@@ -942,7 +945,7 @@ fn rewrite_execution_recipe_steps(
                 &step.skill,
                 &step.args,
             );
-            if effect.validates && !effect.mutates {
+            if apply_phase_pre_mutation_step_should_be_skipped(state, step, effect) {
                 changed = true;
                 continue;
             }
@@ -992,6 +995,24 @@ fn rewrite_execution_recipe_steps(
     } else {
         Vec::new()
     }
+}
+
+fn apply_phase_pre_mutation_step_should_be_skipped(
+    state: &AppState,
+    step: &PlanStep,
+    effect: crate::execution_recipe::ActionEffect,
+) -> bool {
+    if effect.mutates {
+        return false;
+    }
+    if effect.validates {
+        return true;
+    }
+    let normalized_skill = state.resolve_canonical_skill_name(&step.skill);
+    matches!(
+        normalized_skill.as_str(),
+        "http_basic" | "health_check" | "service_control"
+    )
 }
 
 fn first_shadow_blocked_reason(issues: &[VerifyIssue]) -> Option<String> {
@@ -1103,6 +1124,25 @@ pub(crate) fn verify_plan(
                 });
             }
             verify_step_args(state, step, &normalized_skill, &template_scope, &mut issues);
+            if let Some(policy) = crate::contract_matrix::action_policy_for_output_contract(
+                input.route_result.map(|route| &route.output_contract),
+                &normalized_skill,
+                &step.args,
+            ) {
+                if !policy.is_allowed() {
+                    issues.push(VerifyIssue {
+                        step_id: step.step_id.clone(),
+                        kind: VerifyIssueKind::ContractActionRejected,
+                        detail: format!(
+                            "action `{}` is rejected by contract `{}` ({}) with final answer shape `{}`",
+                            policy.action_key,
+                            policy.contract_match,
+                            policy.decision.as_str(),
+                            policy.final_answer_shape
+                        ),
+                    });
+                }
+            }
             let safe_autonomous_creation =
                 safe_autonomous_creation_step(state, &normalized_skill, &step.args);
             let step_risk = effective_step_risk_level(state, &normalized_skill, &step.args);
@@ -1399,6 +1439,16 @@ primary_fallback_role = "primary"
 
     fn route_result(needs_clarify: bool) -> RouteResult {
         route_result_with_risk(needs_clarify, crate::RiskCeiling::Unknown)
+    }
+
+    fn route_result_with_semantic(semantic_kind: crate::OutputSemanticKind) -> RouteResult {
+        let mut route = route_result(false);
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        };
+        route
     }
 
     fn route_result_with_risk(
@@ -1753,6 +1803,42 @@ primary_fallback_role = "primary"
             .issues
             .iter()
             .any(|issue| matches!(issue.kind, VerifyIssueKind::RiskBudgetExceeded)));
+    }
+
+    #[test]
+    fn observe_mode_records_contract_action_rejection_for_structured_route() {
+        let state = test_state();
+        let task = test_task();
+        let route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route),
+                request_text: None,
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({"command": "ls"}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::ObserveOnly,
+        );
+
+        assert!(result.approved);
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| matches!(issue.kind, VerifyIssueKind::ContractActionRejected)));
+        assert!(result
+            .shadow_blocked_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("rejected by contract")));
     }
 
     #[test]

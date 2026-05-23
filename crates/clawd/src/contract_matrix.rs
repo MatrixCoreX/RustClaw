@@ -135,6 +135,187 @@ impl GenericProfile {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum FinalAnswerShape {
+    ArchiveMemberExcerpt,
+    ArchiveMemberList,
+    ComparisonVerdict,
+    ContainerList,
+    CreatedArchivePath,
+    DatabaseKindJudgment,
+    DeliveryTokenOrPath,
+    ExistenceSummaryWithPath,
+    ExistenceVerdictWithPath,
+    FailedStepWithEvidence,
+    Free,
+    GitStateSummary,
+    GroupedNameList,
+    ImageList,
+    JudgmentWithExcerptBasis,
+    KeyListOrKeySummary,
+    LifecycleResult,
+    ListOrEmptyStatement,
+    LogExcerptOrSummary,
+    ManagerNameWithBasis,
+    NameList,
+    PathList,
+    PresenceVerdictWithMatch,
+    ProjectSummaryGroundedInFiles,
+    RawOutputOrShortSummary,
+    RecentArtifactJudgment,
+    RiskAssessment,
+    Scalar,
+    ScalarEqualityVerdict,
+    SchemaVersion,
+    SingleCommitSubject,
+    SinglePath,
+    StatusWithSource,
+    SummaryGroundedInExcerpt,
+    SummaryGroundedInListing,
+    SummaryWithEvidence,
+    TableListing,
+    TableNameList,
+    UnpackDestinationSummary,
+    ValidationVerdict,
+}
+
+impl FinalAnswerShape {
+    #[cfg(test)]
+    pub(crate) const ALL: &'static [Self] = &[
+        Self::ArchiveMemberExcerpt,
+        Self::ArchiveMemberList,
+        Self::ComparisonVerdict,
+        Self::ContainerList,
+        Self::CreatedArchivePath,
+        Self::DatabaseKindJudgment,
+        Self::DeliveryTokenOrPath,
+        Self::ExistenceSummaryWithPath,
+        Self::ExistenceVerdictWithPath,
+        Self::FailedStepWithEvidence,
+        Self::Free,
+        Self::GitStateSummary,
+        Self::GroupedNameList,
+        Self::ImageList,
+        Self::JudgmentWithExcerptBasis,
+        Self::KeyListOrKeySummary,
+        Self::LifecycleResult,
+        Self::ListOrEmptyStatement,
+        Self::LogExcerptOrSummary,
+        Self::ManagerNameWithBasis,
+        Self::NameList,
+        Self::PathList,
+        Self::PresenceVerdictWithMatch,
+        Self::ProjectSummaryGroundedInFiles,
+        Self::RawOutputOrShortSummary,
+        Self::RecentArtifactJudgment,
+        Self::RiskAssessment,
+        Self::Scalar,
+        Self::ScalarEqualityVerdict,
+        Self::SchemaVersion,
+        Self::SingleCommitSubject,
+        Self::SinglePath,
+        Self::StatusWithSource,
+        Self::SummaryGroundedInExcerpt,
+        Self::SummaryGroundedInListing,
+        Self::SummaryWithEvidence,
+        Self::TableListing,
+        Self::TableNameList,
+        Self::UnpackDestinationSummary,
+        Self::ValidationVerdict,
+    ];
+
+    pub(crate) fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "archive_member_excerpt" => Some(Self::ArchiveMemberExcerpt),
+            "archive_member_list" => Some(Self::ArchiveMemberList),
+            "comparison_verdict" => Some(Self::ComparisonVerdict),
+            "container_list" => Some(Self::ContainerList),
+            "created_archive_path" => Some(Self::CreatedArchivePath),
+            "database_kind_judgment" => Some(Self::DatabaseKindJudgment),
+            "delivery_token_or_path" => Some(Self::DeliveryTokenOrPath),
+            "existence_summary_with_path" => Some(Self::ExistenceSummaryWithPath),
+            "existence_verdict_with_path" => Some(Self::ExistenceVerdictWithPath),
+            "failed_step_with_evidence" => Some(Self::FailedStepWithEvidence),
+            "free" => Some(Self::Free),
+            "git_state_summary" => Some(Self::GitStateSummary),
+            "grouped_name_list" => Some(Self::GroupedNameList),
+            "image_list" => Some(Self::ImageList),
+            "judgment_with_excerpt_basis" => Some(Self::JudgmentWithExcerptBasis),
+            "key_list_or_key_summary" => Some(Self::KeyListOrKeySummary),
+            "lifecycle_result" => Some(Self::LifecycleResult),
+            "list_or_empty_statement" => Some(Self::ListOrEmptyStatement),
+            "log_excerpt_or_summary" => Some(Self::LogExcerptOrSummary),
+            "manager_name_with_basis" => Some(Self::ManagerNameWithBasis),
+            "name_list" => Some(Self::NameList),
+            "path_list" => Some(Self::PathList),
+            "presence_verdict_with_match" => Some(Self::PresenceVerdictWithMatch),
+            "project_summary_grounded_in_files" => Some(Self::ProjectSummaryGroundedInFiles),
+            "raw_output_or_short_summary" => Some(Self::RawOutputOrShortSummary),
+            "recent_artifact_judgment" => Some(Self::RecentArtifactJudgment),
+            "risk_assessment" => Some(Self::RiskAssessment),
+            "scalar" => Some(Self::Scalar),
+            "scalar_equality_verdict" => Some(Self::ScalarEqualityVerdict),
+            "schema_version" => Some(Self::SchemaVersion),
+            "single_commit_subject" => Some(Self::SingleCommitSubject),
+            "single_path" => Some(Self::SinglePath),
+            "status_with_source" => Some(Self::StatusWithSource),
+            "summary_grounded_in_excerpt" => Some(Self::SummaryGroundedInExcerpt),
+            "summary_grounded_in_listing" => Some(Self::SummaryGroundedInListing),
+            "summary_with_evidence" => Some(Self::SummaryWithEvidence),
+            "table_listing" => Some(Self::TableListing),
+            "table_name_list" => Some(Self::TableNameList),
+            "unpack_destination_summary" => Some(Self::UnpackDestinationSummary),
+            "validation_verdict" => Some(Self::ValidationVerdict),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::ArchiveMemberExcerpt => "archive_member_excerpt",
+            Self::ArchiveMemberList => "archive_member_list",
+            Self::ComparisonVerdict => "comparison_verdict",
+            Self::ContainerList => "container_list",
+            Self::CreatedArchivePath => "created_archive_path",
+            Self::DatabaseKindJudgment => "database_kind_judgment",
+            Self::DeliveryTokenOrPath => "delivery_token_or_path",
+            Self::ExistenceSummaryWithPath => "existence_summary_with_path",
+            Self::ExistenceVerdictWithPath => "existence_verdict_with_path",
+            Self::FailedStepWithEvidence => "failed_step_with_evidence",
+            Self::Free => "free",
+            Self::GitStateSummary => "git_state_summary",
+            Self::GroupedNameList => "grouped_name_list",
+            Self::ImageList => "image_list",
+            Self::JudgmentWithExcerptBasis => "judgment_with_excerpt_basis",
+            Self::KeyListOrKeySummary => "key_list_or_key_summary",
+            Self::LifecycleResult => "lifecycle_result",
+            Self::ListOrEmptyStatement => "list_or_empty_statement",
+            Self::LogExcerptOrSummary => "log_excerpt_or_summary",
+            Self::ManagerNameWithBasis => "manager_name_with_basis",
+            Self::NameList => "name_list",
+            Self::PathList => "path_list",
+            Self::PresenceVerdictWithMatch => "presence_verdict_with_match",
+            Self::ProjectSummaryGroundedInFiles => "project_summary_grounded_in_files",
+            Self::RawOutputOrShortSummary => "raw_output_or_short_summary",
+            Self::RecentArtifactJudgment => "recent_artifact_judgment",
+            Self::RiskAssessment => "risk_assessment",
+            Self::Scalar => "scalar",
+            Self::ScalarEqualityVerdict => "scalar_equality_verdict",
+            Self::SchemaVersion => "schema_version",
+            Self::SingleCommitSubject => "single_commit_subject",
+            Self::SinglePath => "single_path",
+            Self::StatusWithSource => "status_with_source",
+            Self::SummaryGroundedInExcerpt => "summary_grounded_in_excerpt",
+            Self::SummaryGroundedInListing => "summary_grounded_in_listing",
+            Self::SummaryWithEvidence => "summary_with_evidence",
+            Self::TableListing => "table_listing",
+            Self::TableNameList => "table_name_list",
+            Self::UnpackDestinationSummary => "unpack_destination_summary",
+            Self::ValidationVerdict => "validation_verdict",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ActionPolicyDecision {
     Allowed,
@@ -219,6 +400,10 @@ impl<'a> MatchedContract<'a> {
             Self::Semantic(contract) => contract.final_answer_shape.as_str(),
             Self::Generic(profile) => profile.final_answer_shape.as_str(),
         }
+    }
+
+    pub(crate) fn final_answer_shape_kind(&self) -> Option<FinalAnswerShape> {
+        FinalAnswerShape::parse(self.final_answer_shape())
     }
 
     fn match_name(&self) -> &str {
@@ -334,6 +519,11 @@ impl ContractMatrix {
                     }
                     if contract.final_answer_shape.trim().is_empty() {
                         errors.push(format!("contract `{key}` missing final_answer_shape"));
+                    } else if FinalAnswerShape::parse(&contract.final_answer_shape).is_none() {
+                        errors.push(format!(
+                            "contract `{key}` has unknown final_answer_shape `{}`",
+                            contract.final_answer_shape
+                        ));
                     }
                 }
                 None => errors.push(format!("missing contract for semantic `{key}`")),
@@ -345,6 +535,25 @@ impl ContractMatrix {
                 .any(|kind| kind.as_str() == key.as_str())
             {
                 errors.push(format!("unknown semantic contract `{key}`"));
+            }
+        }
+        let mut generic_names = BTreeSet::new();
+        for profile in &self.generic_profiles {
+            if profile.name.trim().is_empty() {
+                errors.push("generic profile missing name".to_string());
+            } else if !generic_names.insert(profile.name.trim().to_string()) {
+                errors.push(format!("duplicate generic profile `{}`", profile.name));
+            }
+            if profile.final_answer_shape.trim().is_empty() {
+                errors.push(format!(
+                    "generic profile `{}` missing final_answer_shape",
+                    profile.name
+                ));
+            } else if FinalAnswerShape::parse(&profile.final_answer_shape).is_none() {
+                errors.push(format!(
+                    "generic profile `{}` has unknown final_answer_shape `{}`",
+                    profile.name, profile.final_answer_shape
+                ));
             }
         }
         errors
@@ -440,6 +649,7 @@ pub(crate) struct ContractActionPolicy {
     pub(crate) action_key: String,
     pub(crate) contract_match: String,
     pub(crate) required_evidence: Vec<String>,
+    pub(crate) final_answer_shape_kind: FinalAnswerShape,
     pub(crate) final_answer_shape: String,
 }
 
@@ -500,7 +710,10 @@ pub(crate) fn compact_prompt_line_for_output_contract(
         matrix.matrix_version_hash(),
         matched.match_name(),
         required_evidence,
-        matched.final_answer_shape(),
+        matched
+            .final_answer_shape_kind()
+            .map(FinalAnswerShape::as_str)
+            .unwrap_or_else(|| matched.final_answer_shape()),
         allowed_actions,
         forbidden_actions,
     ))
@@ -539,6 +752,14 @@ pub(crate) fn required_evidence_for_output_contract(
     Some(fields.into_iter().collect())
 }
 
+pub(crate) fn final_answer_shape_for_output_contract(
+    output_contract: &IntentOutputContract,
+) -> Option<FinalAnswerShape> {
+    let matrix = bundled_contract_matrix()?;
+    let matched = matrix.match_output_contract(output_contract)?;
+    matched.final_answer_shape_kind()
+}
+
 pub(crate) fn trace_snapshot_for_route(route: &RouteResult) -> Option<Value> {
     trace_snapshot_for_output_contract(&route.output_contract)
 }
@@ -561,7 +782,10 @@ pub(crate) fn trace_snapshot_for_output_contract(
         "contract_match": matched.match_name(),
         "required_evidence": required_evidence_for_output_contract(output_contract)
             .unwrap_or_else(|| matched.required_evidence()),
-        "final_answer_shape": matched.final_answer_shape(),
+        "final_answer_shape": matched
+            .final_answer_shape_kind()
+            .map(FinalAnswerShape::as_str)
+            .unwrap_or_else(|| matched.final_answer_shape()),
         "preferred_actions": normalized_tokens(matched.preferred_actions()),
         "allowed_actions": normalized_tokens(matched.allowed_actions()),
         "forbidden_actions": normalized_tokens(matched.forbidden_actions()),
@@ -583,12 +807,14 @@ pub(crate) fn action_policy_for_output_contract(
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
     let action = ActionRef::from_skill_args(normalized_skill, args)?;
+    let final_answer_shape_kind = matched.final_answer_shape_kind()?;
     Some(ContractActionPolicy {
         decision: matched.action_policy(&action),
         action_key: action.as_key(),
         contract_match: matched.match_name().to_string(),
         required_evidence: matched.required_evidence(),
-        final_answer_shape: matched.final_answer_shape().to_string(),
+        final_answer_shape_kind,
+        final_answer_shape: final_answer_shape_kind.as_str().to_string(),
     })
 }
 
@@ -926,6 +1152,34 @@ mod tests {
             .failure_attribution
             .contains(&"model_error".to_string()));
         assert_eq!(matrix.policy.unknown_semantic, "reject");
+    }
+
+    #[test]
+    fn contract_matrix_final_answer_shapes_are_typed() {
+        let matrix = load_workspace_matrix();
+        let configured = matrix
+            .contracts
+            .values()
+            .map(|contract| contract.final_answer_shape.as_str())
+            .chain(
+                matrix
+                    .generic_profiles
+                    .iter()
+                    .map(|profile| profile.final_answer_shape.as_str()),
+            )
+            .collect::<BTreeSet<_>>();
+        let typed = FinalAnswerShape::ALL
+            .iter()
+            .map(|shape| shape.as_str())
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(configured, typed);
+        for shape in configured {
+            assert_eq!(
+                FinalAnswerShape::parse(shape).map(FinalAnswerShape::as_str),
+                Some(shape)
+            );
+        }
     }
 
     #[test]
