@@ -195,12 +195,18 @@ fn contract_matrix_action_policy_error(
     if policy.is_allowed() {
         return None;
     }
-    let error_text = format!(
+    let mut error_text = format!(
         "action `{}` is rejected by contract `{}` ({})",
         policy.action_key,
         policy.contract_match,
         policy.decision.as_str()
     );
+    if !policy.preferred_actions.is_empty() {
+        error_text.push_str(&format!(
+            "; prefer action(s): {}",
+            policy.preferred_actions.join(", ")
+        ));
+    }
     let evidence_expression = policy
         .evidence_expression
         .to_trace_json(&policy.required_evidence);
@@ -1756,6 +1762,9 @@ mod tests {
             .expect("contract policy error should be structured");
 
         assert_eq!(parsed.error_kind, "contract_action_rejected");
+        assert!(parsed
+            .error_text
+            .contains("prefer action(s): fs_basic.list_dir"));
         assert_eq!(
             parsed
                 .extra
