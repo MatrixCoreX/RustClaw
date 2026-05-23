@@ -1,0 +1,39 @@
+{
+  "ok": true,
+  "data": {
+    "task_id": "fixture-delivery-error-attribution",
+    "status": "succeeded",
+    "result_json": {
+      "text": "Task completed, but the scheduled channel delivery failed.",
+      "messages": [
+        "Task completed, but the scheduled channel delivery failed."
+      ],
+      "task_journal": {
+        "summary": {
+          "input_text": "Send the scheduled report to the configured channel",
+          "final_status": "success",
+          "final_answer": "Task completed, but the scheduled channel delivery failed.",
+          "task_observation_count": 1
+        },
+        "trace": {
+          "rounds": [],
+          "step_results": [],
+          "task_observations": [
+            {
+              "source": "schedule_notify",
+              "job_id": "fixture-job",
+              "channel": "feishu",
+              "runtime_channel": "feishu",
+              "task_success": true,
+              "status": "error",
+              "error_kind": "channel_send_failed",
+              "failure_attribution": "delivery_error",
+              "error_text": "fixture channel send failed"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "error": null
+}

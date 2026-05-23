@@ -1,0 +1,1 @@
+{"case": 1, "status": "succeeded", "error_kind_any": ["channel_send_failed"], "failure_attribution_any": ["delivery_error"], "final_shape": "non_empty"}
