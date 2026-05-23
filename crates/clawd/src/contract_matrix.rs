@@ -4,7 +4,9 @@ use std::sync::OnceLock;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::{IntentOutputContract, OutputLocatorKind, OutputSemanticKind, RouteResult};
+use crate::{
+    IntentOutputContract, OutputLocatorKind, OutputResponseShape, OutputSemanticKind, RouteResult,
+};
 
 #[cfg(test)]
 use anyhow::{Context, Result};
@@ -445,6 +447,47 @@ pub(crate) enum FinalAnswerShape {
     ValidationVerdict,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum FinalAnswerShapeClass {
+    DeliveryArtifact,
+    Freeform,
+    GroundedSummary,
+    ScalarValue,
+    SinglePath,
+    StrictList,
+    Table,
+    Verdict,
+}
+
+impl FinalAnswerShapeClass {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::DeliveryArtifact => "delivery_artifact",
+            Self::Freeform => "freeform",
+            Self::GroundedSummary => "grounded_summary",
+            Self::ScalarValue => "scalar_value",
+            Self::SinglePath => "single_path",
+            Self::StrictList => "strict_list",
+            Self::Table => "table",
+            Self::Verdict => "verdict",
+        }
+    }
+
+    pub(crate) fn coarse_response_shape(self) -> OutputResponseShape {
+        match self {
+            Self::DeliveryArtifact => OutputResponseShape::FileToken,
+            Self::ScalarValue | Self::SinglePath => OutputResponseShape::Scalar,
+            Self::StrictList | Self::Table => OutputResponseShape::Strict,
+            Self::Verdict => OutputResponseShape::OneSentence,
+            Self::Freeform | Self::GroundedSummary => OutputResponseShape::Free,
+        }
+    }
+
+    pub(crate) fn allows_model_language(self) -> bool {
+        matches!(self, Self::Freeform | Self::GroundedSummary | Self::Verdict)
+    }
+}
+
 impl FinalAnswerShape {
     #[cfg(test)]
     pub(crate) const ALL: &'static [Self] = &[
@@ -579,6 +622,58 @@ impl FinalAnswerShape {
             Self::UnpackDestinationSummary => "unpack_destination_summary",
             Self::ValidationVerdict => "validation_verdict",
         }
+    }
+
+    pub(crate) fn class(self) -> FinalAnswerShapeClass {
+        match self {
+            Self::DeliveryTokenOrPath => FinalAnswerShapeClass::DeliveryArtifact,
+            Self::CreatedArchivePath | Self::SinglePath => FinalAnswerShapeClass::SinglePath,
+            Self::Scalar
+            | Self::SchemaVersion
+            | Self::SingleCommitSubject
+            | Self::ManagerNameWithBasis => FinalAnswerShapeClass::ScalarValue,
+            Self::ArchiveMemberList
+            | Self::ContainerList
+            | Self::GroupedNameList
+            | Self::ImageList
+            | Self::KeyListOrKeySummary
+            | Self::ListOrEmptyStatement
+            | Self::NameList
+            | Self::PathList
+            | Self::TableNameList => FinalAnswerShapeClass::StrictList,
+            Self::TableListing => FinalAnswerShapeClass::Table,
+            Self::ComparisonVerdict
+            | Self::DatabaseKindJudgment
+            | Self::ExistenceVerdictWithPath
+            | Self::JudgmentWithExcerptBasis
+            | Self::LifecycleResult
+            | Self::PresenceVerdictWithMatch
+            | Self::RecentArtifactJudgment
+            | Self::RiskAssessment
+            | Self::ScalarEqualityVerdict
+            | Self::StatusWithSource
+            | Self::ValidationVerdict => FinalAnswerShapeClass::Verdict,
+            Self::ArchiveMemberExcerpt
+            | Self::ExistenceSummaryWithPath
+            | Self::FailedStepWithEvidence
+            | Self::GitStateSummary
+            | Self::LogExcerptOrSummary
+            | Self::ProjectSummaryGroundedInFiles
+            | Self::RawOutputOrShortSummary
+            | Self::SummaryGroundedInExcerpt
+            | Self::SummaryGroundedInListing
+            | Self::SummaryWithEvidence
+            | Self::UnpackDestinationSummary => FinalAnswerShapeClass::GroundedSummary,
+            Self::Free => FinalAnswerShapeClass::Freeform,
+        }
+    }
+
+    pub(crate) fn coarse_response_shape(self) -> OutputResponseShape {
+        self.class().coarse_response_shape()
+    }
+
+    pub(crate) fn allows_model_language(self) -> bool {
+        self.class().allows_model_language()
     }
 }
 
@@ -1344,6 +1439,7 @@ pub(crate) fn trace_snapshot_for_output_contract(
 ) -> Option<Value> {
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
+    let final_answer_shape_kind = matched.final_answer_shape_kind();
     Some(json!({
         "contract_matrix_version": matrix.matrix_version,
         "contract_matrix_hash": matrix.matrix_version_hash(),
@@ -1367,10 +1463,13 @@ pub(crate) fn trace_snapshot_for_output_contract(
             .evidence_expression()
             .to_trace_json(&matched.required_evidence()),
         "observation_sources": matched.observation_sources(),
-        "final_answer_shape": matched
-            .final_answer_shape_kind()
+        "final_answer_shape": final_answer_shape_kind
             .map(FinalAnswerShape::as_str)
             .unwrap_or_else(|| matched.final_answer_shape()),
+        "final_answer_shape_class": final_answer_shape_kind.map(|shape| shape.class().as_str()),
+        "coarse_response_shape": final_answer_shape_kind
+            .map(|shape| shape.coarse_response_shape().as_str()),
+        "allows_model_language": final_answer_shape_kind.map(FinalAnswerShape::allows_model_language),
         "preferred_actions": normalized_tokens(matched.preferred_actions()),
         "allowed_actions": normalized_tokens(matched.allowed_actions()),
         "forbidden_actions": normalized_tokens(matched.forbidden_actions()),
@@ -2216,6 +2315,34 @@ failure_policy = "no_retry"
                 .and_then(Value::as_str),
             Some("file_names")
         );
+        assert_eq!(
+            snapshot
+                .get("contract")
+                .and_then(|value| value.get("final_answer_shape"))
+                .and_then(Value::as_str),
+            Some("name_list")
+        );
+        assert_eq!(
+            snapshot
+                .get("contract")
+                .and_then(|value| value.get("final_answer_shape_class"))
+                .and_then(Value::as_str),
+            Some("strict_list")
+        );
+        assert_eq!(
+            snapshot
+                .get("contract")
+                .and_then(|value| value.get("coarse_response_shape"))
+                .and_then(Value::as_str),
+            Some("strict")
+        );
+        assert_eq!(
+            snapshot
+                .get("contract")
+                .and_then(|value| value.get("allows_model_language"))
+                .and_then(Value::as_bool),
+            Some(false)
+        );
     }
 
     #[test]
@@ -2244,6 +2371,58 @@ failure_policy = "no_retry"
                 Some(shape)
             );
         }
+    }
+
+    #[test]
+    fn final_answer_shape_classes_are_total_and_runtime_mapped() {
+        let mut classes = BTreeSet::new();
+        for shape in FinalAnswerShape::ALL {
+            classes.insert(shape.class().as_str());
+            assert_eq!(
+                shape.coarse_response_shape(),
+                shape.class().coarse_response_shape()
+            );
+        }
+
+        assert!(classes.contains("delivery_artifact"));
+        assert!(classes.contains("scalar_value"));
+        assert!(classes.contains("single_path"));
+        assert!(classes.contains("strict_list"));
+        assert!(classes.contains("table"));
+        assert!(classes.contains("verdict"));
+        assert!(classes.contains("grounded_summary"));
+        assert!(classes.contains("freeform"));
+
+        assert_eq!(
+            FinalAnswerShape::DeliveryTokenOrPath.coarse_response_shape(),
+            OutputResponseShape::FileToken
+        );
+        assert_eq!(
+            FinalAnswerShape::Scalar.coarse_response_shape(),
+            OutputResponseShape::Scalar
+        );
+        assert_eq!(
+            FinalAnswerShape::SinglePath.coarse_response_shape(),
+            OutputResponseShape::Scalar
+        );
+        assert_eq!(
+            FinalAnswerShape::NameList.coarse_response_shape(),
+            OutputResponseShape::Strict
+        );
+        assert_eq!(
+            FinalAnswerShape::TableListing.coarse_response_shape(),
+            OutputResponseShape::Strict
+        );
+        assert_eq!(
+            FinalAnswerShape::ValidationVerdict.coarse_response_shape(),
+            OutputResponseShape::OneSentence
+        );
+        assert_eq!(
+            FinalAnswerShape::SummaryWithEvidence.coarse_response_shape(),
+            OutputResponseShape::Free
+        );
+        assert!(!FinalAnswerShape::NameList.allows_model_language());
+        assert!(FinalAnswerShape::SummaryWithEvidence.allows_model_language());
     }
 
     #[test]

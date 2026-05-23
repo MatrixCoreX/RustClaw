@@ -27,6 +27,10 @@ Expectation JSONL rows are intentionally small and optional. Supported fields:
     "final_shape": "path|file_token|integer|list|non_empty|empty",
     "finalizer_stage": "observed_generic",
     "finalizer_fallback": "raw_text",
+    "finalizer_final_answer_shape": "single_path",
+    "finalizer_final_answer_shape_class": "single_path",
+    "finalizer_coarse_response_shape": "scalar",
+    "finalizer_allows_model_language": false,
     "finalizer_grounded_ok": true,
     "contract_match": "file_names",
     "contract_final_answer_shape": "name_list",
@@ -302,6 +306,10 @@ class Observation:
     missing_evidence: list[str]
     finalizer_stage: str
     finalizer_fallback: str
+    finalizer_final_answer_shape: str
+    finalizer_final_answer_shape_class: str
+    finalizer_coarse_response_shape: str
+    finalizer_allows_model_language: bool | None
     finalizer_grounded_ok: bool | None
     finalizer_used_evidence_ids_count: int | None
     final_text: str
@@ -374,6 +382,20 @@ def observe_file(path: Path) -> Observation:
         ),
         finalizer_stage=str(finalizer.get("stage") or "") if isinstance(finalizer, dict) else "",
         finalizer_fallback=str(finalizer.get("fallback") or "") if isinstance(finalizer, dict) else "",
+        finalizer_final_answer_shape=(
+            str(finalizer.get("final_answer_shape") or "") if isinstance(finalizer, dict) else ""
+        ),
+        finalizer_final_answer_shape_class=(
+            str(finalizer.get("final_answer_shape_class") or "") if isinstance(finalizer, dict) else ""
+        ),
+        finalizer_coarse_response_shape=(
+            str(finalizer.get("coarse_response_shape") or "") if isinstance(finalizer, dict) else ""
+        ),
+        finalizer_allows_model_language=(
+            finalizer.get("allows_model_language")
+            if isinstance(finalizer, dict) and isinstance(finalizer.get("allows_model_language"), bool)
+            else None
+        ),
         finalizer_grounded_ok=(
             finalizer.get("grounded_ok") if isinstance(finalizer, dict) and isinstance(finalizer.get("grounded_ok"), bool) else None
         ),
@@ -429,6 +451,9 @@ def evaluate(obs: Observation, expected: dict[str, Any]) -> list[str]:
         "final_shape": obs.final_shape,
         "finalizer_stage": obs.finalizer_stage,
         "finalizer_fallback": obs.finalizer_fallback,
+        "finalizer_final_answer_shape": obs.finalizer_final_answer_shape,
+        "finalizer_final_answer_shape_class": obs.finalizer_final_answer_shape_class,
+        "finalizer_coarse_response_shape": obs.finalizer_coarse_response_shape,
     }
     for key, observed in checks.items():
         if key in expected and str(expected[key]) != str(observed):
@@ -561,6 +586,12 @@ def evaluate(obs: Observation, expected: dict[str, Any]) -> list[str]:
             failures.append(
                 f"finalizer_grounded_ok: expected {wanted!r}, got {obs.finalizer_grounded_ok!r}"
             )
+    if "finalizer_allows_model_language" in expected:
+        wanted = bool(expected["finalizer_allows_model_language"])
+        if obs.finalizer_allows_model_language is not wanted:
+            failures.append(
+                f"finalizer_allows_model_language: expected {wanted!r}, got {obs.finalizer_allows_model_language!r}"
+            )
     if "finalizer_used_evidence_ids_min" in expected:
         wanted = int(expected["finalizer_used_evidence_ids_min"])
         observed = obs.finalizer_used_evidence_ids_count
@@ -637,6 +668,10 @@ def baseline_row(obs: Observation) -> dict[str, Any]:
         "missing_evidence": obs.missing_evidence,
         "finalizer_stage": obs.finalizer_stage,
         "finalizer_fallback": obs.finalizer_fallback,
+        "finalizer_final_answer_shape": obs.finalizer_final_answer_shape,
+        "finalizer_final_answer_shape_class": obs.finalizer_final_answer_shape_class,
+        "finalizer_coarse_response_shape": obs.finalizer_coarse_response_shape,
+        "finalizer_allows_model_language": obs.finalizer_allows_model_language,
         "finalizer_grounded_ok": obs.finalizer_grounded_ok,
         "finalizer_used_evidence_ids_count": obs.finalizer_used_evidence_ids_count,
         "final_shape": obs.final_shape,
