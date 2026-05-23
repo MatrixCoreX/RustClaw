@@ -1074,13 +1074,18 @@ fn apply_current_turn_structural_contract_repair(
     if output_contract.requires_content_evidence
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
     {
+        let filename_candidates = req_surface.filename_candidates_excluding_field_selectors();
         if let Some(locator) =
             crate::intent::locator_extractor::extract_explicit_locator_for_fallback(req)
         {
             output_contract.locator_kind = locator.locator_kind;
             output_contract.locator_hint = locator.locator_hint;
             reason = reason.or(Some("structured_locator_contract_repair"));
-        } else if req_surface.has_filename_candidates() {
+        } else if filename_candidates.len() == 1 {
+            output_contract.locator_kind = OutputLocatorKind::Filename;
+            output_contract.locator_hint = filename_candidates[0].clone();
+            reason = reason.or(Some("filename_target_contract_repair"));
+        } else if !filename_candidates.is_empty() {
             output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
             output_contract.locator_hint = workspace_root.display().to_string();
             reason = reason.or(Some("workspace_filename_targets_contract_repair"));

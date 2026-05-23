@@ -4835,6 +4835,14 @@ fn parse_plain_archive_listing_entries(output: &str) -> Vec<ArchiveListEntry> {
     {
         return Vec::new();
     }
+    if output.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("adding:")
+            || line.starts_with("updating:")
+            || line.starts_with("freshening:")
+    }) {
+        return Vec::new();
+    }
     output
         .lines()
         .map(str::trim)
