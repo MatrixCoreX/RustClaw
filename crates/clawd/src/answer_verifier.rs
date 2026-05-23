@@ -680,6 +680,7 @@ fn execution_evidence_prompt_block(journal: &crate::task_journal::TaskJournal) -
                 "step_id": step.step_id,
                 "skill": step.skill,
                 "status": step.status.as_str(),
+                "observed_evidence": crate::task_journal::observed_evidence_for_step_trace(step),
                 "output_excerpt": step.output_excerpt,
                 "error_excerpt": step.error_excerpt,
             })

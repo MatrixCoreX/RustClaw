@@ -980,8 +980,8 @@ AGENTS.md 已要求基础 skill 的 `text/extra/error_text` 遵循 `docs/base_sk
 - [ ] 将 `observed_output.rs` 中的 semantic-specific extractor 标注为 matrix `observation_sources`。
 - [ ] 将 `system_basic` / `fs_basic` / `config_basic` / `db_basic` / `process_basic` / `package_manager` 输出统一归一成 evidence map。
 - [ ] 对 `content_excerpt` 和 `field_value` 严格区分：需要字段值时不能用全文摘要代替。
-- [ ] `TaskJournalStepTrace` 增加可选 `observed_evidence`，不要只保存 `output_excerpt`。
-- [ ] `observed_evidence` 落 trace 前必须脱敏、截断、可选 hash，不能保存完整敏感内容。
+- [x] `TaskJournal::to_trace_json()` 增加可选 `observed_evidence`，不要只输出 `output_excerpt`。
+- [x] `observed_evidence` 落 trace 前必须脱敏、截断、可选 hash，不能保存完整敏感内容。
 - [ ] 发送给 LLM verifier 的 evidence 使用 provider-safe redacted view，本地 trace view 与 provider view 分离。
 - [ ] 新增或复用 builder/helper 构造 `TaskJournalStepTrace`，避免手工构造点大面积破坏。
 - [ ] `answer_verifier.rs::structurally_satisfies_answer_contract()` 优先读取 evidence map；LLM verifier 只判断复杂 summary 类。
@@ -1090,7 +1090,7 @@ AGENTS.md 已要求基础 skill 的 `text/extra/error_text` 遵循 `docs/base_sk
 - [ ] `TaskJournal::to_trace_json()` 增加完整 evidence snapshot：
   - `observed_evidence`
 - [ ] 普通用户 UI 不展示 `model_error/code_gap/contract_gap` 术语，只展示下一步；开发者详情里展示分类。
-- [ ] `observed_evidence` 默认只展示 field/source/kind/短 excerpt/hash，完整原始输出仍留在受控日志或不落盘。
+- [x] `observed_evidence` 默认只展示 field/source/kind/短 excerpt/hash，完整原始输出仍留在受控日志或不落盘。
 - [ ] summary 与 trace 分层：summary 小而稳定，trace 可延迟展开。
 - [ ] UI / API 对新增字段和缺失字段保持兼容，老任务结果仍可打开。
 - [ ] `tasks.result_json` 中 contract/evidence trace 有大小上限，超过时保留 truncated/hash/count。
