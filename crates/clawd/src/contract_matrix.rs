@@ -16,7 +16,7 @@ use std::path::Path;
 #[cfg(test)]
 pub(crate) const CONTRACT_MATRIX_REL_PATH: &str = "configs/task_contract_matrix.toml";
 
-static BUNDLED_CONTRACT_MATRIX: OnceLock<Option<ContractMatrix>> = OnceLock::new();
+static BUNDLED_CONTRACT_MATRIX: OnceLock<Result<ContractMatrix, String>> = OnceLock::new();
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -1005,21 +1005,30 @@ impl ContractActionPolicy {
     }
 }
 
+fn parse_contract_matrix_source(source: &str) -> Result<ContractMatrix, String> {
+    let matrix: ContractMatrix =
+        toml::from_str(source).map_err(|err| format!("contract matrix parse failed: {err}"))?;
+    let shape_errors = matrix.validate_shape();
+    if !shape_errors.is_empty() {
+        return Err(format!(
+            "contract matrix shape invalid: {}",
+            shape_errors.join("; ")
+        ));
+    }
+    Ok(matrix)
+}
+
+pub(crate) fn bundled_contract_matrix_result() -> Result<&'static ContractMatrix, &'static str> {
+    match BUNDLED_CONTRACT_MATRIX.get_or_init(|| {
+        parse_contract_matrix_source(include_str!("../../../configs/task_contract_matrix.toml"))
+    }) {
+        Ok(matrix) => Ok(matrix),
+        Err(err) => Err(err.as_str()),
+    }
+}
+
 pub(crate) fn bundled_contract_matrix() -> Option<&'static ContractMatrix> {
-    BUNDLED_CONTRACT_MATRIX
-        .get_or_init(|| {
-            let matrix: ContractMatrix =
-                match toml::from_str(include_str!("../../../configs/task_contract_matrix.toml")) {
-                    Ok(matrix) => matrix,
-                    Err(_) => return None,
-                };
-            if matrix.validate_shape().is_empty() {
-                Some(matrix)
-            } else {
-                None
-            }
-        })
-        .as_ref()
+    bundled_contract_matrix_result().ok()
 }
 
 pub(crate) fn compact_prompt_line_for_route(route: &RouteResult) -> Option<String> {
@@ -1581,6 +1590,22 @@ mod tests {
             matrix.trace_policy.provider_evidence_view,
             "provider_safe_redacted"
         );
+    }
+
+    #[test]
+    fn bundled_contract_matrix_result_exposes_load_errors() {
+        let matrix = bundled_contract_matrix_result().expect("bundled matrix should load");
+
+        assert_eq!(matrix.schema_version, 1);
+
+        let err = parse_contract_matrix_source(
+            r#"schema_version = 1
+matrix_version = "broken"
+"#,
+        )
+        .expect_err("invalid matrix should report a concrete error");
+        assert!(err.contains("contract matrix shape invalid"));
+        assert!(err.contains("missing failure attribution"));
     }
 
     #[test]
