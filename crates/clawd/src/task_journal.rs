@@ -209,6 +209,11 @@ fn answer_verifier_summary_json(summary: &TaskJournalAnswerVerifierSummary) -> V
     })
 }
 
+fn plan_step_action_ref(step: &crate::PlanStep) -> Option<String> {
+    crate::contract_matrix::ActionRef::from_skill_args(&step.skill, &step.args)
+        .map(|action| action.as_key())
+}
+
 fn plan_summary_json(plan: &crate::PlanResult) -> Value {
     json!({
         "goal": crate::truncate_for_log(&plan.goal),
@@ -231,6 +236,7 @@ fn plan_trace_json(plan: &crate::PlanResult) -> Value {
                 "step_id": &step.step_id,
                 "action_type": &step.action_type,
                 "skill": &step.skill,
+                "action_ref": plan_step_action_ref(step),
                 "depends_on": &step.depends_on,
             })
         }).collect::<Vec<_>>(),
@@ -271,6 +277,7 @@ fn turn_analysis_json(analysis: &crate::intent_router::TurnAnalysis) -> Value {
 struct RequestedPlanCapability {
     action_type: String,
     capability: String,
+    action_ref: Option<String>,
 }
 
 fn raw_plan_steps(raw_plan_text: &str) -> Vec<Value> {
@@ -317,6 +324,7 @@ fn requested_capability_from_raw_step(step: &Value) -> Option<RequestedPlanCapab
     Some(RequestedPlanCapability {
         action_type: action_type.to_string(),
         capability: capability.to_string(),
+        action_ref: None,
     })
 }
 
@@ -326,13 +334,18 @@ fn requested_capabilities_for_plan(plan: &crate::PlanResult) -> Vec<RequestedPla
         .iter()
         .enumerate()
         .map(|(idx, normalized_step)| {
-            raw_steps
+            let mut requested = raw_steps
                 .get(idx)
                 .and_then(requested_capability_from_raw_step)
                 .unwrap_or_else(|| RequestedPlanCapability {
                     action_type: normalized_step.action_type.clone(),
                     capability: normalized_step.skill.clone(),
-                })
+                    action_ref: None,
+                });
+            if requested.action_ref.is_none() {
+                requested.action_ref = plan_step_action_ref(normalized_step);
+            }
+            requested
         })
         .collect()
 }
@@ -394,6 +407,7 @@ fn step_trace_json(
         "skill": &step.skill,
         "requested_action_type": requested.map(|value| value.action_type.as_str()),
         "requested_capability": requested.map(|value| value.capability.as_str()),
+        "requested_action_ref": requested.and_then(|value| value.action_ref.as_deref()),
         "executed_skill": &step.skill,
         "status": step.status.as_str(),
         "error_kind": structured_error.as_ref().map(|value| value.error_kind.as_str()),
@@ -1737,6 +1751,14 @@ mod tests {
         assert_eq!(
             step.get("requested_capability").and_then(Value::as_str),
             Some("list_dir")
+        );
+        let plan_action_ref = trace
+            .pointer("/rounds/0/plan_result/steps/0/action_ref")
+            .and_then(Value::as_str);
+        assert_eq!(plan_action_ref, Some("system_basic.inventory_dir"));
+        assert_eq!(
+            step.get("requested_action_ref").and_then(Value::as_str),
+            Some("system_basic.inventory_dir")
         );
         assert_eq!(
             step.get("executed_skill").and_then(Value::as_str),
