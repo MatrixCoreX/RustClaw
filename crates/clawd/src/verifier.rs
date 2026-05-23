@@ -43,6 +43,7 @@ pub(crate) enum VerifyIssueKind {
     RecipeValidationAfterMutateRequired,
     RecipeTargetScopeRequired,
     ContractActionRejected,
+    ContractPreferredActionAvailable,
 }
 
 impl Default for VerifyIssueKind {
@@ -68,6 +69,7 @@ impl VerifyIssueKind {
             Self::RecipeValidationAfterMutateRequired => "RecipeValidationAfterMutateRequired",
             Self::RecipeTargetScopeRequired => "RecipeTargetScopeRequired",
             Self::ContractActionRejected => "ContractActionRejected",
+            Self::ContractPreferredActionAvailable => "ContractPreferredActionAvailable",
         }
     }
 }
@@ -1141,6 +1143,18 @@ pub(crate) fn verify_plan(
                             policy.final_answer_shape
                         ),
                     });
+                } else if !policy.preferred_actions.is_empty() && !policy.action_matches_preferred()
+                {
+                    issues.push(VerifyIssue {
+                        step_id: step.step_id.clone(),
+                        kind: VerifyIssueKind::ContractPreferredActionAvailable,
+                        detail: format!(
+                            "action `{}` is allowed by contract `{}` but preferred action(s) are `{}`",
+                            policy.action_key,
+                            policy.contract_match,
+                            policy.preferred_actions.join(",")
+                        ),
+                    });
                 }
             }
             let safe_autonomous_creation =
@@ -1839,6 +1853,39 @@ primary_fallback_role = "primary"
             .shadow_blocked_reason
             .as_deref()
             .is_some_and(|reason| reason.contains("rejected by contract")));
+    }
+
+    #[test]
+    fn observe_mode_records_preferred_contract_action_without_blocking() {
+        let state = test_state();
+        let task = test_task();
+        let route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
+        let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route),
+                request_text: None,
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_tool".to_string(),
+                    skill: "fs_basic".to_string(),
+                    args: json!({"action": "find_entries", "path": "."}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+            },
+            VerifyMode::Enforce,
+        );
+
+        assert!(result.approved, "issues: {:?}", result.issues);
+        assert!(result.issues.iter().any(|issue| matches!(
+            issue.kind,
+            VerifyIssueKind::ContractPreferredActionAvailable
+        )));
+        assert!(result.blocked_reason.is_none());
     }
 
     #[test]
