@@ -77,6 +77,17 @@ pub(crate) fn structurally_satisfies_answer_contract(
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
+    if let Some(shape) = crate::contract_matrix::final_answer_shape_for_output_contract(
+        &route_result.output_contract,
+    ) {
+        if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::ScalarValue {
+            return matrix_scalar_answer_is_grounded_in_successful_observation(
+                route_result,
+                journal,
+                candidate_answer,
+            );
+        }
+    }
     if route_requires_single_file_delivery(route_result)
         && candidate_answer_has_grounded_existing_file_token(journal, candidate_answer)
     {
@@ -103,6 +114,38 @@ pub(crate) fn structurally_satisfies_answer_contract(
         return true;
     }
     scalar_answer_is_grounded_in_successful_observation(route_result, journal, candidate_answer)
+}
+
+fn matrix_scalar_answer_is_grounded_in_successful_observation(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    let Some(shape) =
+        crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+    else {
+        return false;
+    };
+    if shape.class() != crate::contract_matrix::FinalAnswerShapeClass::ScalarValue {
+        return false;
+    }
+    scalar_answer_is_strict(candidate_answer)
+        && scalar_answer_is_grounded_in_successful_observation(route, journal, candidate_answer)
+}
+
+fn scalar_answer_is_strict(candidate_answer: &str) -> bool {
+    let candidate_answer = candidate_answer.trim();
+    if candidate_answer.is_empty() || candidate_answer.lines().count() > 1 {
+        return false;
+    }
+    let lower = candidate_answer.to_ascii_lowercase();
+    if lower.contains(" is ") || lower.contains("：") || lower.contains(':') {
+        return false;
+    }
+    if candidate_answer.ends_with('.') || candidate_answer.ends_with('。') {
+        return false;
+    }
+    true
 }
 
 fn markdown_heading_answer_is_grounded_in_read_observation(
@@ -1139,6 +1182,38 @@ mod tests {
 
         assert!(structurally_satisfies_answer_contract(
             &route, &journal, "3"
+        ));
+    }
+
+    #[test]
+    fn matrix_scalar_shape_requires_plain_scalar_answer() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-matrix-scalar", "ask", "count them");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "fs_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(json!({"count": 3, "items": ["a", "b", "c"]}).to_string()),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route, &journal, "3"
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "The count is 3."
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route, &journal, "count: 3"
         ));
     }
 
