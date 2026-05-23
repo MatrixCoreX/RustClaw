@@ -18,6 +18,13 @@ unknown_semantic = "reject"
 unknown_action = "reject"
 evidence_missing = "retry_then_fail"
 
+[trace_policy]
+evidence_storage = "redacted_excerpt_hash"
+provider_evidence_view = "provider_safe_redacted"
+raw_excerpt_policy = "no_full_raw_excerpt"
+max_items = 24
+max_excerpt_chars = 240
+
 [[generic_profiles]]
 name = "generic_path_content"
 semantic_kind = "none"
@@ -261,6 +268,11 @@ preferred_actions = ["fs_basic.stat_paths"]
 required_evidence = ["exists", "kind", "path"]
 final_answer_shape = "existence_verdict_with_path"
 failure_policy = "retry_with_alternatives"
+
+[contracts.existence_with_path.evidence_expression]
+all_of = ["path", "kind"]
+one_of = ["exists_true", "exists_false"]
+negative_evidence = ["exists_false"]
 
 [contracts.existence_with_path_summary]
 semantic_kind = "existence_with_path_summary"
