@@ -108,6 +108,13 @@ pub(crate) fn structurally_satisfies_answer_contract(
                 candidate_answer,
             );
         }
+        if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact {
+            return matrix_delivery_artifact_answer_is_grounded_in_successful_observation(
+                route_result,
+                journal,
+                candidate_answer,
+            );
+        }
     }
     if route_requires_single_file_delivery(route_result)
         && candidate_answer_has_grounded_existing_file_token(journal, candidate_answer)
@@ -194,6 +201,29 @@ fn matrix_single_path_answer_is_grounded_in_successful_observation(
     observed_single_path_values(journal)
         .iter()
         .any(|observed_path| single_path_matches_observed(&candidate_path, observed_path))
+}
+
+fn matrix_delivery_artifact_answer_is_grounded_in_successful_observation(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    route_requires_single_file_delivery(route)
+        && (candidate_answer_has_grounded_existing_file_token(journal, candidate_answer)
+            || candidate_answer_has_grounded_existing_plain_path(journal, candidate_answer))
+}
+
+fn candidate_answer_has_grounded_existing_plain_path(
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    let Some(candidate_path) = strict_single_path_answer(candidate_answer) else {
+        return false;
+    };
+    let Ok(canonical_candidate_path) = std::path::Path::new(&candidate_path).canonicalize() else {
+        return false;
+    };
+    file_token_path_is_grounded_in_observations(journal, &canonical_candidate_path)
 }
 
 fn strict_single_path_answer(answer: &str) -> Option<String> {
@@ -1590,6 +1620,84 @@ mod tests {
             &route,
             &journal,
             &format!("FILE:{}", file.display())
+        ));
+
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn matrix_delivery_artifact_shape_rejects_raw_command_summary_answer() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.wants_file_delivery = true;
+        route.output_contract.delivery_required = true;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-delivery-shape", "ask", "send file");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "run_cmd".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some("done".to_string()),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(!structurally_satisfies_answer_contract(
+            &route, &journal, "done"
+        ));
+    }
+
+    #[test]
+    fn matrix_delivery_artifact_shape_accepts_grounded_plain_path() {
+        let root = std::env::temp_dir().join(format!(
+            "rustclaw-answer-verifier-plain-delivery-path-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("create temp root");
+        let file = root.join("report.md");
+        std::fs::write(&file, "ok").expect("write temp file");
+
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.wants_file_delivery = true;
+        route.output_contract.delivery_required = true;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-delivery-path", "ask", "send file");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "fs_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    json!({
+                        "path": file.display().to_string(),
+                        "resolved_path": file.display().to_string()
+                    })
+                    .to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            &file.display().to_string()
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            &format!("File: {}", file.display())
         ));
 
         let _ = std::fs::remove_file(&file);
