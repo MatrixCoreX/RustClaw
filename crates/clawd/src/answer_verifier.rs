@@ -710,22 +710,37 @@ fn output_contract_prompt_block(route_result: &RouteResult) -> String {
     .unwrap_or_else(|_| "{}".to_string())
 }
 
+fn provider_safe_excerpt_hash(text: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv64:{hash:016x}")
+}
+
+fn provider_safe_step_evidence(
+    step: &crate::task_journal::TaskJournalStepTrace,
+) -> serde_json::Value {
+    json!({
+        "step_id": step.step_id,
+        "skill": step.skill,
+        "status": step.status.as_str(),
+        "observed_evidence": crate::task_journal::observed_evidence_for_step_trace(step),
+        "output_excerpt_present": step.output_excerpt.as_deref().is_some_and(|value| !value.trim().is_empty()),
+        "output_excerpt_hash": step.output_excerpt.as_deref().map(provider_safe_excerpt_hash),
+        "error_excerpt_present": step.error_excerpt.as_deref().is_some_and(|value| !value.trim().is_empty()),
+        "error_excerpt_hash": step.error_excerpt.as_deref().map(provider_safe_excerpt_hash),
+    })
+}
+
 fn execution_evidence_prompt_block(journal: &crate::task_journal::TaskJournal) -> String {
     let mut steps = journal
         .step_results
         .iter()
         .rev()
         .take(MAX_VERIFIER_STEPS)
-        .map(|step| {
-            json!({
-                "step_id": step.step_id,
-                "skill": step.skill,
-                "status": step.status.as_str(),
-                "observed_evidence": crate::task_journal::observed_evidence_for_step_trace(step),
-                "output_excerpt": step.output_excerpt,
-                "error_excerpt": step.error_excerpt,
-            })
-        })
+        .map(provider_safe_step_evidence)
         .collect::<Vec<_>>();
     steps.reverse();
     serde_json::to_string_pretty(&steps).unwrap_or_else(|_| "[]".to_string())
@@ -736,7 +751,7 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        local_missing_evidence_verifier_gap, should_verify_answer,
+        execution_evidence_prompt_block, local_missing_evidence_verifier_gap, should_verify_answer,
         structurally_satisfies_answer_contract, AnswerVerifierOut,
     };
 
@@ -806,6 +821,38 @@ mod tests {
         .normalized();
         assert!(normalized.should_retry);
         assert!(!normalized.retry_instruction.trim().is_empty());
+    }
+
+    #[test]
+    fn execution_evidence_prompt_uses_provider_safe_redacted_view() {
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-provider-safe", "ask", "检查配置");
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "config_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "path": "/tmp/app.toml",
+                    "token": "sk-test-secret-token-that-should-not-leak"
+                })
+                .to_string(),
+            ),
+            error: Some("password=secret-value-that-should-not-leak".to_string()),
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let block = execution_evidence_prompt_block(&journal);
+
+        assert!(block.contains("\"observed_evidence\""));
+        assert!(block.contains("\"output_excerpt_hash\""));
+        assert!(block.contains("\"error_excerpt_hash\""));
+        assert!(!block.contains("\"output_excerpt\""));
+        assert!(!block.contains("\"error_excerpt\""));
+        assert!(!block.contains("sk-test-secret-token-that-should-not-leak"));
+        assert!(!block.contains("password=secret-value-that-should-not-leak"));
+        assert!(block.contains("\"redacted\": true"));
     }
 
     #[test]
