@@ -43,6 +43,8 @@ pub(crate) enum VerifyIssueKind {
     RecipeValidationAfterMutateRequired,
     RecipeTargetScopeRequired,
     ContractActionRejected,
+    ContractMissing,
+    ContractPolicyViolation,
     ContractPreferredActionAvailable,
 }
 
@@ -69,7 +71,29 @@ impl VerifyIssueKind {
             Self::RecipeValidationAfterMutateRequired => "RecipeValidationAfterMutateRequired",
             Self::RecipeTargetScopeRequired => "RecipeTargetScopeRequired",
             Self::ContractActionRejected => "ContractActionRejected",
+            Self::ContractMissing => "ContractMissing",
+            Self::ContractPolicyViolation => "ContractPolicyViolation",
             Self::ContractPreferredActionAvailable => "ContractPreferredActionAvailable",
+        }
+    }
+
+    pub(crate) fn failure_attribution(self) -> &'static str {
+        match self {
+            Self::SkillNotVisible | Self::CapabilityUnavailable => "tool_gap",
+            Self::MissingRequiredArg
+            | Self::UnresolvedTemplateArg
+            | Self::InvalidDependsOn
+            | Self::PrimaryFallbackConflict
+            | Self::RouteClarifyRequired => "model_error",
+            Self::DefaultCreationTargetApplied
+            | Self::RecipeInspectBeforeMutateRequired
+            | Self::RecipeValidationAfterMutateRequired
+            | Self::RecipeTargetScopeRequired => "code_gap",
+            Self::ConfirmationRequired | Self::RiskBudgetExceeded => "permission_denied",
+            Self::ContractActionRejected
+            | Self::ContractMissing
+            | Self::ContractPolicyViolation
+            | Self::ContractPreferredActionAvailable => "contract_gap",
         }
     }
 }
@@ -747,7 +771,19 @@ fn issue_blocks_in_enforce(kind: VerifyIssueKind) -> bool {
             | VerifyIssueKind::RecipeValidationAfterMutateRequired
             | VerifyIssueKind::RecipeTargetScopeRequired
             | VerifyIssueKind::ContractActionRejected
+            | VerifyIssueKind::ContractMissing
+            | VerifyIssueKind::ContractPolicyViolation
     )
+}
+
+fn route_requires_contract(route_result: Option<&crate::RouteResult>) -> bool {
+    route_result
+        .map(|route| {
+            route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+                || route.output_contract.requires_content_evidence
+                || route.output_contract.delivery_required
+        })
+        .unwrap_or(false)
 }
 
 fn verify_execution_recipe(
@@ -1104,6 +1140,24 @@ pub(crate) fn verify_plan(
             ),
         });
     }
+    let route_contract_missing = input
+        .route_result
+        .filter(|_| route_requires_contract(input.route_result))
+        .is_some_and(|route| {
+            crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+                .is_none()
+        });
+    if route_contract_missing {
+        let semantic_kind = input
+            .route_result
+            .map(|route| route.output_contract.semantic_kind.as_str())
+            .unwrap_or("unknown");
+        issues.push(VerifyIssue {
+            step_id: "route".to_string(),
+            kind: VerifyIssueKind::ContractMissing,
+            detail: format!("no contract matrix entry matched semantic kind `{semantic_kind}`"),
+        });
+    }
 
     let mut template_scope = TemplatePlaceholderScope::default();
     for (idx, step) in effective_plan_result.steps.iter().enumerate() {
@@ -1156,6 +1210,19 @@ pub(crate) fn verify_plan(
                         ),
                     });
                 }
+            } else if route_requires_contract(input.route_result)
+                && !route_contract_missing
+                && crate::contract_matrix::ActionRef::from_skill_args(&normalized_skill, &step.args)
+                    .is_none()
+            {
+                issues.push(VerifyIssue {
+                    step_id: step.step_id.clone(),
+                    kind: VerifyIssueKind::ContractPolicyViolation,
+                    detail: format!(
+                        "planner step skill `{}` could not be converted to a contract action reference",
+                        step.skill
+                    ),
+                });
             }
             let safe_autonomous_creation =
                 safe_autonomous_creation_step(state, &normalized_skill, &step.args);
@@ -1845,14 +1912,46 @@ primary_fallback_role = "primary"
         );
 
         assert!(result.approved);
-        assert!(result
-            .issues
-            .iter()
-            .any(|issue| matches!(issue.kind, VerifyIssueKind::ContractActionRejected)));
+        assert!(result.issues.iter().any(|issue| {
+            matches!(issue.kind, VerifyIssueKind::ContractActionRejected)
+                && issue.kind.failure_attribution() == "contract_gap"
+        }));
         assert!(result
             .shadow_blocked_reason
             .as_deref()
             .is_some_and(|reason| reason.contains("rejected by contract")));
+    }
+
+    #[test]
+    fn verifier_issue_failure_attribution_groups_contract_policy_kinds() {
+        assert_eq!(
+            VerifyIssueKind::ContractActionRejected.failure_attribution(),
+            "contract_gap"
+        );
+        assert_eq!(
+            VerifyIssueKind::ContractMissing.failure_attribution(),
+            "contract_gap"
+        );
+        assert_eq!(
+            VerifyIssueKind::ContractPolicyViolation.failure_attribution(),
+            "contract_gap"
+        );
+        assert_eq!(
+            VerifyIssueKind::ContractPreferredActionAvailable.failure_attribution(),
+            "contract_gap"
+        );
+        assert_eq!(
+            VerifyIssueKind::MissingRequiredArg.failure_attribution(),
+            "model_error"
+        );
+        assert_eq!(
+            VerifyIssueKind::CapabilityUnavailable.failure_attribution(),
+            "tool_gap"
+        );
+        assert_eq!(
+            VerifyIssueKind::RiskBudgetExceeded.failure_attribution(),
+            "permission_denied"
+        );
     }
 
     #[test]

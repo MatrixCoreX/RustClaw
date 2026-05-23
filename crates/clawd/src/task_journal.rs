@@ -162,6 +162,7 @@ fn verify_trace_json(verify: &TaskJournalVerifySummary) -> Value {
             json!({
                 "step_id": &issue.step_id,
                 "kind": issue.kind.as_str(),
+                "failure_attribution": issue.kind.failure_attribution(),
                 "detail": crate::truncate_for_log(&issue.detail),
             })
         }).collect::<Vec<_>>(),
@@ -1454,6 +1455,7 @@ mod tests {
     use super::{
         delivery_payload_consistent, evidence_coverage_for_route, TaskJournal,
         TaskJournalFinalizerFallback, TaskJournalFinalizerStage, TaskJournalFinalizerSummary,
+        TaskJournalRoundTrace, TaskJournalVerifyIssue, TaskJournalVerifySummary,
     };
 
     #[test]
@@ -1724,6 +1726,47 @@ mod tests {
                 .and_then(Value::as_array)
                 .map(Vec::len),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn trace_json_includes_verifier_issue_failure_attribution() {
+        let mut journal = TaskJournal::for_task("task-verifier-attribution", "ask", "列文件");
+        journal.rounds.push(TaskJournalRoundTrace {
+            round_no: 1,
+            goal: "list files".to_string(),
+            verify_result: Some(TaskJournalVerifySummary {
+                mode: crate::verifier::VerifyMode::ObserveOnly,
+                approved: true,
+                blocked_reason: None,
+                shadow_blocked_reason: Some("contract action rejected".to_string()),
+                needs_confirmation: false,
+                issues: vec![TaskJournalVerifyIssue {
+                    step_id: "step_1".to_string(),
+                    kind: crate::verifier::VerifyIssueKind::ContractActionRejected,
+                    detail: "action rejected".to_string(),
+                }],
+            }),
+            ..Default::default()
+        });
+
+        let trace = journal.to_trace_json();
+        let issue = trace
+            .get("rounds")
+            .and_then(Value::as_array)
+            .and_then(|rounds| rounds.first())
+            .and_then(|round| round.get("verify_result"))
+            .and_then(|verify| verify.get("issues"))
+            .and_then(Value::as_array)
+            .and_then(|issues| issues.first())
+            .expect("verify issue should be present");
+        assert_eq!(
+            issue.get("kind").and_then(Value::as_str),
+            Some("ContractActionRejected")
+        );
+        assert_eq!(
+            issue.get("failure_attribution").and_then(Value::as_str),
+            Some("contract_gap")
         );
     }
 
