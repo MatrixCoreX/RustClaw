@@ -1128,12 +1128,12 @@ pub(crate) fn runtime_contract_snapshot_for_output_contract(
             "source": "bundled:configs/task_contract_matrix.toml",
         },
         "registry": {
-            "hash": Value::Null,
-            "source": "not_captured_in_task_snapshot",
+            "hash": bundled_registry_hash(),
+            "source": "bundled:configs/skills_registry.toml",
         },
         "prompt_layer": {
-            "hash": Value::Null,
-            "source": "not_captured_in_task_snapshot",
+            "hash": bundled_prompt_layer_manifest_hash(),
+            "source": "bundled:prompts/layers/manifest.toml",
         },
         "compact_contract_block": compact_line.as_ref().map(|line| {
             json!({
@@ -1335,6 +1335,14 @@ fn fnv1a_hex(input: &str) -> String {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     format!("{hash:016x}")
+}
+
+fn bundled_registry_hash() -> String {
+    fnv1a_hex(include_str!("../../../configs/skills_registry.toml"))
+}
+
+fn bundled_prompt_layer_manifest_hash() -> String {
+    fnv1a_hex(include_str!("../../../prompts/layers/manifest.toml"))
 }
 
 #[cfg(test)]
@@ -1637,6 +1645,30 @@ mod tests {
         );
         assert!(snapshot
             .get("matrix")
+            .and_then(|value| value.get("hash"))
+            .and_then(Value::as_str)
+            .is_some_and(|hash| !hash.is_empty()));
+        assert_eq!(
+            snapshot
+                .get("registry")
+                .and_then(|value| value.get("source"))
+                .and_then(Value::as_str),
+            Some("bundled:configs/skills_registry.toml")
+        );
+        assert!(snapshot
+            .get("registry")
+            .and_then(|value| value.get("hash"))
+            .and_then(Value::as_str)
+            .is_some_and(|hash| !hash.is_empty()));
+        assert_eq!(
+            snapshot
+                .get("prompt_layer")
+                .and_then(|value| value.get("source"))
+                .and_then(Value::as_str),
+            Some("bundled:prompts/layers/manifest.toml")
+        );
+        assert!(snapshot
+            .get("prompt_layer")
             .and_then(|value| value.get("hash"))
             .and_then(Value::as_str)
             .is_some_and(|hash| !hash.is_empty()));
