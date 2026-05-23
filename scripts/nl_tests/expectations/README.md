@@ -41,6 +41,13 @@ Supported fields:
 - `needs_confirmation`
 - `finalizer_stage`
 - `finalizer_fallback`
+- `finalizer_final_answer_shape`
+- `finalizer_final_answer_shape_any`
+- `finalizer_final_answer_shape_class`
+- `finalizer_final_answer_shape_class_any`
+- `finalizer_coarse_response_shape`
+- `finalizer_coarse_response_shape_any`
+- `finalizer_allows_model_language`
 - `finalizer_grounded_ok`
 - `finalizer_used_evidence_ids_min`
 - `final_contains`

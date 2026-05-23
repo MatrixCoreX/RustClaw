@@ -837,7 +837,10 @@ mod tests {
             .get("properties")
             .and_then(serde_json::Value::as_object)
             .expect("schema must have object properties");
-        let actual = properties.keys().map(String::as_str).collect::<BTreeSet<_>>();
+        let actual = properties
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
         assert_eq!(
             actual, expected,
             "answer_verifier.schema.json properties drifted from AnswerVerifierOut"
