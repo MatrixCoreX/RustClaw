@@ -46,6 +46,66 @@ impl Default for ContractMatrix {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum FailureAttribution {
+    ModelError,
+    SchemaError,
+    CodeGap,
+    ContractGap,
+    ToolGap,
+    PermissionDenied,
+    BudgetExhausted,
+    PromptBudgetError,
+    DeliveryError,
+    ProviderError,
+}
+
+impl FailureAttribution {
+    pub(crate) const ALL: [Self; 10] = [
+        Self::ModelError,
+        Self::SchemaError,
+        Self::CodeGap,
+        Self::ContractGap,
+        Self::ToolGap,
+        Self::PermissionDenied,
+        Self::BudgetExhausted,
+        Self::PromptBudgetError,
+        Self::DeliveryError,
+        Self::ProviderError,
+    ];
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::ModelError => "model_error",
+            Self::SchemaError => "schema_error",
+            Self::CodeGap => "code_gap",
+            Self::ContractGap => "contract_gap",
+            Self::ToolGap => "tool_gap",
+            Self::PermissionDenied => "permission_denied",
+            Self::BudgetExhausted => "budget_exhausted",
+            Self::PromptBudgetError => "prompt_budget_error",
+            Self::DeliveryError => "delivery_error",
+            Self::ProviderError => "provider_error",
+        }
+    }
+
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match normalize_action_token(value).as_str() {
+            "model_error" => Some(Self::ModelError),
+            "schema_error" => Some(Self::SchemaError),
+            "code_gap" => Some(Self::CodeGap),
+            "contract_gap" => Some(Self::ContractGap),
+            "tool_gap" => Some(Self::ToolGap),
+            "permission_denied" => Some(Self::PermissionDenied),
+            "budget_exhausted" => Some(Self::BudgetExhausted),
+            "prompt_budget_error" => Some(Self::PromptBudgetError),
+            "delivery_error" => Some(Self::DeliveryError),
+            "provider_error" => Some(Self::ProviderError),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub(crate) struct MatrixPolicy {
@@ -934,25 +994,23 @@ impl ContractMatrix {
         if self.matrix_version.trim().is_empty() {
             errors.push("matrix_version must not be empty".to_string());
         }
-        const EXPECTED_ATTRIBUTIONS: &[&str] = &[
-            "model_error",
-            "schema_error",
-            "code_gap",
-            "contract_gap",
-            "tool_gap",
-            "permission_denied",
-            "budget_exhausted",
-            "prompt_budget_error",
-            "delivery_error",
-            "provider_error",
-        ];
-        for expected in EXPECTED_ATTRIBUTIONS {
-            if !self
-                .failure_attribution
-                .iter()
-                .any(|value| normalize_action_token(value) == *expected)
-            {
-                errors.push(format!("missing failure attribution `{expected}`"));
+        let mut configured_attributions = BTreeSet::new();
+        for raw in &self.failure_attribution {
+            match FailureAttribution::parse(raw) {
+                Some(kind) => {
+                    configured_attributions.insert(kind);
+                }
+                None => {
+                    errors.push(format!("invalid failure attribution `{raw}`"));
+                }
+            }
+        }
+        for expected in FailureAttribution::ALL {
+            if !configured_attributions.contains(&expected) {
+                errors.push(format!(
+                    "missing failure attribution `{}`",
+                    expected.as_str()
+                ));
             }
         }
         if normalize_action_token(&self.trace_policy.evidence_storage) != "redacted_excerpt_hash" {
@@ -2111,6 +2169,46 @@ mod tests {
             matrix.trace_policy.provider_evidence_view,
             "provider_safe_redacted"
         );
+    }
+
+    #[test]
+    fn failure_attribution_enum_matches_workspace_matrix() {
+        let matrix = load_workspace_matrix();
+        let configured = matrix
+            .failure_attribution
+            .iter()
+            .filter_map(|value| FailureAttribution::parse(value))
+            .collect::<BTreeSet<_>>();
+        let expected = FailureAttribution::ALL.into_iter().collect::<BTreeSet<_>>();
+
+        assert_eq!(configured, expected);
+    }
+
+    #[test]
+    fn failure_attribution_rejects_unknown_tokens() {
+        let mut matrix = ContractMatrix {
+            schema_version: 1,
+            matrix_version: "test".to_string(),
+            failure_attribution: FailureAttribution::ALL
+                .iter()
+                .map(|kind| kind.as_str().to_string())
+                .chain(std::iter::once("mystery_bucket".to_string()))
+                .collect(),
+            ..Default::default()
+        };
+        matrix.trace_policy = MatrixTracePolicy {
+            evidence_storage: "redacted_excerpt_hash".to_string(),
+            provider_evidence_view: "provider_safe_redacted".to_string(),
+            raw_excerpt_policy: "no_full_raw_excerpt".to_string(),
+            max_items: 24,
+            max_excerpt_chars: 240,
+        };
+
+        let errors = matrix.validate_shape();
+
+        assert!(errors
+            .iter()
+            .any(|error| error == "invalid failure attribution `mystery_bucket`"));
     }
 
     #[test]

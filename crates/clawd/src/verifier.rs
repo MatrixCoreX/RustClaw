@@ -3,7 +3,7 @@ use std::path::{Component, Path};
 
 use claw_core::skill_registry::{PrimaryFallbackRole, SkillRiskLevel};
 
-use crate::{AppState, ClaimedTask, PlanResult, PlanStep};
+use crate::{contract_matrix::FailureAttribution, AppState, ClaimedTask, PlanResult, PlanStep};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,23 +77,25 @@ impl VerifyIssueKind {
         }
     }
 
-    pub(crate) fn failure_attribution(self) -> &'static str {
+    pub(crate) fn failure_attribution(self) -> FailureAttribution {
         match self {
-            Self::SkillNotVisible | Self::CapabilityUnavailable => "tool_gap",
+            Self::SkillNotVisible | Self::CapabilityUnavailable => FailureAttribution::ToolGap,
             Self::MissingRequiredArg
             | Self::UnresolvedTemplateArg
             | Self::InvalidDependsOn
             | Self::PrimaryFallbackConflict
-            | Self::RouteClarifyRequired => "model_error",
+            | Self::RouteClarifyRequired => FailureAttribution::ModelError,
             Self::DefaultCreationTargetApplied
             | Self::RecipeInspectBeforeMutateRequired
             | Self::RecipeValidationAfterMutateRequired
-            | Self::RecipeTargetScopeRequired => "code_gap",
-            Self::ConfirmationRequired | Self::RiskBudgetExceeded => "permission_denied",
+            | Self::RecipeTargetScopeRequired => FailureAttribution::CodeGap,
+            Self::ConfirmationRequired | Self::RiskBudgetExceeded => {
+                FailureAttribution::PermissionDenied
+            }
             Self::ContractActionRejected
             | Self::ContractMissing
             | Self::ContractPolicyViolation
-            | Self::ContractPreferredActionAvailable => "contract_gap",
+            | Self::ContractPreferredActionAvailable => FailureAttribution::ContractGap,
         }
     }
 }
@@ -1339,8 +1341,8 @@ mod tests {
 
     use super::{verify_plan, VerifyInput, VerifyIssueKind, VerifyMode};
     use crate::{
-        AgentRuntimeConfig, AppState, ClaimedTask, PlanKind, PlanResult, PlanStep, RouteResult,
-        ScheduleKind, SkillViewsSnapshot, ToolsPolicy,
+        contract_matrix::FailureAttribution, AgentRuntimeConfig, AppState, ClaimedTask, PlanKind,
+        PlanResult, PlanStep, RouteResult, ScheduleKind, SkillViewsSnapshot, ToolsPolicy,
     };
 
     fn test_registry() -> SkillsRegistry {
@@ -1914,7 +1916,7 @@ primary_fallback_role = "primary"
         assert!(result.approved);
         assert!(result.issues.iter().any(|issue| {
             matches!(issue.kind, VerifyIssueKind::ContractActionRejected)
-                && issue.kind.failure_attribution() == "contract_gap"
+                && issue.kind.failure_attribution() == FailureAttribution::ContractGap
         }));
         assert!(result
             .shadow_blocked_reason
@@ -1926,31 +1928,31 @@ primary_fallback_role = "primary"
     fn verifier_issue_failure_attribution_groups_contract_policy_kinds() {
         assert_eq!(
             VerifyIssueKind::ContractActionRejected.failure_attribution(),
-            "contract_gap"
+            FailureAttribution::ContractGap
         );
         assert_eq!(
             VerifyIssueKind::ContractMissing.failure_attribution(),
-            "contract_gap"
+            FailureAttribution::ContractGap
         );
         assert_eq!(
             VerifyIssueKind::ContractPolicyViolation.failure_attribution(),
-            "contract_gap"
+            FailureAttribution::ContractGap
         );
         assert_eq!(
             VerifyIssueKind::ContractPreferredActionAvailable.failure_attribution(),
-            "contract_gap"
+            FailureAttribution::ContractGap
         );
         assert_eq!(
             VerifyIssueKind::MissingRequiredArg.failure_attribution(),
-            "model_error"
+            FailureAttribution::ModelError
         );
         assert_eq!(
             VerifyIssueKind::CapabilityUnavailable.failure_attribution(),
-            "tool_gap"
+            FailureAttribution::ToolGap
         );
         assert_eq!(
             VerifyIssueKind::RiskBudgetExceeded.failure_attribution(),
-            "permission_denied"
+            FailureAttribution::PermissionDenied
         );
     }
 
