@@ -792,6 +792,11 @@ impl TaskJournal {
             "kind": self.kind.as_deref(),
             "memory_trace": self.memory_trace.clone(),
             "turn_analysis": self.turn_analysis.as_ref().map(turn_analysis_json),
+            "route_result": self.route_result.as_ref().map(route_result_json),
+            "contract_matrix": self
+                .route_result
+                .as_ref()
+                .and_then(crate::contract_matrix::trace_snapshot_for_route),
             "rounds": self.rounds.iter().map(|round| {
                 json!({
                     "round_no": round.round_no,
@@ -1207,5 +1212,59 @@ mod tests {
                 .and_then(Value::as_str),
             Some("file_names")
         );
+    }
+
+    #[test]
+    fn trace_json_includes_task_level_contract_matrix_snapshot() {
+        let mut journal = TaskJournal::for_task("task-contract-snapshot", "ask", "列出文件名");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::FileNames,
+            requires_content_evidence: true,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+
+        let trace = journal.to_trace_json();
+        let snapshot = trace
+            .get("contract_matrix")
+            .expect("contract matrix snapshot should be present");
+
+        assert_eq!(
+            snapshot.get("contract_match").and_then(Value::as_str),
+            Some("file_names")
+        );
+        assert_eq!(
+            snapshot
+                .get("required_evidence")
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+            Some(vec!["candidates"])
+        );
+        assert_eq!(
+            snapshot.get("final_answer_shape").and_then(Value::as_str),
+            Some("name_list")
+        );
+        assert!(snapshot
+            .get("contract_matrix_hash")
+            .and_then(Value::as_str)
+            .is_some_and(|hash| !hash.is_empty()));
     }
 }
