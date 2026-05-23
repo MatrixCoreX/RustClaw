@@ -4333,6 +4333,20 @@ mod tests {
             route.output_contract.semantic_kind,
             crate::OutputSemanticKind::None
         );
+        let contract_snapshot =
+            crate::contract_matrix::trace_snapshot_for_route(&route).expect("contract snapshot");
+        assert_eq!(
+            contract_snapshot
+                .get("contract_match")
+                .and_then(serde_json::Value::as_str),
+            Some("generic_path_content")
+        );
+        assert_eq!(
+            contract_snapshot
+                .get("locator_kind")
+                .and_then(serde_json::Value::as_str),
+            Some("current_workspace")
+        );
         assert!(route.route_reason.contains("direct_answer_gate_execute"));
     }
 
