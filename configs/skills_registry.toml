@@ -325,6 +325,8 @@ output_kind = "text"
 capabilities = ["net"]
 supported_os = ["linux", "macos"]
 platform_notes = ["Uses Rust HTTP client; no external command dependency."]
+input_schema = { type = "object", properties = { action = { type = "string" }, url = { type = "string" }, method = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "git_basic"
@@ -338,6 +340,8 @@ prompt_file = "prompts/skills/git_basic.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 required_bins = ["git"]
+input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, repo = { type = "string" }, ref = { type = "string" }, args = { type = "array", items = { type = "string" } } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "install_module"
@@ -371,6 +375,8 @@ supported_os = ["linux", "macos"]
 required_bins = ["ps", "kill"]
 optional_bins = ["ss", "lsof", "netstat"]
 platform_notes = ["port_list chooses Linux ss before lsof/netstat; macOS uses lsof before netstat."]
+input_schema = { type = "object", properties = { action = { type = "string" }, service = { type = "string" }, process = { type = "string" }, query = { type = "string" }, port = { type = "integer" }, pid = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "package_manager"
@@ -393,6 +399,8 @@ planner_capabilities = [
   { name = "package.install", action = "install", effect = "mutate", required = ["package"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high" },
   { name = "package.uninstall", action = "uninstall", effect = "mutate", required = ["package"], optional = ["manager", "dry_run", "use_sudo"], risk_level = "high" },
 ]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["detect", "install", "uninstall"] }, package = { type = "string" }, manager = { type = "string" }, dry_run = { type = "boolean" }, use_sudo = { type = "boolean" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "archive_basic"
@@ -418,6 +426,7 @@ planner_capabilities = [
   { name = "archive.unpack", action = "unpack", effect = "mutate", required = ["archive", "dest"], risk_level = "high", preferred = true },
 ]
 input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["list", "read", "pack", "unpack"] }, archive = { type = "string" }, archive_path = { type = "string" }, path = { type = "string" }, member = { type = "string" }, entry = { type = "string" }, file = { type = "string" }, file_path = { type = "string" }, source = { type = "string" }, source_path = { type = "string" }, dest = { type = "string" }, dest_path = { type = "string" }, format = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "db_basic"
@@ -435,6 +444,8 @@ prompt_file = "prompts/skills/db_basic.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 platform_notes = ["SQLite access is implemented in-process; no sqlite3 CLI dependency."]
+input_schema = { type = "object", properties = { action = { type = "string" }, db_path = { type = "string" }, path = { type = "string" }, query = { type = "string" }, table = { type = "string" }, limit = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "docker_basic"
@@ -453,6 +464,8 @@ output_kind = "text"
 supported_os = ["linux", "macos"]
 optional_bins = ["docker"]
 platform_notes = ["Read-only Docker inspection returns available=false when Docker CLI or daemon is unavailable."]
+input_schema = { type = "object", properties = { action = { type = "string" }, container = { type = "string" }, image = { type = "string" }, name = { type = "string" }, limit = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "fs_search"
@@ -596,6 +609,7 @@ retryable = true
 supported_os = ["linux", "macos"]
 optional_bins = ["pgrep", "ps", "uname", "df", "brew", "sysctl", "vm_stat"]
 platform_notes = ["Linux reads /proc for uptime/load/memory; macOS uses sysctl/vm_stat where available."]
+input_schema = { type = "object", properties = { action = { type = "string" }, service = { type = "string" }, target = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
@@ -610,6 +624,8 @@ prompt_file = "prompts/skills/log_analyze.md"
 output_kind = "text"
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
+input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, requested_path = { type = "string" }, pattern = { type = "string" }, max_lines = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "service_control"
@@ -628,6 +644,8 @@ output_kind = "text"
 supported_os = ["linux", "macos"]
 optional_bins = ["systemctl", "service", "journalctl", "brew", "launchctl", "log", "sudo", "ps"]
 platform_notes = ["Linux supports systemd/service managers; macOS prefers Homebrew services and limited launchd inspection/lifecycle guidance."]
+input_schema = { type = "object", properties = { action = { type = "string" }, service = { type = "string" }, target = { type = "string" }, lines = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "task_control"
@@ -656,6 +674,8 @@ prompt_file = "prompts/skills/config_guard.md"
 output_kind = "text"
 capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
+input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, profile = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "crypto"
@@ -730,6 +750,8 @@ capabilities = ["fs.read"]
 supported_os = ["linux", "macos"]
 optional_bins = ["pdftotext", "pdfinfo"]
 platform_notes = ["Markdown/text/html/docx parse in-process; PDF extraction uses poppler tools when available."]
+input_schema = { type = "object", properties = { action = { type = "string" }, path = { type = "string" }, max_bytes = { type = "integer" }, section = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "transform"
@@ -744,6 +766,8 @@ prompt_file = "prompts/skills/transform.md"
 output_kind = "text"
 supported_os = ["linux", "macos"]
 platform_notes = ["Pure structured-data transform; no filesystem or command dependency."]
+input_schema = { type = "object", properties = { action = { type = "string" }, input = {}, records = { type = "array" }, csv = { type = "string" }, operation = { type = "string" }, fields = { type = "array", items = { type = "string" } } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "invest_copy"
