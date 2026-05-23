@@ -1110,6 +1110,42 @@ pub(crate) fn trace_snapshot_for_route(route: &RouteResult) -> Option<Value> {
     trace_snapshot_for_output_contract(&route.output_contract)
 }
 
+pub(crate) fn runtime_contract_snapshot_for_route(route: &RouteResult) -> Option<Value> {
+    runtime_contract_snapshot_for_output_contract(&route.output_contract)
+}
+
+pub(crate) fn runtime_contract_snapshot_for_output_contract(
+    output_contract: &IntentOutputContract,
+) -> Option<Value> {
+    let matrix = bundled_contract_matrix()?;
+    let contract_snapshot = trace_snapshot_for_output_contract(output_contract)?;
+    let compact_line = compact_prompt_line_for_output_contract(output_contract);
+    Some(json!({
+        "schema_version": 1,
+        "matrix": {
+            "version": matrix.matrix_version,
+            "hash": matrix.matrix_version_hash(),
+            "source": "bundled:configs/task_contract_matrix.toml",
+        },
+        "registry": {
+            "hash": Value::Null,
+            "source": "not_captured_in_task_snapshot",
+        },
+        "prompt_layer": {
+            "hash": Value::Null,
+            "source": "not_captured_in_task_snapshot",
+        },
+        "compact_contract_block": compact_line.as_ref().map(|line| {
+            json!({
+                "hash": fnv1a_hex(line),
+                "bytes": line.len(),
+                "present": true,
+            })
+        }),
+        "contract": contract_snapshot,
+    }))
+}
+
 pub(crate) fn trace_snapshot_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<Value> {
@@ -1582,6 +1618,40 @@ mod tests {
             .is_some_and(|items| items
                 .iter()
                 .any(|item| item.as_str() == Some("fs_basic.list_dir"))));
+    }
+
+    #[test]
+    fn runtime_contract_snapshot_binds_matrix_and_compact_prompt_block() {
+        let snapshot = runtime_contract_snapshot_for_output_contract(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::FileNames,
+            ..IntentOutputContract::default()
+        })
+        .expect("runtime contract snapshot");
+
+        assert_eq!(
+            snapshot
+                .get("matrix")
+                .and_then(|value| value.get("source"))
+                .and_then(Value::as_str),
+            Some("bundled:configs/task_contract_matrix.toml")
+        );
+        assert!(snapshot
+            .get("matrix")
+            .and_then(|value| value.get("hash"))
+            .and_then(Value::as_str)
+            .is_some_and(|hash| !hash.is_empty()));
+        assert!(snapshot
+            .get("compact_contract_block")
+            .and_then(|value| value.get("hash"))
+            .and_then(Value::as_str)
+            .is_some_and(|hash| !hash.is_empty()));
+        assert_eq!(
+            snapshot
+                .get("contract")
+                .and_then(|value| value.get("contract_match"))
+                .and_then(Value::as_str),
+            Some("file_names")
+        );
     }
 
     #[test]
