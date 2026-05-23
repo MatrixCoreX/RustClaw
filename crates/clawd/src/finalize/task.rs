@@ -476,6 +476,7 @@ async fn finalize_ask_resume_failure(
     answer_messages: &[String],
     journal: &mut crate::task_journal::TaskJournal,
 ) -> Result<()> {
+    journal.record_final_failure_attribution_from_error(user_error);
     let notify_outcome =
         crate::worker::maybe_notify_schedule_result(state, task, payload, false, user_error).await;
     crate::worker::record_schedule_notify_outcome(journal, notify_outcome);
@@ -508,6 +509,7 @@ async fn finalize_ask_failure(
         "worker_once: ask task_id={} failed: {}",
         task.task_id, err_text
     );
+    journal.record_final_failure_attribution_from_error(err_text);
     let notify_outcome =
         crate::worker::maybe_notify_schedule_result(state, task, payload, false, answer_text).await;
     crate::worker::record_schedule_notify_outcome(journal, notify_outcome);

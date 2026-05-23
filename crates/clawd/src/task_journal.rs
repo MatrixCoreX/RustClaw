@@ -1004,6 +1004,53 @@ fn structured_error_failure_attribution(
         .map(|kind| kind.as_str().to_string())
 }
 
+pub(crate) fn failure_attribution_for_error_text(
+    error_text: &str,
+) -> Option<crate::contract_matrix::FailureAttribution> {
+    let trimmed = error_text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(structured) = crate::skills::parse_structured_skill_error(trimmed) {
+        if let Some(raw) = structured_error_extra_string(Some(&structured), "failure_attribution") {
+            if let Some(kind) = crate::contract_matrix::FailureAttribution::parse(&raw) {
+                return Some(kind);
+            }
+        }
+        if let Some(kind) = failure_attribution_for_structured_error_kind(&structured.error_kind) {
+            return Some(kind);
+        }
+    }
+
+    let normalized = trimmed.to_ascii_lowercase().replace('-', "_");
+    if normalized.contains("schema_validation_failed")
+        || normalized.contains("schema validation")
+        || normalized.contains("json schema")
+        || normalized.contains("invalid schema")
+    {
+        return Some(crate::contract_matrix::FailureAttribution::SchemaError);
+    }
+    if normalized.contains("all llm providers in circuit_breaker cooldown")
+        || normalized.contains("unknown llm error")
+        || (normalized.contains("provider=") && normalized.contains(" failed"))
+        || normalized.contains("provider_error")
+        || normalized.contains("provider_retryable")
+        || normalized.contains("provider_non_retryable")
+        || normalized.contains("rate_limited")
+        || normalized.contains("quota_exhausted")
+    {
+        return Some(crate::contract_matrix::FailureAttribution::ProviderError);
+    }
+    if normalized.contains("channel_send_failed")
+        || normalized.contains("delivery_error")
+        || normalized.contains("delivery failed")
+        || normalized.contains("send status=")
+    {
+        return Some(crate::contract_matrix::FailureAttribution::DeliveryError);
+    }
+    None
+}
+
 fn failure_attribution_for_structured_error_kind(
     error_kind: &str,
 ) -> Option<crate::contract_matrix::FailureAttribution> {
@@ -1361,6 +1408,13 @@ impl TaskJournal {
         self.final_failure_attribution =
             stop_signal_failure_attribution(&stop_signal).map(|kind| kind.as_str().to_string());
         self.final_stop_signal = Some(stop_signal);
+    }
+
+    pub(crate) fn record_final_failure_attribution_from_error(&mut self, error_text: &str) {
+        if self.final_failure_attribution.is_none() {
+            self.final_failure_attribution = failure_attribution_for_error_text(error_text)
+                .map(|kind| kind.as_str().to_string());
+        }
     }
 
     pub(crate) fn merge_from(&mut self, other: &TaskJournal) {
@@ -2097,6 +2151,37 @@ mod tests {
             );
             assert_eq!(
                 step.get("failure_attribution").and_then(Value::as_str),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn final_error_text_records_failure_attribution() {
+        for (error_text, expected) in [
+            (
+                "provider=minimax failed: timeout while reading response",
+                "provider_error",
+            ),
+            (
+                "direct_answer_gate schema_validation_failed task_id=t1 err=missing field",
+                "schema_error",
+            ),
+            (
+                "wechat send status=500 body={\"err\":\"bad gateway\"}",
+                "delivery_error",
+            ),
+        ] {
+            let mut journal =
+                TaskJournal::for_task(format!("task-{expected}"), "ask", "trigger final error");
+            journal.record_final_failure_attribution_from_error(error_text);
+            journal.record_final_status(TaskJournalFinalStatus::Failure);
+
+            assert_eq!(
+                journal
+                    .to_trace_json()
+                    .get("final_failure_attribution")
+                    .and_then(Value::as_str),
                 Some(expected)
             );
         }
