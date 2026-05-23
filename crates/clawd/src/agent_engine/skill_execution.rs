@@ -201,6 +201,9 @@ fn contract_matrix_action_policy_error(
         policy.contract_match,
         policy.decision.as_str()
     );
+    let evidence_expression = policy
+        .evidence_expression
+        .to_trace_json(&policy.required_evidence);
     Some(crate::skills::structured_skill_error_from_parts(
         normalized_skill,
         "contract_action_rejected",
@@ -212,6 +215,7 @@ fn contract_matrix_action_policy_error(
             "action": policy.action_key,
             "contract_match": policy.contract_match,
             "required_evidence": policy.required_evidence,
+            "evidence_expression": evidence_expression,
             "final_answer_shape": policy.final_answer_shape,
         })),
     ))
