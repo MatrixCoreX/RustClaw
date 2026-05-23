@@ -9,9 +9,11 @@ PID_DIR="$SCRIPT_DIR/.pids"
 MOUNTED_CONFIG_DIR="$SCRIPT_DIR/docker/config"
 MOUNTED_CONFIG_FILE="$MOUNTED_CONFIG_DIR/config.toml"
 MOUNTED_REGISTRY_FILE="$MOUNTED_CONFIG_DIR/skills_registry.toml"
+MOUNTED_CONTRACT_MATRIX_FILE="$MOUNTED_CONFIG_DIR/task_contract_matrix.toml"
 MOUNTED_CHANNELS_DIR="$MOUNTED_CONFIG_DIR/channels"
 ACTIVE_CONFIG_FILE="$SCRIPT_DIR/configs/config.toml"
 ACTIVE_REGISTRY_FILE="$SCRIPT_DIR/configs/skills_registry.toml"
+ACTIVE_CONTRACT_MATRIX_FILE="$SCRIPT_DIR/configs/task_contract_matrix.toml"
 ACTIVE_CHANNELS_DIR="$SCRIPT_DIR/configs/channels"
 
 sync_config_from_mount() {
@@ -29,6 +31,14 @@ sync_config_from_mount() {
   elif [[ -f "$ACTIVE_REGISTRY_FILE" ]]; then
     cp "$ACTIVE_REGISTRY_FILE" "$MOUNTED_REGISTRY_FILE"
     echo "Seeded mounted skills registry at $MOUNTED_REGISTRY_FILE"
+  fi
+
+  if [[ -f "$MOUNTED_CONTRACT_MATRIX_FILE" ]]; then
+    cp "$MOUNTED_CONTRACT_MATRIX_FILE" "$ACTIVE_CONTRACT_MATRIX_FILE"
+    echo "Loaded task contract matrix override from $MOUNTED_CONTRACT_MATRIX_FILE"
+  elif [[ -f "$ACTIVE_CONTRACT_MATRIX_FILE" ]]; then
+    cp "$ACTIVE_CONTRACT_MATRIX_FILE" "$MOUNTED_CONTRACT_MATRIX_FILE"
+    echo "Seeded mounted task contract matrix at $MOUNTED_CONTRACT_MATRIX_FILE"
   fi
 
   mkdir -p "$ACTIVE_CHANNELS_DIR" "$MOUNTED_CHANNELS_DIR"
