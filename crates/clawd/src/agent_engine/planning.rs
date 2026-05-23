@@ -2310,6 +2310,13 @@ fn plain_act_filesystem_text_read_only_plan_requires_repair(
     {
         return false;
     }
+    if crate::task_context_builder::uses_light_execution_context_budget(
+        route,
+        &route.resolved_intent,
+    ) && observation_only_plan_can_finalize_from_direct_output(state, Some(route), actions)
+    {
+        return false;
+    }
     let executable_actions = actions.iter().filter(|action| {
         matches!(
             action,

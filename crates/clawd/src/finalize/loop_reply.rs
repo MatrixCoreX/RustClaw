@@ -1721,6 +1721,11 @@ fn markdown_heading_from_read_output(output: &str) -> Option<String> {
     standalone_markdown_heading_from_text(&text)
 }
 
+fn first_markdown_heading_from_read_output(output: &str) -> Option<String> {
+    let text = markdown_text_from_read_output(output)?;
+    text.lines().find_map(markdown_heading_from_line)
+}
+
 fn standalone_markdown_heading_from_text(text: &str) -> Option<String> {
     let mut heading: Option<String> = None;
     for line in text.lines() {
@@ -2012,6 +2017,7 @@ fn delivery_message_is_json_container(message: &str) -> bool {
 fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
     match crate::language_policy::request_language_hint(user_text) {
         "zh-CN" => false,
+        "mixed" => !mixed_request_prefers_chinese_response(user_text),
         "config_default" => state
             .policy
             .command_intent
@@ -2020,6 +2026,19 @@ fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
             .starts_with("en"),
         _ => true,
     }
+}
+
+fn mixed_request_prefers_chinese_response(user_text: &str) -> bool {
+    let lower = user_text.to_ascii_lowercase();
+    if lower.contains("english") || user_text.contains("英文") || user_text.contains("英语") {
+        return false;
+    }
+    user_text.chars().any(|ch| {
+        let codepoint = ch as u32;
+        (0x3400..=0x4DBF).contains(&codepoint)
+            || (0x4E00..=0x9FFF).contains(&codepoint)
+            || (0xF900..=0xFAFF).contains(&codepoint)
+    })
 }
 
 fn final_reply_language_hint(
@@ -2463,6 +2482,23 @@ fn direct_structured_observed_answer(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    direct_structured_observed_answer_impl(state, loop_state, agent_run_context, false)
+}
+
+fn direct_structured_observed_answer_allowing_implicit_metadata_path_facts(
+    state: Option<&AppState>,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    direct_structured_observed_answer_impl(state, loop_state, agent_run_context, true)
+}
+
+fn direct_structured_observed_answer_impl(
+    state: Option<&AppState>,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    allow_implicit_metadata_path_facts: bool,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
     let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
     if route.ask_mode.finalize_chat_wrapped()
         && route.output_contract.requires_content_evidence
@@ -2474,6 +2510,7 @@ fn direct_structured_observed_answer(
         && route.output_contract.requires_content_evidence
         && route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
         && latest_path_batch_facts_has_implicit_metadata_fields(loop_state)
+        && !allow_implicit_metadata_path_facts
     {
         return None;
     }
@@ -2880,6 +2917,15 @@ fn prefer_observed_answer_for_exact_contract(
     if current_delivery_is_publishable_synthesis
         && latest_publishable_synthesis_step_matches(loop_state)
         && !(has_prior_step_error && allow_prior_step_error_replacement)
+        && !route_requires_observed_semantic_projection(route)
+        && current_synthesis_satisfies_matrix_shape(
+            task_id,
+            loop_state,
+            agent_run_context,
+            finalizer_summary.clone(),
+            route,
+            delivery_messages,
+        )
         && delivery_messages.last().is_some_and(|message| {
             !delivery_is_raw_read_observation(message, loop_state)
                 && !crate::finalize::looks_like_planner_artifact(message)
@@ -3307,6 +3353,189 @@ fn should_keep_planned_delivery_over_observed_answer(
             route.output_contract.semantic_kind,
             crate::OutputSemanticKind::RawCommandOutput
         )
+}
+
+fn matrix_final_answer_shape_class(
+    route: &crate::RouteResult,
+) -> Option<crate::contract_matrix::FinalAnswerShapeClass> {
+    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+        .map(|shape| shape.class())
+}
+
+fn route_requires_matrix_deterministic_final_answer(route: &crate::RouteResult) -> bool {
+    matrix_final_answer_shape_class(route).is_some_and(|class| !class.allows_model_language())
+}
+
+fn route_requires_observed_semantic_projection(route: &crate::RouteResult) -> bool {
+    matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::DirectoryNames
+    )
+}
+
+fn matrix_candidate_satisfies_final_shape(
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary>,
+    route: &crate::RouteResult,
+    candidate: &str,
+) -> bool {
+    let candidate = candidate.trim();
+    if candidate.is_empty() {
+        return false;
+    }
+    let delivery_messages = vec![candidate.to_string()];
+    let journal = build_loop_journal(
+        task,
+        user_text,
+        loop_state,
+        agent_run_context,
+        finalizer_summary,
+        crate::task_journal::delivery_payload_consistent(candidate, &delivery_messages),
+        candidate,
+        crate::task_journal::TaskJournalFinalStatus::Success,
+    );
+    crate::answer_verifier::structurally_satisfies_answer_contract(route, &journal, candidate)
+}
+
+fn synthetic_task_for_matrix_shape_check(task_id: &str) -> ClaimedTask {
+    ClaimedTask {
+        task_id: task_id.to_string(),
+        user_id: 0,
+        chat_id: 0,
+        user_key: None,
+        channel: "finalize".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    }
+}
+
+fn current_synthesis_satisfies_matrix_shape(
+    task_id: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: Option<crate::task_journal::TaskJournalFinalizerSummary>,
+    route: &crate::RouteResult,
+    delivery_messages: &[String],
+) -> bool {
+    if !route_requires_matrix_deterministic_final_answer(route) {
+        return true;
+    }
+    let Some(message) = delivery_messages.last() else {
+        return false;
+    };
+    let task = synthetic_task_for_matrix_shape_check(task_id);
+    matrix_candidate_satisfies_final_shape(
+        &task,
+        &route.resolved_intent,
+        loop_state,
+        agent_run_context,
+        finalizer_summary,
+        route,
+        message,
+    )
+}
+
+fn matrix_observed_answer_candidate_for_shape(
+    state: &AppState,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    shape_class: crate::contract_matrix::FinalAnswerShapeClass,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    match shape_class {
+        crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact => {
+            direct_file_token_from_observed_auto_locator_filename(loop_state, agent_run_context)
+                .or_else(|| {
+                    direct_file_token_from_observed_inventory(loop_state, agent_run_context)
+                })
+        }
+        crate::contract_matrix::FinalAnswerShapeClass::ScalarValue
+        | crate::contract_matrix::FinalAnswerShapeClass::SinglePath => {
+            direct_scalar_observed_answer(Some(state), loop_state, agent_run_context)
+        }
+        crate::contract_matrix::FinalAnswerShapeClass::StrictList
+        | crate::contract_matrix::FinalAnswerShapeClass::Table => {
+            direct_structured_observed_answer_allowing_implicit_metadata_path_facts(
+                Some(state),
+                loop_state,
+                agent_run_context,
+            )
+        }
+        crate::contract_matrix::FinalAnswerShapeClass::Freeform
+        | crate::contract_matrix::FinalAnswerShapeClass::GroundedSummary
+        | crate::contract_matrix::FinalAnswerShapeClass::Verdict => None,
+    }
+}
+
+fn replace_delivery_with_matrix_observed_shape_answer(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    delivery_messages: &mut Vec<String>,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if !route_requires_matrix_deterministic_final_answer(route) {
+        return false;
+    }
+    let Some(shape_class) = matrix_final_answer_shape_class(route) else {
+        return false;
+    };
+    let current_answer = final_answer_text_from_delivery(delivery_messages);
+    if !current_answer.trim().is_empty()
+        && matrix_candidate_satisfies_final_shape(
+            task,
+            user_text,
+            loop_state,
+            agent_run_context,
+            finalizer_summary.clone(),
+            route,
+            &current_answer,
+        )
+    {
+        return false;
+    }
+
+    let Some((candidate, summary)) = matrix_observed_answer_candidate_for_shape(
+        state,
+        loop_state,
+        agent_run_context,
+        shape_class,
+    ) else {
+        return false;
+    };
+    if !matrix_candidate_satisfies_final_shape(
+        task,
+        user_text,
+        loop_state,
+        agent_run_context,
+        Some(summary.clone()),
+        route,
+        &candidate,
+    ) {
+        return false;
+    }
+
+    let answer = candidate.trim().to_string();
+    delivery_messages.clear();
+    delivery_messages.push(answer.clone());
+    loop_state.last_user_visible_respond = Some(answer);
+    *finalizer_summary = Some(summary);
+    info!(
+        "delivery matrix_shape_from_observed task_id={} shape_class={} answer={}",
+        task.task_id,
+        shape_class.as_str(),
+        crate::truncate_for_log(&candidate)
+    );
+    true
 }
 
 const EXECUTION_SUMMARY_MAX_STEPS: usize = 4;
@@ -3859,10 +4088,26 @@ fn delivery_contract_suppresses_execution_summary(
     if delivery_matches_latest_transform_observation(loop_state, delivery_messages) {
         return true;
     }
-    if delivery_has_synthesized_answer_result(loop_state, route, delivery_messages) {
+    if delivery_matches_observed_markdown_heading_delivery(
+        loop_state,
+        agent_run_context,
+        delivery_messages,
+    ) {
         return true;
     }
-    if delivery_matches_synthesized_content_answer(loop_state, route, delivery_messages) {
+    if delivery_matches_latest_read_range_synthesis(loop_state, route, delivery_messages) {
+        return true;
+    }
+    let has_existing_execution_summary =
+        delivery_messages_have_execution_summary(delivery_messages);
+    if has_existing_execution_summary
+        && delivery_has_synthesized_answer_result(loop_state, route, delivery_messages)
+    {
+        return true;
+    }
+    if has_existing_execution_summary
+        && delivery_matches_synthesized_content_answer(loop_state, route, delivery_messages)
+    {
         return true;
     }
     if delivery_matches_grounded_content_answer(loop_state, route, delivery_messages) {
@@ -3880,6 +4125,12 @@ fn delivery_contract_suppresses_execution_summary(
     })
 }
 
+fn delivery_messages_have_execution_summary(delivery_messages: &[String]) -> bool {
+    delivery_messages
+        .iter()
+        .any(|message| crate::finalize::is_execution_summary_message(message))
+}
+
 fn single_publishable_delivery_message(delivery_messages: &[String]) -> Option<&str> {
     let mut publishable = delivery_messages
         .iter()
@@ -3888,6 +4139,76 @@ fn single_publishable_delivery_message(delivery_messages: &[String]) -> Option<&
         .filter(|message| !crate::finalize::is_execution_summary_message(message));
     let first = publishable.next()?;
     publishable.next().is_none().then_some(first)
+}
+
+fn delivery_matches_observed_markdown_heading_delivery(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    delivery_messages: &[String],
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if !route_allows_observed_markdown_heading_scalar_delivery(route)
+        || route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::FileNames
+                | crate::OutputSemanticKind::DirectoryNames
+                | crate::OutputSemanticKind::FilePaths
+                | crate::OutputSemanticKind::DirectoryEntryGroups
+                | crate::OutputSemanticKind::ScalarCount
+                | crate::OutputSemanticKind::RawCommandOutput
+                | crate::OutputSemanticKind::ScalarPathOnly
+                | crate::OutputSemanticKind::ExistenceWithPath
+                | crate::OutputSemanticKind::ExistenceWithPathSummary
+        )
+    {
+        return false;
+    }
+    let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
+        return false;
+    };
+    let Some(delivery_heading) = markdown_heading_from_line(delivery_text) else {
+        return false;
+    };
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok())
+        .filter_map(|step| step.output.as_deref())
+        .find(|output| output.contains("\"read_range\"") || output.contains("\"read_text_range\""))
+        .and_then(first_markdown_heading_from_read_output)
+        .is_some_and(|observed_heading| observed_heading.trim() == delivery_heading.trim())
+}
+
+fn delivery_matches_latest_read_range_synthesis(
+    loop_state: &LoopState,
+    route: &crate::RouteResult,
+    delivery_messages: &[String],
+) -> bool {
+    if !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !latest_publishable_synthesis_step_matches(loop_state)
+    {
+        return false;
+    }
+    let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
+        return false;
+    };
+    if !loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|synthesis| synthesis == delivery_text.trim())
+    {
+        return false;
+    }
+    loop_state
+        .executed_step_results
+        .iter()
+        .any(step_output_is_read_range)
 }
 
 fn delivery_matches_latest_structured_scalar_observation(
@@ -3956,6 +4277,12 @@ fn delivery_matches_grounded_content_answer(
     if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
         return false;
     }
+    if !matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Free | crate::OutputResponseShape::OneSentence
+    ) {
+        return false;
+    }
     if matches!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::FileToken
@@ -3963,6 +4290,12 @@ fn delivery_matches_grounded_content_answer(
         route.output_contract.semantic_kind,
         crate::OutputSemanticKind::RawCommandOutput
     ) {
+        return false;
+    }
+    if route_requires_matrix_deterministic_final_answer(route) {
+        return false;
+    }
+    if latest_publishable_synthesis_step_matches(loop_state) {
         return false;
     }
     let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
@@ -7239,7 +7572,11 @@ pub(crate) async fn finalize_loop_reply(
 
     if loop_state.delivery_messages.is_empty() {
         if let Some((answer, summary)) =
-            direct_structured_observed_answer(Some(state), &loop_state, agent_run_context)
+            direct_structured_observed_answer_allowing_implicit_metadata_path_facts(
+                Some(state),
+                &loop_state,
+                agent_run_context,
+            )
         {
             finalizer_summary = Some(summary);
             loop_state.last_user_visible_respond = Some(answer.clone());
@@ -7661,6 +7998,15 @@ pub(crate) async fn finalize_loop_reply(
     );
     replace_delivery_with_observed_markdown_heading_scalar(
         &task.task_id,
+        &mut loop_state,
+        agent_run_context,
+        &mut delivery_deduped,
+        &mut finalizer_summary,
+    );
+    replace_delivery_with_matrix_observed_shape_answer(
+        state,
+        task,
+        user_text,
         &mut loop_state,
         agent_run_context,
         &mut delivery_deduped,
@@ -10334,6 +10680,10 @@ mod tests {
             "synthesize_answer",
             "document 目录下有 alpha.md 和 beta.md。",
         ));
+        loop_state.last_publishable_synthesis_output =
+            Some("document 目录下有 alpha.md 和 beta.md。".to_string());
+        loop_state.last_user_visible_respond =
+            Some("document 目录下有 alpha.md 和 beta.md。".to_string());
         let mut delivery = vec!["document 目录下有 alpha.md 和 beta.md。".to_string()];
         let mut finalizer_summary = None;
 
@@ -10347,6 +10697,48 @@ mod tests {
         );
 
         assert_eq!(delivery, vec!["alpha.md\nbeta.md"]);
+        assert!(finalizer_summary.is_some());
+    }
+
+    #[test]
+    fn matrix_shape_guard_replaces_unstructured_strict_list_with_observed_list() {
+        let state = test_state();
+        let task = claimed_task("task-matrix-shape-guard-list");
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "document".to_string();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"find_ext","count":2,"ext":"md","results":["alpha.md","beta.md"],"root":"document"}"#,
+        ));
+        let mut delivery = vec!["document 目录下有 alpha.md 和 beta.md。".to_string()];
+        let mut finalizer_summary = None;
+
+        assert!(super::replace_delivery_with_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "列出 document 下的 md 文件名，只输出列表",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        ));
+
+        assert_eq!(delivery, vec!["alpha.md\nbeta.md"]);
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some("alpha.md\nbeta.md")
+        );
         assert!(finalizer_summary.is_some());
     }
 
