@@ -406,8 +406,7 @@ fn step_trace_json(
         .error_excerpt
         .as_deref()
         .and_then(crate::skills::parse_structured_skill_error);
-    let failure_attribution =
-        structured_error_extra_string(structured_error.as_ref(), "failure_attribution");
+    let failure_attribution = structured_error_failure_attribution(structured_error.as_ref());
     let contract_policy = contract_policy_trace_json(structured_error.as_ref());
     json!({
         "step_id": &step.step_id,
@@ -990,6 +989,66 @@ fn structured_error_extra_string(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn structured_error_failure_attribution(
+    structured_error: Option<&crate::skills::StructuredSkillError>,
+) -> Option<String> {
+    if let Some(raw) = structured_error_extra_string(structured_error, "failure_attribution") {
+        return crate::contract_matrix::FailureAttribution::parse(&raw)
+            .map(|kind| kind.as_str().to_string())
+            .or(Some(raw));
+    }
+    structured_error
+        .and_then(|value| failure_attribution_for_structured_error_kind(&value.error_kind))
+        .map(|kind| kind.as_str().to_string())
+}
+
+fn failure_attribution_for_structured_error_kind(
+    error_kind: &str,
+) -> Option<crate::contract_matrix::FailureAttribution> {
+    let normalized = error_kind.trim().to_ascii_lowercase().replace('-', "_");
+    match normalized.as_str() {
+        "schema_error"
+        | "schema_validation_failed"
+        | "schema_recovery_failed"
+        | "json_schema_error"
+        | "invalid_json_schema"
+        | "missing_required_field" => Some(crate::contract_matrix::FailureAttribution::SchemaError),
+        "provider_error"
+        | "provider_retryable_response"
+        | "provider_retryable_business"
+        | "provider_non_retryable_business"
+        | "provider_response_invalid"
+        | "provider_schema_error"
+        | "transport_retryable"
+        | "rate_limited"
+        | "quota_exhausted"
+        | "llm_provider_error"
+        | "llm_provider_unavailable" => {
+            Some(crate::contract_matrix::FailureAttribution::ProviderError)
+        }
+        "delivery_error"
+        | "delivery_failed"
+        | "channel_send_failed"
+        | "file_delivery_failed"
+        | "media_delivery_failed"
+        | "missing_delivery_artifact"
+        | "delivery_token_invalid" => {
+            Some(crate::contract_matrix::FailureAttribution::DeliveryError)
+        }
+        "permission_denied" | "policy_denied" | "skill_disabled" | "requires_confirmation" => {
+            Some(crate::contract_matrix::FailureAttribution::PermissionDenied)
+        }
+        "contract_action_rejected" | "contract_policy_violation" | "contract_missing" => {
+            Some(crate::contract_matrix::FailureAttribution::ContractGap)
+        }
+        "budget_exhausted" | "round_budget_exhausted" | "tool_budget_exhausted" => {
+            Some(crate::contract_matrix::FailureAttribution::BudgetExhausted)
+        }
+        "prompt_budget_error" => Some(crate::contract_matrix::FailureAttribution::PromptBudgetError),
+        _ => None,
+    }
 }
 
 fn contract_policy_trace_json(
@@ -1992,6 +2051,53 @@ mod tests {
                 .and_then(Value::as_str),
             Some("candidates")
         );
+    }
+
+    #[test]
+    fn trace_json_infers_failure_attribution_from_standard_error_kind() {
+        for (error_kind, expected) in [
+            ("schema_validation_failed", "schema_error"),
+            ("provider_retryable_response", "provider_error"),
+            ("channel_send_failed", "delivery_error"),
+        ] {
+            let mut journal = TaskJournal::for_task(
+                format!("task-{error_kind}"),
+                "ask",
+                "trigger structured error",
+            );
+            let err = crate::skills::structured_skill_error_from_parts(
+                "runtime",
+                error_kind,
+                "structured failure",
+                None,
+                None,
+            );
+            journal.push_step_result(&crate::executor::StepExecutionResult {
+                step_id: "step_1".to_string(),
+                skill: "runtime".to_string(),
+                status: crate::executor::StepExecutionStatus::Error,
+                output: None,
+                error: Some(err),
+                started_at: 1,
+                finished_at: 1,
+            });
+
+            let trace = journal.to_trace_json();
+            let step = trace
+                .get("step_results")
+                .and_then(Value::as_array)
+                .and_then(|steps| steps.first())
+                .expect("step result should be present");
+
+            assert_eq!(
+                step.get("error_kind").and_then(Value::as_str),
+                Some(error_kind)
+            );
+            assert_eq!(
+                step.get("failure_attribution").and_then(Value::as_str),
+                Some(expected)
+            );
+        }
     }
 
     #[test]
