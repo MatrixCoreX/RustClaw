@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::{repo, AppState};
 use anyhow::anyhow;
-use serde_json::Value;
+use serde_json::{json, Value};
 use tracing::{debug, error, info, info_span, warn, Instrument};
 
 mod ask_pipeline;
@@ -31,6 +31,62 @@ pub(crate) use runtime_support::{
     maybe_recover_stale_running_tasks_runtime, recover_stale_running_tasks_on_startup,
     spawn_cleanup_worker, spawn_schedule_worker, spawn_worker, start_task_heartbeat,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ScheduleNotifyOutcome {
+    pub(crate) job_id: String,
+    pub(crate) channel: String,
+    pub(crate) runtime_channel: String,
+    pub(crate) task_success: bool,
+    pub(crate) delivered: bool,
+    pub(crate) error_text: Option<String>,
+}
+
+fn runtime_channel_label(channel: crate::RuntimeChannel) -> &'static str {
+    match channel {
+        crate::RuntimeChannel::Telegram => "telegram",
+        crate::RuntimeChannel::Whatsapp => "whatsapp",
+        crate::RuntimeChannel::Wechat => "wechat",
+        crate::RuntimeChannel::Feishu => "feishu",
+        crate::RuntimeChannel::Lark => "lark",
+    }
+}
+
+pub(crate) fn schedule_notify_observation(outcome: &ScheduleNotifyOutcome) -> Value {
+    let mut value = json!({
+        "source": "schedule_notify",
+        "job_id": outcome.job_id,
+        "channel": outcome.channel,
+        "runtime_channel": outcome.runtime_channel,
+        "task_success": outcome.task_success,
+        "status": if outcome.delivered { "ok" } else { "error" },
+    });
+    if !outcome.delivered {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("error_kind".to_string(), json!("channel_send_failed"));
+            obj.insert(
+                "failure_attribution".to_string(),
+                json!(crate::contract_matrix::FailureAttribution::DeliveryError.as_str()),
+            );
+            if let Some(error_text) = outcome.error_text.as_deref() {
+                obj.insert(
+                    "error_text".to_string(),
+                    json!(crate::truncate_for_log(error_text)),
+                );
+            }
+        }
+    }
+    value
+}
+
+pub(crate) fn record_schedule_notify_outcome(
+    journal: &mut crate::task_journal::TaskJournal,
+    outcome: Option<ScheduleNotifyOutcome>,
+) {
+    if let Some(outcome) = outcome {
+        journal.push_task_observation(schedule_notify_observation(&outcome));
+    }
+}
 
 pub(crate) fn is_resume_continue_source(raw: &str) -> bool {
     let source = raw.trim().to_ascii_lowercase();
@@ -149,7 +205,7 @@ async fn finalize_worker_timeout(
         task.task_id, task_kind_for_timeout_log, worker_timeout_secs
     );
     crate::update_task_timeout(state, &task.task_id, &timeout_err)?;
-    maybe_notify_schedule_result(state, task, payload, false, &timeout_err).await;
+    let _ = maybe_notify_schedule_result(state, task, payload, false, &timeout_err).await;
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
         "task_call_end task_id={} kind={} status=timeout error={}",
@@ -167,16 +223,16 @@ pub(crate) async fn maybe_notify_schedule_result(
     payload: &Value,
     success: bool,
     text: &str,
-) {
+) -> Option<ScheduleNotifyOutcome> {
     let is_scheduled = payload
         .get("schedule_triggered")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     if !is_scheduled {
-        return;
+        return None;
     }
     let Some(job_id) = payload.get("schedule_job_id").and_then(|v| v.as_str()) else {
-        return;
+        return None;
     };
     let prefix = if success {
         crate::i18n_t_with_default(
@@ -201,6 +257,7 @@ pub(crate) async fn maybe_notify_schedule_result(
         format!("{text_trimmed}\n\n{status_block}")
     };
     let runtime_ch = runtime_channel_from_payload(state, payload);
+    let runtime_channel = runtime_channel_label(runtime_ch).to_string();
     let channel_str = task.channel.trim();
     info!(
         "schedule notify push: task_id={} channel={} runtime_channel={:?}",
@@ -212,12 +269,28 @@ pub(crate) async fn maybe_notify_schedule_result(
                 "schedule notify success: task_id={} channel={} runtime_channel={:?}",
                 task.task_id, channel_str, runtime_ch
             );
+            Some(ScheduleNotifyOutcome {
+                job_id: job_id.to_string(),
+                channel: channel_str.to_string(),
+                runtime_channel,
+                task_success: success,
+                delivered: true,
+                error_text: None,
+            })
         }
         Err(err) => {
             warn!(
                 "schedule notify failed: task_id={} channel={} runtime_channel={:?} err={}",
                 task.task_id, channel_str, runtime_ch, err
             );
+            Some(ScheduleNotifyOutcome {
+                job_id: job_id.to_string(),
+                channel: channel_str.to_string(),
+                runtime_channel,
+                task_success: success,
+                delivered: false,
+                error_text: Some(err),
+            })
         }
     }
 }
@@ -382,6 +455,39 @@ mod tests {
         assert_eq!(
             payload.get("context_token").and_then(|v| v.as_str()),
             Some("ctx-123")
+        );
+    }
+
+    #[test]
+    fn schedule_notify_observation_marks_delivery_failure() {
+        let observation = super::schedule_notify_observation(&super::ScheduleNotifyOutcome {
+            job_id: "job-1".to_string(),
+            channel: "telegram".to_string(),
+            runtime_channel: "telegram".to_string(),
+            task_success: true,
+            delivered: false,
+            error_text: Some("telegram bot token is empty".to_string()),
+        });
+
+        assert_eq!(
+            observation.get("source").and_then(|value| value.as_str()),
+            Some("schedule_notify")
+        );
+        assert_eq!(
+            observation.get("status").and_then(|value| value.as_str()),
+            Some("error")
+        );
+        assert_eq!(
+            observation
+                .get("error_kind")
+                .and_then(|value| value.as_str()),
+            Some("channel_send_failed")
+        );
+        assert_eq!(
+            observation
+                .get("failure_attribution")
+                .and_then(|value| value.as_str()),
+            Some("delivery_error")
         );
     }
 }

@@ -436,11 +436,13 @@ async fn finalize_ask_success(
     is_llm_reply: bool,
     should_refresh_long_term_memory: bool,
     agent_display_name_hint: &str,
-    journal: &crate::task_journal::TaskJournal,
+    journal: &mut crate::task_journal::TaskJournal,
 ) -> Result<()> {
+    let notify_outcome =
+        crate::worker::maybe_notify_schedule_result(state, task, payload, true, answer_text).await;
+    crate::worker::record_schedule_notify_outcome(journal, notify_outcome);
     let result = ask_result_payload(answer_text, answer_messages, Some(journal));
     repo::update_task_success(state, &task.task_id, &result.to_string())?;
-    crate::worker::maybe_notify_schedule_result(state, task, payload, true, answer_text).await;
     insert_ask_memory_pair(
         state,
         task,
@@ -472,15 +474,17 @@ async fn finalize_ask_resume_failure(
     user_error: &str,
     resume_payload: Value,
     answer_messages: &[String],
-    journal: &crate::task_journal::TaskJournal,
+    journal: &mut crate::task_journal::TaskJournal,
 ) -> Result<()> {
+    let notify_outcome =
+        crate::worker::maybe_notify_schedule_result(state, task, payload, false, user_error).await;
+    crate::worker::record_schedule_notify_outcome(journal, notify_outcome);
     let mut result = ask_result_payload(user_error, answer_messages, None);
     if let Some(obj) = result.as_object_mut() {
         obj.insert("resume_context".to_string(), resume_payload);
     }
     let result = journal.attach_to_result(result);
     repo::update_task_failure_with_result(state, &task.task_id, &result.to_string(), user_error)?;
-    crate::worker::maybe_notify_schedule_result(state, task, payload, false, user_error).await;
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
         "task_call_end task_id={} kind=ask status=failed path=normal error={} resume_context=true",
@@ -498,15 +502,17 @@ async fn finalize_ask_failure(
     answer_text: &str,
     answer_messages: &[String],
     err_text: &str,
-    journal: &crate::task_journal::TaskJournal,
+    journal: &mut crate::task_journal::TaskJournal,
 ) -> Result<()> {
     error!(
         "worker_once: ask task_id={} failed: {}",
         task.task_id, err_text
     );
+    let notify_outcome =
+        crate::worker::maybe_notify_schedule_result(state, task, payload, false, answer_text).await;
+    crate::worker::record_schedule_notify_outcome(journal, notify_outcome);
     let result = journal.attach_to_result(ask_result_payload(answer_text, answer_messages, None));
     repo::update_task_failure_with_result(state, &task.task_id, &result.to_string(), err_text)?;
-    crate::worker::maybe_notify_schedule_result(state, task, payload, false, answer_text).await;
     info!("{}", crate::LOG_CALL_WRAP);
     info!(
         "task_call_end task_id={} kind=ask status=failed path=normal error={}",
@@ -584,9 +590,11 @@ pub(crate) async fn finalize_ask_direct_success(
     ));
     journal.record_final_answer(answer_text);
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    let notify_outcome =
+        crate::worker::maybe_notify_schedule_result(state, task, payload, true, answer_text).await;
+    crate::worker::record_schedule_notify_outcome(&mut journal, notify_outcome);
     let result = journal.attach_to_result(json!({ "text": answer_text }));
     repo::update_task_success(state, &task.task_id, &result.to_string())?;
-    crate::worker::maybe_notify_schedule_result(state, task, payload, true, answer_text).await;
     insert_ask_memory_pair(
         state,
         task,
@@ -868,7 +876,7 @@ pub(crate) async fn finalize_ask_result(
                         &err_text,
                         resume_payload,
                         &answer_messages,
-                        &journal,
+                        &mut journal,
                     )
                     .await?;
                     insert_unfinished_goal_memory(state, task, prompt, &err_text);
@@ -882,7 +890,7 @@ pub(crate) async fn finalize_ask_result(
                         &answer_text,
                         &answer_messages,
                         &err_text,
-                        &journal,
+                        &mut journal,
                     )
                     .await?;
                     insert_unfinished_goal_memory(state, task, prompt, &err_text);
@@ -899,7 +907,7 @@ pub(crate) async fn finalize_ask_result(
                     answer.is_llm_reply,
                     route_result.should_refresh_long_term_memory,
                     &route_result.agent_display_name_hint,
-                    &journal,
+                    &mut journal,
                 )
                 .await?;
                 crate::conversation_state::update_active_session_from_ask_outcome(
@@ -1004,7 +1012,7 @@ pub(crate) async fn finalize_ask_result(
                         false,
                         route_result.should_refresh_long_term_memory,
                         &route_result.agent_display_name_hint,
-                        &journal,
+                        &mut journal,
                     )
                     .await?;
                     crate::conversation_state::update_active_session_from_ask_outcome(
@@ -1055,7 +1063,7 @@ pub(crate) async fn finalize_ask_result(
                     &user_error,
                     resume_payload,
                     &[],
-                    &journal,
+                    &mut journal,
                 )
                 .await?;
                 insert_unfinished_goal_memory(state, task, prompt, &user_error);
@@ -1078,8 +1086,16 @@ pub(crate) async fn finalize_ask_result(
             journal.record_final_answer(&user_error);
             crate::finalize::ensure_task_metrics(&mut journal, &user_error, &[]);
             journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
-            finalize_ask_failure(state, task, payload, &user_error, &[], &err_text, &journal)
-                .await?;
+            finalize_ask_failure(
+                state,
+                task,
+                payload,
+                &user_error,
+                &[],
+                &err_text,
+                &mut journal,
+            )
+            .await?;
             insert_unfinished_goal_memory(state, task, prompt, &user_error);
             // §3.1: Finalizing → Failed（dispatch 抛 Err 进入此分支）。
             crate::log_ask_transition(
