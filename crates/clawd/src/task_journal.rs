@@ -883,6 +883,7 @@ fn contract_policy_trace_json(
         "action": extra.get("action").and_then(Value::as_str),
         "contract_match": extra.get("contract_match").and_then(Value::as_str),
         "required_evidence": extra.get("required_evidence").cloned(),
+        "evidence_expression": extra.get("evidence_expression").cloned(),
         "final_answer_shape": extra.get("final_answer_shape").and_then(Value::as_str),
     }))
 }
@@ -1666,6 +1667,7 @@ mod tests {
                 "action": "run_cmd",
                 "contract_match": "file_names",
                 "required_evidence": ["candidates"],
+                "evidence_expression": {"all_of": ["candidates"], "one_of": [], "any_of": [], "negative_evidence": []},
                 "final_answer_shape": "name_list",
             })),
         );
@@ -1705,6 +1707,15 @@ mod tests {
                 .and_then(|value| value.get("contract_match"))
                 .and_then(Value::as_str),
             Some("file_names")
+        );
+        assert_eq!(
+            step.get("contract_policy")
+                .and_then(|value| value.get("evidence_expression"))
+                .and_then(|value| value.get("all_of"))
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(Value::as_str),
+            Some("candidates")
         );
     }
 
