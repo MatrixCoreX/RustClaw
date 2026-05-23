@@ -1074,19 +1074,21 @@ AGENTS.md 已要求基础 skill 的 `text/extra/error_text` 遵循 `docs/base_sk
 
 - [x] trace 对 contract action rejection 记录 contract/action/final shape/失败归因。
 - [ ] trace 对所有成功/失败 step 记录 contract、action、evidence、final shape、失败归因。
-- [ ] trace 记录 runtime snapshot：registry hash、matrix hash、prompt layer hash。
+- [x] trace 记录 task-level contract snapshot：matrix version/hash、semantic/generic match、required evidence、final shape、preferred/allowed/forbidden actions。
+- [ ] trace 记录完整 runtime snapshot：registry hash、matrix hash、prompt layer hash。
 - [ ] UI 默认显示简洁状态：已完成、需要确认、失败并给下一步。
 - [ ] 原始 JSON、trace、provider 输出放到二级详情。
 - [ ] 失败时把技术原因转成人能理解的下一步。
-- [ ] `TaskJournal::to_trace_json()` 增加完整 task-level contract snapshot：
+- [x] `TaskJournal::to_trace_json()` 增加 task-level contract snapshot：
   - `contract_matrix_version`
   - `contract_matrix_hash`
-  - `semantic_contract`
+  - `semantic_contract` / `contract_match`
   - `policy_decisions`（contract rejection step 已有局部字段）
   - `required_evidence`
-  - `observed_evidence`
-  - `final_answer_shape`（contract rejection step 已有局部字段）
+  - `final_answer_shape`
   - `failure_category`（contract rejection step 已有 `failure_attribution`）
+- [ ] `TaskJournal::to_trace_json()` 增加完整 evidence snapshot：
+  - `observed_evidence`
 - [ ] 普通用户 UI 不展示 `model_error/code_gap/contract_gap` 术语，只展示下一步；开发者详情里展示分类。
 - [ ] `observed_evidence` 默认只展示 field/source/kind/短 excerpt/hash，完整原始输出仍留在受控日志或不落盘。
 - [ ] summary 与 trace 分层：summary 小而稳定，trace 可延迟展开。
