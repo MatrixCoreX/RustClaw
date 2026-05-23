@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::{IntentOutputContract, OutputSemanticKind, RouteResult};
 
@@ -239,6 +239,13 @@ impl<'a> MatchedContract<'a> {
         match self {
             Self::Semantic(contract) => contract.forbidden_actions.as_slice(),
             Self::Generic(profile) => profile.forbidden_actions.as_slice(),
+        }
+    }
+
+    fn preferred_actions(&self) -> &[String] {
+        match self {
+            Self::Semantic(contract) => contract.preferred_actions.as_slice(),
+            Self::Generic(profile) => profile.preferred_actions.as_slice(),
         }
     }
 
@@ -530,6 +537,35 @@ pub(crate) fn required_evidence_for_output_contract(
         fields.insert("kind".to_string());
     }
     Some(fields.into_iter().collect())
+}
+
+pub(crate) fn trace_snapshot_for_route(route: &RouteResult) -> Option<Value> {
+    trace_snapshot_for_output_contract(&route.output_contract)
+}
+
+pub(crate) fn trace_snapshot_for_output_contract(
+    output_contract: &IntentOutputContract,
+) -> Option<Value> {
+    let matrix = bundled_contract_matrix()?;
+    let matched = matrix.match_output_contract(output_contract)?;
+    Some(json!({
+        "contract_matrix_version": matrix.matrix_version,
+        "contract_matrix_hash": matrix.matrix_version_hash(),
+        "schema_version": matrix.schema_version,
+        "semantic_kind": output_contract.semantic_kind.as_str(),
+        "response_shape": output_contract.response_shape.as_str(),
+        "locator_kind": output_contract.locator_kind.as_str(),
+        "delivery_intent": output_contract.delivery_intent.as_str(),
+        "requires_content_evidence": output_contract.requires_content_evidence,
+        "delivery_required": output_contract.delivery_required,
+        "contract_match": matched.match_name(),
+        "required_evidence": required_evidence_for_output_contract(output_contract)
+            .unwrap_or_else(|| matched.required_evidence()),
+        "final_answer_shape": matched.final_answer_shape(),
+        "preferred_actions": normalized_tokens(matched.preferred_actions()),
+        "allowed_actions": normalized_tokens(matched.allowed_actions()),
+        "forbidden_actions": normalized_tokens(matched.forbidden_actions()),
+    }))
 }
 
 pub(crate) fn action_policy_for_output_contract(
