@@ -45,6 +45,7 @@
                   {
                     "step_id": "step_1",
                     "kind": "MissingRequiredArg",
+                    "failure_attribution": "model_error",
                     "detail": "Missing required argument: path"
                   }
                 ]
