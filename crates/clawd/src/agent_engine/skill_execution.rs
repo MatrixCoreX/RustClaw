@@ -215,6 +215,7 @@ fn contract_matrix_action_policy_error(
             "action": policy.action_key,
             "contract_match": policy.contract_match,
             "required_evidence": policy.required_evidence,
+            "preferred_actions": policy.preferred_actions,
             "evidence_expression": evidence_expression,
             "final_answer_shape": policy.final_answer_shape,
         })),
