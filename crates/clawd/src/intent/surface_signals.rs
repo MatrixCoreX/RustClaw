@@ -165,7 +165,9 @@ pub(crate) fn inline_json_transform_request(prompt: &str) -> bool {
         .is_some_and(|value| {
             value_has_structured_transform_request(&value)
                 || (value_has_transformable_inline_records(&value)
-                    && prompt_has_embedded_structured_payload_with_instruction(prompt, &raw))
+                    && prompt_has_embedded_structured_payload_with_transform_instruction(
+                        prompt, &raw,
+                    ))
         })
 }
 
@@ -279,7 +281,10 @@ fn value_has_transformable_inline_records(value: &serde_json::Value) -> bool {
     }
 }
 
-fn prompt_has_embedded_structured_payload_with_instruction(prompt: &str, raw: &str) -> bool {
+fn prompt_has_embedded_structured_payload_with_transform_instruction(
+    prompt: &str,
+    raw: &str,
+) -> bool {
     let trimmed = prompt.trim();
     let raw_trimmed = raw.trim();
     if trimmed.is_empty() || raw_trimmed.is_empty() || trimmed == raw_trimmed {
@@ -291,7 +296,47 @@ fn prompt_has_embedded_structured_payload_with_instruction(prompt: &str, raw: &s
     let end = start.saturating_add(raw_trimmed.len());
     let before = trimmed[..start].trim();
     let after = trimmed[end..].trim();
-    !before.is_empty() || !after.is_empty()
+    let instruction = format!("{before} {after}");
+    prompt_text_has_transform_instruction(&instruction)
+}
+
+fn prompt_text_has_transform_instruction(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let sort_is_negated = lower.contains("without sort")
+        || lower.contains("no sort")
+        || lower.contains("not sort")
+        || lower.contains("don't sort")
+        || lower.contains("dont sort")
+        || text.contains("不要排序")
+        || text.contains("不排序");
+    let has_sort_instruction = !sort_is_negated
+        && (lower.contains("sort")
+            || lower.contains("order by")
+            || text.contains("排序")
+            || text.contains("降序")
+            || text.contains("升序"));
+    has_sort_instruction
+        || lower.contains("markdown table")
+        || lower.contains(" as table")
+        || lower.contains("filter")
+        || lower.contains("dedup")
+        || lower.contains("project")
+        || lower.contains("aggregate")
+        || lower.contains("group by")
+        || lower.contains("count")
+        || lower.contains("how many")
+        || lower.contains("only output")
+        || text.contains("表格")
+        || text.contains("过滤")
+        || text.contains("筛选")
+        || text.contains("去重")
+        || text.contains("字段")
+        || text.contains("分组")
+        || text.contains("聚合")
+        || text.contains("统计")
+        || text.contains("数量")
+        || text.contains("个数")
+        || text.contains("只输出")
 }
 
 fn value_has_inline_transform_input(obj: &serde_json::Map<String, serde_json::Value>) -> bool {
@@ -725,6 +770,12 @@ mod tests {
         ));
         assert!(inline_json_transform_request(
             "这个 CSV 按 score 降序输出 markdown 表格：name,score\\nli,3\\nwang,8\\nzhao,5"
+        ));
+        assert!(!inline_json_transform_request(
+            r#"Explain what this JSON represents without sorting it: [{"name":"alpha","score":7},{"name":"beta","score":12}]"#
+        ));
+        assert!(!inline_json_transform_request(
+            r#"解释这个 JSON 代表什么：[{"name":"alpha","score":7},{"name":"beta","score":12}]"#
         ));
     }
 
