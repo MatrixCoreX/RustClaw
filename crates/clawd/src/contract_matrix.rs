@@ -989,6 +989,7 @@ pub(crate) struct ContractActionPolicy {
     pub(crate) action_key: String,
     pub(crate) contract_match: String,
     pub(crate) required_evidence: Vec<String>,
+    pub(crate) preferred_actions: Vec<String>,
     pub(crate) final_answer_shape_kind: FinalAnswerShape,
     pub(crate) final_answer_shape: String,
     pub(crate) evidence_expression: EvidenceExpression,
@@ -997,6 +998,10 @@ pub(crate) struct ContractActionPolicy {
 impl ContractActionPolicy {
     pub(crate) fn is_allowed(&self) -> bool {
         self.decision == ActionPolicyDecision::Allowed
+    }
+
+    pub(crate) fn action_matches_preferred(&self) -> bool {
+        action_matches_policy_tokens(&self.action_key, &self.preferred_actions)
     }
 }
 
@@ -1159,10 +1164,18 @@ pub(crate) fn action_policy_for_output_contract(
         action_key: action.as_key(),
         contract_match: matched.match_name().to_string(),
         required_evidence: matched.required_evidence(),
+        preferred_actions: normalized_tokens(matched.preferred_actions()),
         final_answer_shape_kind,
         final_answer_shape: final_answer_shape_kind.as_str().to_string(),
         evidence_expression: matched.evidence_expression(),
     })
+}
+
+pub(crate) fn action_matches_policy_tokens(action_key: &str, policies: &[String]) -> bool {
+    let Some(action) = ActionRef::parse(action_key) else {
+        return false;
+    };
+    action_matches_any(&action, policies)
 }
 
 #[cfg(test)]
