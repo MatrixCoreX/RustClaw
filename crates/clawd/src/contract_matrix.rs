@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::{IntentOutputContract, OutputSemanticKind, RouteResult};
+use crate::{IntentOutputContract, OutputLocatorKind, OutputSemanticKind, RouteResult};
 
 #[cfg(test)]
 use anyhow::{Context, Result};
@@ -601,6 +601,23 @@ impl ActionPolicyDecision {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ArgPolicyDecision {
+    Allowed,
+    DeferredTemplateArg,
+    MissingTargetBinding,
+}
+
+impl ArgPolicyDecision {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Allowed => "allowed",
+            Self::DeferredTemplateArg => "deferred_template_arg",
+            Self::MissingTargetBinding => "missing_target_binding",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ActionRef {
     pub(crate) skill: String,
@@ -1139,6 +1156,29 @@ pub(crate) struct ContractActionPolicy {
     pub(crate) channel_visibility: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ContractArgPolicy {
+    pub(crate) decision: ArgPolicyDecision,
+    pub(crate) action_key: String,
+    pub(crate) contract_match: String,
+    pub(crate) required_evidence: Vec<String>,
+    pub(crate) missing_target_args: Vec<String>,
+    pub(crate) deferred_target_args: Vec<String>,
+    pub(crate) expected_target_args: Vec<String>,
+    pub(crate) final_answer_shape: String,
+    pub(crate) policy_mode: String,
+    pub(crate) evidence_scope: String,
+    pub(crate) freshness: String,
+    pub(crate) artifact_kind: String,
+    pub(crate) channel_visibility: String,
+}
+
+impl ContractArgPolicy {
+    pub(crate) fn is_allowed(&self) -> bool {
+        self.decision == ArgPolicyDecision::Allowed
+    }
+}
+
 impl ContractActionPolicy {
     pub(crate) fn is_allowed(&self) -> bool {
         self.decision == ActionPolicyDecision::Allowed
@@ -1370,11 +1410,153 @@ pub(crate) fn action_policy_for_output_contract(
     })
 }
 
+pub(crate) fn arg_policy_decision(
+    output_contract: Option<&IntentOutputContract>,
+    normalized_skill: &str,
+    resolved_args: &Value,
+) -> Option<ContractArgPolicy> {
+    let output_contract = output_contract?;
+    if output_contract.semantic_kind == OutputSemanticKind::None
+        && !output_contract.requires_content_evidence
+        && !output_contract.delivery_required
+    {
+        return None;
+    }
+    let matrix = bundled_contract_matrix()?;
+    let matched = matrix.match_output_contract(output_contract)?;
+    let action = ActionRef::from_skill_args(normalized_skill, resolved_args)?;
+    let final_answer_shape_kind = matched.final_answer_shape_kind()?;
+    let target_groups = contract_target_arg_groups(output_contract, &action);
+    let expected_target_args = target_groups
+        .iter()
+        .flat_map(|group| group.iter().copied())
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut missing_target_args = Vec::new();
+    let mut deferred_target_args = Vec::new();
+    for group in &target_groups {
+        if arg_group_has_concrete_value(resolved_args, group) {
+            continue;
+        }
+        let group_label = group.join("|");
+        if arg_group_has_unresolved_template(resolved_args, group) {
+            deferred_target_args.push(group_label);
+        } else {
+            missing_target_args.push(group_label);
+        }
+    }
+    let decision = if !deferred_target_args.is_empty() {
+        ArgPolicyDecision::DeferredTemplateArg
+    } else if !missing_target_args.is_empty() {
+        ArgPolicyDecision::MissingTargetBinding
+    } else {
+        ArgPolicyDecision::Allowed
+    };
+    Some(ContractArgPolicy {
+        decision,
+        action_key: action.as_key(),
+        contract_match: matched.match_name().to_string(),
+        required_evidence: matched.required_evidence(),
+        missing_target_args,
+        deferred_target_args,
+        expected_target_args,
+        final_answer_shape: final_answer_shape_kind.as_str().to_string(),
+        policy_mode: matched.policy_mode(),
+        evidence_scope: matched.evidence_scope(),
+        freshness: matched.freshness(),
+        artifact_kind: matched.artifact_kind(),
+        channel_visibility: matched.channel_visibility(),
+    })
+}
+
 pub(crate) fn action_matches_policy_tokens(action_key: &str, policies: &[String]) -> bool {
     let Some(action) = ActionRef::parse(action_key) else {
         return false;
     };
     action_matches_any(&action, policies)
+}
+
+fn contract_target_arg_groups(
+    output_contract: &IntentOutputContract,
+    action: &ActionRef,
+) -> Vec<Vec<&'static str>> {
+    if !output_contract.requires_content_evidence && !output_contract.delivery_required {
+        return Vec::new();
+    }
+    if !matches!(
+        output_contract.locator_kind,
+        OutputLocatorKind::Path | OutputLocatorKind::Filename
+    ) && !output_contract.delivery_required
+    {
+        return Vec::new();
+    }
+    match (action.skill.as_str(), action.action.as_deref()) {
+        ("fs_basic", Some("compare_paths")) => vec![vec!["left_path"], vec!["right_path"]],
+        ("fs_basic", Some("stat_paths")) => vec![vec!["path", "paths"]],
+        ("fs_basic", Some("list_dir" | "read_text_range")) => vec![vec!["path"]],
+        ("fs_basic", Some("grep_text")) => vec![vec!["root", "path"]],
+        ("fs_basic", Some("write_text" | "append_text" | "make_dir" | "remove_path")) => {
+            vec![vec!["path"]]
+        }
+        ("doc_parse", _) => vec![vec!["path", "file_path", "requested_path"]],
+        ("archive_basic", Some("list" | "read")) => vec![vec!["archive", "archive_path", "path"]],
+        ("archive_basic", Some("pack")) => vec![vec!["source", "source_path", "path"]],
+        ("archive_basic", Some("unpack")) => {
+            vec![
+                vec!["archive", "archive_path", "path"],
+                vec!["dest", "dest_path"],
+            ]
+        }
+        ("config_basic", Some("read_field" | "read_fields" | "list_keys" | "validate")) => {
+            vec![vec!["path"]]
+        }
+        ("config_edit", Some("plan_config_change" | "apply_config_change" | "validate_config")) => {
+            vec![vec!["path"]]
+        }
+        ("db_basic", _) => vec![vec!["db_path", "path"]],
+        _ => Vec::new(),
+    }
+}
+
+fn arg_group_has_concrete_value(args: &Value, group: &[&str]) -> bool {
+    group
+        .iter()
+        .any(|name| args.get(*name).is_some_and(arg_value_is_concrete))
+}
+
+fn arg_group_has_unresolved_template(args: &Value, group: &[&str]) -> bool {
+    group.iter().any(|name| {
+        args.get(*name)
+            .is_some_and(arg_value_has_unresolved_template)
+    })
+}
+
+fn arg_value_is_concrete(value: &Value) -> bool {
+    match value {
+        Value::String(text) => {
+            let trimmed = text.trim();
+            !trimmed.is_empty() && !string_has_unresolved_template(trimmed)
+        }
+        Value::Array(values) => values.iter().any(arg_value_is_concrete),
+        Value::Object(map) => map.values().any(arg_value_is_concrete),
+        Value::Null => false,
+        Value::Bool(_) | Value::Number(_) => true,
+    }
+}
+
+fn arg_value_has_unresolved_template(value: &Value) -> bool {
+    match value {
+        Value::String(text) => string_has_unresolved_template(text),
+        Value::Array(values) => values.iter().any(arg_value_has_unresolved_template),
+        Value::Object(map) => map.values().any(arg_value_has_unresolved_template),
+        _ => false,
+    }
+}
+
+fn string_has_unresolved_template(value: &str) -> bool {
+    value.contains("{{") && value.contains("}}")
 }
 
 #[cfg(test)]
@@ -2233,6 +2415,73 @@ failure_policy = "no_retry"
         );
 
         assert!(policy.is_none());
+    }
+
+    #[test]
+    fn arg_policy_defers_unresolved_template_targets() {
+        let policy = arg_policy_decision(
+            Some(&IntentOutputContract {
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::Path,
+                ..IntentOutputContract::default()
+            }),
+            "fs_basic",
+            &serde_json::json!({
+                "action": "read_text_range",
+                "path": "{{s1.path}}"
+            }),
+        )
+        .expect("arg policy decision");
+
+        assert_eq!(policy.decision, ArgPolicyDecision::DeferredTemplateArg);
+        assert!(policy.missing_target_args.is_empty());
+        assert_eq!(policy.deferred_target_args, vec!["path"]);
+    }
+
+    #[test]
+    fn arg_policy_rejects_missing_bound_target_after_resolution() {
+        let policy = arg_policy_decision(
+            Some(&IntentOutputContract {
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::Path,
+                ..IntentOutputContract::default()
+            }),
+            "fs_basic",
+            &serde_json::json!({
+                "action": "read_text_range",
+                "start_line": 1,
+                "end_line": 20
+            }),
+        )
+        .expect("arg policy decision");
+
+        assert_eq!(policy.decision, ArgPolicyDecision::MissingTargetBinding);
+        assert_eq!(policy.missing_target_args, vec!["path"]);
+        assert_eq!(policy.action_key, "fs_basic.read_text_range");
+    }
+
+    #[test]
+    fn arg_policy_allows_concrete_bound_target() {
+        let policy = arg_policy_decision(
+            Some(&IntentOutputContract {
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::Path,
+                ..IntentOutputContract::default()
+            }),
+            "fs_basic",
+            &serde_json::json!({
+                "action": "read_text_range",
+                "path": "/tmp/readme.md"
+            }),
+        )
+        .expect("arg policy decision");
+
+        assert!(policy.is_allowed());
+        assert!(policy.missing_target_args.is_empty());
+        assert!(policy.deferred_target_args.is_empty());
     }
 
     #[test]
