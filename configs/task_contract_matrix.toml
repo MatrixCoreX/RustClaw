@@ -1,0 +1,483 @@
+schema_version = 1
+matrix_version = "2026-05-23.p1"
+failure_attribution = [
+  "model_error",
+  "schema_error",
+  "code_gap",
+  "contract_gap",
+  "tool_gap",
+  "permission_denied",
+  "budget_exhausted",
+  "prompt_budget_error",
+  "delivery_error",
+  "provider_error",
+]
+
+[policy]
+unknown_semantic = "reject"
+unknown_action = "reject"
+evidence_missing = "retry_then_fail"
+
+[[generic_profiles]]
+name = "generic_path_content"
+semantic_kind = "none"
+requires_content_evidence = true
+locator_kinds = ["path", "current_workspace", "filename"]
+allowed_actions = ["fs_basic.stat_paths", "fs_basic.read_text_range", "fs_basic.list_dir", "fs_basic.find_entries", "doc_parse"]
+forbidden_actions = ["run_cmd"]
+required_evidence = ["content_excerpt", "path"]
+final_answer_shape = "summary_with_evidence"
+failure_policy = "retry_with_alternatives"
+
+[[generic_profiles]]
+name = "generic_delivery"
+semantic_kind = "none"
+delivery_required = true
+allowed_actions = ["fs_basic.stat_paths", "fs_basic.read_text_range", "fs_basic.write_text"]
+required_evidence = ["path"]
+final_answer_shape = "delivery_token_or_path"
+failure_policy = "retry_with_alternatives"
+
+[contracts.none]
+semantic_kind = "none"
+operation = "unknown"
+target_object = "unknown"
+delivery_shape = "summary"
+allowed_actions = []
+preferred_actions = []
+forbidden_actions = ["run_cmd"]
+required_evidence = []
+final_answer_shape = "free"
+none_passthrough = true
+failure_policy = "no_retry"
+
+[contracts.raw_command_output]
+semantic_kind = "raw_command_output"
+operation = "run"
+target_object = "system"
+delivery_shape = "raw"
+allowed_actions = ["run_cmd"]
+preferred_actions = ["run_cmd"]
+forbidden_actions = []
+required_evidence = ["command_output"]
+final_answer_shape = "raw_output_or_short_summary"
+failure_policy = "retry_with_alternatives"
+
+[contracts.service_status]
+semantic_kind = "service_status"
+operation = "inspect"
+target_object = "service"
+delivery_shape = "summary"
+allowed_actions = ["health_check", "process_basic", "service_control", "run_cmd"]
+preferred_actions = ["health_check", "process_basic"]
+forbidden_actions = []
+required_evidence = ["field_value"]
+final_answer_shape = "status_with_source"
+failure_policy = "retry_with_alternatives"
+
+[contracts.hidden_entries_check]
+semantic_kind = "hidden_entries_check"
+operation = "inspect"
+target_object = "directory"
+delivery_shape = "list"
+allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries"]
+preferred_actions = ["fs_basic.list_dir"]
+required_evidence = ["candidates"]
+final_answer_shape = "list_or_empty_statement"
+failure_policy = "retry_with_alternatives"
+
+[contracts.file_names]
+semantic_kind = "file_names"
+operation = "list"
+target_object = "directory"
+delivery_shape = "list"
+allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries"]
+preferred_actions = ["fs_basic.list_dir"]
+required_evidence = ["candidates"]
+final_answer_shape = "name_list"
+failure_policy = "retry_with_alternatives"
+
+[contracts.directory_names]
+semantic_kind = "directory_names"
+operation = "list"
+target_object = "directory"
+delivery_shape = "list"
+allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries"]
+preferred_actions = ["fs_basic.list_dir"]
+required_evidence = ["candidates"]
+final_answer_shape = "name_list"
+failure_policy = "retry_with_alternatives"
+
+[contracts.directory_entry_groups]
+semantic_kind = "directory_entry_groups"
+operation = "list"
+target_object = "directory"
+delivery_shape = "list"
+allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries"]
+preferred_actions = ["fs_basic.list_dir"]
+required_evidence = ["candidates"]
+final_answer_shape = "grouped_name_list"
+failure_policy = "retry_with_alternatives"
+
+[contracts.file_paths]
+semantic_kind = "file_paths"
+operation = "list"
+target_object = "directory"
+delivery_shape = "list"
+allowed_actions = ["fs_basic.find_entries", "fs_basic.list_dir"]
+preferred_actions = ["fs_basic.find_entries"]
+required_evidence = ["candidates"]
+final_answer_shape = "path_list"
+failure_policy = "retry_with_alternatives"
+
+[contracts.directory_purpose_summary]
+semantic_kind = "directory_purpose_summary"
+operation = "summarize"
+target_object = "directory"
+delivery_shape = "summary"
+allowed_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "fs_basic.find_entries"]
+preferred_actions = ["fs_basic.list_dir"]
+required_evidence = ["candidates"]
+final_answer_shape = "summary_grounded_in_listing"
+failure_policy = "retry_with_alternatives"
+
+[contracts.content_excerpt_summary]
+semantic_kind = "content_excerpt_summary"
+operation = "summarize"
+target_object = "path"
+delivery_shape = "summary"
+allowed_actions = ["fs_basic.read_text_range", "doc_parse", "archive_basic.read"]
+preferred_actions = ["fs_basic.read_text_range"]
+required_evidence = ["content_excerpt"]
+final_answer_shape = "summary_grounded_in_excerpt"
+failure_policy = "retry_with_alternatives"
+
+[contracts.content_presence_check]
+semantic_kind = "content_presence_check"
+operation = "inspect"
+target_object = "path"
+delivery_shape = "summary"
+allowed_actions = ["fs_basic.grep_text", "fs_basic.read_text_range", "doc_parse"]
+preferred_actions = ["fs_basic.grep_text"]
+required_evidence = ["content_match"]
+final_answer_shape = "presence_verdict_with_match"
+failure_policy = "retry_with_alternatives"
+
+[contracts.excerpt_kind_judgment]
+semantic_kind = "excerpt_kind_judgment"
+operation = "summarize"
+target_object = "path"
+delivery_shape = "summary"
+allowed_actions = ["fs_basic.read_text_range", "doc_parse", "archive_basic.read"]
+preferred_actions = ["fs_basic.read_text_range"]
+required_evidence = ["content_excerpt"]
+final_answer_shape = "judgment_with_excerpt_basis"
+failure_policy = "retry_with_alternatives"
+
+[contracts.recent_artifacts_judgment]
+semantic_kind = "recent_artifacts_judgment"
+operation = "summarize"
+target_object = "directory"
+delivery_shape = "summary"
+allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.stat_paths"]
+preferred_actions = ["fs_basic.find_entries"]
+required_evidence = ["candidates"]
+final_answer_shape = "recent_artifact_judgment"
+failure_policy = "retry_with_alternatives"
+
+[contracts.workspace_project_summary]
+semantic_kind = "workspace_project_summary"
+operation = "summarize"
+target_object = "directory"
+delivery_shape = "summary"
+allowed_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "fs_basic.find_entries", "git_basic"]
+preferred_actions = ["fs_basic.list_dir", "fs_basic.read_text_range"]
+required_evidence = ["content_excerpt"]
+final_answer_shape = "project_summary_grounded_in_files"
+failure_policy = "retry_with_alternatives"
+
+[contracts.scalar_count]
+semantic_kind = "scalar_count"
+operation = "count"
+target_object = "unknown"
+delivery_shape = "raw"
+allowed_actions = ["fs_basic.count_entries", "db_basic", "archive_basic.list", "run_cmd"]
+preferred_actions = ["fs_basic.count_entries"]
+required_evidence = ["count"]
+final_answer_shape = "scalar"
+failure_policy = "retry_with_alternatives"
+
+[contracts.quantity_comparison]
+semantic_kind = "quantity_comparison"
+operation = "validate"
+target_object = "unknown"
+delivery_shape = "raw"
+allowed_actions = ["fs_basic.compare_paths", "fs_basic.stat_paths", "run_cmd"]
+preferred_actions = ["fs_basic.compare_paths"]
+required_evidence = ["field_value", "size_bytes"]
+final_answer_shape = "comparison_verdict"
+failure_policy = "retry_with_alternatives"
+
+[contracts.execution_failed_step]
+semantic_kind = "execution_failed_step"
+operation = "validate"
+target_object = "system"
+delivery_shape = "summary"
+allowed_actions = ["run_cmd", "log_analyze"]
+preferred_actions = ["log_analyze"]
+required_evidence = ["field_value"]
+final_answer_shape = "failed_step_with_evidence"
+failure_policy = "retry_with_alternatives"
+
+[contracts.generated_file_delivery]
+semantic_kind = "generated_file_delivery"
+operation = "write"
+target_object = "path"
+delivery_shape = "file"
+allowed_actions = ["fs_basic.write_text", "transform"]
+preferred_actions = ["fs_basic.write_text"]
+required_evidence = ["path"]
+final_answer_shape = "delivery_token_or_path"
+failure_policy = "retry_with_alternatives"
+
+[contracts.scalar_path_only]
+semantic_kind = "scalar_path_only"
+operation = "inspect"
+target_object = "path"
+delivery_shape = "raw"
+allowed_actions = ["fs_basic.stat_paths", "fs_basic.find_entries"]
+preferred_actions = ["fs_basic.stat_paths"]
+required_evidence = ["field_value"]
+final_answer_shape = "single_path"
+failure_policy = "retry_with_alternatives"
+
+[contracts.existence_with_path]
+semantic_kind = "existence_with_path"
+operation = "inspect"
+target_object = "path"
+delivery_shape = "summary"
+allowed_actions = ["fs_basic.stat_paths", "fs_basic.find_entries"]
+preferred_actions = ["fs_basic.stat_paths"]
+required_evidence = ["exists", "kind", "path"]
+final_answer_shape = "existence_verdict_with_path"
+failure_policy = "retry_with_alternatives"
+
+[contracts.existence_with_path_summary]
+semantic_kind = "existence_with_path_summary"
+operation = "summarize"
+target_object = "path"
+delivery_shape = "summary"
+allowed_actions = ["fs_basic.stat_paths", "fs_basic.read_text_range", "fs_basic.find_entries"]
+preferred_actions = ["fs_basic.stat_paths", "fs_basic.read_text_range"]
+required_evidence = ["content_excerpt", "exists", "kind", "path"]
+final_answer_shape = "existence_summary_with_path"
+failure_policy = "retry_with_alternatives"
+
+[contracts.recent_scalar_equality_check]
+semantic_kind = "recent_scalar_equality_check"
+operation = "validate"
+target_object = "unknown"
+delivery_shape = "raw"
+allowed_actions = ["fs_basic.stat_paths", "git_basic", "run_cmd"]
+preferred_actions = ["fs_basic.stat_paths"]
+required_evidence = ["field_value"]
+final_answer_shape = "scalar_equality_verdict"
+failure_policy = "retry_with_alternatives"
+
+[contracts.git_commit_subject]
+semantic_kind = "git_commit_subject"
+operation = "inspect"
+target_object = "system"
+delivery_shape = "raw"
+allowed_actions = ["git_basic", "run_cmd"]
+preferred_actions = ["git_basic"]
+required_evidence = ["field_value"]
+final_answer_shape = "single_commit_subject"
+failure_policy = "retry_with_alternatives"
+
+[contracts.git_repository_state]
+semantic_kind = "git_repository_state"
+operation = "inspect"
+target_object = "system"
+delivery_shape = "summary"
+allowed_actions = ["git_basic", "run_cmd"]
+preferred_actions = ["git_basic"]
+required_evidence = ["field_value"]
+final_answer_shape = "git_state_summary"
+failure_policy = "retry_with_alternatives"
+
+[contracts.structured_keys]
+semantic_kind = "structured_keys"
+operation = "inspect"
+target_object = "config_key"
+delivery_shape = "summary"
+allowed_actions = ["config_basic.list_keys", "config_basic.read_fields", "db_basic"]
+preferred_actions = ["config_basic.list_keys"]
+required_evidence = ["field_value"]
+final_answer_shape = "key_list_or_key_summary"
+failure_policy = "retry_with_alternatives"
+
+[contracts.config_validation]
+semantic_kind = "config_validation"
+operation = "validate"
+target_object = "config_key"
+delivery_shape = "summary"
+allowed_actions = ["config_basic.validate", "config_basic.guard_rustclaw_config", "config_edit.validate_config", "config_guard"]
+preferred_actions = ["config_basic.validate"]
+required_evidence = ["field_value"]
+final_answer_shape = "validation_verdict"
+failure_policy = "retry_with_alternatives"
+
+[contracts.config_risk_assessment]
+semantic_kind = "config_risk_assessment"
+operation = "validate"
+target_object = "config_key"
+delivery_shape = "summary"
+allowed_actions = ["config_basic.guard_rustclaw_config", "config_edit.guard_config", "config_guard"]
+preferred_actions = ["config_basic.guard_rustclaw_config"]
+required_evidence = ["field_value"]
+final_answer_shape = "risk_assessment"
+failure_policy = "retry_with_alternatives"
+
+[contracts.sqlite_table_listing]
+semantic_kind = "sqlite_table_listing"
+operation = "list"
+target_object = "db"
+delivery_shape = "list"
+allowed_actions = ["db_basic", "run_cmd"]
+preferred_actions = ["db_basic"]
+required_evidence = ["candidates"]
+final_answer_shape = "table_listing"
+failure_policy = "retry_with_alternatives"
+
+[contracts.sqlite_table_names_only]
+semantic_kind = "sqlite_table_names_only"
+operation = "list"
+target_object = "db"
+delivery_shape = "list"
+allowed_actions = ["db_basic", "run_cmd"]
+preferred_actions = ["db_basic"]
+required_evidence = ["candidates"]
+final_answer_shape = "table_name_list"
+failure_policy = "retry_with_alternatives"
+
+[contracts.sqlite_database_kind_judgment]
+semantic_kind = "sqlite_database_kind_judgment"
+operation = "inspect"
+target_object = "db"
+delivery_shape = "summary"
+allowed_actions = ["db_basic", "run_cmd"]
+preferred_actions = ["db_basic"]
+required_evidence = ["field_value"]
+final_answer_shape = "database_kind_judgment"
+failure_policy = "retry_with_alternatives"
+
+[contracts.sqlite_schema_version]
+semantic_kind = "sqlite_schema_version"
+operation = "inspect"
+target_object = "db"
+delivery_shape = "raw"
+allowed_actions = ["db_basic", "run_cmd"]
+preferred_actions = ["db_basic"]
+required_evidence = ["field_value"]
+final_answer_shape = "schema_version"
+failure_policy = "retry_with_alternatives"
+
+[contracts.package_manager_detection]
+semantic_kind = "package_manager_detection"
+operation = "inspect"
+target_object = "system"
+delivery_shape = "summary"
+allowed_actions = ["package_manager.detect", "run_cmd"]
+preferred_actions = ["package_manager.detect"]
+required_evidence = ["field_value"]
+final_answer_shape = "manager_name_with_basis"
+failure_policy = "retry_with_alternatives"
+
+[contracts.archive_list]
+semantic_kind = "archive_list"
+operation = "list"
+target_object = "path"
+delivery_shape = "list"
+allowed_actions = ["archive_basic.list"]
+preferred_actions = ["archive_basic.list"]
+required_evidence = ["candidates"]
+final_answer_shape = "archive_member_list"
+failure_policy = "retry_with_alternatives"
+
+[contracts.archive_read]
+semantic_kind = "archive_read"
+operation = "inspect"
+target_object = "path"
+delivery_shape = "summary"
+allowed_actions = ["archive_basic.read"]
+preferred_actions = ["archive_basic.read"]
+required_evidence = ["content_excerpt"]
+final_answer_shape = "archive_member_excerpt"
+failure_policy = "retry_with_alternatives"
+
+[contracts.archive_pack]
+semantic_kind = "archive_pack"
+operation = "write"
+target_object = "path"
+delivery_shape = "file"
+allowed_actions = ["archive_basic.pack"]
+preferred_actions = ["archive_basic.pack"]
+required_evidence = ["path"]
+final_answer_shape = "created_archive_path"
+failure_policy = "retry_with_alternatives"
+
+[contracts.archive_unpack]
+semantic_kind = "archive_unpack"
+operation = "modify"
+target_object = "path"
+delivery_shape = "summary"
+allowed_actions = ["archive_basic.unpack"]
+preferred_actions = ["archive_basic.unpack"]
+required_evidence = ["path"]
+final_answer_shape = "unpack_destination_summary"
+failure_policy = "retry_with_alternatives"
+
+[contracts.docker_ps]
+semantic_kind = "docker_ps"
+operation = "list"
+target_object = "process"
+delivery_shape = "list"
+allowed_actions = ["docker_basic", "run_cmd"]
+preferred_actions = ["docker_basic"]
+required_evidence = ["candidates"]
+final_answer_shape = "container_list"
+failure_policy = "retry_with_alternatives"
+
+[contracts.docker_images]
+semantic_kind = "docker_images"
+operation = "list"
+target_object = "process"
+delivery_shape = "list"
+allowed_actions = ["docker_basic", "run_cmd"]
+preferred_actions = ["docker_basic"]
+required_evidence = ["candidates"]
+final_answer_shape = "image_list"
+failure_policy = "retry_with_alternatives"
+
+[contracts.docker_logs]
+semantic_kind = "docker_logs"
+operation = "list"
+target_object = "process"
+delivery_shape = "summary"
+allowed_actions = ["docker_basic", "run_cmd"]
+preferred_actions = ["docker_basic"]
+required_evidence = ["candidates"]
+final_answer_shape = "log_excerpt_or_summary"
+failure_policy = "retry_with_alternatives"
+
+[contracts.docker_container_lifecycle]
+semantic_kind = "docker_container_lifecycle"
+operation = "modify"
+target_object = "process"
+delivery_shape = "summary"
+allowed_actions = ["docker_basic", "run_cmd"]
+preferred_actions = ["docker_basic"]
+required_evidence = ["field_value"]
+final_answer_shape = "lifecycle_result"
+failure_policy = "retry_with_alternatives"

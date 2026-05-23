@@ -182,6 +182,41 @@ fn unresolved_runtime_template_argument_error(
     ))
 }
 
+fn contract_matrix_action_policy_error(
+    loop_state: &LoopState,
+    normalized_skill: &str,
+    classification_args: &Value,
+) -> Option<String> {
+    let policy = crate::contract_matrix::action_policy_for_output_contract(
+        loop_state.output_contract.as_ref(),
+        normalized_skill,
+        classification_args,
+    )?;
+    if policy.is_allowed() {
+        return None;
+    }
+    let error_text = format!(
+        "action `{}` is rejected by contract `{}` ({})",
+        policy.action_key,
+        policy.contract_match,
+        policy.decision.as_str()
+    );
+    Some(crate::skills::structured_skill_error_from_parts(
+        normalized_skill,
+        "contract_action_rejected",
+        &error_text,
+        None,
+        Some(json!({
+            "failure_attribution": "contract_gap",
+            "decision": policy.decision.as_str(),
+            "action": policy.action_key,
+            "contract_match": policy.contract_match,
+            "required_evidence": policy.required_evidence,
+            "final_answer_shape": policy.final_answer_shape,
+        })),
+    ))
+}
+
 fn is_path_like_arg_key(key: &str) -> bool {
     let key = key.trim();
     matches!(
@@ -237,6 +272,59 @@ fn structured_observation_path_argument_error(
     ))
 }
 
+struct PreflightFailureMetadata {
+    reason: &'static str,
+    error_kind: String,
+    retry_instruction: &'static str,
+}
+
+fn structured_error_extra_string(
+    structured: &crate::skills::StructuredSkillError,
+    key: &str,
+) -> Option<String> {
+    structured
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn preflight_failure_metadata(err: &str) -> PreflightFailureMetadata {
+    let structured = crate::skills::parse_structured_skill_error(err);
+    let error_kind = structured
+        .as_ref()
+        .map(|value| value.error_kind.clone())
+        .unwrap_or_else(|| "invalid_args".to_string());
+    if error_kind == "contract_action_rejected" {
+        return PreflightFailureMetadata {
+            reason: "contract_action_rejected",
+            error_kind,
+            retry_instruction:
+                "Choose an action allowed by the task contract, or revise the plan before retrying.",
+        };
+    }
+    if structured
+        .as_ref()
+        .and_then(|value| structured_error_extra_string(value, "reason"))
+        .as_deref()
+        == Some("structured_observation_embedded_in_path_arg")
+    {
+        return PreflightFailureMetadata {
+            reason: "structured_observation_embedded_in_path_arg",
+            error_kind,
+            retry_instruction: "Do not embed structured observations in path arguments. Select one concrete observed path or ask for clarification.",
+        };
+    }
+    PreflightFailureMetadata {
+        reason: "unresolved_runtime_placeholder",
+        error_kind,
+        retry_instruction: "Do not retry the same unresolved runtime placeholder. Use concrete observed values, synthesize_answer, or one command pipeline.",
+    }
+}
+
 fn handle_preflight_argument_failure(
     state: &AppState,
     task: &ClaimedTask,
@@ -249,17 +337,16 @@ fn handle_preflight_argument_failure(
     action_trace_kind: &str,
 ) -> SkillActionOutcome {
     let user_visible_err = crate::skills::normalize_skill_error_for_user(normalized_skill, err);
+    let metadata = preflight_failure_metadata(err);
     super::attempt_ledger::record_attempt_with_retry_instruction(
         loop_state,
         normalized_skill,
-        "preflight=rejected_unresolved_runtime_placeholder",
+        &format!("preflight=rejected_{}", metadata.reason),
         crate::executor::StepExecutionStatus::Error,
         "",
-        Some("invalid_args"),
+        Some(metadata.error_kind.as_str()),
         &user_visible_err,
-        Some(
-            "Do not retry the same unresolved runtime placeholder. Use concrete observed values, synthesize_answer, or one command pipeline.",
-        ),
+        Some(metadata.retry_instruction),
     );
     let effect = crate::execution_recipe::classify_skill_action_effect(
         state,
@@ -309,8 +396,8 @@ fn handle_preflight_argument_failure(
         &step_execution,
     );
     loop_state.history_compact.push(format!(
-        "round={} step={} skill={} rejected_unresolved_runtime_placeholder",
-        loop_state.round_no, step_in_round, normalized_skill
+        "round={} step={} skill={} rejected_{}",
+        loop_state.round_no, step_in_round, normalized_skill, metadata.reason
     ));
     publish_failure_recovery_progress(
         state,
@@ -322,8 +409,14 @@ fn handle_preflight_argument_failure(
         "recoverable_failure_continue_round",
     );
     info!(
-        "executor_preflight_arg_rejected task_id={} round={} step={} type={} skill={} reason=unresolved_runtime_placeholder",
-        task.task_id, loop_state.round_no, step_in_round, action_trace_kind, normalized_skill
+        "executor_preflight_arg_rejected task_id={} round={} step={} type={} skill={} reason={} error_kind={}",
+        task.task_id,
+        loop_state.round_no,
+        step_in_round,
+        action_trace_kind,
+        normalized_skill,
+        metadata.reason,
+        metadata.error_kind
     );
     SkillActionOutcome {
         ended_with_user_visible_output: false,
@@ -1311,6 +1404,21 @@ pub(super) async fn execute_prepared_skill_action(
     action_trace_kind: &str,
 ) -> Result<SkillActionOutcome, String> {
     let classification_args = recovery_args.as_ref().unwrap_or(&exec_args);
+    if let Some(err) =
+        contract_matrix_action_policy_error(loop_state, normalized_skill, classification_args)
+    {
+        return Ok(handle_preflight_argument_failure(
+            state,
+            task,
+            loop_state,
+            global_step,
+            step_in_round,
+            normalized_skill,
+            classification_args,
+            &err,
+            action_trace_kind,
+        ));
+    }
     if let Some(err) = unresolved_runtime_template_argument_error(
         normalized_skill,
         &exec_args,
@@ -1479,7 +1587,8 @@ mod tests {
 
     use super::{
         build_auto_sudo_retry_args, contains_unresolved_runtime_template_arg,
-        handle_skill_step_failure, handle_skill_step_success, skill_extra_requests_user_input,
+        contract_matrix_action_policy_error, handle_skill_step_failure, handle_skill_step_success,
+        preflight_failure_metadata, skill_extra_requests_user_input,
         structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
         AgentLoopGuardPolicy, LoopState,
     };
@@ -1624,6 +1733,41 @@ mod tests {
             !parsed.error_text.contains("{{"),
             "user-facing error text must not leak unresolved templates"
         );
+    }
+
+    #[test]
+    fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.output_contract = Some(crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::FileNames,
+            requires_content_evidence: true,
+            ..crate::IntentOutputContract::default()
+        });
+        let args = serde_json::json!({"command": "ls"});
+
+        let err = contract_matrix_action_policy_error(&loop_state, "run_cmd", &args)
+            .expect("contract matrix should reject run_cmd for file_names");
+        let parsed = crate::skills::parse_structured_skill_error(&err)
+            .expect("contract policy error should be structured");
+
+        assert_eq!(parsed.error_kind, "contract_action_rejected");
+        assert_eq!(
+            parsed
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("decision")),
+            Some(&serde_json::json!("rejected_not_allowed"))
+        );
+        assert_eq!(
+            parsed
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("failure_attribution")),
+            Some(&serde_json::json!("contract_gap"))
+        );
+        let metadata = preflight_failure_metadata(&err);
+        assert_eq!(metadata.reason, "contract_action_rejected");
+        assert_eq!(metadata.error_kind, "contract_action_rejected");
     }
 
     #[test]
