@@ -102,6 +102,12 @@ pub(crate) fn structurally_satisfies_answer_contract(
                 candidate_answer,
             );
         }
+        if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::SinglePath {
+            return matrix_single_path_answer_is_grounded_in_successful_observation(
+                journal,
+                candidate_answer,
+            );
+        }
     }
     if route_requires_single_file_delivery(route_result)
         && candidate_answer_has_grounded_existing_file_token(journal, candidate_answer)
@@ -176,6 +182,120 @@ fn matrix_table_answer_is_grounded_in_successful_observation(
         return false;
     }
     candidate_cells.is_subset(&observed_cells) && observed_cells.is_subset(&candidate_cells)
+}
+
+fn matrix_single_path_answer_is_grounded_in_successful_observation(
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    let Some(candidate_path) = strict_single_path_answer(candidate_answer) else {
+        return false;
+    };
+    observed_single_path_values(journal)
+        .iter()
+        .any(|observed_path| single_path_matches_observed(&candidate_path, observed_path))
+}
+
+fn strict_single_path_answer(answer: &str) -> Option<String> {
+    let answer = answer.trim();
+    if answer.is_empty() || answer.lines().count() > 1 {
+        return None;
+    }
+    let lower = answer.to_ascii_lowercase();
+    if lower.starts_with("file:")
+        || answer.contains(':')
+        || answer.contains('：')
+        || answer.ends_with('.')
+        || answer.ends_with('。')
+    {
+        return None;
+    }
+    Some(answer.to_string())
+}
+
+fn observed_single_path_values(journal: &crate::task_journal::TaskJournal) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            continue;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) {
+            collect_single_path_values_from_json(&value, &mut paths);
+        } else if let Some(path) = strict_single_path_answer(output) {
+            paths.insert(path);
+        }
+    }
+    paths
+}
+
+fn collect_single_path_values_from_json(value: &serde_json::Value, paths: &mut BTreeSet<String>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                if single_path_evidence_key(key) {
+                    if let Some(path) = child
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|path| !path.is_empty())
+                    {
+                        paths.insert(path.to_string());
+                    }
+                }
+                collect_single_path_values_from_json(child, paths);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_single_path_values_from_json(item, paths);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn single_path_evidence_key(key: &str) -> bool {
+    matches!(
+        key,
+        "path"
+            | "resolved_path"
+            | "archive_path"
+            | "output_path"
+            | "created_path"
+            | "destination_path"
+            | "target_path"
+            | "file_path"
+            | "result_path"
+    )
+}
+
+fn single_path_matches_observed(candidate_path: &str, observed_path: &str) -> bool {
+    let candidate_path = candidate_path.trim();
+    let observed_path = observed_path.trim();
+    if candidate_path.is_empty() || observed_path.is_empty() {
+        return false;
+    }
+    if candidate_path == observed_path {
+        return true;
+    }
+    let candidate = std::path::Path::new(candidate_path);
+    let observed = std::path::Path::new(observed_path);
+    if candidate.canonicalize().is_ok_and(|candidate| {
+        observed
+            .canonicalize()
+            .is_ok_and(|observed| candidate == observed)
+    }) {
+        return true;
+    }
+    std::env::current_dir().ok().is_some_and(|dir| {
+        dir.join(candidate).canonicalize().is_ok_and(|candidate| {
+            observed
+                .canonicalize()
+                .is_ok_and(|observed| candidate == observed)
+        })
+    })
 }
 
 fn markdown_table_data_cells(answer: &str) -> BTreeSet<String> {
@@ -1701,6 +1821,54 @@ mod tests {
             &route,
             &journal,
             "| name |\n| --- |\n| orders |\n| payments |"
+        ));
+    }
+
+    #[test]
+    fn matrix_single_path_shape_requires_plain_grounded_path() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-matrix-path", "ask", "pack logs");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "archive_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    json!({
+                        "action": "pack",
+                        "archive_path": "/tmp/rustclaw/report.zip",
+                        "source_paths": ["/tmp/rustclaw/report.md"]
+                    })
+                    .to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "/tmp/rustclaw/report.zip"
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "Archive: /tmp/rustclaw/report.zip"
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "The archive is /tmp/rustclaw/report.zip"
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "/tmp/rustclaw/missing.zip"
         ));
     }
 
