@@ -230,6 +230,7 @@ async fn finalize_run_skill_failure(
     ));
     journal.record_final_answer(err_text);
     journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
+    journal.record_final_failure_attribution_from_error(err_text);
     let notify_outcome =
         super::maybe_notify_schedule_result(state, task, payload, false, err_text).await;
     super::record_schedule_notify_outcome(&mut journal, notify_outcome);
