@@ -48,6 +48,9 @@ pub(crate) fn content_evidence_execution_finalize_style(
     {
         return None;
     }
+    if let Some(style) = contract_matrix_finalize_style(contract) {
+        return Some(style);
+    }
     if matches!(
         contract.response_shape,
         OutputResponseShape::Scalar | OutputResponseShape::FileToken
@@ -55,6 +58,22 @@ pub(crate) fn content_evidence_execution_finalize_style(
         Some(ActFinalizeStyle::Plain)
     } else {
         Some(ActFinalizeStyle::ChatWrapped)
+    }
+}
+
+fn contract_matrix_finalize_style(contract: &IntentOutputContract) -> Option<ActFinalizeStyle> {
+    let shape = crate::contract_matrix::final_answer_shape_for_output_contract(contract)?;
+    match shape.class() {
+        crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact
+        | crate::contract_matrix::FinalAnswerShapeClass::ScalarValue
+        | crate::contract_matrix::FinalAnswerShapeClass::SinglePath
+        | crate::contract_matrix::FinalAnswerShapeClass::StrictList
+        | crate::contract_matrix::FinalAnswerShapeClass::Table => Some(ActFinalizeStyle::Plain),
+        crate::contract_matrix::FinalAnswerShapeClass::Freeform
+        | crate::contract_matrix::FinalAnswerShapeClass::GroundedSummary
+        | crate::contract_matrix::FinalAnswerShapeClass::Verdict => {
+            Some(ActFinalizeStyle::ChatWrapped)
+        }
     }
 }
 
@@ -477,6 +496,42 @@ mod tests {
         assert_eq!(
             content_evidence_execution_finalize_style(&contract, false),
             None
+        );
+    }
+
+    #[test]
+    fn strict_list_contract_uses_plain_finalize_style_from_matrix() {
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: Default::default(),
+            semantic_kind: OutputSemanticKind::FileNames,
+            ..IntentOutputContract::default()
+        };
+
+        assert_eq!(
+            content_evidence_execution_finalize_style(&contract, false),
+            Some(ActFinalizeStyle::Plain)
+        );
+    }
+
+    #[test]
+    fn grounded_summary_contract_uses_chat_wrapped_finalize_style_from_matrix() {
+        let contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::OneSentence,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: Default::default(),
+            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            ..IntentOutputContract::default()
+        };
+
+        assert_eq!(
+            content_evidence_execution_finalize_style(&contract, false),
+            Some(ActFinalizeStyle::ChatWrapped)
         );
     }
 
