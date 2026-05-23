@@ -1048,6 +1048,7 @@ pub(crate) struct TaskJournal {
     pub(crate) verify_result: Option<TaskJournalVerifySummary>,
     pub(crate) rounds: Vec<TaskJournalRoundTrace>,
     pub(crate) step_results: Vec<TaskJournalStepTrace>,
+    pub(crate) task_observations: Vec<Value>,
     pub(crate) finalizer_summary: Option<TaskJournalFinalizerSummary>,
     pub(crate) answer_verifier_summary: Option<TaskJournalAnswerVerifierSummary>,
     pub(crate) task_metrics: TaskJournalTaskMetrics,
@@ -1166,6 +1167,10 @@ impl TaskJournal {
         });
     }
 
+    pub(crate) fn push_task_observation(&mut self, observation: Value) {
+        self.task_observations.push(observation);
+    }
+
     pub(crate) fn record_finalizer_summary(
         &mut self,
         finalizer_summary: TaskJournalFinalizerSummary,
@@ -1256,6 +1261,9 @@ impl TaskJournal {
         if self.step_results.is_empty() {
             self.step_results = other.step_results.clone();
         }
+        if self.task_observations.is_empty() {
+            self.task_observations = other.task_observations.clone();
+        }
         if self.finalizer_summary.is_none() {
             self.finalizer_summary = other.finalizer_summary.clone();
         }
@@ -1312,6 +1320,7 @@ impl TaskJournal {
             "kind": self.kind.as_deref(),
             "round_count": self.rounds.len(),
             "step_count": self.step_results.len(),
+            "task_observation_count": self.task_observations.len(),
             "final_status": self.final_status.map(TaskJournalFinalStatus::as_str),
             "input_text": crate::truncate_for_log(&self.input_text),
             "context_bundle_summary": self.context_bundle_summary.as_deref().map(crate::truncate_for_log),
@@ -1371,6 +1380,7 @@ impl TaskJournal {
                 let requested = next_requested_capability(&mut requested_by_step_id, &step.step_id);
                 step_trace_json(step, requested.as_ref())
             }).collect::<Vec<_>>(),
+            "task_observations": self.task_observations.clone(),
             "finalizer_summary": self
                 .finalizer_summary
                 .as_ref()
