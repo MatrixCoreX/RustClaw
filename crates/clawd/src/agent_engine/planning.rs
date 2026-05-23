@@ -60,6 +60,26 @@ fn build_incremental_plan_prompt(
     )
 }
 
+fn ensure_required_contract_block_present(
+    route_result: Option<&RouteResult>,
+    prompt_text: &str,
+) -> Result<(), String> {
+    let Some(route) = route_result else {
+        return Ok(());
+    };
+    let Some(contract_line) = crate::contract_matrix::compact_prompt_line_for_route(route) else {
+        return Ok(());
+    };
+    if prompt_text.contains(&contract_line) {
+        Ok(())
+    } else {
+        Err(format!(
+            "prompt_budget_error: compact contract block missing from planner prompt; contract_line_hash={}",
+            crate::contract_matrix::fnv1a_hex(&contract_line)
+        ))
+    }
+}
+
 fn runtime_os_label() -> String {
     format!(
         "{} (family={}, arch={})",
@@ -17233,6 +17253,7 @@ pub(super) async fn plan_round_actions(
         recent_assistant_replies.chars().count(),
         crate::truncate_for_log(user_text)
     );
+    ensure_required_contract_block_present(route_result, &prompt_text)?;
     let plan_raw = llm_gateway::run_with_fallback_with_prompt_source(
         state,
         task,
@@ -17603,7 +17624,7 @@ mod tests {
         content_excerpt_summary_auto_locator_deterministic_plan_result,
         directory_compare_locator_deterministic_plan_result,
         directory_tree_auto_locator_deterministic_plan_result, enforce_output_contract_tool_args,
-        ensure_content_excerpt_summary_has_bounded_content,
+        ensure_content_excerpt_summary_has_bounded_content, ensure_required_contract_block_present,
         existence_with_path_locator_deterministic_plan_result,
         explicit_command_deterministic_plan_result, file_facts_auto_locator_observation_plan,
         file_paths_locator_deterministic_plan_result,
@@ -20988,6 +21009,33 @@ Structured inline transform request:
         assert!(spec.contains("operation=list"));
         assert!(spec.contains("required_evidence_fields=candidates"));
         assert!(spec.contains("failure_policy=retry_with_alternatives"));
+    }
+
+    #[test]
+    fn planner_prompt_contract_guard_allows_present_compact_contract_block() {
+        let mut route = base_route_result();
+        route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        let contract_line =
+            crate::contract_matrix::compact_prompt_line_for_route(&route).expect("contract line");
+        let prompt = format!("System\n{contract_line}\nUser");
+
+        ensure_required_contract_block_present(Some(&route), &prompt).expect("contract present");
+    }
+
+    #[test]
+    fn planner_prompt_contract_guard_fails_closed_when_compact_contract_block_missing() {
+        let mut route = base_route_result();
+        route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+
+        let err = ensure_required_contract_block_present(Some(&route), "System\nUser")
+            .expect_err("missing contract block should fail closed");
+
+        assert!(err.contains("prompt_budget_error"));
+        assert!(err.contains("contract_line_hash="));
     }
 
     #[test]
