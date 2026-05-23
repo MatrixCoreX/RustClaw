@@ -672,10 +672,11 @@ pub(crate) fn local_missing_evidence_verifier_gap(
     {
         return None;
     }
-    let missing = crate::task_journal::missing_required_evidence_fields(route_result, journal);
-    if missing.is_empty() {
+    let coverage = crate::task_journal::evidence_coverage_for_route(route_result, journal);
+    if coverage.is_complete() {
         return None;
     }
+    let missing = coverage.missing_evidence;
     Some(AnswerVerifierOut {
         pass: false,
         missing_evidence_fields: missing.clone(),

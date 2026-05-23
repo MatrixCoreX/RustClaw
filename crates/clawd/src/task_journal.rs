@@ -168,11 +168,24 @@ fn verify_trace_json(verify: &TaskJournalVerifySummary) -> Value {
     })
 }
 
-fn finalizer_summary_json(summary: &TaskJournalFinalizerSummary) -> Value {
+fn finalizer_summary_json(
+    summary: &TaskJournalFinalizerSummary,
+    route: Option<&crate::RouteResult>,
+    journal: &TaskJournal,
+) -> Value {
+    let evidence_coverage = route.map(|route| evidence_coverage_for_route(route, journal));
     json!({
         "stage": summary.stage.map(TaskJournalFinalizerStage::as_str),
         "disposition": summary.disposition.map(crate::finalize::FinalizerDisposition::as_str),
         "fallback": summary.fallback.map(TaskJournalFinalizerFallback::as_str),
+        "final_answer_shape": route
+            .and_then(|route| crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract))
+            .map(crate::contract_matrix::FinalAnswerShape::as_str),
+        "evidence_coverage_complete": evidence_coverage.as_ref().map(TaskJournalEvidenceCoverage::is_complete),
+        "missing_evidence": evidence_coverage
+            .as_ref()
+            .map(|coverage| coverage.missing_evidence.clone())
+            .unwrap_or_default(),
         "parsed": summary.parsed,
         "contract_ok": summary.contract_ok,
         "completion_ok": summary.completion_ok,
@@ -654,32 +667,52 @@ fn stable_trace_hash(text: &str) -> String {
     format!("fnv64:{hash:016x}")
 }
 
-pub(crate) fn missing_required_evidence_fields(
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct TaskJournalEvidenceCoverage {
+    pub(crate) required_evidence: Vec<String>,
+    pub(crate) observed_fields: BTreeSet<String>,
+    pub(crate) observed_canonical: BTreeSet<String>,
+    pub(crate) missing_evidence: Vec<String>,
+}
+
+impl TaskJournalEvidenceCoverage {
+    pub(crate) fn is_complete(&self) -> bool {
+        self.missing_evidence.is_empty()
+    }
+
+    fn to_trace_json(&self) -> Value {
+        json!({
+            "schema_version": 1,
+            "required_evidence": self.required_evidence.clone(),
+            "observed_fields": self.observed_fields.iter().take(64).cloned().collect::<Vec<_>>(),
+            "observed_canonical": self.observed_canonical.iter().take(64).cloned().collect::<Vec<_>>(),
+            "missing_evidence": self.missing_evidence.clone(),
+        })
+    }
+}
+
+pub(crate) fn evidence_coverage_for_route(
     route: &crate::RouteResult,
     journal: &TaskJournal,
-) -> Vec<String> {
-    let required =
+) -> TaskJournalEvidenceCoverage {
+    let required_evidence =
         crate::task_contract::required_evidence_fields_for_output_contract(&route.output_contract);
-    let (_, observed_canonical) = observed_evidence_field_sets(journal);
-    required
+    let (observed_fields, observed_canonical) = observed_evidence_field_sets(journal);
+    let missing_evidence = required_evidence
         .iter()
         .filter(|field| !observed_canonical.contains(field.as_str()))
         .cloned()
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>();
+    TaskJournalEvidenceCoverage {
+        required_evidence,
+        observed_fields,
+        observed_canonical,
+        missing_evidence,
+    }
 }
 
 fn evidence_coverage_trace_json(route: &crate::RouteResult, journal: &TaskJournal) -> Value {
-    let required =
-        crate::task_contract::required_evidence_fields_for_output_contract(&route.output_contract);
-    let (observed_fields, observed_canonical) = observed_evidence_field_sets(journal);
-    let missing = missing_required_evidence_fields(route, journal);
-    json!({
-        "schema_version": 1,
-        "required_evidence": required,
-        "observed_fields": observed_fields.into_iter().take(64).collect::<Vec<_>>(),
-        "observed_canonical": observed_canonical.into_iter().take(64).collect::<Vec<_>>(),
-        "missing_evidence": missing,
-    })
+    evidence_coverage_for_route(route, journal).to_trace_json()
 }
 
 fn observed_evidence_field_sets(journal: &TaskJournal) -> (BTreeSet<String>, BTreeSet<String>) {
@@ -1215,7 +1248,10 @@ impl TaskJournal {
                 .map(crate::truncate_for_log),
             "plan_result": self.plan_result.as_ref().map(plan_summary_json),
             "verify_result": self.verify_result.as_ref().map(verify_summary_json),
-            "finalizer_summary": self.finalizer_summary.as_ref().map(finalizer_summary_json),
+            "finalizer_summary": self
+                .finalizer_summary
+                .as_ref()
+                .map(|summary| finalizer_summary_json(summary, self.route_result.as_ref(), self)),
             "answer_verifier_summary": self.answer_verifier_summary.as_ref().map(answer_verifier_summary_json),
             "task_metrics": task_metrics_json(&self.task_metrics),
             "final_answer": self.final_answer.as_deref().map(crate::truncate_for_log),
@@ -1254,7 +1290,10 @@ impl TaskJournal {
                 let requested = next_requested_capability(&mut requested_by_step_id, &step.step_id);
                 step_trace_json(step, requested.as_ref())
             }).collect::<Vec<_>>(),
-            "finalizer_summary": self.finalizer_summary.as_ref().map(finalizer_summary_json),
+            "finalizer_summary": self
+                .finalizer_summary
+                .as_ref()
+                .map(|summary| finalizer_summary_json(summary, self.route_result.as_ref(), self)),
             "answer_verifier_summary": self.answer_verifier_summary.as_ref().map(answer_verifier_summary_json),
             "task_metrics": task_metrics_json(&self.task_metrics),
             "ask_state_transitions": self.transitions.iter().map(ask_transition_json).collect::<Vec<_>>(),
@@ -1372,6 +1411,20 @@ mod tests {
                 .and_then(|v| v.get("stage"))
                 .and_then(Value::as_str),
             Some("general")
+        );
+        assert_eq!(
+            summary
+                .get("finalizer_summary")
+                .and_then(|v| v.get("final_answer_shape"))
+                .and_then(Value::as_str),
+            Some("free")
+        );
+        assert_eq!(
+            summary
+                .get("finalizer_summary")
+                .and_then(|v| v.get("evidence_coverage_complete"))
+                .and_then(Value::as_bool),
+            Some(true)
         );
         assert_eq!(
             summary
