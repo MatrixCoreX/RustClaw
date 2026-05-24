@@ -106,6 +106,25 @@ pub(crate) struct TaskJournalStepTrace {
     pub(crate) finished_at: u64,
 }
 
+#[cfg(test)]
+impl TaskJournalStepTrace {
+    pub(crate) fn ok(
+        step_id: impl Into<String>,
+        skill: impl Into<String>,
+        output: impl Into<String>,
+    ) -> Self {
+        Self {
+            step_id: step_id.into(),
+            skill: skill.into(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output_excerpt: Some(output.into()),
+            error_excerpt: None,
+            started_at: 0,
+            finished_at: 0,
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TaskJournalFinalizerSummary {
