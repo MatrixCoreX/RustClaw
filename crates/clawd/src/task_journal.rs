@@ -485,7 +485,7 @@ pub(crate) fn observed_evidence_from_output(output: Option<&str>) -> Option<Valu
             "json"
         }
         Err(_) => {
-            collector.push(text_observed_evidence_item(output));
+            collect_text_observed_evidence(&mut collector, output);
             "text"
         }
     };
@@ -644,6 +644,102 @@ fn text_observed_evidence_item(output: &str) -> Value {
         "excerpt": excerpt,
         "hash": stable_trace_hash(output),
     })
+}
+
+fn collect_text_observed_evidence(collector: &mut ObservedEvidenceCollector, output: &str) {
+    collector.push(text_observed_evidence_item(output));
+    if let Some(count) = text_count_evidence(output) {
+        collector.push(json_observed_evidence_item(
+            "text_output.extractor",
+            "count",
+            &json!(count),
+        ));
+    }
+    let lines = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if lines.len() == 1 && text_line_looks_like_path(lines[0]) {
+        collector.push(text_extracted_evidence_item("path", lines[0]));
+        return;
+    }
+    if lines.len() > 1
+        && lines
+            .iter()
+            .all(|line| text_line_looks_like_list_item(line))
+    {
+        for (idx, line) in lines.iter().take(MAX_OBSERVED_EVIDENCE_ITEMS).enumerate() {
+            collector.push(text_extracted_evidence_item(
+                &format!("results[{idx}]"),
+                line,
+            ));
+        }
+    }
+}
+
+fn text_extracted_evidence_item(field: &str, value: &str) -> Value {
+    let excerpt = redacted_text_excerpt(value);
+    json!({
+        "field": field,
+        "source": "text_output.extractor",
+        "kind": "text",
+        "excerpt": excerpt,
+        "hash": stable_trace_hash(value),
+    })
+}
+
+fn text_count_evidence(output: &str) -> Option<i64> {
+    let trimmed = output.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(value) = trimmed.parse::<i64>() {
+        return Some(value);
+    }
+    let normalized = trimmed
+        .replace(',', " ")
+        .replace(':', " ")
+        .replace(';', " ");
+    let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+    let mut counts = BTreeSet::new();
+    for window in tokens.windows(2) {
+        let number = window[0].parse::<i64>().ok();
+        let unit = window[1].trim_matches(|ch: char| !ch.is_ascii_alphabetic());
+        if let Some(value) = number {
+            let unit = unit.to_ascii_lowercase();
+            if matches!(
+                unit.as_str(),
+                "file" | "files" | "item" | "items" | "entry" | "entries" | "row" | "rows"
+            ) {
+                counts.insert(value);
+            }
+        }
+    }
+    (counts.len() == 1).then(|| *counts.iter().next().expect("single count"))
+}
+
+fn text_line_looks_like_path(line: &str) -> bool {
+    let line = line.trim();
+    !line.is_empty()
+        && line.len() <= MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS
+        && !line.contains(|ch| matches!(ch, '\n' | '\r' | '\0'))
+        && !line.contains("://")
+        && !line.ends_with(['.', '。'])
+        && (line.starts_with('/')
+            || line.starts_with("./")
+            || line.starts_with("../")
+            || line.contains('/'))
+}
+
+fn text_line_looks_like_list_item(line: &str) -> bool {
+    let line = line.trim();
+    !line.is_empty()
+        && line.len() <= MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS
+        && !line.contains(|ch| matches!(ch, '\n' | '\r' | '\0'))
+        && !line.contains("://")
+        && !line.ends_with(['.', '。', ':', '：'])
+        && line.split_whitespace().count() <= 4
 }
 
 fn json_value_kind(value: &Value) -> &'static str {
@@ -953,6 +1049,7 @@ fn normalize_evidence_field(field: &str) -> String {
 
 fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<String> {
     let leaf = field.rsplit('.').next().unwrap_or(field);
+    let leaf = leaf.split_once('[').map_or(leaf, |(prefix, _)| prefix);
     let mut values = BTreeSet::new();
     values.insert(field.to_string());
     values.insert(leaf.to_string());
@@ -1734,10 +1831,10 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{
-        delivery_payload_consistent, evidence_coverage_for_route, TaskJournal,
-        TaskJournalFinalStatus, TaskJournalFinalizerFallback, TaskJournalFinalizerStage,
-        TaskJournalFinalizerSummary, TaskJournalRoundTrace, TaskJournalVerifyIssue,
-        TaskJournalVerifySummary,
+        delivery_payload_consistent, evidence_coverage_for_route, observed_evidence_from_output,
+        TaskJournal, TaskJournalFinalStatus, TaskJournalFinalizerFallback,
+        TaskJournalFinalizerStage, TaskJournalFinalizerSummary, TaskJournalRoundTrace,
+        TaskJournalVerifyIssue, TaskJournalVerifySummary,
     };
 
     #[test]
@@ -2380,6 +2477,70 @@ mod tests {
                         && item.get("hash").and_then(Value::as_str).is_some()
                 })
             }));
+    }
+
+    #[test]
+    fn text_observed_evidence_extracts_count_path_and_candidates() {
+        let archive_listing = "exit=0\nArchive: /tmp/test.zip\n  Length Name\n  22 notes.txt\n  20 nested/config.ini\n  42 2 files";
+        let observed = observed_evidence_from_output(Some(archive_listing))
+            .expect("text evidence should be present");
+        let items = observed
+            .get("items")
+            .and_then(Value::as_array)
+            .expect("evidence items");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("count")
+                && item.get("excerpt").and_then(Value::as_str) == Some("2")
+        }));
+
+        let observed = observed_evidence_from_output(Some("/home/guagua/rustclaw/Cargo.toml"))
+            .expect("path evidence should be present");
+        let items = observed
+            .get("items")
+            .and_then(Value::as_array)
+            .expect("path evidence items");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("path")
+                && item.get("source").and_then(Value::as_str) == Some("text_output.extractor")
+        }));
+
+        let mut journal = TaskJournal::for_task("task-text-candidates", "ask", "列出文件名");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::FileNames,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some("Cargo.toml\nREADME.md".to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete());
+        assert!(coverage.observed_canonical.contains("candidates"));
     }
 
     #[test]
