@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use tracing::info;
@@ -3446,6 +3447,7 @@ fn matrix_observed_answer_candidate_for_shape(
     agent_run_context: Option<&AgentRunContext>,
     shape_class: crate::contract_matrix::FinalAnswerShapeClass,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
     match shape_class {
         crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact => {
             direct_file_token_from_observed_auto_locator_filename(loop_state, agent_run_context)
@@ -3457,17 +3459,335 @@ fn matrix_observed_answer_candidate_for_shape(
         | crate::contract_matrix::FinalAnswerShapeClass::SinglePath => {
             direct_scalar_observed_answer(Some(state), loop_state, agent_run_context)
         }
-        crate::contract_matrix::FinalAnswerShapeClass::StrictList
-        | crate::contract_matrix::FinalAnswerShapeClass::Table => {
-            direct_structured_observed_answer_allowing_implicit_metadata_path_facts(
-                Some(state),
-                loop_state,
-                agent_run_context,
-            )
-        }
+        crate::contract_matrix::FinalAnswerShapeClass::StrictList => route
+            .and_then(|route| matrix_strict_list_observed_answer(route, loop_state))
+            .or_else(|| {
+                direct_structured_observed_answer_allowing_implicit_metadata_path_facts(
+                    Some(state),
+                    loop_state,
+                    agent_run_context,
+                )
+            }),
+        crate::contract_matrix::FinalAnswerShapeClass::Table => route
+            .and_then(|route| matrix_table_observed_answer(route, loop_state))
+            .or_else(|| {
+                direct_structured_observed_answer_allowing_implicit_metadata_path_facts(
+                    Some(state),
+                    loop_state,
+                    agent_run_context,
+                )
+            }),
         crate::contract_matrix::FinalAnswerShapeClass::Freeform
         | crate::contract_matrix::FinalAnswerShapeClass::GroundedSummary
         | crate::contract_matrix::FinalAnswerShapeClass::Verdict => None,
+    }
+}
+
+fn matrix_strict_list_observed_answer(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if !matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::FilePaths
+            | crate::OutputSemanticKind::StructuredKeys
+            | crate::OutputSemanticKind::SqliteTableNamesOnly
+    ) {
+        return None;
+    }
+    let mut items = BTreeMap::<String, String>::new();
+    for step in &loop_state.executed_step_results {
+        if !step.is_ok()
+            || matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+        {
+            continue;
+        }
+        let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+            continue;
+        };
+        collect_matrix_strict_list_items(route, &value, &mut items);
+    }
+    if items.is_empty() {
+        return None;
+    }
+    let answer = items.into_values().collect::<Vec<_>>().join("\n");
+    Some((answer, matrix_observed_shape_summary(loop_state)))
+}
+
+fn collect_matrix_strict_list_items(
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+    items: &mut BTreeMap<String, String>,
+) {
+    push_matrix_string_arrays(
+        route,
+        value,
+        items,
+        &[
+            "keys",
+            "identity_values",
+            "names",
+            "paths",
+            "files",
+            "dirs",
+            "directories",
+            "results",
+            "tables",
+        ],
+    );
+    if let Some(names_by_kind) = value
+        .get("names_by_kind")
+        .and_then(serde_json::Value::as_object)
+    {
+        for child in names_by_kind.values() {
+            push_matrix_array_items(route, child, items);
+        }
+    }
+    for key in ["entries", "items", "facts", "rows"] {
+        if let Some(rows) = value.get(key).and_then(serde_json::Value::as_array) {
+            for row in rows {
+                collect_matrix_list_object_fields(route, row, items);
+            }
+        }
+    }
+}
+
+fn push_matrix_string_arrays(
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+    items: &mut BTreeMap<String, String>,
+    keys: &[&str],
+) {
+    for key in keys {
+        if let Some(child) = value.get(*key) {
+            push_matrix_array_items(route, child, items);
+        }
+    }
+}
+
+fn push_matrix_array_items(
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+    items: &mut BTreeMap<String, String>,
+) {
+    let Some(array) = value.as_array() else {
+        return;
+    };
+    for item in array {
+        if let Some(text) = item.as_str() {
+            push_matrix_list_item(route, text, items);
+        } else {
+            collect_matrix_list_object_fields(route, item, items);
+        }
+    }
+}
+
+fn collect_matrix_list_object_fields(
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+    items: &mut BTreeMap<String, String>,
+) {
+    let Some(map) = value.as_object() else {
+        return;
+    };
+    for key in [
+        "name",
+        "path",
+        "resolved_path",
+        "table",
+        "table_name",
+        "identity_value",
+    ] {
+        if let Some(text) = map.get(key).and_then(serde_json::Value::as_str) {
+            push_matrix_list_item(route, text, items);
+        }
+    }
+}
+
+fn push_matrix_list_item(
+    route: &crate::RouteResult,
+    raw: &str,
+    items: &mut BTreeMap<String, String>,
+) {
+    let Some(display) = matrix_list_display_item(route, raw) else {
+        return;
+    };
+    items.entry(display.to_ascii_lowercase()).or_insert(display);
+}
+
+fn matrix_list_display_item(route: &crate::RouteResult, raw: &str) -> Option<String> {
+    let item = raw.trim().trim_matches('`').trim();
+    if item.is_empty() {
+        return None;
+    }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::FileNames {
+        return std::path::Path::new(item)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .or_else(|| Some(item.to_string()));
+    }
+    Some(item.to_string())
+}
+
+fn matrix_table_observed_answer(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::SqliteTableListing {
+        return None;
+    }
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok()
+            || matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+        {
+            continue;
+        }
+        let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+            continue;
+        };
+        if let Some(answer) = matrix_markdown_table_from_json(&value) {
+            return Some((answer, matrix_observed_shape_summary(loop_state)));
+        }
+    }
+    None
+}
+
+fn matrix_markdown_table_from_json(value: &serde_json::Value) -> Option<String> {
+    let rows = value
+        .get("rows")
+        .or_else(|| value.pointer("/result/rows"))?
+        .as_array()?;
+    if rows.is_empty() {
+        return None;
+    }
+    let columns = matrix_table_columns(value, rows)?;
+    let mut table = String::new();
+    table.push('|');
+    for column in &columns {
+        table.push(' ');
+        table.push_str(column);
+        table.push_str(" |");
+    }
+    table.push('\n');
+    table.push('|');
+    for _ in &columns {
+        table.push_str(" --- |");
+    }
+    for row in rows {
+        let cells = matrix_table_row_cells(row, &columns)?;
+        table.push('\n');
+        table.push('|');
+        for cell in cells {
+            table.push(' ');
+            table.push_str(&cell);
+            table.push_str(" |");
+        }
+    }
+    Some(table)
+}
+
+fn matrix_table_columns(
+    value: &serde_json::Value,
+    rows: &[serde_json::Value],
+) -> Option<Vec<String>> {
+    let mut columns = value
+        .get("columns")
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for row in rows {
+        if let Some(map) = row.as_object() {
+            for key in map.keys() {
+                if !columns.iter().any(|column| column == key) {
+                    columns.push(key.clone());
+                }
+            }
+        }
+    }
+    (!columns.is_empty()).then_some(columns)
+}
+
+fn matrix_table_row_cells(row: &serde_json::Value, columns: &[String]) -> Option<Vec<String>> {
+    match row {
+        serde_json::Value::Object(map) => {
+            let mut cells = Vec::new();
+            for column in columns {
+                let cell = map
+                    .get(column)
+                    .and_then(matrix_table_cell_text)
+                    .unwrap_or_default();
+                if cell.contains(['\n', '|']) {
+                    return None;
+                }
+                cells.push(cell);
+            }
+            Some(cells)
+        }
+        serde_json::Value::Array(values) => values
+            .iter()
+            .map(matrix_table_cell_text)
+            .collect::<Option<Vec<_>>>(),
+        value => matrix_table_cell_text(value).map(|cell| vec![cell]),
+    }
+}
+
+fn matrix_table_cell_text(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(value) => Some(value.trim().to_string()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        serde_json::Value::Null => Some(String::new()),
+        _ => None,
+    }
+}
+
+fn matrix_observed_shape_summary(
+    loop_state: &LoopState,
+) -> crate::task_journal::TaskJournalFinalizerSummary {
+    crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: loop_state.executed_step_results.len(),
+        ..Default::default()
     }
 }
 
@@ -10738,6 +11058,71 @@ mod tests {
         assert_eq!(
             loop_state.last_user_visible_respond.as_deref(),
             Some("alpha.md\nbeta.md")
+        );
+        assert!(finalizer_summary.is_some());
+    }
+
+    #[test]
+    fn matrix_strict_list_shape_builds_list_from_observed_json() {
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "document".to_string();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"find_ext","count":2,"ext":"md","results":["document/beta.md","document/alpha.md"],"root":"document"}"#,
+        ));
+
+        let (answer, summary) = super::matrix_strict_list_observed_answer(&route, &loop_state)
+            .expect("matrix list answer");
+
+        assert_eq!(answer, "alpha.md\nbeta.md");
+        assert_eq!(summary.format_ok, Some(true));
+        assert_eq!(summary.grounded_ok, Some(true));
+    }
+
+    #[test]
+    fn matrix_shape_guard_replaces_unstructured_table_with_markdown_table() {
+        let state = test_state();
+        let task = claimed_task("task-matrix-shape-guard-table");
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "data/app.sqlite".to_string();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "db_basic",
+            r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}"#,
+        ));
+        let mut delivery = vec!["数据库里有 orders 和 users 两张表。".to_string()];
+        let mut finalizer_summary = None;
+
+        assert!(super::replace_delivery_with_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "列出数据库表，输出表格",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        ));
+
+        assert_eq!(delivery, vec!["| name |\n| --- |\n| orders |\n| users |"]);
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some("| name |\n| --- |\n| orders |\n| users |")
         );
         assert!(finalizer_summary.is_some());
     }
