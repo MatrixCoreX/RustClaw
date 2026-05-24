@@ -1182,7 +1182,6 @@ fn action_supports_structured_direct_observed_finalize(
                 matches!(
                     route.output_contract.semantic_kind,
                     crate::OutputSemanticKind::None
-                        | crate::OutputSemanticKind::DirectoryEntryGroups
                 )
             }),
             Some("dir_compare") => route_result.is_some_and(|route| {
@@ -1211,6 +1210,7 @@ fn action_supports_structured_direct_observed_finalize(
                     route.output_contract.semantic_kind,
                     crate::OutputSemanticKind::FileNames
                         | crate::OutputSemanticKind::DirectoryNames
+                        | crate::OutputSemanticKind::DirectoryEntryGroups
                 )
             }),
             _ => false,
@@ -2675,6 +2675,69 @@ fn generic_directory_auto_locator_observation_plan(
     ])
 }
 
+fn directory_entry_groups_auto_locator_observation_plan(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<Vec<AgentAction>> {
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryEntryGroups
+    {
+        return None;
+    }
+    let path = route_directory_locator_path(route, auto_locator_path)?;
+    if !Path::new(&path).is_dir() {
+        return None;
+    }
+    Some(vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "list_dir",
+            "path": path,
+            "names_only": false,
+            "max_entries": 1000,
+            "sort_by": "name",
+        }),
+    }])
+}
+
+fn directory_entry_groups_auto_locator_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
+        return None;
+    }
+    let actions =
+        directory_entry_groups_auto_locator_observation_plan(route_result, auto_locator_path)?;
+    let actions = normalize_planned_actions_with_original_and_context(
+        state,
+        route_result,
+        loop_state,
+        user_text,
+        original_user_text,
+        Some(goal),
+        auto_locator_path,
+        actions,
+    );
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
 fn directory_tree_auto_locator_observation_plan(
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
@@ -2695,7 +2758,6 @@ fn directory_tree_auto_locator_observation_plan(
             route.output_contract.semantic_kind,
             crate::OutputSemanticKind::None
                 | crate::OutputSemanticKind::RawCommandOutput
-                | crate::OutputSemanticKind::DirectoryEntryGroups
                 | crate::OutputSemanticKind::DirectoryPurposeSummary
                 | crate::OutputSemanticKind::WorkspaceProjectSummary
         )
@@ -3846,6 +3908,52 @@ fn archive_read_deterministic_plan_result(
             "member": member,
         }),
     }];
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        if loop_state.round_no <= 1 {
+            PlanKind::Single
+        } else {
+            PlanKind::Incremental
+        },
+        &actions,
+    ))
+}
+
+fn archive_unpack_deterministic_plan_result(
+    goal: &str,
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+) -> Option<PlanResult> {
+    if loop_state.has_tool_or_skill_output || !archive_basic_enabled_for_planning(state) {
+        return None;
+    }
+    let route = route_result?;
+    if route.needs_clarify
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ArchiveUnpack
+    {
+        return None;
+    }
+    let (archive, dest) = archive_unpack_pair_for_route(route)?;
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "archive_basic".to_string(),
+            args: serde_json::json!({
+                "action": "unpack",
+                "archive": archive,
+                "dest": dest,
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
     let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
     Some(build_plan_result(
@@ -6616,6 +6724,11 @@ fn normalize_legacy_compatibility_actions(
     let actions =
         strip_terminal_discussion_for_direct_skill_passthrough(state, route_result, actions);
     let actions = normalize_action_schema_aliases(state, route_result, actions);
+    let actions = rewrite_directory_entry_groups_tree_summary_to_list_dir(
+        route_result,
+        auto_locator_path,
+        actions,
+    );
     let actions = rewrite_archive_basic_short_archive_to_active_bound_target(plan_context, actions);
     let actions = rewrite_invalid_rustclaw_config_section_field_reads_to_guard(
         route_result,
@@ -6668,6 +6781,61 @@ fn normalize_legacy_compatibility_actions(
     let actions =
         rewrite_single_target_file_read_to_auto_locator(route_result, auto_locator_path, actions);
     actions
+}
+
+fn rewrite_directory_entry_groups_tree_summary_to_list_dir(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if route_result.is_none_or(|route| {
+        route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryEntryGroups
+    }) {
+        return actions;
+    }
+    actions
+        .into_iter()
+        .map(|action| match action {
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args }
+                if skill.eq_ignore_ascii_case("system_basic")
+                    && args
+                        .get("action")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .is_some_and(|action| action.eq_ignore_ascii_case("tree_summary")) =>
+            {
+                let path = args
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|path| !path.is_empty())
+                    .or_else(|| {
+                        auto_locator_path
+                            .map(str::trim)
+                            .filter(|path| !path.is_empty())
+                    })
+                    .or_else(|| {
+                        route_result
+                            .map(|route| route.output_contract.locator_hint.trim())
+                            .filter(|path| !path.is_empty())
+                    });
+                let mut mapped = serde_json::Map::new();
+                mapped.insert("action".to_string(), Value::String("list_dir".to_string()));
+                if let Some(path) = path {
+                    mapped.insert("path".to_string(), Value::String(path.to_string()));
+                }
+                mapped.insert("names_only".to_string(), Value::Bool(false));
+                mapped.insert("max_entries".to_string(), Value::Number(1000.into()));
+                mapped.insert("sort_by".to_string(), Value::String("name".to_string()));
+                AgentAction::CallTool {
+                    tool: "fs_basic".to_string(),
+                    args: Value::Object(mapped),
+                }
+            }
+            other => other,
+        })
+        .collect()
 }
 
 fn rewrite_rustclaw_config_validation_to_guard(
@@ -7251,10 +7419,8 @@ fn action_is_structured_config_validation(action: &AgentAction) -> bool {
                 .and_then(Value::as_str)
                 .map(str::trim)
                 .unwrap_or_default();
-            (skill.eq_ignore_ascii_case("config_basic")
-                && action_name.eq_ignore_ascii_case("validate"))
-                || (skill.eq_ignore_ascii_case("system_basic")
-                    && action_name.eq_ignore_ascii_case("validate_structured"))
+            skill.eq_ignore_ascii_case("config_basic")
+                && action_name.eq_ignore_ascii_case("validate")
         }
         _ => false,
     }
@@ -10897,9 +11063,10 @@ fn content_evidence_plan_only_has_locator_observation(
             })
             .collect::<Vec<_>>();
         if !executable_actions.is_empty()
-            && !executable_actions
-                .iter()
-                .any(|action| action_observes_content_presence_search(action))
+            && !executable_actions.iter().any(|action| {
+                action_observes_content_presence_search(action)
+                    || action_reads_workspace_text_content(action)
+            })
         {
             return true;
         }
@@ -14641,6 +14808,9 @@ fn archive_format_for_path(path: &str) -> &'static str {
 }
 
 fn archive_unpack_pair_for_route(route: &RouteResult) -> Option<(String, String)> {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ArchiveUnpack {
+        return None;
+    }
     let (archive, dest) = split_archive_locator_pair(&route.output_contract.locator_hint)?;
     if !is_supported_archive_path(&archive) {
         return None;
@@ -14662,14 +14832,13 @@ fn rewrite_archive_unpack_run_cmd_to_archive_basic(
     let Some((archive, dest)) = archive_unpack_pair_for_route(route) else {
         return actions;
     };
+    if actions.iter().any(action_is_archive_basic_unpack) {
+        return actions;
+    }
     let mut rewritten = actions;
     let mut changed = false;
     for action in rewritten.iter_mut() {
-        let should_rewrite = matches!(
-            action,
-            AgentAction::CallSkill { skill, .. } | AgentAction::CallTool { tool: skill, .. }
-                if skill.trim().eq_ignore_ascii_case("run_cmd")
-        );
+        let should_rewrite = action_skill_is_run_cmd(action) || action_is_archive_basic(action);
         if !should_rewrite {
             continue;
         }
@@ -14682,15 +14851,19 @@ fn rewrite_archive_unpack_run_cmd_to_archive_basic(
             }),
         };
         changed = true;
+        break;
     }
     if changed {
-        info!("plan_rewrite_archive_unpack_run_cmd_to_archive_basic");
+        info!("plan_rewrite_archive_unpack_plan_to_archive_basic");
     }
     rewritten
 }
 
 fn archive_pack_pair_for_route(route: &RouteResult) -> Option<(String, String)> {
-    if !route.is_execute_gate() || !route.output_contract.requires_content_evidence {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ArchivePack
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+    {
         return None;
     }
     let (source, archive) = split_archive_locator_pair(&route.output_contract.locator_hint)?;
@@ -14711,6 +14884,22 @@ fn action_is_archive_basic(action: &AgentAction) -> bool {
     planned_action_skill_name(action)
         .map(str::trim)
         .is_some_and(|skill| skill.eq_ignore_ascii_case("archive_basic"))
+}
+
+fn action_is_archive_basic_pack(action: &AgentAction) -> bool {
+    action_is_archive_basic(action)
+        && action_args(action)
+            .and_then(|args| args.get("action"))
+            .and_then(Value::as_str)
+            .is_some_and(|action| action.trim().eq_ignore_ascii_case("pack"))
+}
+
+fn action_is_archive_basic_unpack(action: &AgentAction) -> bool {
+    action_is_archive_basic(action)
+        && action_args(action)
+            .and_then(|args| args.get("action"))
+            .and_then(Value::as_str)
+            .is_some_and(|action| action.trim().eq_ignore_ascii_case("unpack"))
 }
 
 fn action_skill_is_run_cmd(action: &AgentAction) -> bool {
@@ -15963,14 +16152,15 @@ fn rewrite_archive_pack_plan_to_archive_basic(
     let Some((source, archive)) = archive_pack_pair_for_route(route) else {
         return actions;
     };
-    if actions.iter().any(action_is_archive_basic) {
+    if actions.iter().any(action_is_archive_basic_pack) {
         return actions;
     }
 
     let mut rewritten = actions;
     let mut changed = false;
     for action in rewritten.iter_mut() {
-        if action_is_path_metadata_facts_for_pair(action, &source, &archive)
+        if action_is_archive_basic(action)
+            || action_is_path_metadata_facts_for_pair(action, &source, &archive)
             || action_skill_is_run_cmd(action)
         {
             *action = AgentAction::CallSkill {
@@ -17063,6 +17253,21 @@ pub(super) async fn plan_round_actions(
             );
             return Ok(plan_result);
         }
+        if let Some(plan_result) = directory_entry_groups_auto_locator_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            user_text,
+            Some(&original_user_text_for_policy),
+            auto_locator_path,
+        ) {
+            info!(
+                "plan_deterministic_directory_entry_groups_auto_locator task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
         if let Some(plan_result) = directory_tree_auto_locator_deterministic_plan_result(
             state,
             goal,
@@ -17088,6 +17293,15 @@ pub(super) async fn plan_round_actions(
         ) {
             info!(
                 "plan_deterministic_archive_read task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
+        if let Some(plan_result) =
+            archive_unpack_deterministic_plan_result(goal, state, route_result, loop_state)
+        {
+            info!(
+                "plan_deterministic_archive_unpack task_id={} round={}",
                 task.task_id, loop_state.round_no
             );
             return Ok(plan_result);
@@ -17624,12 +17838,14 @@ mod tests {
         action_targets_config_edit, actions_use_ad_hoc_command_without_route_preferred_skill,
         active_task_append_current_locator_deterministic_plan_result,
         archive_list_auto_locator_deterministic_plan_result,
-        archive_read_deterministic_plan_result, broaden_default_read_range_for_structured_text,
-        build_lightweight_skill_playbooks_text, build_lightweight_skill_quick_index_text,
-        build_lightweight_tool_spec, can_fallback_to_initial_plan_after_repair_failure,
-        classify_planning_prompt_class, compact_skill_playbook_from_prompt,
+        archive_read_deterministic_plan_result, archive_unpack_deterministic_plan_result,
+        broaden_default_read_range_for_structured_text, build_lightweight_skill_playbooks_text,
+        build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
+        can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
+        compact_skill_playbook_from_prompt,
         content_excerpt_summary_auto_locator_deterministic_plan_result,
         directory_compare_locator_deterministic_plan_result,
+        directory_entry_groups_auto_locator_deterministic_plan_result,
         directory_tree_auto_locator_deterministic_plan_result, enforce_output_contract_tool_args,
         ensure_content_excerpt_summary_has_bounded_content, ensure_required_contract_block_present,
         existence_with_path_locator_deterministic_plan_result,
@@ -17658,6 +17874,7 @@ mod tests {
         rewrite_archive_unpack_run_cmd_to_archive_basic,
         rewrite_config_change_preview_to_config_edit_plan,
         rewrite_config_validation_read_plan_to_validate,
+        rewrite_directory_entry_groups_tree_summary_to_list_dir,
         rewrite_docker_readonly_run_cmd_to_docker_basic, rewrite_extract_field_alias_args,
         rewrite_pre_observation_concrete_respond_to_placeholder,
         rewrite_process_ps_run_cmd_to_process_basic, rewrite_rustclaw_config_validation_to_guard,
@@ -18198,6 +18415,7 @@ mod tests {
         let state = test_state();
         let loop_state = LoopState::new(1);
         let mut route = base_route_result();
+        route.output_contract.semantic_kind = OutputSemanticKind::ArchiveUnpack;
         route.output_contract.response_shape = OutputResponseShape::Free;
         route.output_contract.requires_content_evidence = true;
         route.output_contract.locator_kind = OutputLocatorKind::Filename;
@@ -18301,6 +18519,7 @@ mod tests {
     #[test]
     fn sqlite_database_kind_judgment_rewrites_run_cmd_to_db_basic_list_tables() {
         let mut route = base_route_result();
+        route.output_contract.semantic_kind = OutputSemanticKind::ArchiveUnpack;
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.requires_content_evidence = true;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -18738,6 +18957,7 @@ mod tests {
     #[test]
     fn archive_unpack_route_rewrites_run_cmd_unzip_to_archive_basic() {
         let mut route = base_route_result();
+        route.output_contract.semantic_kind = OutputSemanticKind::ArchiveUnpack;
         route.output_contract.response_shape = OutputResponseShape::Free;
         route.output_contract.requires_content_evidence = true;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -18773,6 +18993,112 @@ mod tests {
     }
 
     #[test]
+    fn archive_unpack_route_rewrites_archive_read_plan_to_unpack() {
+        let mut route = base_route_result();
+        route.output_contract.semantic_kind = OutputSemanticKind::ArchiveUnpack;
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/bundle.zip | /tmp/out".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "archive_basic".to_string(),
+            args: json!({
+                "action": "read",
+                "archive": "/tmp/bundle.zip",
+                "member": "/tmp/out",
+            }),
+        }];
+
+        let rewritten =
+            rewrite_archive_unpack_run_cmd_to_archive_basic(Some(&route), false, actions);
+
+        match &rewritten[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "archive_basic");
+                assert_eq!(
+                    args.get("action").and_then(|value| value.as_str()),
+                    Some("unpack")
+                );
+                assert_eq!(
+                    args.get("archive").and_then(|value| value.as_str()),
+                    Some("/tmp/bundle.zip")
+                );
+                assert_eq!(
+                    args.get("dest").and_then(|value| value.as_str()),
+                    Some("/tmp/out")
+                );
+            }
+            other => panic!("expected archive_basic action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn content_excerpt_archive_member_read_is_not_rewritten_to_unpack() {
+        let mut route = base_route_result();
+        route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | notes.txt".to_string();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "archive_basic".to_string(),
+            args: json!({
+                "action": "read",
+                "archive": "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip",
+                "member": "notes.txt",
+            }),
+        }];
+
+        let rewritten =
+            rewrite_archive_unpack_run_cmd_to_archive_basic(Some(&route), false, actions);
+
+        let args = expect_planned_call(&rewritten[0], "archive_basic", "read");
+        assert_eq!(
+            args.get("archive").and_then(Value::as_str),
+            Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip")
+        );
+        assert_eq!(
+            args.get("member").and_then(Value::as_str),
+            Some("notes.txt")
+        );
+    }
+
+    #[test]
+    fn archive_unpack_contract_plans_direct_unpack_without_model_plan() {
+        let state = test_state_with_enabled_skills(&["archive_basic"]);
+        let mut route = base_route_result();
+        route.output_contract.semantic_kind = OutputSemanticKind::ArchiveUnpack;
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | tmp/contract_matrix_unpacked"
+                .to_string();
+        let loop_state = LoopState::new(1);
+
+        let plan = archive_unpack_deterministic_plan_result(
+            "unpack archive",
+            &state,
+            Some(&route),
+            &loop_state,
+        )
+        .expect("archive unpack deterministic plan");
+
+        assert_eq!(plan.steps.len(), 3);
+        let action = plan.steps[0].to_agent_action().expect("agent action");
+        let args = expect_planned_call(&action, "archive_basic", "unpack");
+        assert_eq!(
+            args.get("archive").and_then(Value::as_str),
+            Some("scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip")
+        );
+        assert_eq!(
+            args.get("dest").and_then(Value::as_str),
+            Some("tmp/contract_matrix_unpacked")
+        );
+    }
+
+    #[test]
     fn archive_unpack_preserves_explicit_literal_run_cmd() {
         let mut route = base_route_result();
         route.output_contract.response_shape = OutputResponseShape::Free;
@@ -18802,6 +19128,7 @@ mod tests {
     #[test]
     fn archive_pack_route_rewrites_probe_only_plan_to_archive_basic() {
         let mut route = base_route_result();
+        route.output_contract.semantic_kind = OutputSemanticKind::ArchivePack;
         route.output_contract.response_shape = OutputResponseShape::OneSentence;
         route.output_contract.requires_content_evidence = true;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -18855,8 +19182,55 @@ mod tests {
     }
 
     #[test]
+    fn archive_pack_route_rewrites_archive_list_plan_to_pack() {
+        let mut route = base_route_result();
+        route.output_contract.semantic_kind = OutputSemanticKind::ArchivePack;
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "scripts/skill_calls | tmp/nl_archive_case_en.zip".to_string();
+        let actions = vec![
+            AgentAction::CallSkill {
+                skill: "archive_basic".to_string(),
+                args: json!({
+                    "action": "list",
+                    "archive": "tmp/nl_archive_case_en.zip",
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let rewritten = rewrite_archive_pack_plan_to_archive_basic(Some(&route), false, actions);
+
+        assert_eq!(rewritten.len(), 2);
+        match &rewritten[0] {
+            AgentAction::CallSkill { skill, args } => {
+                assert_eq!(skill, "archive_basic");
+                assert_eq!(args.get("action").and_then(Value::as_str), Some("pack"));
+                assert_eq!(
+                    args.get("source").and_then(Value::as_str),
+                    Some("scripts/skill_calls")
+                );
+                assert_eq!(
+                    args.get("archive").and_then(Value::as_str),
+                    Some("tmp/nl_archive_case_en.zip")
+                );
+            }
+            other => panic!("expected archive_basic pack action, got {other:?}"),
+        }
+        assert!(matches!(rewritten[1], AgentAction::SynthesizeAnswer { .. }));
+    }
+
+    #[test]
     fn archive_pack_preserves_explicit_literal_run_cmd() {
         let mut route = base_route_result();
+        route.output_contract.semantic_kind = OutputSemanticKind::ArchivePack;
         route.output_contract.response_shape = OutputResponseShape::Strict;
         route.output_contract.requires_content_evidence = true;
         route.output_contract.locator_kind = OutputLocatorKind::Path;
@@ -19227,6 +19601,59 @@ mod tests {
             normalized
                 .iter()
                 .all(|action| !planned_call_is(action, "fs_basic", "read_text_range")),
+            "normalized actions: {normalized:?}"
+        );
+    }
+
+    #[test]
+    fn config_validation_contract_normalizes_legacy_system_validate_structured_to_validate() {
+        let state = test_state();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_plain(),
+            true,
+            OutputResponseShape::Scalar,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::ConfigValidation;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/configs/app_config.toml".to_string();
+        route.resolved_intent =
+            "Validate app_config.toml and briefly say whether it is readable".to_string();
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "system_basic".to_string(),
+                args: json!({
+                    "action": "validate_structured",
+                    "path": "scripts/nl_tests/fixtures/device_local/configs/app_config.toml",
+                    "format": "toml",
+                }),
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+
+        let normalized = normalize_planned_actions(
+            &state,
+            Some(&route),
+            &LoopState::new(1),
+            "验证 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 是否是可读配置，并简短说明结果。",
+            None,
+            actions,
+        );
+
+        let args = expect_planned_call(&normalized[0], "config_basic", "validate");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some("scripts/nl_tests/fixtures/device_local/configs/app_config.toml")
+        );
+        assert_eq!(args.get("format").and_then(Value::as_str), Some("toml"));
+        assert!(
+            normalized.iter().all(|action| !planned_call_is(
+                action,
+                "system_basic",
+                "validate_structured"
+            )),
             "normalized actions: {normalized:?}"
         );
     }
@@ -22071,6 +22498,40 @@ version = "0.1.7"
             &loop_state,
             &actions,
         ));
+    }
+
+    #[test]
+    fn content_presence_route_accepts_text_read_observation_plan() {
+        let loop_state = LoopState::new(2);
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: json!({
+                    "action": "read_text_range",
+                    "path": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+                    "mode": "head",
+                    "n": 120
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
+
+        assert!(
+            !should_force_plan_repair(Some(&route), &loop_state, &actions),
+            "unexpected repair reason: {}",
+            repair_reason(Some(&route), &loop_state, Some(&actions))
+        );
     }
 
     #[test]
@@ -24920,6 +25381,79 @@ version = "0.1.7"
         }
         assert!(matches!(actions[1], AgentAction::SynthesizeAnswer { .. }));
         assert!(matches!(actions[2], AgentAction::Respond { .. }));
+    }
+
+    #[test]
+    fn directory_entry_groups_auto_locator_uses_fs_basic_list_dir() {
+        let root = TempDirGuard::new("directory_entry_groups_auto_locator");
+        fs::create_dir_all(root.path.join("docs")).expect("create docs");
+        fs::write(root.path.join("README.md"), "hello").expect("write readme");
+        let root_path = root.path.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = root_path.clone();
+
+        let plan = directory_entry_groups_auto_locator_deterministic_plan_result(
+            &test_state(),
+            "group directory entries",
+            Some(&route),
+            &LoopState::new(1),
+            "按文件和文件夹分组",
+            Some("按文件和文件夹分组"),
+            Some(root_path.as_str()),
+        )
+        .expect("directory entry groups plan should be available");
+
+        assert_eq!(plan.plan_kind, PlanKind::Single);
+        assert_eq!(plan.steps.len(), 1);
+        assert!(matches!(
+            plan.steps[0].to_agent_action(),
+            Some(AgentAction::CallTool { tool, args })
+                if tool == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("list_dir")
+                    && args.get("path").and_then(Value::as_str) == Some(root_path.as_str())
+                    && args.get("names_only").and_then(Value::as_bool) == Some(false)
+        ));
+    }
+
+    #[test]
+    fn directory_entry_groups_rewrites_tree_summary_to_list_dir() {
+        let root = TempDirGuard::new("directory_entry_groups_rewrite");
+        fs::create_dir_all(root.path.join("docs")).expect("create docs");
+        let root_path = root.path.display().to_string();
+        let mut route = route_result(
+            crate::AskMode::planner_execute_chat_wrapped(),
+            true,
+            OutputResponseShape::Strict,
+        );
+        route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = root_path.clone();
+        let actions = vec![AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: json!({
+                "action": "tree_summary",
+                "path": root_path,
+                "max_depth": 2
+            }),
+        }];
+
+        let rewritten =
+            rewrite_directory_entry_groups_tree_summary_to_list_dir(Some(&route), None, actions);
+
+        assert_eq!(rewritten.len(), 1);
+        assert!(matches!(
+            &rewritten[0],
+            AgentAction::CallTool { tool, args }
+                if tool == "fs_basic"
+                    && args.get("action").and_then(Value::as_str) == Some("list_dir")
+                    && args.get("names_only").and_then(Value::as_bool) == Some(false)
+        ));
     }
 
     #[test]

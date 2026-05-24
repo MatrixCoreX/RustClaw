@@ -1195,6 +1195,14 @@ fn prebind_quantity_compare_directory_pair_from_current_request(
     let semantic_quantity_comparison =
         route_result.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison;
     if !semantic_quantity_comparison
+        && route_result.output_contract.semantic_kind != crate::OutputSemanticKind::None
+    {
+        return false;
+    }
+    if !semantic_quantity_comparison && prompt_surface_contains_archive_locator_pair(prompt) {
+        return false;
+    }
+    if !semantic_quantity_comparison
         && !route_result.needs_clarify
         && !route_result.is_execute_gate()
     {
@@ -1226,6 +1234,19 @@ fn prebind_quantity_compare_directory_pair_from_current_request(
         },
     );
     true
+}
+
+fn prompt_surface_contains_archive_locator_pair(prompt: &str) -> bool {
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(prompt);
+    let Some((left, right)) = surface.locator_target_pair.as_ref() else {
+        return false;
+    };
+    supported_archive_locator_path(left) ^ supported_archive_locator_path(right)
+}
+
+fn supported_archive_locator_path(path: &str) -> bool {
+    let path = path.trim().to_ascii_lowercase();
+    path.ends_with(".zip") || path.ends_with(".tar.gz") || path.ends_with(".tgz")
 }
 
 fn workspace_directory_pair_from_current_request(
@@ -1507,6 +1528,7 @@ fn semantic_kind_can_execute_without_locator(kind: crate::OutputSemanticKind) ->
         kind,
         crate::OutputSemanticKind::RawCommandOutput
             | crate::OutputSemanticKind::ServiceStatus
+            | crate::OutputSemanticKind::HiddenEntriesCheck
             | crate::OutputSemanticKind::WorkspaceProjectSummary
             | crate::OutputSemanticKind::GitCommitSubject
             | crate::OutputSemanticKind::GitRepositoryState
@@ -2795,6 +2817,28 @@ mod tests {
     }
 
     #[test]
+    fn current_workspace_hidden_entries_check_does_not_trigger_unbound_fallback_guard() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(!unbound_targeted_evidence_route_should_force_clarify(
+            "check hidden entries in the current workspace and list examples",
+            &route,
+            &snapshot,
+        ));
+    }
+
+    #[test]
     fn active_bound_target_prebinds_matching_basename_locator_hint() {
         let mut route = executable_filename_route();
         route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
@@ -3347,6 +3391,82 @@ mod tests {
             .output_contract
             .locator_hint
             .contains("fixtures/tmp/dynamic_guard_unpack_case"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn directory_pair_prebind_skips_archive_locator_pair_contract() {
+        let root = make_temp_root("directory_pair_archive_locator_pair");
+        std::fs::create_dir_all(root.join("scripts/nl_tests/fixtures/device_local/tmp"))
+            .expect("fixture dirs");
+        std::fs::create_dir_all(root.join("tmp/contract_matrix_unpacked")).expect("dest dir");
+        let state = test_state_with_root(root.clone());
+        let mut route = executable_filename_route();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+
+        assert!(!prebind_quantity_compare_directory_pair_from_current_request(
+            &state,
+            concat!(
+                "把 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 解压到 tmp/contract_matrix_unpacked，并简短说明结果。",
+                "\n[CONTRACT_TEST_HINT]\n",
+                "candidate_wrong_action_ref=fs_basic.write_text\n",
+                "policy_expectation=runtime_must_reject_or_replace_disallowed_action\n",
+                "[/CONTRACT_TEST_HINT]"
+            ),
+            &mut route,
+        ));
+
+        assert_eq!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::CurrentWorkspace
+        );
+        assert!(route.output_contract.locator_hint.is_empty());
+        assert!(!route
+            .route_reason
+            .contains("directory_pair_prebound_from_current_request"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn directory_pair_prebind_skips_explicit_content_excerpt_contract() {
+        let root = make_temp_root("directory_pair_content_excerpt");
+        std::fs::create_dir_all(root.join("scripts/nl_tests/fixtures/device_local/docs"))
+            .expect("fixture dirs");
+        std::fs::create_dir_all(root.join(".git/objects/20")).expect("numeric dir");
+        let state = test_state_with_root(root.clone());
+        let mut route = executable_filename_route();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md".to_string();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+
+        assert!(!prebind_quantity_compare_directory_pair_from_current_request(
+            &state,
+            concat!(
+                "读取 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md 前 20 行，并用三句话总结。",
+                "\n[CONTRACT_TEST_HINT]\n",
+                "preferred_action_ref=archive_basic.read\n",
+                "policy_expectation=use_allowed_action_with_required_evidence\n",
+                "[/CONTRACT_TEST_HINT]"
+            ),
+            &mut route,
+        ));
+
+        assert_eq!(
+            route.output_contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+        );
+        assert!(!route
+            .route_reason
+            .contains("directory_pair_prebound_from_current_request"));
 
         let _ = std::fs::remove_dir_all(root);
     }

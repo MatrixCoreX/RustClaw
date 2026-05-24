@@ -3,6 +3,40 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+CASE_COUNT="${CONTRACT_MATRIX_CASE_COUNT:-100}"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  bash scripts/nl_tests/run_contract_matrix_offline_suite.sh [--count N]
+
+Options:
+  --count N    number of generated contract-matrix cases to validate. Default: 100
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --count)
+      CASE_COUNT="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if ! [[ "${CASE_COUNT}" =~ ^[0-9]+$ ]] || [[ "${CASE_COUNT}" -le 0 ]]; then
+  echo "--count must be a positive integer, got: ${CASE_COUNT}" >&2
+  exit 2
+fi
 
 cd "$ROOT_DIR"
 
@@ -13,14 +47,14 @@ python3 -m py_compile \
 
 echo "Generating deterministic contract matrix seed cases"
 python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
-  --count 100 \
+  --count "${CASE_COUNT}" \
   --check \
   --report \
   > /tmp/rustclaw-contract-matrix-cases.jsonl
 
 echo "Generating deterministic contract matrix live NL rows"
 python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
-  --count 100 \
+  --count "${CASE_COUNT}" \
   --check \
   --nl \
   --expectations /tmp/rustclaw-contract-matrix-nl.expectations.jsonl \

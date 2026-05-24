@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InlineJsonShape {
     WholeValue,
@@ -114,6 +116,7 @@ impl PromptSurfaceSignals {
 }
 
 pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
+    let prompt = prompt_without_contract_test_hint_blocks(prompt);
     let trimmed = prompt.trim();
     if trimmed.is_empty() {
         return PromptSurfaceSignals::default();
@@ -153,6 +156,31 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
         delivery_token_reference,
         locator_target_pair,
         deictic_reference,
+    }
+}
+
+fn prompt_without_contract_test_hint_blocks(prompt: &str) -> Cow<'_, str> {
+    const START: &str = "[CONTRACT_TEST_HINT]";
+    const END: &str = "[/CONTRACT_TEST_HINT]";
+
+    let Some(first_start) = prompt.find(START) else {
+        return Cow::Borrowed(prompt);
+    };
+
+    let mut out = String::with_capacity(prompt.len());
+    out.push_str(&prompt[..first_start]);
+    let mut rest = &prompt[first_start + START.len()..];
+    loop {
+        let Some(end_idx) = rest.find(END) else {
+            return Cow::Owned(out);
+        };
+        rest = &rest[end_idx + END.len()..];
+        let Some(start_idx) = rest.find(START) else {
+            out.push_str(rest);
+            return Cow::Owned(out);
+        };
+        out.push_str(&rest[..start_idx]);
+        rest = &rest[start_idx + START.len()..];
     }
 }
 
@@ -428,7 +456,7 @@ pub(crate) fn detect_locator_target_pair_shape(prompt: &str) -> Option<(String, 
         return None;
     }
     let mut explicit_paths = Vec::new();
-    for token in trimmed.split_whitespace().map(trim_pair_candidate_token) {
+    for token in split_pair_candidate_tokens(trimmed).map(trim_pair_candidate_token) {
         if !token.is_empty() && crate::worker::has_explicit_path_or_url_locator_hint(token) {
             push_unique_case_insensitive(&mut explicit_paths, token.to_string());
         }
@@ -444,6 +472,34 @@ pub(crate) fn detect_locator_target_pair_shape(prompt: &str) -> Option<(String, 
         }
     }
     (filenames.len() == 2).then(|| (filenames.remove(0), filenames.remove(0)))
+}
+
+fn split_pair_candidate_tokens<'a>(prompt: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+    prompt.split_whitespace().flat_map(|token| {
+        token.split(|ch: char| {
+            matches!(
+                ch,
+                ',' | '，'
+                    | '。'
+                    | ';'
+                    | '；'
+                    | ':'
+                    | '：'
+                    | '('
+                    | ')'
+                    | '（'
+                    | '）'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '<'
+                    | '>'
+                    | '《'
+                    | '》'
+            )
+        })
+    })
 }
 
 fn trim_pair_candidate_token(token: &str) -> &str {
@@ -874,6 +930,42 @@ mod tests {
             signals.locator_target_pair,
             Some(("Cargo.toml".to_string(), "Cargo.lock".to_string()))
         );
+    }
+
+    #[test]
+    fn locator_target_pair_splits_punctuation_suffix_after_path() {
+        let signals = analyze_prompt_surface(
+            "把 scripts/nl_tests/fixtures/device_local/docs 打包成 tmp/contract_matrix_docs_bundle.zip，并告诉我生成路径。",
+        );
+        assert_eq!(
+            signals.locator_target_pair,
+            Some((
+                "scripts/nl_tests/fixtures/device_local/docs".to_string(),
+                "tmp/contract_matrix_docs_bundle.zip".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn locator_target_pair_ignores_contract_test_hint_metadata() {
+        let signals = analyze_prompt_surface(concat!(
+            "把 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 解压到 tmp/contract_matrix_unpacked，并简短说明结果。",
+            "\n[CONTRACT_TEST_HINT]\n",
+            "candidate_wrong_action_ref=fs_basic.write_text\n",
+            "policy_expectation=runtime_must_reject_or_replace_disallowed_action\n",
+            "[/CONTRACT_TEST_HINT]"
+        ));
+        assert_eq!(
+            signals.locator_target_pair,
+            Some((
+                "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip".to_string(),
+                "tmp/contract_matrix_unpacked".to_string()
+            ))
+        );
+        assert!(!signals
+            .filename_candidates
+            .iter()
+            .any(|candidate| candidate.contains("candidate_wrong_action_ref")));
     }
 
     #[test]
