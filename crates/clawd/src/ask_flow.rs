@@ -1094,6 +1094,45 @@ fn direct_answer_gate_promotion_needs_unbound_deictic_clarify(
     true
 }
 
+fn direct_answer_gate_untrusted_locator_hint_requires_clarify(
+    state: &AppState,
+    current_user_request: &str,
+    contract: &crate::IntentOutputContract,
+    reference_resolution: &DirectAnswerGateReferenceResolutionOut,
+    auto_locator_path: Option<&str>,
+    has_authoritative_deictic_anchor: bool,
+    has_structural_session_alias_target: bool,
+) -> bool {
+    if !contract.requires_content_evidence
+        || contract.locator_hint.trim().is_empty()
+        || !matches!(
+            contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::Url
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        || current_request_has_direct_answer_gate_locator_surface(
+            state,
+            current_user_request,
+            contract,
+        )
+        || has_authoritative_deictic_anchor
+        || has_structural_session_alias_target
+        || auto_locator_path.is_some_and(|path| !path.trim().is_empty())
+    {
+        return false;
+    }
+    matches!(
+        direct_answer_gate_reference_target(reference_resolution),
+        "" | "none"
+            | "current_turn_locator"
+            | "unresolved_prior_object"
+            | "missing_locator"
+            | "ambiguous_locator"
+    )
+}
+
 fn current_request_has_direct_answer_gate_locator_surface(
     state: &AppState,
     current_user_request: &str,
@@ -1455,7 +1494,11 @@ fn direct_answer_gate_candidate_needs_unbound_context_clarify(
         if direct_answer_gate_allows_contextual_chat_reference(current_user_request, route, gate) {
             return false;
         }
-        if !current_request_has_context_binding_surface(current_user_request) {
+        let reference_requires_clarify =
+            direct_answer_gate_reference_requires_clarify(&gate.reference_resolution);
+        if !reference_requires_clarify
+            && !current_request_has_context_binding_surface(current_user_request)
+        {
             return false;
         }
         return direct_answer_route_introduces_unmentioned_distinctive_context_target(
@@ -1877,22 +1920,6 @@ fn current_request_has_context_binding_surface(current_user_request: &str) -> bo
         || surface.has_filename_candidates()
         || surface.locator_target_pair.is_some()
         || surface.has_deictic_reference()
-        || current_request_has_unbound_natural_locator_reference(current_user_request)
-}
-
-fn current_request_has_unbound_natural_locator_reference(current_user_request: &str) -> bool {
-    let lower = current_user_request.to_ascii_lowercase();
-    lower.contains("that file")
-        || lower.contains("that package file")
-        || lower.contains("that folder")
-        || lower.contains("that directory")
-        || lower.contains("selected file")
-        || current_user_request.contains("那个文件")
-        || current_user_request.contains("这个文件")
-        || current_user_request.contains("那个目录")
-        || current_user_request.contains("这个目录")
-        || current_user_request.contains("那个文件夹")
-        || current_user_request.contains("这个文件夹")
 }
 
 fn current_request_has_workspace_child_locator_surface(current_user_request: &str) -> bool {
@@ -1984,7 +2011,8 @@ fn direct_answer_gate_chat_promotion_lacks_structured_target(
         || current_request_mentions_resolvable_gate_locator(state, current_user_request, contract)
         || matches!(contract.locator_kind, crate::OutputLocatorKind::None)
         || current_request_has_structural_execution_target(current_user_request)
-        || current_request_has_unbound_natural_locator_reference(current_user_request)
+        || crate::intent::surface_signals::analyze_prompt_surface(current_user_request)
+            .has_deictic_reference()
         || current_request_resolves_structural_workspace_child_locator_surface(
             state,
             current_user_request,
@@ -2279,6 +2307,17 @@ fn apply_direct_answer_gate_outcome(
                 return DirectAnswerPreflight::DirectAnswer;
             }
             if output_contract_requires_planner_execution(&contract) {
+                if direct_answer_gate_untrusted_locator_hint_requires_clarify(
+                    state,
+                    current_user_request,
+                    &contract,
+                    &gate.reference_resolution,
+                    auto_locator_path,
+                    has_authoritative_deictic_anchor,
+                    has_structural_session_alias_target,
+                ) {
+                    return apply_direct_answer_gate_unbound_deictic_clarify(route, &gate);
+                }
                 if direct_answer_gate_chat_promotion_lacks_structured_target(
                     state,
                     current_user_request,
@@ -2314,6 +2353,17 @@ fn apply_direct_answer_gate_outcome(
                     structural_session_alias_locator.as_ref(),
                     &mut contract,
                 );
+                if direct_answer_gate_untrusted_locator_hint_requires_clarify(
+                    state,
+                    current_user_request,
+                    &contract,
+                    &gate.reference_resolution,
+                    auto_locator_path,
+                    has_authoritative_deictic_anchor,
+                    has_structural_session_alias_target,
+                ) {
+                    return apply_direct_answer_gate_unbound_deictic_clarify(route, &gate);
+                }
                 if direct_answer_gate_delivery_needs_unbound_existing_file_clarify(
                     state,
                     current_user_request,
@@ -2384,6 +2434,17 @@ fn apply_direct_answer_gate_outcome(
                 &mut contract,
                 structured_scalar_extraction,
             );
+            if direct_answer_gate_untrusted_locator_hint_requires_clarify(
+                state,
+                current_user_request,
+                &contract,
+                &gate.reference_resolution,
+                auto_locator_path,
+                has_authoritative_deictic_anchor,
+                has_structural_session_alias_target,
+            ) {
+                return apply_direct_answer_gate_unbound_deictic_clarify(route, &gate);
+            }
             if direct_answer_gate_chat_promotion_lacks_structured_target(
                 state,
                 current_user_request,
@@ -2425,6 +2486,17 @@ fn apply_direct_answer_gate_outcome(
                 structural_session_alias_locator.as_ref(),
                 &mut contract,
             );
+            if direct_answer_gate_untrusted_locator_hint_requires_clarify(
+                state,
+                current_user_request,
+                &contract,
+                &gate.reference_resolution,
+                auto_locator_path,
+                has_authoritative_deictic_anchor,
+                has_structural_session_alias_target,
+            ) {
+                return apply_direct_answer_gate_unbound_deictic_clarify(route, &gate);
+            }
             if direct_answer_gate_delivery_needs_unbound_existing_file_clarify(
                 state,
                 current_user_request,
@@ -5183,6 +5255,7 @@ mod tests {
         };
         let mut gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
         gate.resolved_user_intent = "Summarize Cargo.toml package configuration.".to_string();
+        gate.reference_resolution.target = "unresolved_prior_object".to_string();
         let state = crate::AppState::test_default_with_fixture_provider();
 
         let outcome =

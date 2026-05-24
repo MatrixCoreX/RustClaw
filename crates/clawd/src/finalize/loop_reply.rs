@@ -2018,7 +2018,7 @@ fn delivery_message_is_json_container(message: &str) -> bool {
 fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
     match crate::language_policy::request_language_hint(user_text) {
         "zh-CN" => false,
-        "mixed" => !mixed_request_prefers_chinese_response(user_text),
+        "mixed" => !crate::language_policy::mixed_language_prefers_cjk_response(user_text),
         "config_default" => state
             .policy
             .command_intent
@@ -2027,19 +2027,6 @@ fn prefer_english_for_user_text(state: &AppState, user_text: &str) -> bool {
             .starts_with("en"),
         _ => true,
     }
-}
-
-fn mixed_request_prefers_chinese_response(user_text: &str) -> bool {
-    let lower = user_text.to_ascii_lowercase();
-    if lower.contains("english") || user_text.contains("英文") || user_text.contains("英语") {
-        return false;
-    }
-    user_text.chars().any(|ch| {
-        let codepoint = ch as u32;
-        (0x3400..=0x4DBF).contains(&codepoint)
-            || (0x4E00..=0x9FFF).contains(&codepoint)
-            || (0xF900..=0xFAFF).contains(&codepoint)
-    })
 }
 
 fn final_reply_language_hint(
@@ -12510,7 +12497,7 @@ mod tests {
 
         assert_eq!(loop_state.delivery_messages.len(), 1);
         let answer = &loop_state.delivery_messages[0];
-        assert!(answer.contains("第 2 步失败"));
+        assert!(answer.contains("第 2 步失败"), "answer: {answer}");
         assert!(answer.contains("definitely_missing_command_rustclaw_user_ops_13579"));
         assert!(!answer.contains("第 1 步"));
         assert!(!answer.contains("exit code 127"));

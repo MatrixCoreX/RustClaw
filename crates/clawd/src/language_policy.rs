@@ -259,6 +259,11 @@ pub(crate) fn request_language_hint(user_text: &str) -> &'static str {
     "config_default"
 }
 
+pub(crate) fn mixed_language_prefers_cjk_response(user_text: &str) -> bool {
+    let counts = text_language_counts_without_neutral_artifacts(user_text.trim());
+    counts.cjk > 0 && counts.cjk.saturating_mul(4) >= counts.non_cjk_alpha()
+}
+
 fn canonical_locale_hint(locale_hint: &str) -> Option<String> {
     let trimmed = locale_hint.trim();
     if trimmed.is_empty() {
@@ -399,8 +404,9 @@ pub(crate) fn task_response_language_hint(
 #[cfg(test)]
 mod tests {
     use super::{
-        preferred_response_language_hint, request_language_hint, task_language_source_text,
-        task_user_request_for_prompt, text_language_conflicts_with_hint,
+        mixed_language_prefers_cjk_response, preferred_response_language_hint,
+        request_language_hint, task_language_source_text, task_user_request_for_prompt,
+        text_language_conflicts_with_hint,
     };
 
     #[test]
@@ -442,6 +448,19 @@ mod tests {
             "und-Latn"
         );
         assert_eq!(request_language_hint("12345"), "config_default");
+    }
+
+    #[test]
+    fn mixed_response_language_preference_uses_script_balance() {
+        assert!(!mixed_language_prefers_cjk_response(
+            "用 English language answer explain README please"
+        ));
+        assert!(mixed_language_prefers_cjk_response(
+            "读取 README.md 的第一行"
+        ));
+        assert!(mixed_language_prefers_cjk_response(
+            "先执行 echo BEFORE_BREAK，再执行 definitely_missing_command_rustclaw_user_ops_13579，只告诉我哪一步挂了"
+        ));
     }
 
     #[test]

@@ -181,9 +181,12 @@ target_object = "path"
 delivery_shape = "summary"
 allowed_actions = ["fs_basic.grep_text", "fs_basic.read_text_range", "doc_parse"]
 preferred_actions = ["fs_basic.grep_text"]
-required_evidence = ["content_match"]
+required_evidence = ["content_match", "content_excerpt"]
 final_answer_shape = "presence_verdict_with_match"
 failure_policy = "retry_with_alternatives"
+
+[contracts.content_presence_check.evidence_expression]
+any_of = ["content_match", "content_excerpt"]
 
 [contracts.excerpt_kind_judgment]
 semantic_kind = "excerpt_kind_judgment"
@@ -362,7 +365,7 @@ target_object = "config_key"
 delivery_shape = "summary"
 allowed_actions = ["config_basic.guard_rustclaw_config", "config_edit.guard_config", "config_guard"]
 preferred_actions = ["config_basic.guard_rustclaw_config"]
-required_evidence = ["field_value"]
+required_evidence = ["candidates", "count"]
 final_answer_shape = "risk_assessment"
 failure_policy = "retry_with_alternatives"
 
