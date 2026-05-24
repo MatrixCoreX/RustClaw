@@ -244,7 +244,7 @@ fn strict_single_path_answer(answer: &str) -> Option<String> {
 }
 
 fn observed_single_path_values(journal: &crate::task_journal::TaskJournal) -> BTreeSet<String> {
-    let mut paths = BTreeSet::new();
+    let mut paths = observed_single_path_values_from_evidence_map(journal);
     for step in &journal.step_results {
         if step.status != crate::executor::StepExecutionStatus::Ok {
             continue;
@@ -373,7 +373,7 @@ fn markdown_table_separator_row(cells: &[String]) -> bool {
 }
 
 fn observed_table_cells(journal: &crate::task_journal::TaskJournal) -> BTreeSet<String> {
-    let mut cells = BTreeSet::new();
+    let mut cells = observed_table_cells_from_evidence_map(journal);
     for step in &journal.step_results {
         if step.status != crate::executor::StepExecutionStatus::Ok {
             continue;
@@ -502,7 +502,7 @@ fn normalize_strict_list_item(item: &str) -> String {
 }
 
 fn observed_strict_list_items(journal: &crate::task_journal::TaskJournal) -> Vec<String> {
-    let mut items = BTreeSet::new();
+    let mut items = observed_strict_list_items_from_evidence_map(journal);
     for step in &journal.step_results {
         if step.status != crate::executor::StepExecutionStatus::Ok {
             continue;
@@ -1032,6 +1032,12 @@ fn scalar_answer_is_grounded_in_successful_observation(
     if candidate_answer.is_empty() || candidate_answer.lines().count() > 1 {
         return false;
     }
+    if observed_scalar_values_from_evidence_map(journal)
+        .iter()
+        .any(|observed| observed == candidate_answer)
+    {
+        return true;
+    }
     journal.step_results.iter().any(|step| {
         step.status == crate::executor::StepExecutionStatus::Ok
             && step.output_excerpt.as_deref().is_some_and(|output| {
@@ -1067,6 +1073,221 @@ fn json_value_contains_scalar_answer(value: &serde_json::Value, candidate_answer
             .any(|item| json_value_contains_scalar_answer(item, candidate_answer)),
         serde_json::Value::Null => false,
     }
+}
+
+fn successful_observed_evidence_items(
+    journal: &crate::task_journal::TaskJournal,
+) -> Vec<serde_json::Value> {
+    let mut items = Vec::new();
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            continue;
+        }
+        let Some(evidence) = crate::task_journal::observed_evidence_for_step_trace(step) else {
+            continue;
+        };
+        if let Some(evidence_items) = evidence.get("items").and_then(|value| value.as_array()) {
+            items.extend(evidence_items.iter().cloned());
+        }
+    }
+    items
+}
+
+fn observed_scalar_values_from_evidence_map(
+    journal: &crate::task_journal::TaskJournal,
+) -> BTreeSet<String> {
+    let mut values = BTreeSet::new();
+    for item in successful_observed_evidence_items(journal) {
+        if observed_evidence_item_supports_scalar(&item) {
+            push_observed_evidence_excerpt(&item, &mut values);
+        }
+    }
+    values
+}
+
+fn observed_single_path_values_from_evidence_map(
+    journal: &crate::task_journal::TaskJournal,
+) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+    for item in successful_observed_evidence_items(journal) {
+        if observed_evidence_item_supports_single_path(&item) {
+            push_observed_evidence_excerpt(&item, &mut paths);
+        }
+    }
+    paths
+}
+
+fn observed_strict_list_items_from_evidence_map(
+    journal: &crate::task_journal::TaskJournal,
+) -> BTreeSet<String> {
+    let mut items = BTreeSet::new();
+    for item in successful_observed_evidence_items(journal) {
+        if observed_evidence_item_supports_strict_list(&item) {
+            if let Some(excerpt) = observed_evidence_excerpt(&item) {
+                push_observed_list_item(&excerpt, &mut items);
+            }
+        }
+    }
+    items
+}
+
+fn observed_table_cells_from_evidence_map(
+    journal: &crate::task_journal::TaskJournal,
+) -> BTreeSet<String> {
+    let mut cells = BTreeSet::new();
+    for item in successful_observed_evidence_items(journal) {
+        if observed_evidence_item_supports_table_cell(&item) {
+            if let Some(excerpt) = observed_evidence_excerpt(&item) {
+                let normalized = normalize_strict_list_item(&excerpt);
+                if !normalized.is_empty() {
+                    cells.insert(normalized);
+                }
+            }
+        }
+    }
+    cells
+}
+
+fn push_observed_evidence_excerpt(item: &serde_json::Value, values: &mut BTreeSet<String>) {
+    if let Some(excerpt) = observed_evidence_excerpt(item) {
+        values.insert(excerpt);
+    }
+}
+
+fn observed_evidence_excerpt(item: &serde_json::Value) -> Option<String> {
+    if item.get("redacted").and_then(|value| value.as_bool()) == Some(true) {
+        return None;
+    }
+    item.get("excerpt")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn observed_evidence_field(item: &serde_json::Value) -> Option<&str> {
+    item.get("field")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn observed_evidence_kind(item: &serde_json::Value) -> Option<&str> {
+    item.get("kind")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn observed_evidence_item_supports_scalar(item: &serde_json::Value) -> bool {
+    if !matches!(
+        observed_evidence_kind(item),
+        Some("string" | "number" | "bool" | "text" | "null")
+    ) {
+        return false;
+    }
+    let Some(field) = observed_evidence_field(item) else {
+        return false;
+    };
+    let leaf = observed_evidence_field_leaf(field);
+    matches!(
+        leaf.as_str(),
+        "bytes"
+            | "count"
+            | "file_size"
+            | "file_type"
+            | "found"
+            | "kind"
+            | "length"
+            | "manager"
+            | "package_manager"
+            | "present"
+            | "schema_version"
+            | "size"
+            | "size_bytes"
+            | "state"
+            | "status"
+            | "subject"
+            | "text_excerpt"
+            | "total"
+            | "type"
+            | "value"
+            | "version"
+    )
+}
+
+fn observed_evidence_item_supports_single_path(item: &serde_json::Value) -> bool {
+    if !matches!(observed_evidence_kind(item), Some("string" | "text")) {
+        return false;
+    }
+    let Some(field) = observed_evidence_field(item) else {
+        return false;
+    };
+    single_path_evidence_key(observed_evidence_field_leaf(field).as_str())
+}
+
+fn observed_evidence_item_supports_strict_list(item: &serde_json::Value) -> bool {
+    if !matches!(
+        observed_evidence_kind(item),
+        Some("string" | "number" | "bool")
+    ) {
+        return false;
+    }
+    let Some(field) = observed_evidence_field(item) else {
+        return false;
+    };
+    let normalized = field.to_ascii_lowercase();
+    let leaf = observed_evidence_field_leaf(&normalized);
+    if field_has_array_index(&normalized)
+        && matches!(
+            leaf.as_str(),
+            "identity_value" | "name" | "path" | "resolved_path" | "table" | "table_name"
+        )
+    {
+        return true;
+    }
+    [
+        "directories",
+        "dirs",
+        "files",
+        "identity_values",
+        "keys",
+        "names",
+        "paths",
+        "results",
+        "tables",
+    ]
+    .iter()
+    .any(|prefix| array_item_field_matches(&normalized, prefix))
+}
+
+fn observed_evidence_item_supports_table_cell(item: &serde_json::Value) -> bool {
+    if !matches!(
+        observed_evidence_kind(item),
+        Some("string" | "number" | "bool")
+    ) {
+        return false;
+    }
+    let Some(field) = observed_evidence_field(item) else {
+        return false;
+    };
+    field.to_ascii_lowercase().contains("rows[")
+}
+
+fn observed_evidence_field_leaf(field: &str) -> String {
+    let leaf = field.rsplit('.').next().unwrap_or(field);
+    let leaf = leaf.split_once('[').map_or(leaf, |(prefix, _)| prefix);
+    leaf.trim().to_ascii_lowercase()
+}
+
+fn field_has_array_index(field: &str) -> bool {
+    field.contains('[') && field.contains(']')
+}
+
+fn array_item_field_matches(field: &str, prefix: &str) -> bool {
+    field == prefix
+        || field.starts_with(&format!("{prefix}["))
+        || field.contains(&format!(".{prefix}["))
 }
 
 pub(crate) async fn verify_answer_observe_only(
@@ -1296,9 +1517,11 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        execution_evidence_prompt_block, local_missing_evidence_verifier_gap, should_verify_answer,
-        structural_satisfaction_can_skip_verifier, structurally_satisfies_answer_contract,
-        AnswerVerifierOut,
+        execution_evidence_prompt_block, local_missing_evidence_verifier_gap,
+        observed_scalar_values_from_evidence_map, observed_single_path_values_from_evidence_map,
+        observed_strict_list_items_from_evidence_map, observed_table_cells_from_evidence_map,
+        should_verify_answer, structural_satisfaction_can_skip_verifier,
+        structurally_satisfies_answer_contract, AnswerVerifierOut,
     };
 
     fn route_with_mode(ask_mode: crate::AskMode) -> crate::RouteResult {
@@ -1977,6 +2200,130 @@ mod tests {
             &route,
             &journal,
             "/tmp/rustclaw/missing.zip"
+        ));
+    }
+
+    #[test]
+    fn matrix_scalar_shape_uses_observed_evidence_map_values() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-matrix-scalar-evidence",
+            "ask",
+            "count them",
+        );
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "fs_basic",
+                json!({"count": 3, "items": ["a", "b", "c"]}).to_string(),
+            ));
+
+        assert!(observed_scalar_values_from_evidence_map(&journal).contains("3"));
+        assert!(structurally_satisfies_answer_contract(
+            &route, &journal, "3"
+        ));
+    }
+
+    #[test]
+    fn matrix_strict_list_shape_uses_observed_evidence_map_values() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-matrix-list-evidence",
+            "ask",
+            "list files",
+        );
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "fs_basic",
+                json!({
+                    "action": "inventory_dir",
+                    "names": ["README.md", "Cargo.toml"]
+                })
+                .to_string(),
+            ));
+
+        let items = observed_strict_list_items_from_evidence_map(&journal);
+        assert!(items.contains("readme.md"));
+        assert!(items.contains("cargo.toml"));
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "- README.md\n- Cargo.toml"
+        ));
+    }
+
+    #[test]
+    fn matrix_table_shape_uses_observed_evidence_map_cells() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-matrix-table-evidence",
+            "ask",
+            "list tables",
+        );
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "db_basic",
+                json!({
+                    "columns": ["name"],
+                    "rows": [
+                        {"name": "orders"},
+                        {"name": "users"}
+                    ]
+                })
+                .to_string(),
+            ));
+
+        let cells = observed_table_cells_from_evidence_map(&journal);
+        assert!(cells.contains("orders"));
+        assert!(cells.contains("users"));
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "| name |\n| --- |\n| orders |\n| users |"
+        ));
+    }
+
+    #[test]
+    fn matrix_single_path_shape_uses_observed_evidence_map_paths() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-matrix-path-evidence",
+            "ask",
+            "pack logs",
+        );
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "archive_basic",
+                json!({
+                    "archive_path": "/tmp/rustclaw/report.zip",
+                    "source_paths": ["/tmp/rustclaw/report.md"]
+                })
+                .to_string(),
+            ));
+
+        assert!(observed_single_path_values_from_evidence_map(&journal)
+            .contains("/tmp/rustclaw/report.zip"));
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "/tmp/rustclaw/report.zip"
         ));
     }
 
