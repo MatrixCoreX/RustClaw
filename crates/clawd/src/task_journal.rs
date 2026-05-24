@@ -830,10 +830,88 @@ fn evidence_coverage_trace_json(route: &crate::RouteResult, journal: &TaskJourna
     evidence_coverage_for_route(route, journal).to_trace_json()
 }
 
+fn task_outcome_summary_json(journal: &TaskJournal) -> Value {
+    let final_shape = journal
+        .route_result
+        .as_ref()
+        .and_then(crate::contract_matrix::trace_snapshot_for_route)
+        .and_then(|snapshot| {
+            snapshot
+                .get("final_answer_shape")
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+        });
+    let missing_evidence = journal
+        .route_result
+        .as_ref()
+        .map(|route| evidence_coverage_for_route(route, journal).missing_evidence)
+        .unwrap_or_default();
+    let missing_count = missing_evidence.len();
+    let state = match journal.final_status {
+        Some(TaskJournalFinalStatus::Success) if missing_count == 0 => "completed",
+        Some(TaskJournalFinalStatus::Success) => "needs_attention",
+        Some(TaskJournalFinalStatus::Clarify) => "needs_input",
+        Some(TaskJournalFinalStatus::Failure | TaskJournalFinalStatus::ResumeFailure) => "failed",
+        None => "in_progress",
+    };
+    let (message_zh, message_en, next_step_zh, next_step_en) = match state {
+        "completed" => (
+            "任务已完成。",
+            "The task completed.",
+            "可以直接查看结果。",
+            "You can review the result.",
+        ),
+        "needs_attention" => (
+            "任务已返回结果，但证据没有完全匹配。",
+            "The task returned a result, but evidence did not fully match.",
+            "请展开技术详情确认缺少的证据，必要时补充目标后重试。",
+            "Open technical details to check missing evidence, then add the target and retry if needed.",
+        ),
+        "needs_input" => (
+            "任务需要你补充信息。",
+            "The task needs more information.",
+            "请按提示补充目标、路径或确认信息。",
+            "Provide the requested target, path, or confirmation.",
+        ),
+        "failed" if missing_count > 0 => (
+            "任务没有完成，缺少必要证据。",
+            "The task did not complete because required evidence is missing.",
+            "请补充明确目标后重试。",
+            "Add a clearer target and retry.",
+        ),
+        "failed" => (
+            "任务没有完成。",
+            "The task did not complete.",
+            "请根据错误信息处理后重试；技术详情已保留在下方。",
+            "Use the error message to decide the next step, then retry. Technical details are available below.",
+        ),
+        _ => (
+            "任务正在处理。",
+            "The task is in progress.",
+            "稍后重新查询任务状态。",
+            "Query the task again shortly.",
+        ),
+    };
+    json!({
+        "schema_version": 1,
+        "state": state,
+        "message_zh": message_zh,
+        "message_en": message_en,
+        "next_step_zh": next_step_zh,
+        "next_step_en": next_step_en,
+        "final_answer_shape": final_shape,
+        "missing_evidence_count": missing_count,
+        "has_technical_details": true,
+    })
+}
+
 fn observed_evidence_field_sets(journal: &TaskJournal) -> (BTreeSet<String>, BTreeSet<String>) {
     let mut observed_fields = BTreeSet::new();
     let mut observed_canonical = BTreeSet::new();
     for step in &journal.step_results {
+        if !step_can_supply_contract_evidence(step) {
+            continue;
+        }
         let Some(evidence) = observed_evidence_for_step_trace(step) else {
             continue;
         };
@@ -855,6 +933,14 @@ fn observed_evidence_field_sets(journal: &TaskJournal) -> (BTreeSet<String>, BTr
         }
     }
     (observed_fields, observed_canonical)
+}
+
+fn step_can_supply_contract_evidence(step: &TaskJournalStepTrace) -> bool {
+    step.status == crate::executor::StepExecutionStatus::Ok
+        && !matches!(
+            step.skill.as_str(),
+            "respond" | "synthesize_answer" | "think" | "answer_verifier"
+        )
 }
 
 fn normalize_evidence_field(field: &str) -> String {
@@ -1556,6 +1642,7 @@ impl TaskJournal {
                 .as_ref()
                 .map(|summary| finalizer_summary_json(summary, self.route_result.as_ref(), self)),
             "answer_verifier_summary": self.answer_verifier_summary.as_ref().map(answer_verifier_summary_json),
+            "task_outcome": task_outcome_summary_json(self),
             "task_metrics": task_metrics_json(&self.task_metrics),
             "final_answer": self.final_answer.as_deref().map(crate::truncate_for_log),
         })
@@ -2353,6 +2440,139 @@ mod tests {
             .get("observed_canonical")
             .and_then(Value::as_array)
             .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("candidates"))));
+        let summary = journal.to_summary_json();
+        assert_eq!(
+            summary
+                .get("task_outcome")
+                .and_then(|value| value.get("state"))
+                .and_then(Value::as_str),
+            Some("in_progress")
+        );
+    }
+
+    #[test]
+    fn evidence_coverage_ignores_failed_and_synthesis_outputs() {
+        let mut journal = TaskJournal::for_task(
+            "task-evidence-coverage-filter",
+            "ask",
+            "summarize file content",
+        );
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            requires_content_evidence: true,
+            semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
+            locator_kind: crate::OutputLocatorKind::Path,
+            locator_hint: "README.md".to_string(),
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_failed".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Error,
+            output: Some(json!({"content": "failed read should not count"}).to_string()),
+            error: Some("read failed".to_string()),
+            started_at: 1,
+            finished_at: 2,
+        });
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_synthesis".to_string(),
+            skill: "synthesize_answer".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({"content": "model synthesis should not count as observed content"})
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 3,
+            finished_at: 4,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+
+        assert!(!coverage.is_complete());
+        assert_eq!(coverage.missing_evidence, vec!["content_excerpt"]);
+        assert!(!coverage.observed_canonical.contains("content_excerpt"));
+    }
+
+    #[test]
+    fn summary_json_includes_user_readable_task_outcome() {
+        let mut journal = TaskJournal::for_task("task-outcome", "ask", "列出文件名");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::FileNames,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.record_final_status(TaskJournalFinalStatus::Success);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(json!({"names": ["Cargo.toml", "README.md"]}).to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let outcome = journal
+            .to_summary_json()
+            .get("task_outcome")
+            .cloned()
+            .expect("task outcome");
+
+        assert_eq!(
+            outcome.get("state").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert_eq!(
+            outcome.get("final_answer_shape").and_then(Value::as_str),
+            Some("name_list")
+        );
+        assert_eq!(
+            outcome
+                .get("missing_evidence_count")
+                .and_then(Value::as_u64),
+            Some(0)
+        );
+        assert!(outcome.get("message_zh").and_then(Value::as_str).is_some());
+        assert!(outcome
+            .get("next_step_en")
+            .and_then(Value::as_str)
+            .is_some());
     }
 
     #[test]
