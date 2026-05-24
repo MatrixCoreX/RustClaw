@@ -1017,6 +1017,27 @@ fn apply_current_turn_structural_contract_repair(
         reason = Some("semantic_contract_requires_evidence");
     }
 
+    if let Some((semantic_kind, locator_hint)) =
+        archive_pair_contract_from_surface(output_contract, req_surface)
+    {
+        output_contract.semantic_kind = semantic_kind;
+        output_contract.requires_content_evidence = true;
+        output_contract.delivery_required = false;
+        output_contract.delivery_intent = OutputDeliveryIntent::None;
+        output_contract.response_shape = match semantic_kind {
+            OutputSemanticKind::ArchivePack => OutputResponseShape::Scalar,
+            OutputSemanticKind::ArchiveUnpack => OutputResponseShape::OneSentence,
+            _ => output_contract.response_shape,
+        };
+        output_contract.locator_kind = OutputLocatorKind::Path;
+        output_contract.locator_hint = locator_hint;
+        reason = Some(match semantic_kind {
+            OutputSemanticKind::ArchivePack => "archive_pack_pair_contract_repair",
+            OutputSemanticKind::ArchiveUnpack => "archive_unpack_pair_contract_repair",
+            _ => "archive_pair_contract_repair",
+        });
+    }
+
     if output_contract.semantic_kind == OutputSemanticKind::ScalarPathOnly
         && req_surface.has_structured_target_refinement()
     {
@@ -1111,6 +1132,88 @@ fn apply_current_turn_structural_contract_repair(
     }
 
     reason
+}
+
+fn archive_pair_contract_from_surface(
+    output_contract: &IntentOutputContract,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> Option<(OutputSemanticKind, String)> {
+    let generated_delivery_contract = output_contract.semantic_kind
+        == OutputSemanticKind::GeneratedFileDelivery
+        || (output_contract.semantic_kind == OutputSemanticKind::None
+            && (output_contract.delivery_required
+                || matches!(
+                    output_contract.response_shape,
+                    OutputResponseShape::FileToken
+                )
+                || matches!(
+                    output_contract.delivery_intent,
+                    OutputDeliveryIntent::FileSingle
+                )));
+    let (left, right) = req_surface.locator_target_pair.as_ref()?;
+    let left_is_archive = contract_repair_supported_archive_path(left);
+    let right_is_archive = contract_repair_supported_archive_path(right);
+    let inferred_kind = match (left_is_archive, right_is_archive) {
+        (false, true) => Some((
+            OutputSemanticKind::ArchivePack,
+            format!("{} | {}", left.trim(), right.trim()),
+        )),
+        (true, false) => Some((
+            OutputSemanticKind::ArchiveUnpack,
+            format!("{} | {}", left.trim(), right.trim()),
+        )),
+        _ => None,
+    }?;
+    let structural_operation_pair =
+        archive_pair_has_structural_operation_shape(inferred_kind.0, left, right);
+    let already_archive_contract = output_contract.semantic_kind == inferred_kind.0;
+    let scalar_or_drift_contract = structural_operation_pair
+        && !matches!(output_contract.response_shape, OutputResponseShape::Strict)
+        && matches!(
+            output_contract.semantic_kind,
+            OutputSemanticKind::None
+                | OutputSemanticKind::ScalarPathOnly
+                | OutputSemanticKind::ContentExcerptSummary
+        );
+    if already_archive_contract || generated_delivery_contract || scalar_or_drift_contract {
+        return Some(inferred_kind);
+    }
+    None
+}
+
+fn archive_pair_has_structural_operation_shape(
+    semantic_kind: OutputSemanticKind,
+    left: &str,
+    right: &str,
+) -> bool {
+    match semantic_kind {
+        OutputSemanticKind::ArchivePack => {
+            !contract_repair_supported_archive_path(left)
+                && contract_repair_path_operand_is_structural(left)
+                && contract_repair_supported_archive_path(right)
+        }
+        OutputSemanticKind::ArchiveUnpack => {
+            contract_repair_supported_archive_path(left)
+                && !contract_repair_supported_archive_path(right)
+                && contract_repair_path_operand_is_structural(right)
+        }
+        _ => false,
+    }
+}
+
+fn contract_repair_path_operand_is_structural(path: &str) -> bool {
+    let path = path.trim();
+    path.starts_with("./")
+        || path.starts_with("../")
+        || path.starts_with('/')
+        || path.starts_with("~/")
+        || path.contains('/')
+        || path.contains('\\')
+}
+
+fn contract_repair_supported_archive_path(path: &str) -> bool {
+    let path = path.trim().to_ascii_lowercase();
+    path.ends_with(".zip") || path.ends_with(".tar.gz") || path.ends_with(".tgz")
 }
 
 fn apply_self_contained_payload_direct_answer_contract_repair(
@@ -1916,6 +2019,13 @@ fn apply_current_turn_anchor_drift_repair(
     current_anchor_path: &str,
     workspace_root: &Path,
 ) -> Option<&'static str> {
+    if matches!(
+        output_contract.semantic_kind,
+        OutputSemanticKind::ArchivePack | OutputSemanticKind::ArchiveUnpack
+    ) && output_contract.locator_hint.contains('|')
+    {
+        return None;
+    }
     if !normalizer_target_drifted_from_current_anchor(
         output_contract,
         resolved_user_intent,
@@ -2052,7 +2162,13 @@ fn apply_explicit_command_execution_contract_repair(
     *needs_clarify = false;
     clarify_question.clear();
     output_contract.requires_content_evidence = true;
-    output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    output_contract.semantic_kind =
+        if output_contract.semantic_kind == OutputSemanticKind::ExecutionFailedStep {
+            output_contract.response_shape = OutputResponseShape::Strict;
+            OutputSemanticKind::ExecutionFailedStep
+        } else {
+            OutputSemanticKind::RawCommandOutput
+        };
     output_contract.locator_kind = OutputLocatorKind::None;
     output_contract.locator_hint.clear();
     *first_layer_decision = FirstLayerDecision::PlannerExecute;
@@ -3334,8 +3450,9 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("Every enum field must be exactly one listed schema token. Do not output aliases, combined values, or explanatory prose in decision/output_contract/execution_recipe/turn_type/target_task_policy.".to_string());
     parts.push("Boolean fields must be JSON true/false, not prose. self_extension must be an object with mode/trigger/execute_now; use {\"mode\":\"none\",\"trigger\":\"none\",\"execute_now\":false} unless the user explicitly asks for self-extension. If locator_kind=\"none\", locator_hint must be \"\".".to_string());
     parts.push("If the user asks to observe/list/read first but only return a scalar result, set response_shape=\"scalar\" and use a matching semantic_kind only when one applies: scalar_count for generic counts, hidden_entries_check for hidden/dot-prefixed entry counts, scalar_path_only only for a path/current-directory/workspace-location answer, sqlite_schema_version for SQLite schema-version metadata. For config field values, package names, usernames, hostnames, titles, IDs, or other non-path scalar values, keep semantic_kind=\"none\" unless another specific enum applies. If the final answer must include both a structured field/key/path identifier and its value, it is not a scalar-only value response: use response_shape=\"strict\" and preserve the key/value shape in resolved_user_intent. If the request requires an exact non-scalar output format with fixed count, body-only delivery, one-line fixed format, placeholder format, or no-extra-output delivery, set response_shape=\"strict\" and preserve the exact format in resolved_user_intent. For any exact counted-sentence requirement, also set exact_sentence_count to that positive integer; use response_shape=\"strict\" when the count is greater than 1. Never put natural-language format descriptions in response_shape.".to_string());
-    parts.push("For ordered command/tool execution where the final answer should identify only the failed step(s), set response_shape=\"strict\", semantic_kind=\"execution_failed_step\", requires_content_evidence=true, delivery_required=false. This is a semantic judgment from the requested final answer shape, not a phrase-list trigger.".to_string());
+    parts.push("For command/tool execution where the final answer is about execution failure itself, including a single failed command/action or ordered failed step(s), set response_shape=\"strict\", semantic_kind=\"execution_failed_step\", requires_content_evidence=true, delivery_required=false. This is a semantic judgment from the requested final answer shape, not a phrase-list trigger.".to_string());
     parts.push("For requests to create/save/write a new artifact and then send/deliver it, set response_shape=\"file_token\", semantic_kind=\"generated_file_delivery\", delivery_required=true, delivery_intent=\"file_single\", requires_content_evidence=true. If the user did not supply a filename but the artifact type/content is clear, do not ask for one; let execution planning choose a safe workspace filename.".to_string());
+    parts.push("For archive pack/create/compress or unpack/extract/decompress requests, use semantic_kind=\"archive_pack\" or semantic_kind=\"archive_unpack\" even when the final answer asks only for the resulting path or status. Do not classify archive operations as generated_file_delivery; they have dedicated archive contracts and actions.".to_string());
     parts.push("For requests to send/deliver/receive an existing or selected local file, including a file selected from an observed or target directory by ordinal/order such as first/last/newest/largest, set wants_file_delivery=true, response_shape=\"file_token\", delivery_required=true, delivery_intent=\"file_single\", requires_content_evidence=true. The final answer must be a file token, not a bare filename, file_path_and_content answer_candidate, or pasted file content. This is a semantic delivery contract, not a phrase list.".to_string());
     parts.push("Text drafting/composition is not file delivery by default. If REQUEST asks to write/draft/compose an article, note, proposal, summary, checklist, tutorial, guide, or long-form text for the chat, but does not explicitly ask to save it to a file/path/document or send/deliver it as an attachment/artifact, do not use response_shape=\"file_token\" or semantic_kind=\"generated_file_delivery\". Keep delivery_required=false, wants_file_delivery=false, and use response_shape=\"free\" or \"strict\" according to the requested prose format. If the text is project-bound and needs workspace facts, use decision=\"planner_execute\", requires_content_evidence=true, locator_kind=\"current_workspace\"; still keep file delivery disabled. Examples: \"帮我写一篇关于 RustClaw 的长文\" / \"Write a long article about RustClaw\" means pasted prose in chat, while \"帮我写成 md 文件并发给我\" / \"Create a markdown file and send it to me\" means generated file delivery.".to_string());
     parts.push("For exact same/different comparison of two scalar/field values that still need observation, use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, response_shape=\"strict\", semantic_kind=\"recent_scalar_equality_check\". Keep the requested final line format in resolved_user_intent.".to_string());
@@ -9089,6 +9206,35 @@ mod tests {
     }
 
     #[test]
+    fn current_turn_anchor_drift_repair_preserves_archive_pair_contract() {
+        let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::OneSentence,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            semantic_kind: OutputSemanticKind::ArchiveUnpack,
+            locator_hint:
+                "/tmp/rustclaw-anchor-test/tmp/test_bundle.zip | /tmp/rustclaw-anchor-test/out"
+                    .to_string(),
+            ..Default::default()
+        };
+
+        let repair = super::apply_current_turn_anchor_drift_repair(
+            &mut contract,
+            "archive unpack path pair",
+            "/tmp/rustclaw-anchor-test/tmp/test_bundle.zip",
+            workspace,
+        );
+
+        assert_eq!(repair, None);
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveUnpack);
+        assert_eq!(
+            contract.locator_hint,
+            "/tmp/rustclaw-anchor-test/tmp/test_bundle.zip | /tmp/rustclaw-anchor-test/out"
+        );
+    }
+
+    #[test]
     fn current_turn_anchor_repair_stays_off_for_executionless_chat() {
         let contract = IntentOutputContract::default();
         let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
@@ -13255,6 +13401,48 @@ mod tests {
     }
 
     #[test]
+    fn explicit_command_execution_repair_preserves_failed_step_contract() {
+        let runtime = crate::CommandIntentRuntime {
+            all_result_suffixes: vec![],
+            execute_prefixes: vec!["执行".to_string()],
+            standalone_commands: vec![],
+            default_locale: "zh-CN".to_string(),
+            verify_enforce_enabled: true,
+        };
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+        let mut needs_clarify = false;
+        let mut clarify_question = String::new();
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            semantic_kind: OutputSemanticKind::ExecutionFailedStep,
+            ..IntentOutputContract::default()
+        };
+
+        let repair = super::apply_explicit_command_execution_contract_repair(
+            &runtime,
+            "执行一个会失败的只读检查命令：cat /definitely_missing_rustclaw_contract_case，然后说明失败原因。",
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut contract,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(repair, Some("explicit_command_requires_fresh_execution"));
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+        assert_eq!(
+            contract.semantic_kind,
+            OutputSemanticKind::ExecutionFailedStep
+        );
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+        assert!(contract.locator_hint.is_empty());
+    }
+
+    #[test]
     fn explicit_command_execution_repair_respects_pure_direct_answer_contract() {
         let runtime = crate::CommandIntentRuntime {
             all_result_suffixes: vec![],
@@ -13939,6 +14127,279 @@ mod tests {
         assert_eq!(clarify_question, "请提供压缩包路径");
         assert_eq!(decision, FirstLayerDecision::Clarify);
         assert!(!contract.requires_content_evidence);
+    }
+
+    #[test]
+    fn archive_pack_pair_repairs_generated_file_delivery_contract() {
+        let req = "把 scripts/nl_tests/fixtures/device_local/docs 打包成 tmp/contract_matrix_docs_bundle.zip，并告诉我生成路径。";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        assert_eq!(
+            surface.locator_target_pair,
+            Some((
+                "scripts/nl_tests/fixtures/device_local/docs".to_string(),
+                "tmp/contract_matrix_docs_bundle.zip".to_string()
+            ))
+        );
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::FileToken,
+            requires_content_evidence: true,
+            delivery_required: true,
+            delivery_intent: OutputDeliveryIntent::FileSingle,
+            semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(reason, Some("archive_pack_pair_contract_repair"));
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchivePack);
+        assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+        assert!(contract.requires_content_evidence);
+        assert!(!contract.delivery_required);
+        assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(
+            contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/docs | tmp/contract_matrix_docs_bundle.zip"
+        );
+    }
+
+    #[test]
+    fn archive_pack_pair_repairs_scalar_path_only_contract() {
+        let req = "把 scripts/nl_tests/fixtures/device_local/docs 打包成 tmp/contract_matrix_docs_bundle.zip，并告诉我生成路径。";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Scalar,
+            requires_content_evidence: true,
+            delivery_required: false,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::ScalarPathOnly,
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(reason, Some("archive_pack_pair_contract_repair"));
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchivePack);
+        assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+        assert_eq!(
+            contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/docs | tmp/contract_matrix_docs_bundle.zip"
+        );
+    }
+
+    #[test]
+    fn archive_unpack_pair_repairs_generated_file_delivery_contract() {
+        let req = "把 tmp/contract_matrix_docs_bundle.zip 解压到 tmp/contract_matrix_unpacked，并告诉我结果。";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        assert_eq!(
+            surface.locator_target_pair,
+            Some((
+                "tmp/contract_matrix_docs_bundle.zip".to_string(),
+                "tmp/contract_matrix_unpacked".to_string()
+            ))
+        );
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::FileToken,
+            requires_content_evidence: true,
+            delivery_required: true,
+            delivery_intent: OutputDeliveryIntent::FileSingle,
+            semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(reason, Some("archive_unpack_pair_contract_repair"));
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveUnpack);
+        assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
+        assert!(contract.requires_content_evidence);
+        assert!(!contract.delivery_required);
+        assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(
+            contract.locator_hint,
+            "tmp/contract_matrix_docs_bundle.zip | tmp/contract_matrix_unpacked"
+        );
+    }
+
+    #[test]
+    fn archive_unpack_pair_repairs_generic_path_content_contract() {
+        let req = "把 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 解压到 tmp/contract_matrix_unpacked，并简短说明结果。";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        assert_eq!(
+            surface.locator_target_pair,
+            Some((
+                "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip".to_string(),
+                "tmp/contract_matrix_unpacked".to_string()
+            ))
+        );
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::None,
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(reason, Some("archive_unpack_pair_contract_repair"));
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveUnpack);
+        assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
+        assert!(contract.requires_content_evidence);
+        assert!(!contract.delivery_required);
+        assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(
+            contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | tmp/contract_matrix_unpacked"
+        );
+    }
+
+    #[test]
+    fn archive_unpack_pair_repairs_content_excerpt_drift_contract() {
+        let req = "把 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 解压到 tmp/contract_matrix_unpacked，并简短说明结果。";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "scripts/nl_tests/fixtures/device_local".to_string(),
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(reason, Some("archive_unpack_pair_contract_repair"));
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveUnpack);
+        assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(
+            contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | tmp/contract_matrix_unpacked"
+        );
+    }
+
+    #[test]
+    fn archive_unpack_pair_repairs_policy_suffix_contract() {
+        let req = concat!(
+            "把 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 解压到 tmp/contract_matrix_unpacked，并简短说明结果。",
+            "\n[CONTRACT_TEST_HINT]\n",
+            "candidate_wrong_action_ref=fs_basic.write_text\n",
+            "policy_expectation=runtime_must_reject_or_replace_disallowed_action\n",
+            "[/CONTRACT_TEST_HINT]"
+        );
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        assert_eq!(
+            surface.locator_target_pair,
+            Some((
+                "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip".to_string(),
+                "tmp/contract_matrix_unpacked".to_string()
+            ))
+        );
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::None,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip".to_string(),
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(reason, Some("archive_unpack_pair_contract_repair"));
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveUnpack);
+        assert_eq!(contract.response_shape, OutputResponseShape::OneSentence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(
+            contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | tmp/contract_matrix_unpacked"
+        );
+    }
+
+    #[test]
+    fn archive_pair_does_not_repair_plain_observation_contract() {
+        let req =
+            "比较 tmp/contract_matrix_docs_bundle.zip 和 tmp/contract_matrix_unpacked 的大小差异。";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        assert!(surface.locator_target_pair.is_some());
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::None,
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_ne!(reason, Some("archive_unpack_pair_contract_repair"));
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+        assert_eq!(contract.response_shape, OutputResponseShape::Strict);
     }
 
     #[test]

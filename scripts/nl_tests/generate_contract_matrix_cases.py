@@ -258,6 +258,50 @@ def base_case(
     }
 
 
+def contract_test_hint_lines(case: dict[str, Any]) -> list[str]:
+    lines = [
+        f"contract_type={case.get('contract_type') or ''}",
+        f"contract_id={case.get('contract_id') or ''}",
+        f"semantic_kind={case.get('semantic_kind') or ''}",
+        f"phase={case.get('phase') or ''}",
+        f"final_answer_shape={case.get('final_answer_shape') or ''}",
+        "required_evidence_json="
+        + json.dumps(case.get("required_evidence") or [], ensure_ascii=False, sort_keys=True),
+        "evidence_expression_json="
+        + json.dumps(case.get("evidence_expression") or {}, ensure_ascii=False, sort_keys=True),
+        "allowed_actions_json="
+        + json.dumps(case.get("allowed_actions") or [], ensure_ascii=False, sort_keys=True),
+        "forbidden_actions_json="
+        + json.dumps(case.get("forbidden_actions") or [], ensure_ascii=False, sort_keys=True),
+        f"none_passthrough={str(bool(case.get('none_passthrough'))).lower()}",
+    ]
+    action_ref = case.get("action_ref")
+    decision = case.get("expected_policy_decision")
+    if isinstance(action_ref, str) and action_ref:
+        if case.get("phase") == "allowed_action" and live_nl_action_preference_applicable(case):
+            lines.append(f"preferred_action_ref={action_ref}")
+            lines.append("policy_expectation=use_allowed_action_with_required_evidence")
+        elif case.get("phase") == "negative_action" and decision != "allowed":
+            lines.append(f"candidate_wrong_action_ref={action_ref}")
+            lines.append("policy_expectation=runtime_must_reject_or_replace_disallowed_action")
+        else:
+            lines.append(f"action_ref={action_ref}")
+    if decision:
+        lines.append(f"expected_policy_decision={decision}")
+    return lines
+
+
+def append_contract_test_hint(prompt: str, case: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            prompt,
+            "[CONTRACT_TEST_HINT]",
+            *contract_test_hint_lines(case),
+            "[/CONTRACT_TEST_HINT]",
+        ]
+    )
+
+
 def generated_prompt_for_case(case: dict[str, Any]) -> str:
     contract_id = str(case.get("contract_id") or "")
     if case.get("contract_type") == "generic":
@@ -269,17 +313,7 @@ def generated_prompt_for_case(case: dict[str, Any]) -> str:
             f"按 RustClaw 结构化任务 {contract_id} 做一次只读检查，"
             "需要先观察证据，再按要求给出简短结果。"
         )
-    phase = str(case.get("phase") or "")
-    action_ref = case.get("action_ref")
-    decision = case.get("expected_policy_decision")
-    if phase == "allowed_action" and action_ref:
-        return f"{prompt} 这是 contract action 覆盖用例：优先使用 {action_ref} 完成，不要跳过观察。"
-    if phase == "negative_action" and action_ref and decision != "allowed":
-        return (
-            f"{prompt} 这是 contract policy 覆盖用例：如果 planner 倾向使用 {action_ref}，"
-            "runtime 应按 matrix 拦截或改用允许的工具。"
-        )
-    return prompt
+    return append_contract_test_hint(prompt, case)
 
 
 def as_nl_case(case: dict[str, Any]) -> dict[str, Any]:
@@ -311,6 +345,34 @@ def as_nl_case(case: dict[str, Any]) -> dict[str, Any]:
 
 def action_skill(action_ref: str) -> str:
     return parse_action(action_ref)[0]
+
+
+def live_nl_action_preference_applicable(case: dict[str, Any]) -> bool:
+    """Return whether a live NL prompt can safely force this allowed action.
+
+    Contract actions may be conditionally valid for a subtype of the target
+    object. For example, `archive_basic.read` is a valid way to provide a
+    content excerpt when the target is an archive member, but the default live
+    prompt for `content_excerpt_summary` targets a plain markdown file. For
+    live replay we keep the contract/evidence coverage but avoid forcing an
+    action whose argument contract cannot be satisfied by that prompt.
+    """
+
+    action_ref = case.get("action_ref")
+    if not isinstance(action_ref, str):
+        return True
+    contract_id = str(case.get("contract_id") or "")
+    action = normalize_token(action_ref).replace("-", "_")
+    archive_action_contracts = {
+        "archive_basic.list": {"archive_list"},
+        "archive_basic.read": {"archive_read"},
+        "archive_basic.pack": {"archive_pack"},
+        "archive_basic.unpack": {"archive_unpack"},
+    }
+    allowed_contracts = archive_action_contracts.get(action)
+    if allowed_contracts is not None:
+        return contract_id in allowed_contracts
+    return True
 
 
 def allowed_action_refs(case: dict[str, Any]) -> list[str]:
@@ -354,7 +416,11 @@ def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any
         skills = allowed_execution_skills(case)
         if skills:
             row["executed_any"] = skills
-    if case.get("phase") == "allowed_action" and case.get("action_ref"):
+    if (
+        case.get("phase") == "allowed_action"
+        and case.get("action_ref")
+        and live_nl_action_preference_applicable(case)
+    ):
         row["planned_action_any"] = [str(case["action_ref"])]
 
     if case.get("phase") == "negative_action":

@@ -474,6 +474,7 @@ fn step_contract_trace_json(
 
 pub(crate) fn observed_evidence_for_step_trace(step: &TaskJournalStepTrace) -> Option<Value> {
     observed_evidence_from_output(step.output_excerpt.as_deref())
+        .or_else(|| observed_evidence_from_error(step.error_excerpt.as_deref()))
 }
 
 pub(crate) fn observed_evidence_from_output(output: Option<&str>) -> Option<Value> {
@@ -496,6 +497,38 @@ pub(crate) fn observed_evidence_from_output(output: Option<&str>) -> Option<Valu
     Some(json!({
         "schema_version": 1,
         "source": "step_output",
+        "format": format,
+        "storage": "redacted_excerpt_hash",
+        "item_count": item_count,
+        "truncated": item_count > collector.items.len(),
+        "items": collector.items,
+    }))
+}
+
+fn observed_evidence_from_error(error: Option<&str>) -> Option<Value> {
+    let error = error.map(str::trim).filter(|value| !value.is_empty())?;
+    let mut collector = ObservedEvidenceCollector::default();
+    let format = if let Some(structured) = crate::skills::parse_structured_skill_error(error) {
+        collector.push(json_observed_evidence_item(
+            "structured_error",
+            "error_text",
+            &json!(structured.error_text),
+        ));
+        if let Some(extra) = structured.extra.as_ref() {
+            collect_json_observed_evidence(&mut collector, "structured_error.extra", "", extra, 0);
+        }
+        "json"
+    } else {
+        collect_text_observed_evidence(&mut collector, error);
+        "text"
+    };
+    if collector.items.is_empty() {
+        return None;
+    }
+    let item_count = collector.total_count;
+    Some(json!({
+        "schema_version": 1,
+        "source": "step_error",
         "format": format,
         "storage": "redacted_excerpt_hash",
         "item_count": item_count,
@@ -655,20 +688,46 @@ fn collect_text_observed_evidence(collector: &mut ObservedEvidenceCollector, out
             &json!(count),
         ));
     }
+    if let Some(subject) = text_git_oneline_subject_evidence(output) {
+        collector.push(text_extracted_evidence_item("subject", &subject));
+    }
+    if let Some(path) = text_path_evidence(output) {
+        collector.push(text_extracted_evidence_item("path", &path));
+    }
+    if let Some(status) = text_status_evidence(output) {
+        collector.push(text_extracted_evidence_item("status", status));
+        collector.push(text_extracted_evidence_item("candidates[0]", status));
+    }
+    collect_text_machine_key_value_evidence(collector, output);
+    if let Some(state) = text_git_state_evidence(output) {
+        collector.push(text_extracted_evidence_item("state", state));
+    }
     let lines = output
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>();
-    if lines.len() == 1 && text_line_looks_like_path(lines[0]) {
-        collector.push(text_extracted_evidence_item("path", lines[0]));
-        return;
-    }
     if lines.len() > 1
         && lines
             .iter()
             .all(|line| text_line_looks_like_list_item(line))
     {
+        collector.push(json_observed_evidence_item(
+            "text_output.extractor",
+            "count",
+            &json!(lines.len()),
+        ));
+        let hidden_count = lines
+            .iter()
+            .filter(|line| text_line_looks_like_hidden_entry(line))
+            .count();
+        if hidden_count > 0 {
+            collector.push(json_observed_evidence_item(
+                "text_output.extractor",
+                "hidden_count",
+                &json!(hidden_count),
+            ));
+        }
         for (idx, line) in lines.iter().take(MAX_OBSERVED_EVIDENCE_ITEMS).enumerate() {
             collector.push(text_extracted_evidence_item(
                 &format!("results[{idx}]"),
@@ -676,6 +735,61 @@ fn collect_text_observed_evidence(collector: &mut ObservedEvidenceCollector, out
             ));
         }
     }
+}
+
+fn collect_text_machine_key_value_evidence(
+    collector: &mut ObservedEvidenceCollector,
+    output: &str,
+) {
+    let mut seen = BTreeSet::new();
+    for token in output.lines().flat_map(str::split_whitespace) {
+        let token = token
+            .trim_matches(|ch: char| {
+                matches!(
+                    ch,
+                    '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';'
+                )
+            })
+            .trim();
+        let Some((raw_key, raw_value)) = token.split_once('=') else {
+            continue;
+        };
+        let key = normalize_evidence_field(raw_key);
+        if !machine_key_value_evidence_key_allowed(&key) || evidence_field_is_sensitive(&key) {
+            continue;
+        }
+        let value = raw_value
+            .trim()
+            .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | ',' | ';'));
+        if value.is_empty() || text_looks_sensitive(value) {
+            continue;
+        }
+        if seen.insert((key.clone(), value.to_string())) {
+            collector.push(text_extracted_evidence_item(&key, value));
+        }
+    }
+}
+
+fn machine_key_value_evidence_key_allowed(key: &str) -> bool {
+    matches!(
+        key,
+        "field_value"
+            | "value"
+            | "status"
+            | "state"
+            | "version"
+            | "schema_version"
+            | "package_manager"
+            | "manager"
+            | "subject"
+            | "branch"
+            | "commit"
+            | "valid"
+            | "available"
+            | "exit"
+            | "exit_code"
+            | "error_kind"
+    )
 }
 
 fn text_extracted_evidence_item(field: &str, value: &str) -> Value {
@@ -719,6 +833,147 @@ fn text_count_evidence(output: &str) -> Option<i64> {
     (counts.len() == 1).then(|| *counts.iter().next().expect("single count"))
 }
 
+fn text_status_evidence(output: &str) -> Option<&'static str> {
+    let lowered = output.trim().to_ascii_lowercase();
+    if lowered.is_empty() {
+        return None;
+    }
+    if lowered.contains("docker unavailable") {
+        return Some("docker unavailable");
+    }
+    None
+}
+
+fn text_git_state_evidence(output: &str) -> Option<&'static str> {
+    let mut saw_git_branch = false;
+    let mut saw_change = false;
+    for line in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        if line.starts_with("## ") {
+            saw_git_branch = true;
+            continue;
+        }
+        if line == "exit=0" {
+            continue;
+        }
+        if line
+            .chars()
+            .take(2)
+            .any(|ch| matches!(ch, 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | '?' | '!'))
+        {
+            saw_change = true;
+        }
+    }
+    if saw_git_branch {
+        Some(if saw_change { "dirty" } else { "clean" })
+    } else {
+        None
+    }
+}
+
+fn text_path_evidence(output: &str) -> Option<String> {
+    let lines = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    if lines.len() == 1 && text_line_looks_like_standalone_path(lines[0]) {
+        return Some(lines[0].to_string());
+    }
+    if let Some(path) = labeled_text_path_evidence(output) {
+        return Some(path);
+    }
+    let mut paths = BTreeSet::new();
+    for token in output.split_whitespace() {
+        let candidate = token
+            .trim_matches(|ch: char| {
+                matches!(
+                    ch,
+                    '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | '。' | '，'
+                )
+            })
+            .trim();
+        if text_line_looks_like_path(candidate) {
+            paths.insert(candidate.to_string());
+            continue;
+        }
+        if let Some((_, rhs)) = candidate.split_once('=') {
+            let rhs = rhs.trim();
+            if text_line_looks_like_path(rhs) {
+                paths.insert(rhs.to_string());
+            }
+        }
+    }
+    (paths.len() == 1).then(|| paths.into_iter().next().expect("single path"))
+}
+
+fn labeled_text_path_evidence(output: &str) -> Option<String> {
+    let mut paths = BTreeSet::new();
+    for token in output.split_whitespace() {
+        let candidate = token
+            .trim_matches(|ch: char| {
+                matches!(
+                    ch,
+                    '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | '。' | '，'
+                )
+            })
+            .trim();
+        let Some((key, rhs)) = candidate.split_once('=') else {
+            continue;
+        };
+        let key = normalize_evidence_field(key);
+        if !matches!(
+            key.as_str(),
+            "path"
+                | "archive"
+                | "archive_path"
+                | "output"
+                | "output_path"
+                | "dest"
+                | "dest_path"
+                | "destination"
+        ) {
+            continue;
+        }
+        let rhs = rhs.trim();
+        if text_line_looks_like_path(rhs) {
+            paths.insert(rhs.to_string());
+        }
+    }
+    (paths.len() == 1).then(|| paths.into_iter().next().expect("single labeled path"))
+}
+
+fn text_git_oneline_subject_evidence(output: &str) -> Option<String> {
+    for line in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        if line == "exit=0" {
+            continue;
+        }
+        let mut parts = line.splitn(2, char::is_whitespace);
+        let Some(hash) = parts.next() else {
+            continue;
+        };
+        let Some(subject) = parts.next() else {
+            continue;
+        };
+        let subject = subject.trim();
+        if text_looks_like_git_hash(hash) && !subject.is_empty() {
+            return Some(subject.to_string());
+        }
+    }
+    None
+}
+
+fn text_looks_like_git_hash(value: &str) -> bool {
+    (7..=40).contains(&value.len()) && value.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
 fn text_line_looks_like_path(line: &str) -> bool {
     let line = line.trim();
     !line.is_empty()
@@ -732,14 +987,32 @@ fn text_line_looks_like_path(line: &str) -> bool {
             || line.contains('/'))
 }
 
+fn text_line_looks_like_standalone_path(line: &str) -> bool {
+    text_line_looks_like_path(line) && line.split_whitespace().count() == 1
+}
+
 fn text_line_looks_like_list_item(line: &str) -> bool {
     let line = line.trim();
+    if line == "." {
+        return true;
+    }
     !line.is_empty()
         && line.len() <= MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS
         && !line.contains(|ch| matches!(ch, '\n' | '\r' | '\0'))
         && !line.contains("://")
         && !line.ends_with(['.', '。', ':', '：'])
         && line.split_whitespace().count() <= 4
+}
+
+fn text_line_looks_like_hidden_entry(line: &str) -> bool {
+    let leaf = line
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | ',' | ';'))
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .trim();
+    leaf.starts_with('.') && leaf != "." && leaf != ".."
 }
 
 fn json_value_kind(value: &Value) -> &'static str {
@@ -802,6 +1075,9 @@ fn redacted_text_excerpt(text: &str) -> String {
 fn text_looks_sensitive(text: &str) -> bool {
     let trimmed =
         text.trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '-');
+    if known_non_secret_config_risk_label(trimmed) {
+        return false;
+    }
     if trimmed.contains('/') || trimmed.contains('\\') {
         return false;
     }
@@ -817,6 +1093,37 @@ fn text_looks_sensitive(text: &str) -> bool {
         .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | '+'))
         .count();
     dense_chars * 100 / trimmed.len().max(1) >= 85
+}
+
+fn known_non_secret_config_risk_label(text: &str) -> bool {
+    let Some((field, value)) = text.split_once('=') else {
+        return false;
+    };
+    let field = field.trim().to_ascii_lowercase();
+    let value = value
+        .trim()
+        .trim_matches(|ch| matches!(ch, '"' | '\'' | '`'));
+    if !matches!(
+        field.as_str(),
+        "tools.allow"
+            | "tools.allow_sudo"
+            | "tools.allow_path_outside_workspace"
+            | "telegram.sendfile.full_access"
+            | "server.listen"
+            | "self_extension.enabled"
+            | "worker.task_timeout_seconds"
+    ) {
+        return false;
+    }
+    if value.eq_ignore_ascii_case("true")
+        || value.eq_ignore_ascii_case("false")
+        || value.parse::<i64>().is_ok()
+        || value.parse::<f64>().is_ok()
+    {
+        return true;
+    }
+    field == "tools.allow" && value == "[\"*\"]"
+        || field == "server.listen" && (value == "0.0.0.0" || value.starts_with("0.0.0.0:"))
 }
 
 fn stable_trace_hash(text: &str) -> String {
@@ -860,7 +1167,8 @@ pub(crate) fn evidence_coverage_for_route(
 ) -> TaskJournalEvidenceCoverage {
     let required_evidence =
         crate::task_contract::required_evidence_fields_for_output_contract(&route.output_contract);
-    let (observed_fields, observed_canonical) = observed_evidence_field_sets(journal);
+    let (observed_fields, mut observed_canonical) = observed_evidence_field_sets(journal);
+    augment_route_canonical_evidence(route, &observed_fields, &mut observed_canonical);
     let evidence_expression = crate::contract_matrix::bundled_contract_matrix()
         .and_then(|matrix| matrix.match_output_contract(&route.output_contract))
         .map(|matched| matched.evidence_expression());
@@ -1005,7 +1313,7 @@ fn observed_evidence_field_sets(journal: &TaskJournal) -> (BTreeSet<String>, BTr
     let mut observed_fields = BTreeSet::new();
     let mut observed_canonical = BTreeSet::new();
     for step in &journal.step_results {
-        if !step_can_supply_contract_evidence(step) {
+        if !step_can_supply_contract_evidence(step, journal.route_result.as_ref()) {
             continue;
         }
         let Some(evidence) = observed_evidence_for_step_trace(step) else {
@@ -1031,12 +1339,54 @@ fn observed_evidence_field_sets(journal: &TaskJournal) -> (BTreeSet<String>, BTr
     (observed_fields, observed_canonical)
 }
 
-fn step_can_supply_contract_evidence(step: &TaskJournalStepTrace) -> bool {
-    step.status == crate::executor::StepExecutionStatus::Ok
-        && !matches!(
-            step.skill.as_str(),
-            "respond" | "synthesize_answer" | "think" | "answer_verifier"
-        )
+fn augment_route_canonical_evidence(
+    route: &crate::RouteResult,
+    observed_fields: &BTreeSet<String>,
+    observed_canonical: &mut BTreeSet<String>,
+) {
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+        && observed_canonical.contains("size_bytes")
+        && observed_fields
+            .iter()
+            .filter(|field| normalized_field_leaf(field) == "size_bytes")
+            .take(2)
+            .count()
+            >= 2
+    {
+        observed_canonical.insert("field_value".to_string());
+    }
+}
+
+fn normalized_field_leaf(field: &str) -> &str {
+    let leaf = field.rsplit('.').next().unwrap_or(field);
+    leaf.split_once('[').map_or(leaf, |(prefix, _)| prefix)
+}
+
+fn step_can_supply_contract_evidence(
+    step: &TaskJournalStepTrace,
+    route: Option<&crate::RouteResult>,
+) -> bool {
+    if matches!(
+        step.skill.as_str(),
+        "respond" | "synthesize_answer" | "think" | "answer_verifier"
+    ) {
+        return false;
+    }
+    match step.status {
+        crate::executor::StepExecutionStatus::Ok => true,
+        crate::executor::StepExecutionStatus::Error => {
+            step.skill == "run_cmd"
+                && route.is_some_and(|route| {
+                    route.output_contract.semantic_kind
+                        == crate::OutputSemanticKind::ExecutionFailedStep
+                        || crate::task_contract::required_evidence_fields_for_output_contract(
+                            &route.output_contract,
+                        )
+                        .iter()
+                        .any(|field| field == "command_output")
+                })
+        }
+    }
 }
 
 fn normalize_evidence_field(field: &str) -> String {
@@ -1048,8 +1398,7 @@ fn normalize_evidence_field(field: &str) -> String {
 }
 
 fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<String> {
-    let leaf = field.rsplit('.').next().unwrap_or(field);
-    let leaf = leaf.split_once('[').map_or(leaf, |(prefix, _)| prefix);
+    let leaf = normalized_field_leaf(field);
     let mut values = BTreeSet::new();
     values.insert(field.to_string());
     values.insert(leaf.to_string());
@@ -1071,6 +1420,7 @@ fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<String> {
                 "containers",
                 "images",
                 "members",
+                "risks",
             ][..],
         ),
         (
@@ -1104,7 +1454,10 @@ fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<String> {
                 "file_path",
                 "target_path",
                 "output_path",
+                "archive",
                 "archive_path",
+                "dest",
+                "dest_path",
                 "destination",
             ][..],
         ),
@@ -1122,11 +1475,23 @@ fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<String> {
                 "subject",
                 "branch",
                 "commit",
+                "valid",
+                "available",
+                "exit",
+                "exit_code",
+                "error_kind",
             ][..],
         ),
         (
             "count",
-            &["count", "total", "length", "item_count", "row_count"][..],
+            &[
+                "count",
+                "total",
+                "length",
+                "item_count",
+                "row_count",
+                "risk_count",
+            ][..],
         ),
         (
             "size_bytes",
@@ -2503,6 +2868,46 @@ mod tests {
             item.get("field").and_then(Value::as_str) == Some("path")
                 && item.get("source").and_then(Value::as_str) == Some("text_output.extractor")
         }));
+        let observed = observed_evidence_from_output(Some(
+            "written 40 bytes to /home/guagua/rustclaw/document/pwd_line.txt",
+        ))
+        .expect("path token evidence should be present");
+        let items = observed
+            .get("items")
+            .and_then(Value::as_array)
+            .expect("path token evidence items");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("path")
+                && item.get("excerpt").and_then(Value::as_str)
+                    == Some("/home/guagua/rustclaw/document/pwd_line.txt")
+        }));
+        let observed = observed_evidence_from_output(Some(
+            "archive_path=/home/guagua/rustclaw/tmp/bundle.zip\nexit=0\n  adding: /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md (deflated 32%)",
+        ))
+        .expect("labeled archive path evidence should be present");
+        let items = observed
+            .get("items")
+            .and_then(Value::as_array)
+            .expect("labeled path evidence items");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("path")
+                && item.get("excerpt").and_then(Value::as_str)
+                    == Some("/home/guagua/rustclaw/tmp/bundle.zip")
+        }));
+
+        let observed = observed_evidence_from_output(Some(
+            "exit=0\n09342a6a fix: expose nl execution and locator flows\n",
+        ))
+        .expect("git subject evidence should be present");
+        let items = observed
+            .get("items")
+            .and_then(Value::as_array)
+            .expect("git subject evidence items");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("subject")
+                && item.get("excerpt").and_then(Value::as_str)
+                    == Some("fix: expose nl execution and locator flows")
+        }));
 
         let mut journal = TaskJournal::for_task("task-text-candidates", "ask", "列出文件名");
         let mut route = crate::RouteResult {
@@ -2541,6 +2946,423 @@ mod tests {
         let coverage = evidence_coverage_for_route(&route, &journal);
         assert!(coverage.is_complete());
         assert!(coverage.observed_canonical.contains("candidates"));
+        assert!(coverage.observed_canonical.contains("count"));
+
+        let observed = observed_evidence_from_output(Some(".git\nREADME.md\n.env\nsrc\n"))
+            .expect("hidden list evidence should be present");
+        let items = observed
+            .get("items")
+            .and_then(Value::as_array)
+            .expect("hidden list evidence items");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("hidden_count")
+                && item.get("excerpt").and_then(Value::as_str) == Some("2")
+        }));
+    }
+
+    #[test]
+    fn docker_unavailable_text_counts_as_field_value_evidence() {
+        let mut journal =
+            TaskJournal::for_task("task-docker-unavailable", "ask", "检查 Docker 是否可用");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::DockerContainerLifecycle,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "docker_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some("docker unavailable: No such file or directory (os error 2)".to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("field_value"));
+
+        let trace = journal.to_trace_json();
+        let items = trace
+            .get("step_results")
+            .and_then(Value::as_array)
+            .and_then(|steps| steps.first())
+            .and_then(|step| step.get("observed_evidence"))
+            .and_then(|observed| observed.get("items"))
+            .and_then(Value::as_array)
+            .expect("observed evidence items should be present");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("status")
+                && item.get("excerpt").and_then(Value::as_str) == Some("docker unavailable")
+        }));
+    }
+
+    #[test]
+    fn docker_success_exit_text_counts_as_field_value_evidence() {
+        let mut journal =
+            TaskJournal::for_task("task-docker-version", "ask", "检查 Docker 是否可用");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::DockerContainerLifecycle,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "docker_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some("exit=0\nClient: Docker Engine".to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("field_value"));
+
+        let trace = journal.to_trace_json();
+        let items = trace
+            .get("step_results")
+            .and_then(Value::as_array)
+            .and_then(|steps| steps.first())
+            .and_then(|step| step.get("observed_evidence"))
+            .and_then(|observed| observed.get("items"))
+            .and_then(Value::as_array)
+            .expect("observed evidence items should be present");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("exit")
+                && item.get("excerpt").and_then(Value::as_str) == Some("0")
+        }));
+    }
+
+    #[test]
+    fn package_manager_key_value_text_counts_as_field_value_evidence() {
+        let mut journal = TaskJournal::for_task("task-package-manager", "ask", "检测包管理器");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::PackageManagerDetection,
+            locator_kind: crate::OutputLocatorKind::None,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "package_manager".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some("package_manager=apt-get".to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("field_value"));
+
+        let observed = observed_evidence_from_output(Some("package_manager=apt-get"))
+            .expect("machine key/value evidence should be present");
+        let items = observed
+            .get("items")
+            .and_then(Value::as_array)
+            .expect("observed evidence items");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("package_manager")
+                && item.get("excerpt").and_then(Value::as_str) == Some("apt-get")
+        }));
+    }
+
+    #[test]
+    fn docker_unavailable_text_counts_as_list_candidate_evidence() {
+        let mut journal =
+            TaskJournal::for_task("task-docker-images-unavailable", "ask", "列出 Docker 镜像");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::DockerImages,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "docker_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some("docker unavailable: No such file or directory (os error 2)".to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("candidates"));
+
+        let trace = journal.to_trace_json();
+        let items = trace
+            .get("step_results")
+            .and_then(Value::as_array)
+            .and_then(|steps| steps.first())
+            .and_then(|step| step.get("observed_evidence"))
+            .and_then(|observed| observed.get("items"))
+            .and_then(Value::as_array)
+            .expect("observed evidence items should be present");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("candidates[0]")
+                && item.get("excerpt").and_then(Value::as_str) == Some("docker unavailable")
+        }));
+    }
+
+    #[test]
+    fn git_status_text_counts_as_field_value_evidence() {
+        let mut journal = TaskJournal::for_task("task-git-state", "ask", "检查仓库状态");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::GitRepositoryState,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "git_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                "exit=0\n## main...origin/main\n M crates/clawd/src/task_journal.rs\n".to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("field_value"));
+
+        let trace = journal.to_trace_json();
+        let items = trace
+            .get("step_results")
+            .and_then(Value::as_array)
+            .and_then(|steps| steps.first())
+            .and_then(|step| step.get("observed_evidence"))
+            .and_then(|observed| observed.get("items"))
+            .and_then(Value::as_array)
+            .expect("observed evidence items should be present");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("state")
+                && item.get("excerpt").and_then(Value::as_str) == Some("dirty")
+        }));
+    }
+
+    #[test]
+    fn git_status_text_ignores_non_ascii_summary_without_panic() {
+        assert_eq!(
+            super::text_git_state_evidence(
+                "exit=0\n## main...origin/main\n执行 cat /definitely_missing_rustclaw_contract_case 失败\n"
+            ),
+            Some("clean")
+        );
+    }
+
+    #[test]
+    fn config_validation_evidence_coverage_accepts_valid_flag() {
+        let mut journal = TaskJournal::for_task("task-config-validation", "ask", "验证配置");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::ConfigValidation,
+            requires_content_evidence: true,
+            locator_kind: crate::OutputLocatorKind::Path,
+            locator_hint: "configs/config.toml".to_string(),
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "config_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "action": "validate_structured",
+                    "path": "configs/config.toml",
+                    "format": "toml",
+                    "valid": true,
+                    "root_type": "object",
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("field_value"));
+    }
+
+    #[test]
+    fn quantity_comparison_size_bytes_counts_as_field_value_evidence() {
+        let mut journal =
+            TaskJournal::for_task("task-quantity-comparison", "ask", "比较两个文件大小");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::QuantityComparison,
+            locator_kind: crate::OutputLocatorKind::Path,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "action": "path_batch_facts",
+                    "facts": [
+                        {
+                            "path": "release_checklist.md",
+                            "exists": true,
+                            "fact": {
+                                "kind": "file",
+                                "size_bytes": 153
+                            }
+                        },
+                        {
+                            "path": "package.json",
+                            "exists": true,
+                            "fact": {
+                                "kind": "file",
+                                "size_bytes": 246
+                            }
+                        }
+                    ]
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("field_value"));
+        assert!(coverage.observed_canonical.contains("size_bytes"));
     }
 
     #[test]
@@ -2612,6 +3434,80 @@ mod tests {
     }
 
     #[test]
+    fn config_risk_evidence_coverage_accepts_guard_findings() {
+        let mut journal = TaskJournal::for_task("task-config-risk-evidence", "ask", "检查配置风险");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::ConfigRiskAssessment,
+            locator_kind: crate::OutputLocatorKind::Path,
+            locator_hint: "configs/config.toml".to_string(),
+            requires_content_evidence: true,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "config_edit".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "action": "guard_config",
+                    "format": "toml",
+                    "path": "configs/config.toml",
+                    "resolved_path": "/home/guagua/rustclaw/configs/config.toml",
+                    "risk_count": 2,
+                    "risks": [
+                        "tools.allow_sudo=true",
+                        "tools.allow_path_outside_workspace=true"
+                    ]
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        let trace = journal.to_trace_json();
+        let items = trace
+            .get("step_results")
+            .and_then(Value::as_array)
+            .and_then(|steps| steps.first())
+            .and_then(|step| step.get("observed_evidence"))
+            .and_then(|observed| observed.get("items"))
+            .and_then(Value::as_array)
+            .expect("observed evidence items should be present");
+
+        assert!(coverage.is_complete());
+        assert_eq!(coverage.required_evidence, vec!["candidates", "count"]);
+        assert!(coverage.observed_canonical.contains("candidates"));
+        assert!(coverage.observed_canonical.contains("count"));
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("risks[1]")
+                && item.get("excerpt").and_then(Value::as_str)
+                    == Some("tools.allow_path_outside_workspace=true")
+                && item.get("redacted").is_none()
+        }));
+    }
+
+    #[test]
     fn evidence_coverage_ignores_failed_and_synthesis_outputs() {
         let mut journal = TaskJournal::for_task(
             "task-evidence-coverage-filter",
@@ -2670,6 +3566,79 @@ mod tests {
         assert!(!coverage.is_complete());
         assert_eq!(coverage.missing_evidence, vec!["content_excerpt"]);
         assert!(!coverage.observed_canonical.contains("content_excerpt"));
+    }
+
+    #[test]
+    fn raw_command_output_error_step_supplies_command_output_evidence() {
+        let mut journal = TaskJournal::for_task(
+            "task-run-cmd-failure-evidence",
+            "ask",
+            "cat /definitely_missing_rustclaw_contract_case",
+        );
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::ExecutionFailedStep,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "run_cmd".to_string(),
+            status: crate::executor::StepExecutionStatus::Error,
+            output: None,
+            error: Some(crate::skills::structured_skill_error_from_parts(
+                "run_cmd",
+                "nonzero_exit",
+                "Command failed with exit code 1",
+                Some("linux"),
+                Some(json!({
+                    "command": "cat /definitely_missing_rustclaw_contract_case",
+                    "exit_code": 1,
+                    "stderr": "cat: /definitely_missing_rustclaw_contract_case: No such file or directory (os error 2)\n",
+                    "stdout": Value::Null,
+                })),
+            )),
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("field_value"));
+
+        let trace = journal.to_trace_json();
+        let items = trace
+            .get("step_results")
+            .and_then(Value::as_array)
+            .and_then(|steps| steps.first())
+            .and_then(|step| step.get("observed_evidence"))
+            .and_then(|observed| observed.get("items"))
+            .and_then(Value::as_array)
+            .expect("observed evidence items should be present");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("stderr")
+                && item
+                    .get("excerpt")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value.contains("No such file or directory"))
+        }));
     }
 
     #[test]
@@ -2894,6 +3863,68 @@ mod tests {
         assert_eq!(
             coverage.missing_evidence,
             vec!["one_of(exists_false|exists_true)"]
+        );
+    }
+
+    #[test]
+    fn content_presence_accepts_excerpt_evidence_alternative() {
+        let mut journal = TaskJournal::for_task(
+            "task-content-presence-excerpt",
+            "ask",
+            "check whether the file mentions release",
+        );
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::ContentPresenceCheck,
+            locator_kind: crate::OutputLocatorKind::Path,
+            requires_content_evidence: true,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "action": "read_range",
+                    "path": "/tmp/release_checklist.md",
+                    "excerpt": "1|# Release Checklist"
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete());
+        assert!(coverage.observed_canonical.contains("content_excerpt"));
+        assert_eq!(
+            coverage
+                .evidence_expression
+                .as_ref()
+                .and_then(|value| value.get("any_of"))
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
+            Some(vec!["content_excerpt", "content_match"])
         );
     }
 

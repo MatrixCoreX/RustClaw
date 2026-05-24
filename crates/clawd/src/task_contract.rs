@@ -494,6 +494,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         }
         OutputSemanticKind::ContentPresenceCheck => {
             fields.insert("content_match");
+            fields.insert("content_excerpt");
         }
         OutputSemanticKind::DirectoryPurposeSummary => {
             fields.insert("candidates");
@@ -518,13 +519,16 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         | OutputSemanticKind::PackageManagerDetection
         | OutputSemanticKind::StructuredKeys
         | OutputSemanticKind::ConfigValidation
-        | OutputSemanticKind::ConfigRiskAssessment
         | OutputSemanticKind::SqliteDatabaseKindJudgment
         | OutputSemanticKind::SqliteSchemaVersion
         | OutputSemanticKind::RecentScalarEqualityCheck
         | OutputSemanticKind::ExecutionFailedStep
         | OutputSemanticKind::DockerContainerLifecycle => {
             fields.insert("field_value");
+        }
+        OutputSemanticKind::ConfigRiskAssessment => {
+            fields.insert("candidates");
+            fields.insert("count");
         }
         OutputSemanticKind::GeneratedFileDelivery
         | OutputSemanticKind::ArchivePack

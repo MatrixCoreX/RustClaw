@@ -50,6 +50,7 @@ fn resolve_static_capability_action_for_state(
     args: Value,
 ) -> Option<AgentAction> {
     let Some((skill, action)) = (match normalized {
+        "fs_basic" => Some(("fs_basic", None)),
         "filesystem.list_entries" | "filesystem.list_dir" => Some(("fs_basic", Some("list_dir"))),
         "filesystem.count_entries" => Some(("fs_basic", Some("count_entries"))),
         "filesystem.read_text_range" | "filesystem.read_text" | "filesystem.read_file" => {
@@ -86,6 +87,7 @@ fn resolve_static_capability_action_for_state(
             Some(("config_edit", Some("guard_config")))
         }
         "config.read_back" => Some(("config_edit", Some("read_back"))),
+        "config_basic" => Some(("config_basic", None)),
         "config.restart_if_requested" => Some(("config_edit", Some("restart_if_requested"))),
         "transform" | "transform.transform_data" | "data.transform" | "data.transform_records" => {
             Some(("transform", Some("transform_data")))
@@ -287,6 +289,23 @@ mod tests {
     }
 
     #[test]
+    fn resolves_bare_fs_basic_capability_to_fs_basic_tool() {
+        let action = resolve_static_capability_action(
+            &normalize_capability_name("fs_basic"),
+            json!({"action": "list_dir", "path": "."}),
+        )
+        .expect("bare fs_basic capability should resolve");
+        match action {
+            AgentAction::CallTool { tool, args } => {
+                assert_eq!(tool, "fs_basic");
+                assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
+                assert_eq!(args.get("path").and_then(Value::as_str), Some("."));
+            }
+            other => panic!("unexpected action: {other:?}"),
+        }
+    }
+
+    #[test]
     fn resolves_system_run_command_to_run_cmd_skill() {
         let action = resolve_static_capability_action(
             &normalize_capability_name("system.run_command"),
@@ -323,6 +342,10 @@ mod tests {
 
     fn resolve_static_capability_action(normalized: &str, args: Value) -> Option<AgentAction> {
         match normalized {
+            "fs_basic" => Some(AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args,
+            }),
             "filesystem.list_entries" | "filesystem.list_dir" => Some(AgentAction::CallTool {
                 tool: "fs_basic".to_string(),
                 args: with_action(args, "list_dir"),

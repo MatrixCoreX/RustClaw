@@ -1447,9 +1447,28 @@ pub(crate) fn required_evidence_for_output_contract(
 pub(crate) fn final_answer_shape_for_output_contract(
     output_contract: &IntentOutputContract,
 ) -> Option<FinalAnswerShape> {
+    if let Some(shape) = final_answer_shape_override_for_output_contract(output_contract) {
+        return Some(shape);
+    }
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
     matched.final_answer_shape_kind()
+}
+
+fn final_answer_shape_override_for_output_contract(
+    output_contract: &IntentOutputContract,
+) -> Option<FinalAnswerShape> {
+    if output_contract.semantic_kind == OutputSemanticKind::HiddenEntriesCheck
+        && output_contract.response_shape == OutputResponseShape::Scalar
+    {
+        return Some(FinalAnswerShape::Scalar);
+    }
+    if output_contract.semantic_kind == OutputSemanticKind::StructuredKeys
+        && output_contract.response_shape != OutputResponseShape::Strict
+    {
+        return Some(FinalAnswerShape::ValidationVerdict);
+    }
+    None
 }
 
 pub(crate) fn trace_snapshot_for_route(route: &RouteResult) -> Option<Value> {
@@ -1497,7 +1516,8 @@ pub(crate) fn trace_snapshot_for_output_contract(
 ) -> Option<Value> {
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
-    let final_answer_shape_kind = matched.final_answer_shape_kind();
+    let final_answer_shape_kind = final_answer_shape_override_for_output_contract(output_contract)
+        .or_else(|| matched.final_answer_shape_kind());
     Some(json!({
         "contract_matrix_version": matrix.matrix_version,
         "contract_matrix_hash": matrix.matrix_version_hash(),
@@ -1541,7 +1561,8 @@ pub(crate) fn action_trace_for_output_contract(
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
     let action = ActionRef::parse(action_ref)?;
-    let final_answer_shape_kind = matched.final_answer_shape_kind();
+    let final_answer_shape_kind = final_answer_shape_override_for_output_contract(output_contract)
+        .or_else(|| matched.final_answer_shape_kind());
     Some(json!({
         "schema_version": 1,
         "action_ref": action.as_key(),
@@ -1566,6 +1587,45 @@ pub(crate) fn action_trace_for_output_contract(
     }))
 }
 
+fn contract_policy_action_ref(normalized_skill: &str, args: &Value) -> Option<ActionRef> {
+    runtime_equivalent_virtual_action_ref(normalized_skill, args).or_else(|| {
+        let canonical =
+            crate::virtual_tools::canonicalize_legacy_tool_call(normalized_skill, args.clone())?;
+        ActionRef::from_skill_args(&canonical.tool, &canonical.args)
+    })
+}
+
+fn policy_action_ref_for_match(
+    matched: &MatchedContract<'_>,
+    normalized_skill: &str,
+    args: &Value,
+) -> Option<ActionRef> {
+    let action = ActionRef::from_skill_args(normalized_skill, args)?;
+    if matched.action_policy(&action) == ActionPolicyDecision::Allowed {
+        return Some(action);
+    }
+    contract_policy_action_ref(normalized_skill, args)
+        .filter(|canonical| matched.action_policy(canonical) == ActionPolicyDecision::Allowed)
+        .or(Some(action))
+}
+
+fn runtime_equivalent_virtual_action_ref(
+    normalized_skill: &str,
+    args: &Value,
+) -> Option<ActionRef> {
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(normalize_action_token)?;
+    match (
+        normalize_action_token(normalized_skill).as_str(),
+        action.as_str(),
+    ) {
+        ("config_edit", "guard_config") => ActionRef::parse("config_basic.guard_rustclaw_config"),
+        _ => None,
+    }
+}
+
 pub(crate) fn action_policy_for_output_contract(
     output_contract: Option<&IntentOutputContract>,
     normalized_skill: &str,
@@ -1580,11 +1640,11 @@ pub(crate) fn action_policy_for_output_contract(
     }
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
-    let action = ActionRef::from_skill_args(normalized_skill, args)?;
+    let policy_action = policy_action_ref_for_match(&matched, normalized_skill, args)?;
     let final_answer_shape_kind = matched.final_answer_shape_kind()?;
     Some(ContractActionPolicy {
-        decision: matched.action_policy(&action),
-        action_key: action.as_key(),
+        decision: matched.action_policy(&policy_action),
+        action_key: policy_action.as_key(),
         contract_match: matched.match_name().to_string(),
         required_evidence: matched.required_evidence(),
         preferred_actions: normalized_tokens(matched.preferred_actions()),
@@ -1613,7 +1673,7 @@ pub(crate) fn arg_policy_decision(
     }
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
-    let action = ActionRef::from_skill_args(normalized_skill, resolved_args)?;
+    let action = policy_action_ref_for_match(&matched, normalized_skill, resolved_args)?;
     let final_answer_shape_kind = matched.final_answer_shape_kind()?;
     let target_groups = contract_target_arg_groups(output_contract, &action);
     let expected_target_args = target_groups
@@ -1698,12 +1758,14 @@ fn contract_target_arg_groups(
                 vec!["dest", "dest_path"],
             ]
         }
-        ("config_basic", Some("read_field" | "read_fields" | "list_keys" | "validate")) => {
-            vec![vec!["path"]]
-        }
-        ("config_edit", Some("plan_config_change" | "apply_config_change" | "validate_config")) => {
-            vec![vec!["path"]]
-        }
+        (
+            "config_basic",
+            Some("read_field" | "read_fields" | "list_keys" | "validate" | "guard_rustclaw_config"),
+        ) => vec![vec!["path"]],
+        (
+            "config_edit",
+            Some("plan_config_change" | "apply_config_change" | "validate_config" | "guard_config"),
+        ) => vec![vec!["path"]],
         ("db_basic", _) => vec![vec!["db_path", "path"]],
         _ => Vec::new(),
     }
@@ -2325,6 +2387,26 @@ matrix_version = "broken"
     }
 
     #[test]
+    fn final_shape_honors_scalar_hidden_entries_and_structured_key_verdicts() {
+        assert_eq!(
+            final_answer_shape_for_output_contract(&IntentOutputContract {
+                response_shape: OutputResponseShape::Scalar,
+                semantic_kind: OutputSemanticKind::HiddenEntriesCheck,
+                ..IntentOutputContract::default()
+            }),
+            Some(FinalAnswerShape::Scalar)
+        );
+        assert_eq!(
+            final_answer_shape_for_output_contract(&IntentOutputContract {
+                response_shape: OutputResponseShape::Free,
+                semantic_kind: OutputSemanticKind::StructuredKeys,
+                ..IntentOutputContract::default()
+            }),
+            Some(FinalAnswerShape::ValidationVerdict)
+        );
+    }
+
+    #[test]
     fn generic_delivery_snapshot_defaults_to_file_artifact() {
         let snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
             semantic_kind: OutputSemanticKind::None,
@@ -2750,6 +2832,52 @@ failure_policy = "no_retry"
     }
 
     #[test]
+    fn action_policy_allows_runtime_equivalent_for_virtual_config_validation() {
+        let policy = action_policy_for_output_contract(
+            Some(&IntentOutputContract {
+                semantic_kind: OutputSemanticKind::ConfigValidation,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::Path,
+                ..IntentOutputContract::default()
+            }),
+            "system_basic",
+            &serde_json::json!({
+                "action": "validate_structured",
+                "path": "configs/config.toml",
+                "format": "toml",
+            }),
+        )
+        .expect("policy decision");
+
+        assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+        assert_eq!(policy.action_key, "config_basic.validate");
+        assert_eq!(policy.contract_match, "config_validation");
+    }
+
+    #[test]
+    fn action_policy_allows_runtime_equivalent_for_virtual_config_guard() {
+        let policy = action_policy_for_output_contract(
+            Some(&IntentOutputContract {
+                semantic_kind: OutputSemanticKind::ConfigValidation,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::Path,
+                ..IntentOutputContract::default()
+            }),
+            "config_edit",
+            &serde_json::json!({
+                "action": "guard_config",
+                "path": "configs/app_config.toml",
+                "format": "toml",
+            }),
+        )
+        .expect("policy decision");
+
+        assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+        assert_eq!(policy.action_key, "config_basic.guard_rustclaw_config");
+        assert_eq!(policy.contract_match, "config_validation");
+    }
+
+    #[test]
     fn action_policy_skips_unstructured_none_contracts() {
         let policy = action_policy_for_output_contract(
             Some(&IntentOutputContract::default()),
@@ -2825,6 +2953,51 @@ failure_policy = "no_retry"
         assert!(policy.is_allowed());
         assert!(policy.missing_target_args.is_empty());
         assert!(policy.deferred_target_args.is_empty());
+    }
+
+    #[test]
+    fn arg_policy_uses_virtual_equivalent_target_groups() {
+        let policy = arg_policy_decision(
+            Some(&IntentOutputContract {
+                semantic_kind: OutputSemanticKind::ConfigValidation,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::Path,
+                ..IntentOutputContract::default()
+            }),
+            "system_basic",
+            &serde_json::json!({
+                "action": "validate_structured",
+                "path": "configs/config.toml",
+                "format": "toml",
+            }),
+        )
+        .expect("arg policy decision");
+
+        assert!(policy.is_allowed());
+        assert_eq!(policy.action_key, "config_basic.validate");
+        assert_eq!(policy.expected_target_args, vec!["path"]);
+    }
+
+    #[test]
+    fn arg_policy_uses_virtual_guard_equivalent_target_groups() {
+        let policy = arg_policy_decision(
+            Some(&IntentOutputContract {
+                semantic_kind: OutputSemanticKind::ConfigValidation,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::Path,
+                ..IntentOutputContract::default()
+            }),
+            "config_edit",
+            &serde_json::json!({
+                "action": "guard_config",
+                "path": "configs/app_config.toml",
+            }),
+        )
+        .expect("arg policy decision");
+
+        assert!(policy.is_allowed());
+        assert_eq!(policy.action_key, "config_basic.guard_rustclaw_config");
+        assert_eq!(policy.expected_target_args, vec!["path"]);
     }
 
     #[test]

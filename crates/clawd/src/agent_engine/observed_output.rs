@@ -3455,6 +3455,27 @@ fn structured_scalar_candidate(
         return git_basic_scalar_candidate(route, body);
     }
     if skill == "archive_basic" {
+        if let Some(route) = route {
+            match route.output_contract.semantic_kind {
+                crate::OutputSemanticKind::ArchivePack => {
+                    if let Some(path) = archive_basic_path_value_from_body(
+                        body,
+                        &["archive", "archive_path", "output_path", "path"],
+                    ) {
+                        return Some(path);
+                    }
+                }
+                crate::OutputSemanticKind::ArchiveUnpack => {
+                    if let Some(path) = archive_basic_path_value_from_body(
+                        body,
+                        &["dest", "dest_path", "destination", "path"],
+                    ) {
+                        return Some(path);
+                    }
+                }
+                _ => {}
+            }
+        }
         let summary = archive_list_summary_from_body(body)?;
         if route.is_some_and(route_requests_scalar_count) {
             return Some(summary.entries.len().to_string());
@@ -3760,6 +3781,55 @@ fn structured_scalar_candidate(
         ),
         _ => None,
     }
+}
+
+fn archive_basic_path_value_from_body(body: &str, labels: &[&str]) -> Option<String> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(body.trim()) {
+        for label in labels {
+            if let Some(path) = value
+                .get(*label)
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| archive_basic_observed_path_candidate(value))
+            {
+                return Some(path.to_string());
+            }
+        }
+    }
+    for token in body.split_whitespace() {
+        let token = token.trim_matches(|ch: char| {
+            matches!(
+                ch,
+                '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | '。' | '，'
+            )
+        });
+        let Some((key, rhs)) = token.split_once('=') else {
+            continue;
+        };
+        if !labels
+            .iter()
+            .any(|label| key.trim().eq_ignore_ascii_case(label))
+        {
+            continue;
+        }
+        let rhs = rhs.trim();
+        if archive_basic_observed_path_candidate(rhs) {
+            return Some(rhs.to_string());
+        }
+    }
+    None
+}
+
+fn archive_basic_observed_path_candidate(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && value.len() <= 4096
+        && !value.contains(|ch| matches!(ch, '\n' | '\r' | '\0'))
+        && !value.contains("://")
+        && (value.starts_with('/')
+            || value.starts_with("./")
+            || value.starts_with("../")
+            || value.contains('/'))
 }
 
 fn package_manager_summary_candidate(
@@ -5414,6 +5484,9 @@ fn matrix_checked_direct_candidate(
     {
         return Some(answer);
     }
+    if route_requires_matrix_grounded_direct_candidate(route) {
+        return None;
+    }
     Some(answer)
 }
 
@@ -5826,7 +5899,13 @@ fn extract_direct_answer_from_generic_output_impl(
                     prefers_english_free_text,
                 ),
                 "archive_basic" => {
-                    if let Some(answer) =
+                    if let Some(answer) = archive_unpack_direct_answer_candidate(
+                        route,
+                        &observed_output.body,
+                        prefers_english_free_text,
+                    ) {
+                        Some(answer)
+                    } else if let Some(answer) =
                         archive_read_direct_answer_candidate(&observed_output.body)
                     {
                         Some(answer)
@@ -5891,7 +5970,11 @@ fn extract_direct_answer_from_generic_output_impl(
                                 )
                             })
                     } else if action == Some("inventory_dir")
-                        && is_plain_act
+                        && (is_plain_act
+                            || route.is_some_and(|route| {
+                                route.output_contract.semantic_kind
+                                    == crate::OutputSemanticKind::DirectoryEntryGroups
+                            }))
                         && allow_raw_listing_direct_answer
                     {
                         inventory_dir_direct_answer_candidate(
@@ -6040,6 +6123,24 @@ fn extract_direct_answer_from_generic_output_impl(
         return None;
     }
     matrix_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
+}
+
+fn archive_unpack_direct_answer_candidate(
+    route: Option<&crate::RouteResult>,
+    body: &str,
+    prefer_english: bool,
+) -> Option<String> {
+    let route = route?;
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ArchiveUnpack {
+        return None;
+    }
+    let dest =
+        archive_basic_path_value_from_body(body, &["dest", "dest_path", "destination", "path"])?;
+    if prefer_english {
+        Some(format!("Unpacked to {dest}."))
+    } else {
+        Some(format!("已解压到 {dest}。"))
+    }
 }
 
 fn fs_search_output_direct_answer_candidate(
@@ -7704,6 +7805,32 @@ version.workspace = true
         assert!(answer.contains("- src"));
         assert!(answer.contains("文件:"));
         assert!(answer.contains("- Cargo.toml"));
+        assert!(answer.contains("- README.md"));
+    }
+
+    #[test]
+    fn direct_answer_groups_inventory_dir_for_chat_wrapped_directory_entry_contract() {
+        let mut loop_state = LoopState::new(1);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "system_basic",
+            r#"{"action":"inventory_dir","path":"/tmp/root","names_only":false,"names":["docs","README.md"],"names_by_kind":{"files":["README.md"],"dirs":["docs"],"other":[]},"counts":{"files":1,"dirs":1,"total":2}}"#,
+        ));
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.semantic_kind = OutputSemanticKind::DirectoryEntryGroups;
+        let context = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+
+        let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&context))
+            .expect("inventory_dir should produce grouped direct answer");
+
+        assert!(answer.contains("目录:") || answer.contains("Directories:"));
+        assert!(answer.contains("- docs"));
+        assert!(answer.contains("文件:") || answer.contains("Files:"));
         assert!(answer.contains("- README.md"));
     }
 
@@ -11122,6 +11249,103 @@ version.workspace = true
         assert!(
             has_observed_answer_candidates(&loop_state),
             "archive json should remain available as observed facts for synthesis"
+        );
+    }
+
+    #[test]
+    fn archive_pack_scalar_contract_returns_created_archive_path() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "archive_basic",
+            "archive_path=/tmp/rustclaw-workspace/tmp/nl_archive_case.zip\nexit=0\n  adding: /tmp/rustclaw-workspace/scripts/skill_calls/ (stored 0%)\n",
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent:
+                "把 scripts/skill_calls 打成一个 zip 到 tmp/nl_archive_case.zip，只返回生成路径"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Scalar,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ArchivePack,
+                locator_hint: "scripts/skill_calls | tmp/nl_archive_case.zip".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("/tmp/rustclaw-workspace/tmp/nl_archive_case.zip")
+        );
+    }
+
+    #[test]
+    fn archive_unpack_contract_returns_one_sentence_destination_summary() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "archive_basic",
+            "dest_path=/tmp/rustclaw-workspace/tmp/contract_matrix_unpacked\nexit=0\nArchive: /tmp/test_bundle.zip\n inflating: /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked/notes.txt\n",
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent:
+                "把 test_bundle.zip 解压到 tmp/contract_matrix_unpacked，并简短说明结果".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ArchiveUnpack,
+                locator_hint: "/tmp/test_bundle.zip | tmp/contract_matrix_unpacked".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("已解压到 /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked。")
         );
     }
 

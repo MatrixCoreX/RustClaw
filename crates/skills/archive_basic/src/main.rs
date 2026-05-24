@@ -153,13 +153,14 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
                 true,
             )?;
             pack_archive(format, &source, &archive).map(|text| {
+                let archive_path = archive.display().to_string();
                 (
-                    text.clone(),
+                    format!("archive_path={archive_path}\n{text}"),
                     json!({
                         "action":"pack",
                         "format":format,
                         "source":source.display().to_string(),
-                        "archive":archive.display().to_string(),
+                        "archive":archive_path,
                         "output":text
                     }),
                 )
@@ -173,12 +174,13 @@ fn execute(args: Value) -> Result<(String, Value), SkillError> {
             )?;
             let dest = resolve_path(&root, required_str_any(obj, &["dest", "dest_path"])?, true)?;
             unpack_archive(&archive, &dest).map(|text| {
+                let dest_path = dest.display().to_string();
                 (
-                    text.clone(),
+                    format!("dest_path={dest_path}\n{text}"),
                     json!({
                         "action":"unpack",
                         "archive":archive.display().to_string(),
-                        "dest":dest.display().to_string(),
+                        "dest":dest_path,
                         "output":text
                     }),
                 )
