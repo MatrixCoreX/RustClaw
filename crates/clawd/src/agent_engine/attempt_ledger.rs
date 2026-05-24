@@ -1,4 +1,4 @@
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::LoopState;
 
@@ -16,6 +16,7 @@ pub(crate) struct AttemptLedgerEntry {
     pub(super) why_not_satisfied: String,
     pub(super) retry_instruction: Option<String>,
     pub(super) avoid_repeating: String,
+    pub(super) contract_policy: Option<Value>,
 }
 
 pub(super) fn record_attempt(
@@ -59,6 +60,8 @@ pub(super) fn record_attempt_with_retry_instruction(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(crate::truncate_for_agent_trace);
+    let contract_policy = contract_policy_from_structured_error(why_not_satisfied)
+        .or_else(|| contract_policy_from_structured_error(observed_output));
     loop_state.attempt_ledger_entries.push(AttemptLedgerEntry {
         attempt_id,
         tool_or_skill: tool_or_skill.trim().to_string(),
@@ -78,6 +81,7 @@ pub(super) fn record_attempt_with_retry_instruction(
         },
         retry_instruction,
         avoid_repeating: avoid_repeating_hint(status, error_kind.as_deref()).to_string(),
+        contract_policy,
     });
 }
 
@@ -106,6 +110,8 @@ pub(super) fn build_attempt_ledger_compact(loop_state: &LoopState) -> String {
             let error_text = step.error.as_deref().unwrap_or_default();
             let output_text = step.output.as_deref().unwrap_or_default();
             let error_kind = structured_error_kind(error_text);
+            let contract_policy = contract_policy_from_structured_error(error_text)
+                .or_else(|| contract_policy_from_structured_error(output_text));
             json!({
                 "attempt_id": format!("a{}", idx + 1),
                 "tool_or_skill": step.skill,
@@ -117,6 +123,7 @@ pub(super) fn build_attempt_ledger_compact(loop_state: &LoopState) -> String {
                 "why_not_satisfied": why_not_satisfied_from_status(step.status, output_text, error_text),
                 "retry_instruction": null,
                 "avoid_repeating": avoid_repeating_hint(step.status, error_kind.as_deref()),
+                "contract_policy": contract_policy,
             })
         })
         .collect::<Vec<_>>();
@@ -136,6 +143,7 @@ fn attempt_entry_json(entry: &AttemptLedgerEntry) -> serde_json::Value {
         "why_not_satisfied": entry.why_not_satisfied,
         "retry_instruction": entry.retry_instruction,
         "avoid_repeating": entry.avoid_repeating,
+        "contract_policy": entry.contract_policy,
     })
 }
 
@@ -143,6 +151,28 @@ fn structured_error_kind(error_text: &str) -> Option<String> {
     crate::skills::parse_structured_skill_error(error_text)
         .map(|structured| structured.error_kind)
         .or_else(|| (!error_text.trim().is_empty()).then_some("unclassified_error".to_string()))
+}
+
+fn contract_policy_from_structured_error(error_text: &str) -> Option<Value> {
+    let structured = crate::skills::parse_structured_skill_error(error_text)?;
+    if !matches!(
+        structured.error_kind.as_str(),
+        "contract_action_rejected" | "contract_arg_rejected"
+    ) {
+        return None;
+    }
+    let extra = structured.extra.as_ref()?;
+    Some(json!({
+        "error_kind": structured.error_kind.as_str(),
+        "decision": extra.get("decision").and_then(Value::as_str),
+        "action": extra.get("action").and_then(Value::as_str),
+        "contract_match": extra.get("contract_match").and_then(Value::as_str),
+        "preferred_actions": extra.get("preferred_actions").cloned(),
+        "missing_target_args": extra.get("missing_target_args").cloned(),
+        "expected_target_args": extra.get("expected_target_args").cloned(),
+        "required_evidence": extra.get("required_evidence").cloned(),
+        "final_answer_shape": extra.get("final_answer_shape").and_then(Value::as_str),
+    }))
 }
 
 fn why_not_satisfied_from_status(
@@ -335,6 +365,43 @@ mod tests {
             assert!(ledger.contains("\"retryable\": false"));
             assert!(ledger.contains(hint));
         }
+    }
+
+    #[test]
+    fn attempt_ledger_exposes_contract_policy_decision_for_repair_prompt() {
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        let err = crate::skills::structured_skill_error_from_parts(
+            "run_cmd",
+            "contract_action_rejected",
+            "action `run_cmd` is rejected by contract `file_names`",
+            None,
+            Some(serde_json::json!({
+                "decision": "rejected_not_allowed",
+                "action": "run_cmd",
+                "contract_match": "file_names",
+                "preferred_actions": ["fs_basic.list_dir"],
+                "required_evidence": ["candidates"],
+                "final_answer_shape": "name_list",
+            })),
+        );
+        loop_state
+            .executed_step_results
+            .push(crate::executor::StepExecutionResult {
+                step_id: "s1".to_string(),
+                skill: "run_cmd".to_string(),
+                status: crate::executor::StepExecutionStatus::Error,
+                output: None,
+                error: Some(err),
+                started_at: 1,
+                finished_at: 2,
+            });
+
+        let ledger = build_attempt_ledger_compact(&loop_state);
+
+        assert!(ledger.contains("\"contract_policy\""));
+        assert!(ledger.contains("\"decision\": \"rejected_not_allowed\""));
+        assert!(ledger.contains("\"preferred_actions\""));
+        assert!(ledger.contains("fs_basic.list_dir"));
     }
 
     #[test]

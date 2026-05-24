@@ -773,6 +773,134 @@ function extractTaskText(result: TaskQueryResponse): string {
   return JSON.stringify(result.result_json ?? null, null, 2);
 }
 
+type UiLang = "zh" | "en";
+
+interface TaskOutcomeView {
+  title: string;
+  tone: "ok" | "running" | "attention" | "failed";
+  nextStep: string;
+  finalShape?: string;
+  missingEvidence: string[];
+  failureLabel?: string;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function getPathValue(root: unknown, path: string[]): unknown {
+  let current: unknown = root;
+  for (const key of path) {
+    const record = asRecord(current);
+    if (!record) return undefined;
+    current = record[key];
+  }
+  return current;
+}
+
+function stringAt(root: unknown, path: string[]): string | undefined {
+  const value = getPathValue(root, path);
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function stringArrayAt(root: unknown, path: string[]): string[] {
+  const value = getPathValue(root, path);
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function taskTraceRoot(result: TaskQueryResponse): unknown {
+  return getPathValue(result.result_json, ["task_journal", "trace"]);
+}
+
+function taskSummaryRoot(result: TaskQueryResponse): unknown {
+  return getPathValue(result.result_json, ["task_journal", "summary"]);
+}
+
+function humanFailureLabel(kind: string | undefined, lang: UiLang): string | undefined {
+  if (!kind) return undefined;
+  const zh: Record<string, string> = {
+    budget_exhausted: "任务用完了本轮尝试次数",
+    contract_gap: "任务规则拦截了不合适的动作",
+    delivery_error: "结果发送或文件交付没有完成",
+    permission_denied: "需要权限或确认后才能继续",
+    provider_error: "模型服务暂时不可用",
+    schema_error: "模型返回格式不符合要求",
+    tool_gap: "当前没有合适的工具完成这一步",
+  };
+  const en: Record<string, string> = {
+    budget_exhausted: "The task used its retry budget",
+    contract_gap: "The task rules blocked an unsuitable action",
+    delivery_error: "Result delivery did not finish",
+    permission_denied: "Permission or confirmation is required",
+    provider_error: "The model provider is unavailable",
+    schema_error: "The model response did not match the expected format",
+    tool_gap: "No suitable tool is available for this step",
+  };
+  return (lang === "zh" ? zh : en)[kind] ?? kind;
+}
+
+function buildTaskOutcome(result: TaskQueryResponse, lang: UiLang): TaskOutcomeView {
+  const summary = taskSummaryRoot(result);
+  const trace = taskTraceRoot(result);
+  const outcome = getPathValue(summary, ["task_outcome"]);
+  const outcomeState = stringAt(outcome, ["state"]);
+  const outcomeMessage =
+    stringAt(outcome, [lang === "zh" ? "message_zh" : "message_en"]) ??
+    stringAt(outcome, ["message_zh"]) ??
+    stringAt(outcome, ["message_en"]);
+  const outcomeNextStep =
+    stringAt(outcome, [lang === "zh" ? "next_step_zh" : "next_step_en"]) ??
+    stringAt(outcome, ["next_step_zh"]) ??
+    stringAt(outcome, ["next_step_en"]);
+  const finalStatus = stringAt(summary, ["final_status"]) ?? result.status;
+  const failureKind =
+    stringAt(summary, ["final_failure_attribution"]) ??
+    stringAt(trace, ["final_failure_attribution"]);
+  const missingEvidence = stringArrayAt(trace, ["evidence_coverage", "missing_evidence"]);
+  const finalShape =
+    stringAt(trace, ["contract_matrix", "final_answer_shape"]) ??
+    stringAt(summary, ["finalizer_summary", "final_answer_shape"]);
+  const tLocal = (zh: string, en: string) => (lang === "zh" ? zh : en);
+
+  if (result.status === "queued" || result.status === "running") {
+    return {
+      title: tLocal("正在处理", "In progress"),
+      tone: "running",
+      nextStep: tLocal("稍后会自动刷新；如果等待较久，可以重新查询这个任务 ID。", "This will refresh automatically; query the task ID again if it takes a while."),
+      finalShape,
+      missingEvidence,
+    };
+  }
+
+  if (result.status === "succeeded" || finalStatus === "success") {
+    return {
+      title: outcomeMessage ?? tLocal("已完成", "Completed"),
+      tone: outcomeState === "needs_attention" || missingEvidence.length > 0 ? "attention" : "ok",
+      nextStep:
+        outcomeNextStep ??
+        (missingEvidence.length > 0
+          ? tLocal("任务已返回结果，但还有证据项没有完全匹配；请查看详情确认。", "The task returned a result, but some evidence fields did not fully match; check details.")
+          : tLocal("任务已经完成，可以直接查看结果。", "The task completed. You can review the result.")),
+      finalShape,
+      missingEvidence,
+    };
+  }
+
+  return {
+    title: outcomeMessage ?? tLocal("没有完成", "Not completed"),
+    tone: "failed",
+    nextStep:
+      outcomeNextStep ??
+      (missingEvidence.length > 0
+        ? tLocal(`还缺少证据：${missingEvidence.join(", ")}。请补充目标或稍后重试。`, `Missing evidence: ${missingEvidence.join(", ")}. Add the target or retry later.`)
+        : tLocal("请根据错误提示处理后重试；技术详情已放在下方。", "Use the error message to decide the next step, then retry. Technical details are below.")),
+    finalShape,
+    missingEvidence,
+    failureLabel: humanFailureLabel(failureKind, lang),
+  };
+}
+
 function shortenHex(value?: string | null, head = 16, tail = 16): string {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) return "--";
@@ -4432,6 +4560,7 @@ export default function App() {
   ]
     .filter(Boolean)
     .join("\n\n");
+  const taskOutcome = taskResult ? buildTaskOutcome(taskResult, lang) : null;
   const isDashboardPage = currentPage === "dashboard";
 
   if (!uiAuthReady) {
@@ -7395,10 +7524,47 @@ export default function App() {
                         <p className="text-red-200">{taskResult.error_text || "--"}</p>
                       </div>
                     </div>
-                    <p className="mb-1 mt-4 text-white/60">{tSlash("结果 JSON / Result")}</p>
-                    <pre className="max-h-72 overflow-auto rounded-lg border border-white/10 bg-[#12151f] p-3 text-xs text-white/80">
-                      {JSON.stringify(taskResult.result_json ?? null, null, 2)}
-                    </pre>
+                    {taskOutcome ? (
+                      <div
+                        className={`mt-4 rounded-xl border px-3 py-3 ${
+                          taskOutcome.tone === "ok"
+                            ? "border-emerald-400/25 bg-emerald-500/10 text-emerald-50"
+                            : taskOutcome.tone === "running"
+                              ? "border-sky-400/25 bg-sky-500/10 text-sky-50"
+                              : taskOutcome.tone === "attention"
+                                ? "border-amber-400/25 bg-amber-500/10 text-amber-50"
+                                : "border-red-400/25 bg-red-500/10 text-red-50"
+                        }`}
+                      >
+                        <p className="font-semibold">{taskOutcome.title}</p>
+                        <p className="mt-1 text-sm opacity-80">{taskOutcome.nextStep}</p>
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                          {taskOutcome.finalShape ? (
+                            <span className="rounded-md border border-white/10 bg-black/20 px-2 py-1">
+                              {t("输出形状", "Answer shape")}: {taskOutcome.finalShape}
+                            </span>
+                          ) : null}
+                          {taskOutcome.failureLabel ? (
+                            <span className="rounded-md border border-white/10 bg-black/20 px-2 py-1">
+                              {taskOutcome.failureLabel}
+                            </span>
+                          ) : null}
+                          {taskOutcome.missingEvidence.length > 0 ? (
+                            <span className="rounded-md border border-white/10 bg-black/20 px-2 py-1">
+                              {t("缺少证据", "Missing evidence")}: {taskOutcome.missingEvidence.join(", ")}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                    <details className="mt-4 rounded-lg border border-white/10 bg-[#12151f] p-3">
+                      <summary className="cursor-pointer text-xs font-medium text-white/65">
+                        {tSlash("技术详情 JSON / Technical JSON")}
+                      </summary>
+                      <pre className="mt-3 max-h-72 overflow-auto text-xs text-white/80">
+                        {JSON.stringify(taskResult.result_json ?? null, null, 2)}
+                      </pre>
+                    </details>
                   </div>
                 ) : null}
               </section>

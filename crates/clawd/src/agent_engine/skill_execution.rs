@@ -339,7 +339,7 @@ fn structured_observation_path_argument_error(
 struct PreflightFailureMetadata {
     reason: &'static str,
     error_kind: String,
-    retry_instruction: &'static str,
+    retry_instruction: String,
 }
 
 fn structured_error_extra_string(
@@ -356,18 +356,81 @@ fn structured_error_extra_string(
         .map(str::to_string)
 }
 
+fn structured_error_extra_string_list(
+    structured: &crate::skills::StructuredSkillError,
+    key: &str,
+) -> Vec<String> {
+    structured
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get(key))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn contract_policy_retry_instruction(
+    structured: &crate::skills::StructuredSkillError,
+) -> Option<String> {
+    let decision = structured_error_extra_string(structured, "decision")?;
+    let action = structured_error_extra_string(structured, "action")
+        .unwrap_or_else(|| "unknown_action".to_string());
+    let contract = structured_error_extra_string(structured, "contract_match")
+        .unwrap_or_else(|| "unknown_contract".to_string());
+    let mut parts = vec![format!(
+        "ContractPolicyDecision={decision}; rejected_action={action}; contract={contract}."
+    )];
+    let preferred = structured_error_extra_string_list(structured, "preferred_actions");
+    if !preferred.is_empty() {
+        parts.push(format!(
+            "Use preferred action(s): {}.",
+            preferred.join(", ")
+        ));
+    }
+    let expected_targets = structured_error_extra_string_list(structured, "expected_target_args");
+    if !expected_targets.is_empty() {
+        parts.push(format!(
+            "Bind required target arg(s): {}.",
+            expected_targets.join(", ")
+        ));
+    }
+    parts.push("Do not repeat the same rejected action unless the contract changes.".to_string());
+    Some(parts.join(" "))
+}
+
 fn preflight_failure_metadata(err: &str) -> PreflightFailureMetadata {
     let structured = crate::skills::parse_structured_skill_error(err);
     let error_kind = structured
         .as_ref()
         .map(|value| value.error_kind.clone())
         .unwrap_or_else(|| "invalid_args".to_string());
-    if error_kind == "contract_action_rejected" {
+    if matches!(
+        error_kind.as_str(),
+        "contract_action_rejected" | "contract_arg_rejected"
+    ) {
+        let retry_instruction = structured
+            .as_ref()
+            .and_then(contract_policy_retry_instruction)
+            .unwrap_or_else(|| {
+                "Choose an action allowed by the task contract, or revise the plan before retrying."
+                    .to_string()
+            });
         return PreflightFailureMetadata {
-            reason: "contract_action_rejected",
+            reason: if error_kind == "contract_action_rejected" {
+                "contract_action_rejected"
+            } else {
+                "contract_arg_rejected"
+            },
             error_kind,
-            retry_instruction:
-                "Choose an action allowed by the task contract, or revise the plan before retrying.",
+            retry_instruction,
         };
     }
     if structured
@@ -379,13 +442,13 @@ fn preflight_failure_metadata(err: &str) -> PreflightFailureMetadata {
         return PreflightFailureMetadata {
             reason: "structured_observation_embedded_in_path_arg",
             error_kind,
-            retry_instruction: "Do not embed structured observations in path arguments. Select one concrete observed path or ask for clarification.",
+            retry_instruction: "Do not embed structured observations in path arguments. Select one concrete observed path or ask for clarification.".to_string(),
         };
     }
     PreflightFailureMetadata {
         reason: "unresolved_runtime_placeholder",
         error_kind,
-        retry_instruction: "Do not retry the same unresolved runtime placeholder. Use concrete observed values, synthesize_answer, or one command pipeline.",
+        retry_instruction: "Do not retry the same unresolved runtime placeholder. Use concrete observed values, synthesize_answer, or one command pipeline.".to_string(),
     }
 }
 
@@ -410,7 +473,7 @@ fn handle_preflight_argument_failure(
         "",
         Some(metadata.error_kind.as_str()),
         &user_visible_err,
-        Some(metadata.retry_instruction),
+        Some(metadata.retry_instruction.as_str()),
     );
     let effect = crate::execution_recipe::classify_skill_action_effect(
         state,
@@ -1848,6 +1911,10 @@ mod tests {
         let metadata = preflight_failure_metadata(&err);
         assert_eq!(metadata.reason, "contract_action_rejected");
         assert_eq!(metadata.error_kind, "contract_action_rejected");
+        assert!(metadata
+            .retry_instruction
+            .contains("ContractPolicyDecision=rejected_not_allowed"));
+        assert!(metadata.retry_instruction.contains("fs_basic.list_dir"));
     }
 
     #[test]
@@ -1886,6 +1953,13 @@ mod tests {
                 .and_then(|extra| extra.get("failure_attribution")),
             Some(&serde_json::json!("model_error"))
         );
+        let metadata = preflight_failure_metadata(&err);
+        assert_eq!(metadata.reason, "contract_arg_rejected");
+        assert_eq!(metadata.error_kind, "contract_arg_rejected");
+        assert!(metadata
+            .retry_instruction
+            .contains("ContractPolicyDecision=missing_target_binding"));
+        assert!(metadata.retry_instruction.contains("path"));
     }
 
     #[test]
