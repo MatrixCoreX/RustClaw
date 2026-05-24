@@ -246,7 +246,7 @@ fn strict_single_path_answer(answer: &str) -> Option<String> {
 fn observed_single_path_values(journal: &crate::task_journal::TaskJournal) -> BTreeSet<String> {
     let mut paths = observed_single_path_values_from_evidence_map(journal);
     for step in &journal.step_results {
-        if step.status != crate::executor::StepExecutionStatus::Ok {
+        if !step_can_supply_verifier_observation(step) {
             continue;
         }
         let Some(output) = step.output_excerpt.as_deref() else {
@@ -375,7 +375,7 @@ fn markdown_table_separator_row(cells: &[String]) -> bool {
 fn observed_table_cells(journal: &crate::task_journal::TaskJournal) -> BTreeSet<String> {
     let mut cells = observed_table_cells_from_evidence_map(journal);
     for step in &journal.step_results {
-        if step.status != crate::executor::StepExecutionStatus::Ok {
+        if !step_can_supply_verifier_observation(step) {
             continue;
         }
         let Some(output) = step.output_excerpt.as_deref() else {
@@ -504,7 +504,7 @@ fn normalize_strict_list_item(item: &str) -> String {
 fn observed_strict_list_items(journal: &crate::task_journal::TaskJournal) -> Vec<String> {
     let mut items = observed_strict_list_items_from_evidence_map(journal);
     for step in &journal.step_results {
-        if step.status != crate::executor::StepExecutionStatus::Ok {
+        if !step_can_supply_verifier_observation(step) {
             continue;
         }
         let Some(output) = step.output_excerpt.as_deref() else {
@@ -664,7 +664,7 @@ fn markdown_heading_answer_is_grounded_in_read_observation(
         return false;
     };
     journal.step_results.iter().any(|step| {
-        step.status == crate::executor::StepExecutionStatus::Ok
+        step_can_supply_verifier_observation(step)
             && step.output_excerpt.as_deref().is_some_and(|output| {
                 markdown_heading_from_read_observation(output)
                     .is_some_and(|heading| heading == candidate_heading)
@@ -744,7 +744,7 @@ fn file_token_path_is_grounded_in_observations(
 ) -> bool {
     let current_dir = std::env::current_dir().ok();
     journal.step_results.iter().any(|step| {
-        step.status == crate::executor::StepExecutionStatus::Ok
+        step_can_supply_verifier_observation(step)
             && step.output_excerpt.as_deref().is_some_and(|output| {
                 observed_output_contains_path(output, canonical_token_path, current_dir.as_deref())
             })
@@ -856,9 +856,17 @@ fn raw_command_answer_is_exact_single_successful_observation(
 }
 
 fn is_external_execution_step(step: &crate::task_journal::TaskJournalStepTrace) -> bool {
-    !matches!(
+    !is_synthesis_or_verifier_step(step)
+}
+
+fn step_can_supply_verifier_observation(step: &crate::task_journal::TaskJournalStepTrace) -> bool {
+    step.status == crate::executor::StepExecutionStatus::Ok && !is_synthesis_or_verifier_step(step)
+}
+
+fn is_synthesis_or_verifier_step(step: &crate::task_journal::TaskJournalStepTrace) -> bool {
+    matches!(
         step.skill.as_str(),
-        "synthesize_answer" | "respond" | "think"
+        "synthesize_answer" | "respond" | "think" | "answer_verifier"
     )
 }
 
@@ -875,7 +883,7 @@ fn existence_with_path_answer_is_grounded_in_observation(
         return false;
     }
     journal.step_results.iter().any(|step| {
-        step.status == crate::executor::StepExecutionStatus::Ok
+        step_can_supply_verifier_observation(step)
             && step.output_excerpt.as_deref().is_some_and(|output| {
                 path_batch_facts_contain_answer_path(output, candidate_answer)
             })
@@ -943,7 +951,7 @@ fn structured_keys_answer_is_grounded_in_observation(
         return false;
     }
     journal.step_results.iter().any(|step| {
-        step.status == crate::executor::StepExecutionStatus::Ok
+        step_can_supply_verifier_observation(step)
             && step.output_excerpt.as_deref().is_some_and(|output| {
                 structured_keys_from_output(output).is_some_and(|keys| {
                     !keys.is_empty()
@@ -1039,7 +1047,7 @@ fn scalar_answer_is_grounded_in_successful_observation(
         return true;
     }
     journal.step_results.iter().any(|step| {
-        step.status == crate::executor::StepExecutionStatus::Ok
+        step_can_supply_verifier_observation(step)
             && step.output_excerpt.as_deref().is_some_and(|output| {
                 observed_output_contains_scalar_answer(output, candidate_answer)
             })
@@ -1080,7 +1088,7 @@ fn successful_observed_evidence_items(
 ) -> Vec<serde_json::Value> {
     let mut items = Vec::new();
     for step in &journal.step_results {
-        if step.status != crate::executor::StepExecutionStatus::Ok {
+        if !step_can_supply_verifier_observation(step) {
             continue;
         }
         let Some(evidence) = crate::task_journal::observed_evidence_for_step_trace(step) else {
@@ -2257,6 +2265,91 @@ mod tests {
             &route,
             &journal,
             "- README.md\n- Cargo.toml"
+        ));
+    }
+
+    #[test]
+    fn matrix_shape_grounding_ignores_synthesis_and_verifier_steps() {
+        let mut list_route = route_with_mode(crate::AskMode::planner_execute_plain());
+        list_route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        list_route.output_contract.requires_content_evidence = true;
+        list_route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+        let mut list_journal =
+            crate::task_journal::TaskJournal::for_task("task-synth-list", "ask", "list files");
+        list_journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_synth",
+                "synthesize_answer",
+                json!({"names": ["README.md", "Cargo.toml"]}).to_string(),
+            ));
+        list_journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_verifier",
+            "answer_verifier",
+            json!({"observed_evidence": {"items": [{"kind": "filename", "excerpt": "README.md"}]}})
+                .to_string(),
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &list_route,
+            &list_journal,
+            "- README.md\n- Cargo.toml"
+        ));
+
+        let mut table_route = route_with_mode(crate::AskMode::planner_execute_plain());
+        table_route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        table_route.output_contract.requires_content_evidence = true;
+        table_route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
+        let mut table_journal =
+            crate::task_journal::TaskJournal::for_task("task-synth-table", "ask", "list tables");
+        table_journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_respond",
+                "respond",
+                json!({"rows": [{"name": "orders"}, {"name": "users"}]}).to_string(),
+            ));
+        assert!(!structurally_satisfies_answer_contract(
+            &table_route,
+            &table_journal,
+            "| name |\n| --- |\n| orders |\n| users |"
+        ));
+
+        let mut path_route = route_with_mode(crate::AskMode::planner_execute_plain());
+        path_route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        path_route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchivePack;
+        let mut path_journal =
+            crate::task_journal::TaskJournal::for_task("task-synth-path", "ask", "pack logs");
+        path_journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_think",
+                "think",
+                json!({"archive_path": "/tmp/rustclaw/report.zip"}).to_string(),
+            ));
+        assert!(!structurally_satisfies_answer_contract(
+            &path_route,
+            &path_journal,
+            "/tmp/rustclaw/report.zip"
+        ));
+
+        let mut scalar_route = route_with_mode(crate::AskMode::planner_execute_plain());
+        scalar_route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        scalar_route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        let mut scalar_journal =
+            crate::task_journal::TaskJournal::for_task("task-synth-scalar", "ask", "count files");
+        scalar_journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_synth",
+                "synthesize_answer",
+                json!({"count": 3}).to_string(),
+            ));
+        assert!(!structurally_satisfies_answer_contract(
+            &scalar_route,
+            &scalar_journal,
+            "3"
         ));
     }
 
