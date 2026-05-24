@@ -69,6 +69,7 @@ fn canonicalize_system_basic_call(args: Value) -> Option<VirtualToolCanonicalCal
         "extract_field" => ("config_basic", "read_field"),
         "extract_fields" => ("config_basic", "read_fields"),
         "structured_keys" => ("config_basic", "list_keys"),
+        "validate_structured" => ("config_basic", "validate"),
         _ => return None,
     };
     obj.insert("action".to_string(), Value::String(action.to_string()));
@@ -447,6 +448,10 @@ fn normalize_fs_basic_args(args: &mut Value) -> bool {
         ],
     );
     changed |= move_value_alias_if_missing(obj, "max_entries", &["limit"]);
+    if action_name(obj).as_deref() == Some("grep_text") {
+        changed |= promote_grep_pattern_to_query_if_missing(obj);
+        changed |= move_value_alias_if_missing(obj, "query", &["text", "keyword"]);
+    }
     changed
 }
 
@@ -869,6 +874,20 @@ mod tests {
     }
 
     #[test]
+    fn legacy_system_basic_validate_structured_canonicalizes_to_config_basic_validate() {
+        let canonical = canonicalize_legacy_tool_call(
+            "system_basic",
+            json!({"action":"validate_structured", "path":"configs/config.toml", "format":"toml"}),
+        )
+        .expect("canonical");
+        assert_eq!(canonical.tool, "config_basic");
+        assert_eq!(
+            canonical.args.get("action").and_then(|v| v.as_str()),
+            Some("validate")
+        );
+    }
+
+    #[test]
     fn legacy_fs_search_find_ext_canonicalizes_to_fs_basic_find_entries() {
         let canonical = canonicalize_legacy_tool_call(
             "fs_search",
@@ -907,6 +926,23 @@ mod tests {
         );
         assert!(canonical.args.get("pattern").is_none());
         assert_eq!(canonical.args.get("patterns"), Some(&json!(["*.rs"])));
+    }
+
+    #[test]
+    fn fs_basic_grep_text_pattern_alias_normalizes_to_required_query() {
+        let mut args = json!({
+            "action": "grep_text",
+            "path": "docs/release_checklist.md",
+            "pattern": "release"
+        });
+
+        assert!(normalize_virtual_tool_arg_aliases("fs_basic", &mut args));
+        assert_eq!(
+            args.get("action").and_then(|v| v.as_str()),
+            Some("grep_text")
+        );
+        assert_eq!(args.get("query").and_then(|v| v.as_str()), Some("release"));
+        assert!(args.get("pattern").is_none());
     }
 
     #[test]

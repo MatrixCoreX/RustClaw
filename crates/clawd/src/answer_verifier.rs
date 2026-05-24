@@ -104,6 +104,7 @@ pub(crate) fn structurally_satisfies_answer_contract(
         }
         if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::SinglePath {
             return matrix_single_path_answer_is_grounded_in_successful_observation(
+                route_result,
                 journal,
                 candidate_answer,
             );
@@ -145,7 +146,7 @@ pub(crate) fn structurally_satisfies_answer_contract(
 }
 
 fn matrix_strict_list_answer_is_grounded_in_successful_observation(
-    _route: &RouteResult,
+    route: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -159,21 +160,38 @@ fn matrix_strict_list_answer_is_grounded_in_successful_observation(
     }
     let observed_variants = observed_items
         .iter()
-        .flat_map(|item| strict_list_item_variants(item))
+        .flat_map(|item| strict_list_item_variants_for_route(route, item, true))
         .collect::<BTreeSet<_>>();
     let candidate_variants = candidate_items
         .iter()
-        .flat_map(|item| strict_list_item_variants(item))
+        .flat_map(|item| strict_list_item_variants_for_route(route, item, false))
         .collect::<BTreeSet<_>>();
-    candidate_items.iter().all(|item| {
-        strict_list_item_variants(item)
+    let candidate_is_observed = candidate_items.iter().all(|item| {
+        strict_list_item_variants_for_route(route, item, false)
             .iter()
             .any(|item| observed_variants.contains(item))
-    }) && observed_items.iter().all(|item| {
-        strict_list_item_variants(item)
+    });
+    if !candidate_is_observed {
+        return false;
+    }
+    if strict_list_route_allows_observed_subset(route) {
+        return true;
+    }
+    observed_items.iter().all(|item| {
+        strict_list_item_variants_for_route(route, item, true)
             .iter()
             .any(|item| candidate_variants.contains(item))
+            || candidate_items
+                .iter()
+                .any(|candidate| strict_list_candidate_annotates_observed_item(candidate, item))
     })
+}
+
+fn strict_list_route_allows_observed_subset(route: &RouteResult) -> bool {
+    matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FilePaths | crate::OutputSemanticKind::DirectoryNames
+    )
 }
 
 fn matrix_table_answer_is_grounded_in_successful_observation(
@@ -192,15 +210,32 @@ fn matrix_table_answer_is_grounded_in_successful_observation(
 }
 
 fn matrix_single_path_answer_is_grounded_in_successful_observation(
+    route: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
-    let Some(candidate_path) = strict_single_path_answer(candidate_answer) else {
+    if let Some(candidate_path) = strict_single_path_answer(candidate_answer) {
+        return observed_single_path_values(journal)
+            .iter()
+            .any(|observed_path| single_path_matches_observed(&candidate_path, observed_path));
+    }
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ScalarPathOnly {
         return false;
-    };
-    observed_single_path_values(journal)
+    }
+    let candidate_items = strict_list_answer_items(candidate_answer);
+    if candidate_items.len() <= 1 {
+        return false;
+    }
+    let observed_variants = observed_strict_list_items(journal)
         .iter()
-        .any(|observed_path| single_path_matches_observed(&candidate_path, observed_path))
+        .flat_map(|item| strict_list_item_variants(item))
+        .collect::<BTreeSet<_>>();
+    !observed_variants.is_empty()
+        && candidate_items.iter().all(|item| {
+            strict_list_item_variants(item)
+                .iter()
+                .any(|item| observed_variants.contains(item))
+        })
 }
 
 fn matrix_delivery_artifact_answer_is_grounded_in_successful_observation(
@@ -264,6 +299,7 @@ fn observed_single_path_values(journal: &crate::task_journal::TaskJournal) -> BT
 fn collect_single_path_values_from_json(value: &serde_json::Value, paths: &mut BTreeSet<String>) {
     match value {
         serde_json::Value::Object(map) => {
+            collect_joined_path_values_from_json_object(map, paths);
             for (key, child) in map {
                 if single_path_evidence_key(key) {
                     if let Some(path) = child
@@ -286,11 +322,66 @@ fn collect_single_path_values_from_json(value: &serde_json::Value, paths: &mut B
     }
 }
 
+fn collect_joined_path_values_from_json_object(
+    map: &serde_json::Map<String, serde_json::Value>,
+    paths: &mut BTreeSet<String>,
+) {
+    let Some(root) = map
+        .get("resolved_path")
+        .or_else(|| map.get("root"))
+        .or_else(|| map.get("path"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    for key in ["results", "names", "paths", "files"] {
+        let Some(items) = map.get(key).and_then(|value| value.as_array()) else {
+            continue;
+        };
+        for item in items {
+            let Some(child) = item
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            let child_path = std::path::Path::new(child);
+            if child_path.is_absolute() || joined_result_already_contains_root(root, child) {
+                paths.insert(child.to_string());
+            } else {
+                paths.insert(
+                    std::path::Path::new(root)
+                        .join(child_path)
+                        .display()
+                        .to_string(),
+                );
+            }
+        }
+    }
+}
+
+fn joined_result_already_contains_root(root: &str, child: &str) -> bool {
+    let root = root.trim().trim_matches('/');
+    if root.is_empty() || root == "." {
+        return true;
+    }
+    let child = child.trim().trim_start_matches("./");
+    child == root || child.starts_with(&format!("{root}/"))
+}
+
 fn single_path_evidence_key(key: &str) -> bool {
     matches!(
         key,
         "path"
             | "resolved_path"
+            | "cwd"
+            | "current_dir"
+            | "working_directory"
+            | "workspace_root"
+            | "root"
             | "archive_path"
             | "output_path"
             | "created_path"
@@ -466,11 +557,27 @@ fn strip_list_marker(raw: &str) -> String {
         .trim()
         .to_string();
     if let Some((prefix, rest)) = value.split_once('.') {
-        if prefix.chars().all(|ch| ch.is_ascii_digit()) {
+        if !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit()) {
             value = rest.trim().to_string();
         }
     }
     value.trim_matches('`').trim().to_string()
+}
+
+fn strict_list_item_variants_for_route(
+    route: &RouteResult,
+    item: &str,
+    observed_item: bool,
+) -> Vec<String> {
+    let mut variants = strict_list_item_variants(item);
+    if observed_item
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryNames
+    {
+        variants.extend(strict_list_parent_directory_variants(item));
+    }
+    variants.sort();
+    variants.dedup();
+    variants
 }
 
 fn strict_list_item_variants(item: &str) -> Vec<String> {
@@ -490,6 +597,42 @@ fn strict_list_item_variants(item: &str) -> Vec<String> {
     variants.sort();
     variants.dedup();
     variants
+}
+
+fn strict_list_parent_directory_variants(item: &str) -> Vec<String> {
+    let normalized = normalize_strict_list_item(item);
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+    let path = std::path::Path::new(&normalized);
+    let parent = path
+        .parent()
+        .map(|value| {
+            let text = value.to_string_lossy();
+            if text.is_empty() {
+                ".".to_string()
+            } else {
+                text.to_string()
+            }
+        })
+        .unwrap_or_else(|| ".".to_string());
+    vec![normalize_strict_list_item(&parent)]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn strict_list_candidate_annotates_observed_item(candidate: &str, observed: &str) -> bool {
+    let candidate = normalize_strict_list_item(candidate);
+    let observed = normalize_strict_list_item(observed);
+    !candidate.is_empty()
+        && !observed.is_empty()
+        && candidate.len() > observed.len()
+        && candidate.starts_with(&observed)
+        && candidate[observed.len()..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace)
 }
 
 fn normalize_strict_list_item(item: &str) -> String {
@@ -545,7 +688,7 @@ fn collect_observed_strict_list_items_from_value(
             push_array_strings(child, items);
         }
     }
-    for key in ["entries", "items", "facts", "rows"] {
+    for key in ["entries", "items", "facts", "matches", "rows"] {
         if let Some(array) = value.get(key).and_then(|value| value.as_array()) {
             for item in array {
                 collect_observed_list_item_object_fields(item, items);
@@ -586,6 +729,9 @@ fn collect_observed_list_item_object_fields(
     let Some(map) = value.as_object() else {
         return;
     };
+    if let Some(with_size) = observed_name_size_item(map) {
+        push_observed_list_item(&with_size, items);
+    }
     for key in [
         "name",
         "path",
@@ -598,6 +744,25 @@ fn collect_observed_list_item_object_fields(
             push_observed_list_item(text, items);
         }
     }
+}
+
+fn observed_name_size_item(map: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    let name = map
+        .get("name")
+        .or_else(|| map.get("path"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let size = map
+        .get("size_bytes")
+        .or_else(|| map.get("size"))
+        .and_then(|value| match value {
+            serde_json::Value::Number(value) => Some(value.to_string()),
+            serde_json::Value::String(value) => Some(value.trim().to_string()),
+            _ => None,
+        })
+        .filter(|value| !value.is_empty())?;
+    Some(format!("{name} {size}"))
 }
 
 fn push_observed_list_item(text: &str, items: &mut BTreeSet<String>) {
@@ -620,14 +785,114 @@ fn matrix_scalar_answer_is_grounded_in_successful_observation(
     if shape.class() != crate::contract_matrix::FinalAnswerShapeClass::ScalarValue {
         return false;
     }
-    scalar_answer_is_strict(candidate_answer)
-        && scalar_answer_is_grounded_in_successful_observation(route, journal, candidate_answer)
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
+        && (!scalar_answer_is_strict_for_shape(shape, candidate_answer)
+            || route.output_contract.response_shape != crate::OutputResponseShape::Scalar)
+    {
+        return count_summary_answer_is_grounded_in_successful_observation(
+            journal,
+            candidate_answer,
+            route.output_contract.response_shape != crate::OutputResponseShape::Scalar,
+        );
+    }
+    scalar_answer_is_strict_for_shape(shape, candidate_answer)
+        && scalar_answer_value_is_grounded_in_successful_observation(journal, candidate_answer)
 }
 
-fn scalar_answer_is_strict(candidate_answer: &str) -> bool {
+fn count_summary_answer_is_grounded_in_successful_observation(
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+    allow_single_observed_scalar: bool,
+) -> bool {
+    let candidate = candidate_answer.trim();
+    if candidate.is_empty() {
+        return false;
+    }
+    if allow_single_observed_scalar && candidate.lines().count() > 1 {
+        return false;
+    }
+    let mut observed_values = observed_scalar_values_from_evidence_map(journal);
+    for step in &journal.step_results {
+        if !step_can_supply_verifier_observation(step) {
+            continue;
+        }
+        if let Some(output) = step.output_excerpt.as_deref() {
+            observed_values.extend(observed_scalar_values_from_output(output));
+        }
+    }
+    observed_values
+        .iter()
+        .filter(|observed| scalar_token_occurs_in_text(candidate, observed))
+        .collect::<BTreeSet<_>>()
+        .len()
+        >= if allow_single_observed_scalar { 1 } else { 2 }
+}
+
+fn observed_scalar_values_from_output(output: &str) -> BTreeSet<String> {
+    let mut values = BTreeSet::new();
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) {
+        collect_scalar_values_from_json(&value, &mut values);
+    } else {
+        for line in output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+        {
+            if line.parse::<i64>().is_ok() {
+                values.insert(line.to_string());
+            }
+        }
+    }
+    values
+}
+
+fn collect_scalar_values_from_json(value: &serde_json::Value, values: &mut BTreeSet<String>) {
+    match value {
+        serde_json::Value::Number(value) => {
+            values.insert(value.to_string());
+        }
+        serde_json::Value::Bool(value) => {
+            values.insert(value.to_string());
+        }
+        serde_json::Value::String(value) => {
+            let value = value.trim();
+            if value.parse::<i64>().is_ok() {
+                values.insert(value.to_string());
+            }
+        }
+        serde_json::Value::Array(items) => {
+            values.insert(items.len().to_string());
+            for item in items {
+                collect_scalar_values_from_json(item, values);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for value in map.values() {
+                collect_scalar_values_from_json(value, values);
+            }
+        }
+        serde_json::Value::Null => {}
+    }
+}
+
+fn scalar_token_occurs_in_text(text: &str, scalar: &str) -> bool {
+    let scalar = scalar.trim();
+    !scalar.is_empty()
+        && text
+            .split(|ch: char| !ch.is_ascii_alphanumeric())
+            .any(|token| token == scalar)
+}
+
+fn scalar_answer_is_strict_for_shape(
+    shape: crate::contract_matrix::FinalAnswerShape,
+    candidate_answer: &str,
+) -> bool {
     let candidate_answer = candidate_answer.trim();
     if candidate_answer.is_empty() || candidate_answer.lines().count() > 1 {
         return false;
+    }
+    if shape == crate::contract_matrix::FinalAnswerShape::SingleCommitSubject {
+        return !candidate_answer.ends_with('.') && !candidate_answer.ends_with('。');
     }
     let lower = candidate_answer.to_ascii_lowercase();
     if lower.contains(" is ") || lower.contains("：") || lower.contains(':') {
@@ -1036,6 +1301,13 @@ fn scalar_answer_is_grounded_in_successful_observation(
     ) {
         return false;
     }
+    scalar_answer_value_is_grounded_in_successful_observation(journal, candidate_answer)
+}
+
+fn scalar_answer_value_is_grounded_in_successful_observation(
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
     let candidate_answer = candidate_answer.trim();
     if candidate_answer.is_empty() || candidate_answer.lines().count() > 1 {
         return false;
@@ -1171,6 +1443,10 @@ fn observed_evidence_excerpt(item: &serde_json::Value) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
+        .or_else(|| {
+            item.get("count")
+                .and_then(|value| value.as_u64().map(|value| value.to_string()))
+        })
 }
 
 fn observed_evidence_field(item: &serde_json::Value) -> Option<&str> {
@@ -1188,9 +1464,10 @@ fn observed_evidence_kind(item: &serde_json::Value) -> Option<&str> {
 }
 
 fn observed_evidence_item_supports_scalar(item: &serde_json::Value) -> bool {
+    let kind = observed_evidence_kind(item);
     if !matches!(
-        observed_evidence_kind(item),
-        Some("string" | "number" | "bool" | "text" | "null")
+        kind,
+        Some("string" | "number" | "bool" | "text" | "null" | "array")
     ) {
         return false;
     }
@@ -1198,6 +1475,21 @@ fn observed_evidence_item_supports_scalar(item: &serde_json::Value) -> bool {
         return false;
     };
     let leaf = observed_evidence_field_leaf(field);
+    if kind == Some("array") {
+        return matches!(
+            leaf.as_str(),
+            "entries"
+                | "facts"
+                | "files"
+                | "items"
+                | "matches"
+                | "names"
+                | "paths"
+                | "results"
+                | "rows"
+                | "tables"
+        ) && item.get("count").and_then(|value| value.as_u64()).is_some();
+    }
     matches!(
         leaf.as_str(),
         "bytes"
@@ -1205,6 +1497,8 @@ fn observed_evidence_item_supports_scalar(item: &serde_json::Value) -> bool {
             | "file_size"
             | "file_type"
             | "found"
+            | "hidden"
+            | "hidden_count"
             | "kind"
             | "length"
             | "manager"
@@ -1237,7 +1531,7 @@ fn observed_evidence_item_supports_single_path(item: &serde_json::Value) -> bool
 fn observed_evidence_item_supports_strict_list(item: &serde_json::Value) -> bool {
     if !matches!(
         observed_evidence_kind(item),
-        Some("string" | "number" | "bool")
+        Some("string" | "number" | "bool" | "text")
     ) {
         return false;
     }
@@ -2018,6 +2312,81 @@ mod tests {
     }
 
     #[test]
+    fn matrix_scalar_count_shape_allows_observed_component_breakdown() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-component-count", "ask", "count dirs");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "system_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    json!({
+                        "action": "count_inventory",
+                        "counts": {
+                            "total": 66,
+                            "files": 40,
+                            "dirs": 26
+                        }
+                    })
+                    .to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "文件：40 个\n文件夹：26 个"
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "总数：66 个"
+        ));
+    }
+
+    #[test]
+    fn matrix_single_path_shape_accepts_root_prefixed_results() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-root-prefixed-path", "ask", "find it");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "fs_search".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    json!({
+                        "action": "find_name",
+                        "count": 1,
+                        "root": "plan",
+                        "results": ["plan/agent_intelligence_architecture_plan_20260511.md"]
+                    })
+                    .to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "plan/agent_intelligence_architecture_plan_20260511.md"
+        ));
+    }
+
+    #[test]
     fn structured_keys_answer_covering_all_keys_skips_llm_verifier() {
         let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
         route.output_contract.response_shape = crate::OutputResponseShape::Strict;
@@ -2265,6 +2634,59 @@ mod tests {
             &route,
             &journal,
             "- README.md\n- Cargo.toml"
+        ));
+    }
+
+    #[test]
+    fn matrix_scalar_shape_accepts_count_from_array_evidence_for_non_scalar_route_shape() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-array-count", "ask", "count rows");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "db_basic",
+                json!({"columns":["name"],"rows":[{"name":"orders"},{"name":"users"}]}).to_string(),
+            ));
+
+        assert!(structurally_satisfies_answer_contract(
+            &route, &journal, "2"
+        ));
+    }
+
+    #[test]
+    fn matrix_file_path_list_shape_allows_grounded_filtered_subset() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-path-subset", "ask", "find path");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "fs_basic",
+                json!({
+                    "action": "find_name",
+                    "results": ["plan/a.md", "plan/b.md", "docs/c.md"]
+                })
+                .to_string(),
+            ));
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "plan/b.md"
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "plan/missing.md"
         ));
     }
 
