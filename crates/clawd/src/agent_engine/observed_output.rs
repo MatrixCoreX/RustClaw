@@ -5356,7 +5356,7 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     prefer_english: bool,
 ) -> Option<String> {
     if let Some(path) = recent_file_path_candidate_for_scalar_path(loop_state, route) {
-        return Some(path);
+        return matrix_checked_direct_candidate(route, loop_state, auto_locator_path, path);
     }
     if let Some(answer) = latest_successful_list_dir_answer_candidate(
         loop_state,
@@ -5367,7 +5367,7 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         if !crate::finalize::looks_like_planner_artifact(&answer)
             && !crate::finalize::looks_like_internal_trace_artifact(&answer)
         {
-            return Some(answer);
+            return matrix_checked_direct_candidate(route, loop_state, auto_locator_path, answer);
         }
     }
     let observed_output = extract_latest_generic_successful_output(loop_state)?;
@@ -5394,7 +5394,116 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     {
         return None;
     }
+    matrix_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
+}
+
+fn matrix_checked_direct_candidate(
+    route: Option<&crate::RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+    answer: String,
+) -> Option<String> {
+    let Some(route) = route else {
+        return Some(answer);
+    };
+    if latest_observation_is_explicitly_forbidden_by_contract(route, loop_state) {
+        return None;
+    }
+    if route_requires_matrix_grounded_direct_candidate(route)
+        && matrix_direct_candidate_satisfies_contract(route, loop_state, auto_locator_path, &answer)
+    {
+        return Some(answer);
+    }
     Some(answer)
+}
+
+fn route_requires_matrix_grounded_direct_candidate(route: &crate::RouteResult) -> bool {
+    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+        .is_some_and(|shape| !shape.allows_model_language())
+}
+
+fn matrix_direct_candidate_satisfies_contract(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+    candidate: &str,
+) -> bool {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "observed-output-direct-candidate",
+        "ask",
+        route.resolved_intent.as_str(),
+    );
+    journal.record_route_result(route);
+    for step in &loop_state.executed_step_results {
+        journal.push_step_result(step);
+    }
+    if let Some(path) = auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "auto_locator_path".to_string(),
+            skill: "auto_locator".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                serde_json::json!({
+                    "action": "auto_locator",
+                    "path": path,
+                    "resolved_path": path,
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+    }
+    crate::answer_verifier::structurally_satisfies_answer_contract(route, &journal, candidate)
+}
+
+fn latest_observation_is_explicitly_forbidden_by_contract(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> bool {
+    if !route_uses_enforced_generic_path_content_profile(route) {
+        return false;
+    }
+    let Some(step) = loop_state.executed_step_results.iter().rev().find(|step| {
+        step.is_ok()
+            && !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+    }) else {
+        return false;
+    };
+    let args = step
+        .output
+        .as_deref()
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(body.trim()).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    crate::contract_matrix::action_policy_for_output_contract(
+        Some(&route.output_contract),
+        &step.skill,
+        &args,
+    )
+    .is_some_and(|policy| {
+        policy.decision == crate::contract_matrix::ActionPolicyDecision::RejectedForbidden
+    })
+}
+
+fn route_uses_enforced_generic_path_content_profile(route: &crate::RouteResult) -> bool {
+    route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
+        && route.output_contract.response_shape == crate::OutputResponseShape::Free
+        && matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        && !route_allows_strict_plain_observation_passthrough(route)
 }
 
 #[cfg(test)]
@@ -5431,13 +5540,28 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
         if let Some(answer) =
             count_inventory_planned_file_dir_breakdown_answer(None, loop_state, false)
         {
-            return Some(answer);
+            return matrix_checked_direct_candidate(
+                Some(route),
+                loop_state,
+                auto_locator_path,
+                answer,
+            );
         }
         if let Some(answer) = count_answer_from_latest_listing(route, loop_state) {
-            return Some(answer);
+            return matrix_checked_direct_candidate(
+                Some(route),
+                loop_state,
+                auto_locator_path,
+                answer,
+            );
         }
         if let Some(answer) = count_answer_from_latest_fs_search(route, loop_state) {
-            return Some(answer);
+            return matrix_checked_direct_candidate(
+                Some(route),
+                loop_state,
+                auto_locator_path,
+                answer,
+            );
         }
     }
     let locator_hint = route.map(|route| route.output_contract.locator_hint.as_str());
@@ -5476,13 +5600,28 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
             loop_state,
             prefer_english,
         ) {
-            return Some(answer);
+            return matrix_checked_direct_candidate(
+                Some(route),
+                loop_state,
+                auto_locator_path,
+                answer,
+            );
         }
         if let Some(answer) = count_answer_from_latest_listing(route, loop_state) {
-            return Some(answer);
+            return matrix_checked_direct_candidate(
+                Some(route),
+                loop_state,
+                auto_locator_path,
+                answer,
+            );
         }
         if let Some(answer) = count_answer_from_latest_fs_search(route, loop_state) {
-            return Some(answer);
+            return matrix_checked_direct_candidate(
+                Some(route),
+                loop_state,
+                auto_locator_path,
+                answer,
+            );
         }
     }
     let locator_hint = route.map(|route| route.output_contract.locator_hint.as_str());
@@ -5553,7 +5692,12 @@ fn extract_direct_answer_from_generic_output_impl(
         if let Some(answer) =
             hidden_entries_direct_answer(state, route, loop_state, prefers_english_free_text)
         {
-            return Some(answer);
+            return matrix_checked_direct_candidate(
+                Some(route),
+                loop_state,
+                auto_locator_path,
+                answer,
+            );
         }
     }
 
@@ -5895,7 +6039,7 @@ fn extract_direct_answer_from_generic_output_impl(
     {
         return None;
     }
-    Some(answer)
+    matrix_checked_direct_candidate(route, loop_state, auto_locator_path, answer)
 }
 
 fn fs_search_output_direct_answer_candidate(
@@ -10689,6 +10833,50 @@ version.workspace = true
             auto_locator_path: Some(temp_dir.to_string_lossy().to_string()),
             ..AgentRunContext::default()
         };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+            None
+        );
+    }
+
+    #[test]
+    fn direct_answer_blocks_contract_forbidden_observation_action() {
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "run_cmd", "hello from shell"));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent: "读取 docs/guide.md 并总结".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::None,
+                locator_hint: "docs/guide.md".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
             None
