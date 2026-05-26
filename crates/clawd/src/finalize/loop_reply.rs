@@ -9817,7 +9817,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_summary_attaches_for_scalar_value_contract() {
+    fn execution_summary_suppressed_for_scalar_value_contract() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
         loop_state
             .round_traces
@@ -9855,14 +9855,8 @@ mod tests {
 
         attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-        assert_eq!(delivery.len(), 2);
-        assert!(delivery[0].contains("**执行过程**"));
-        assert!(delivery[0].contains("system_basic"));
-        assert!(delivery[0].contains("rustclaw-nl-fixture"));
-        assert_eq!(
-            delivery.last().map(String::as_str),
-            Some("rustclaw-nl-fixture")
-        );
+        assert_eq!(delivery, vec!["rustclaw-nl-fixture"]);
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
     }
 
     #[test]
@@ -10670,7 +10664,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_summary_attaches_for_strict_content_excerpt_contract() {
+    fn execution_summary_suppressed_for_strict_content_excerpt_contract() {
         let mut route = free_route_result();
         route.output_contract.response_shape = crate::OutputResponseShape::Strict;
         route.output_contract.requires_content_evidence = true;
@@ -10707,13 +10701,7 @@ mod tests {
             r#"{"action":"read_range","excerpt":"1|alpha\n2|beta","path":"/tmp/model_io.log"}"#,
         ));
 
-        let summary = build_execution_summary_message(&loop_state, Some(&ctx), None)
-            .expect("strict content excerpt should expose execution process");
-
-        assert!(summary.contains("**执行过程**"));
-        assert!(summary.contains("system_basic"));
-        assert!(summary.contains("read_range"));
-        assert!(summary.contains("alpha"));
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
     }
 
     #[test]
@@ -10733,19 +10721,11 @@ mod tests {
             r#"{"action":"read_range","excerpt":"1|\u001b[32mconnected\u001b[0m to wss://host/ws?device_id=123&access_key=abc123&service_id=7&ticket=deadbeef","path":"/tmp/feishud.log"}"#,
         ));
 
-        let summary = build_execution_summary_message(&loop_state, Some(&ctx), None)
-            .expect("strict content excerpt should expose sanitized execution process");
-
-        assert!(summary.contains("**执行过程**"));
-        assert!(summary.contains("access_key=[REDACTED]"));
-        assert!(summary.contains("ticket=[REDACTED]"));
-        assert!(!summary.contains("\\u001b"));
-        assert!(!summary.contains("abc123"));
-        assert!(!summary.contains("deadbeef"));
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
     }
 
     #[test]
-    fn execution_summary_attaches_for_exact_file_names_contract() {
+    fn execution_summary_suppressed_for_exact_file_names_contract() {
         let mut route = free_route_result();
         route.output_contract.locator_hint = "document".to_string();
         route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
@@ -10763,11 +10743,8 @@ mod tests {
 
         attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-        assert_eq!(delivery.len(), 2);
-        assert!(delivery[0].contains("**执行过程**"));
-        assert!(delivery[0].contains("list_dir"));
-        assert_eq!(delivery[1], "alpha.md\nbeta.md");
-        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_some());
+        assert_eq!(delivery, vec!["alpha.md\nbeta.md"]);
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
     }
 
     #[test]
@@ -10873,7 +10850,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_summary_language_uses_original_user_request_before_resolved_text() {
+    fn execution_summary_suppressed_for_file_names_contract_even_with_original_user_request() {
         let mut route = free_route_result();
         route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
         let ctx = crate::agent_engine::AgentRunContext {
@@ -10889,16 +10866,12 @@ mod tests {
             "act_plan.log\nclawd.log\n",
         ));
 
-        let summary = build_execution_summary_message(
+        assert!(build_execution_summary_message(
             &loop_state,
             Some(&ctx),
             Some("List the first five filenames under logs."),
         )
-        .expect("execution summary should be attached");
-
-        assert!(summary.starts_with("**执行过程**"));
-        assert!(summary.contains("调用"));
-        assert!(!summary.starts_with("**Execution**"));
+        .is_none());
     }
 
     #[test]
@@ -10947,7 +10920,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_summary_attaches_for_existence_with_path_contract() {
+    fn execution_summary_suppressed_for_existence_with_path_contract() {
         let mut route = free_route_result();
         route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
         route.output_contract.locator_hint = "rustclaw.service".to_string();
@@ -10965,15 +10938,12 @@ mod tests {
 
         attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-        assert_eq!(delivery.len(), 2);
-        assert!(delivery[0].contains("**执行过程**"));
-        assert!(delivery[0].contains("fs_search"));
-        assert_eq!(delivery[1], "有，路径：rustclaw.service");
-        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_some());
+        assert_eq!(delivery, vec!["有，路径：rustclaw.service"]);
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
     }
 
     #[test]
-    fn execution_summary_attaches_for_sqlite_table_names_contract() {
+    fn execution_summary_suppressed_for_sqlite_table_names_contract() {
         let mut route = free_route_result();
         route.output_contract.response_shape = OutputResponseShape::Strict;
         route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableNamesOnly;
@@ -11010,15 +10980,8 @@ mod tests {
 
         attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
 
-        assert_eq!(delivery.len(), 2);
-        assert!(delivery[0].contains("**执行过程**"));
-        assert!(delivery[0].contains("sqlite3 /tmp/test.sqlite"));
-        assert!(delivery[0].contains("orders"));
-        assert!(delivery[0].contains("users"));
-        assert_eq!(
-            delivery.last().map(String::as_str),
-            Some("这个 SQLite 数据库里有表：orders、users。")
-        );
+        assert_eq!(delivery, vec!["这个 SQLite 数据库里有表：orders、users。"]);
+        assert!(build_execution_summary_message(&loop_state, Some(&ctx), None).is_none());
     }
 
     #[test]
@@ -11049,7 +11012,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_summary_includes_scalar_contract_without_reading_user_text() {
+    fn execution_summary_suppressed_for_scalar_contract_without_reading_user_text() {
         let mut route = free_route_result();
         route.output_contract.response_shape = OutputResponseShape::Scalar;
         route.output_contract.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
@@ -11073,14 +11036,13 @@ mod tests {
             &mut delivery,
         );
 
-        assert_eq!(delivery.len(), 2);
-        assert!(crate::finalize::is_execution_summary_message(&delivery[0]));
-        assert!(delivery[0].contains("list_dir"));
-        assert!(delivery[0].contains(".git"));
-        assert_eq!(
-            delivery.last().map(String::as_str),
-            Some("有。示例：.git, .gitignore")
-        );
+        assert_eq!(delivery, vec!["有。示例：.git, .gitignore"]);
+        assert!(build_execution_summary_message(
+            &loop_state,
+            Some(&ctx),
+            Some("plain runtime text that is intentionally ignored"),
+        )
+        .is_none());
     }
 
     #[test]
@@ -14950,7 +14912,7 @@ mod tests {
         assert!(reply
             .messages
             .iter()
-            .any(|message| crate::finalize::is_execution_summary_message(message)));
+            .all(|message| !crate::finalize::is_execution_summary_message(message)));
         assert_eq!(
             reply.messages.last().map(String::as_str),
             Some("/tmp/repo/configs/channels | 目录")
