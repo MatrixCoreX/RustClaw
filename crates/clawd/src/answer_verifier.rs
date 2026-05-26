@@ -98,6 +98,7 @@ pub(crate) fn structurally_satisfies_answer_contract(
         }
         if shape.class() == crate::contract_matrix::FinalAnswerShapeClass::Table {
             return matrix_table_answer_is_grounded_in_successful_observation(
+                route_result,
                 journal,
                 candidate_answer,
             );
@@ -154,7 +155,7 @@ fn matrix_strict_list_answer_is_grounded_in_successful_observation(
     if candidate_items.is_empty() {
         return false;
     }
-    let observed_items = observed_strict_list_items(journal);
+    let observed_items = observed_strict_list_items(route, journal);
     if observed_items.is_empty() {
         return false;
     }
@@ -195,6 +196,7 @@ fn strict_list_route_allows_observed_subset(route: &RouteResult) -> bool {
 }
 
 fn matrix_table_answer_is_grounded_in_successful_observation(
+    route: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -202,7 +204,7 @@ fn matrix_table_answer_is_grounded_in_successful_observation(
     if candidate_cells.is_empty() {
         return false;
     }
-    let observed_cells = observed_table_cells(journal);
+    let observed_cells = observed_table_cells(route, journal);
     if observed_cells.is_empty() {
         return false;
     }
@@ -215,7 +217,7 @@ fn matrix_single_path_answer_is_grounded_in_successful_observation(
     candidate_answer: &str,
 ) -> bool {
     if let Some(candidate_path) = strict_single_path_answer(candidate_answer) {
-        return observed_single_path_values(journal)
+        return observed_single_path_values(route, journal)
             .iter()
             .any(|observed_path| single_path_matches_observed(&candidate_path, observed_path));
     }
@@ -226,7 +228,7 @@ fn matrix_single_path_answer_is_grounded_in_successful_observation(
     if candidate_items.len() <= 1 {
         return false;
     }
-    let observed_variants = observed_strict_list_items(journal)
+    let observed_variants = observed_strict_list_items(route, journal)
         .iter()
         .flat_map(|item| strict_list_item_variants(item))
         .collect::<BTreeSet<_>>();
@@ -278,10 +280,13 @@ fn strict_single_path_answer(answer: &str) -> Option<String> {
     Some(answer.to_string())
 }
 
-fn observed_single_path_values(journal: &crate::task_journal::TaskJournal) -> BTreeSet<String> {
-    let mut paths = observed_single_path_values_from_evidence_map(journal);
+fn observed_single_path_values(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> BTreeSet<String> {
+    let mut paths = observed_single_path_values_from_evidence_map_for_route(route, journal);
     for step in &journal.step_results {
-        if !step_can_supply_verifier_observation(step) {
+        if !step_can_supply_verifier_observation_for_route(route, step) {
             continue;
         }
         let Some(output) = step.output_excerpt.as_deref() else {
@@ -463,10 +468,13 @@ fn markdown_table_separator_row(cells: &[String]) -> bool {
     })
 }
 
-fn observed_table_cells(journal: &crate::task_journal::TaskJournal) -> BTreeSet<String> {
-    let mut cells = observed_table_cells_from_evidence_map(journal);
+fn observed_table_cells(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> BTreeSet<String> {
+    let mut cells = observed_table_cells_from_evidence_map_for_route(route, journal);
     for step in &journal.step_results {
-        if !step_can_supply_verifier_observation(step) {
+        if !step_can_supply_verifier_observation_for_route(route, step) {
             continue;
         }
         let Some(output) = step.output_excerpt.as_deref() else {
@@ -644,10 +652,13 @@ fn normalize_strict_list_item(item: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn observed_strict_list_items(journal: &crate::task_journal::TaskJournal) -> Vec<String> {
-    let mut items = observed_strict_list_items_from_evidence_map(journal);
+fn observed_strict_list_items(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> Vec<String> {
+    let mut items = observed_strict_list_items_from_evidence_map_for_route(route, journal);
     for step in &journal.step_results {
-        if !step_can_supply_verifier_observation(step) {
+        if !step_can_supply_verifier_observation_for_route(route, step) {
             continue;
         }
         let Some(output) = step.output_excerpt.as_deref() else {
@@ -790,16 +801,22 @@ fn matrix_scalar_answer_is_grounded_in_successful_observation(
             || route.output_contract.response_shape != crate::OutputResponseShape::Scalar)
     {
         return count_summary_answer_is_grounded_in_successful_observation(
+            route,
             journal,
             candidate_answer,
             route.output_contract.response_shape != crate::OutputResponseShape::Scalar,
         );
     }
     scalar_answer_is_strict_for_shape(shape, candidate_answer)
-        && scalar_answer_value_is_grounded_in_successful_observation(journal, candidate_answer)
+        && scalar_answer_value_is_grounded_in_successful_observation(
+            route,
+            journal,
+            candidate_answer,
+        )
 }
 
 fn count_summary_answer_is_grounded_in_successful_observation(
+    route: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
     allow_single_observed_scalar: bool,
@@ -811,9 +828,9 @@ fn count_summary_answer_is_grounded_in_successful_observation(
     if allow_single_observed_scalar && candidate.lines().count() > 1 {
         return false;
     }
-    let mut observed_values = observed_scalar_values_from_evidence_map(journal);
+    let mut observed_values = observed_scalar_values_from_evidence_map_for_route(route, journal);
     for step in &journal.step_results {
-        if !step_can_supply_verifier_observation(step) {
+        if !step_can_supply_verifier_observation_for_route(route, step) {
             continue;
         }
         if let Some(output) = step.output_excerpt.as_deref() {
@@ -1233,7 +1250,7 @@ fn structured_keys_answer_is_grounded_in_observation(
         return false;
     }
     journal.step_results.iter().any(|step| {
-        step_can_supply_verifier_observation(step)
+        step_can_supply_verifier_observation_for_route(route, step)
             && step.output_excerpt.as_deref().is_some_and(|output| {
                 structured_keys_from_output(output).is_some_and(|keys| {
                     !keys.is_empty()
@@ -1318,10 +1335,11 @@ fn scalar_answer_is_grounded_in_successful_observation(
     ) {
         return false;
     }
-    scalar_answer_value_is_grounded_in_successful_observation(journal, candidate_answer)
+    scalar_answer_value_is_grounded_in_successful_observation(route, journal, candidate_answer)
 }
 
 fn scalar_answer_value_is_grounded_in_successful_observation(
+    route: &RouteResult,
     journal: &crate::task_journal::TaskJournal,
     candidate_answer: &str,
 ) -> bool {
@@ -1329,14 +1347,14 @@ fn scalar_answer_value_is_grounded_in_successful_observation(
     if candidate_answer.is_empty() || candidate_answer.lines().count() > 1 {
         return false;
     }
-    if observed_scalar_values_from_evidence_map(journal)
+    if observed_scalar_values_from_evidence_map_for_route(route, journal)
         .iter()
         .any(|observed| observed == candidate_answer)
     {
         return true;
     }
     journal.step_results.iter().any(|step| {
-        step_can_supply_verifier_observation(step)
+        step_can_supply_verifier_observation_for_route(route, step)
             && step.output_excerpt.as_deref().is_some_and(|output| {
                 observed_output_contains_scalar_answer(output, candidate_answer)
             })
@@ -1372,6 +1390,7 @@ fn json_value_contains_scalar_answer(value: &serde_json::Value, candidate_answer
     }
 }
 
+#[cfg(test)]
 fn successful_observed_evidence_items(
     journal: &crate::task_journal::TaskJournal,
 ) -> Vec<serde_json::Value> {
@@ -1390,6 +1409,26 @@ fn successful_observed_evidence_items(
     items
 }
 
+fn successful_observed_evidence_items_for_route(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> Vec<serde_json::Value> {
+    let mut items = Vec::new();
+    for step in &journal.step_results {
+        if !step_can_supply_verifier_observation_for_route(route, step) {
+            continue;
+        }
+        let Some(evidence) = crate::task_journal::observed_evidence_for_step_trace(step) else {
+            continue;
+        };
+        if let Some(evidence_items) = evidence.get("items").and_then(|value| value.as_array()) {
+            items.extend(evidence_items.iter().cloned());
+        }
+    }
+    items
+}
+
+#[cfg(test)]
 fn observed_scalar_values_from_evidence_map(
     journal: &crate::task_journal::TaskJournal,
 ) -> BTreeSet<String> {
@@ -1402,6 +1441,20 @@ fn observed_scalar_values_from_evidence_map(
     values
 }
 
+fn observed_scalar_values_from_evidence_map_for_route(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> BTreeSet<String> {
+    let mut values = BTreeSet::new();
+    for item in successful_observed_evidence_items_for_route(route, journal) {
+        if observed_evidence_item_supports_scalar(&item) {
+            push_observed_evidence_excerpt(&item, &mut values);
+        }
+    }
+    values
+}
+
+#[cfg(test)]
 fn observed_single_path_values_from_evidence_map(
     journal: &crate::task_journal::TaskJournal,
 ) -> BTreeSet<String> {
@@ -1414,6 +1467,20 @@ fn observed_single_path_values_from_evidence_map(
     paths
 }
 
+fn observed_single_path_values_from_evidence_map_for_route(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+    for item in successful_observed_evidence_items_for_route(route, journal) {
+        if observed_evidence_item_supports_single_path(&item) {
+            push_observed_evidence_excerpt(&item, &mut paths);
+        }
+    }
+    paths
+}
+
+#[cfg(test)]
 fn observed_strict_list_items_from_evidence_map(
     journal: &crate::task_journal::TaskJournal,
 ) -> BTreeSet<String> {
@@ -1428,11 +1495,45 @@ fn observed_strict_list_items_from_evidence_map(
     items
 }
 
+fn observed_strict_list_items_from_evidence_map_for_route(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> BTreeSet<String> {
+    let mut items = BTreeSet::new();
+    for item in successful_observed_evidence_items_for_route(route, journal) {
+        if observed_evidence_item_supports_strict_list(&item) {
+            if let Some(excerpt) = observed_evidence_excerpt(&item) {
+                push_observed_list_item(&excerpt, &mut items);
+            }
+        }
+    }
+    items
+}
+
+#[cfg(test)]
 fn observed_table_cells_from_evidence_map(
     journal: &crate::task_journal::TaskJournal,
 ) -> BTreeSet<String> {
     let mut cells = BTreeSet::new();
     for item in successful_observed_evidence_items(journal) {
+        if observed_evidence_item_supports_table_cell(&item) {
+            if let Some(excerpt) = observed_evidence_excerpt(&item) {
+                let normalized = normalize_strict_list_item(&excerpt);
+                if !normalized.is_empty() {
+                    cells.insert(normalized);
+                }
+            }
+        }
+    }
+    cells
+}
+
+fn observed_table_cells_from_evidence_map_for_route(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> BTreeSet<String> {
+    let mut cells = BTreeSet::new();
+    for item in successful_observed_evidence_items_for_route(route, journal) {
         if observed_evidence_item_supports_table_cell(&item) {
             if let Some(excerpt) = observed_evidence_excerpt(&item) {
                 let normalized = normalize_strict_list_item(&excerpt);
@@ -1836,10 +1937,14 @@ mod tests {
 
     use super::{
         execution_evidence_prompt_block, local_missing_evidence_verifier_gap,
-        observed_scalar_values_from_evidence_map, observed_single_path_values_from_evidence_map,
-        observed_strict_list_items_from_evidence_map, observed_table_cells_from_evidence_map,
-        should_verify_answer, structural_satisfaction_can_skip_verifier,
-        structurally_satisfies_answer_contract, AnswerVerifierOut,
+        observed_scalar_values_from_evidence_map,
+        observed_scalar_values_from_evidence_map_for_route,
+        observed_single_path_values_from_evidence_map,
+        observed_strict_list_items_from_evidence_map,
+        observed_strict_list_items_from_evidence_map_for_route,
+        observed_table_cells_from_evidence_map, should_verify_answer,
+        structural_satisfaction_can_skip_verifier, structurally_satisfies_answer_contract,
+        AnswerVerifierOut,
     };
 
     fn route_with_mode(ask_mode: crate::AskMode) -> crate::RouteResult {
@@ -2646,6 +2751,76 @@ mod tests {
         assert!(!observed_scalar_values_from_evidence_map(&journal).contains("1|running"));
         assert!(!structurally_satisfies_answer_contract(
             &route, &journal, "running"
+        ));
+    }
+
+    #[test]
+    fn matrix_scalar_shape_ignores_read_text_structured_fields() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+        route.output_contract.requires_content_evidence = false;
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-matrix-scalar-read-fields",
+            "ask",
+            "service status",
+        );
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_read",
+                "fs_basic",
+                json!({
+                    "action": "read_text_range",
+                    "path": "/tmp/status-notes.md",
+                    "status": "running"
+                })
+                .to_string(),
+            ));
+
+        assert!(observed_scalar_values_from_evidence_map(&journal).contains("running"));
+        assert!(
+            !observed_scalar_values_from_evidence_map_for_route(&route, &journal)
+                .contains("running")
+        );
+        assert!(!structurally_satisfies_answer_contract(
+            &route, &journal, "running"
+        ));
+    }
+
+    #[test]
+    fn matrix_strict_list_shape_ignores_read_text_list_fields() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+        route.output_contract.requires_content_evidence = false;
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-matrix-list-read-fields",
+            "ask",
+            "list files",
+        );
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_read",
+                "fs_basic",
+                json!({
+                    "action": "read_text_range",
+                    "path": "/tmp/listing-notes.md",
+                    "names": ["README.md", "Cargo.toml"]
+                })
+                .to_string(),
+            ));
+
+        assert!(observed_strict_list_items_from_evidence_map(&journal).contains("readme.md"));
+        assert!(
+            !observed_strict_list_items_from_evidence_map_for_route(&route, &journal)
+                .contains("readme.md")
+        );
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "- README.md\n- Cargo.toml"
         ));
     }
 
