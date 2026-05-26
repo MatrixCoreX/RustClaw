@@ -5870,10 +5870,34 @@ fn matrix_checked_direct_candidate(
     {
         return Some(answer);
     }
+    if hidden_entries_empty_direct_candidate_satisfies_contract(route, loop_state, &answer) {
+        return Some(answer);
+    }
     if route_requires_matrix_grounded_direct_candidate(route) {
         return None;
     }
     Some(answer)
+}
+
+fn hidden_entries_empty_direct_candidate_satisfies_contract(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    answer: &str,
+) -> bool {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::HiddenEntriesCheck
+        || route.output_contract.response_shape != crate::OutputResponseShape::Strict
+        || answer.trim().is_empty()
+        || crate::finalize::looks_like_planner_artifact(answer)
+        || crate::finalize::looks_like_internal_trace_artifact(answer)
+    {
+        return false;
+    }
+    latest_hidden_entries(loop_state)
+        .or_else(|| {
+            latest_directory_listing_entries(loop_state, None)
+                .map(|entries| hidden_entries_from_entries(&entries))
+        })
+        .is_some_and(|hidden_entries| hidden_entries.is_empty())
 }
 
 fn route_requires_matrix_grounded_direct_candidate(route: &crate::RouteResult) -> bool {
@@ -6174,7 +6198,12 @@ fn extract_direct_answer_from_generic_output_impl(
             if latest_observation_is_explicitly_forbidden_by_contract(route, loop_state) {
                 return None;
             }
-            return Some(answer);
+            return matrix_checked_direct_candidate(
+                Some(route),
+                loop_state,
+                auto_locator_path,
+                answer,
+            );
         }
         if let Some(answer) = db_basic_database_kind_judgment_from_loop_state_candidate(
             route,
