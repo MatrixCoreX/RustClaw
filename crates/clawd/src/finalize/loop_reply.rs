@@ -2061,6 +2061,39 @@ fn prefer_english_for_final_reply(
     !(normalized.starts_with("zh") || normalized == "mixed")
 }
 
+fn deterministic_template_language_preference(
+    state: &AppState,
+    user_text: &str,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<bool> {
+    let hint = agent_run_context
+        .and_then(|ctx| ctx.original_user_request.as_deref())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(crate::language_policy::request_language_hint)
+        .filter(|hint| *hint != "config_default")
+        .unwrap_or_else(|| crate::language_policy::request_language_hint(user_text));
+    let normalized = hint.trim().to_ascii_lowercase();
+    if normalized.starts_with("zh") {
+        Some(false)
+    } else if normalized.starts_with("en") {
+        Some(true)
+    } else if normalized == "mixed" {
+        Some(!crate::language_policy::mixed_language_prefers_cjk_response(user_text))
+    } else if normalized == "config_default" || normalized.is_empty() {
+        Some(
+            state
+                .policy
+                .command_intent
+                .default_locale
+                .to_ascii_lowercase()
+                .starts_with("en"),
+        )
+    } else {
+        None
+    }
+}
+
 fn route_resolved_intent(agent_run_context: Option<&AgentRunContext>) -> String {
     agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
@@ -3322,6 +3355,11 @@ fn should_keep_planned_delivery_over_observed_answer(
     delivery: &str,
     observed: &str,
 ) -> bool {
+    if route_allows_model_language_final_answer(route)
+        && planned_delivery_is_publishable_model_language_answer(delivery)
+    {
+        return true;
+    }
     let planned_delivery_contains_more_than_observed =
         delivery_has_planned_content_beyond_observed_answer(delivery, observed);
     if !planned_delivery_contains_more_than_observed {
@@ -3345,6 +3383,22 @@ fn should_keep_planned_delivery_over_observed_answer(
             route.output_contract.semantic_kind,
             crate::OutputSemanticKind::RawCommandOutput
         )
+}
+
+fn route_allows_model_language_final_answer(route: &crate::RouteResult) -> bool {
+    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+        .is_some_and(|shape| shape.allows_model_language())
+}
+
+fn planned_delivery_is_publishable_model_language_answer(delivery: &str) -> bool {
+    let delivery = delivery.trim();
+    !delivery.is_empty()
+        && crate::finalize::parse_delivery_token(delivery).is_none()
+        && !crate::finalize::looks_like_planner_artifact(delivery)
+        && !crate::finalize::looks_like_internal_trace_artifact(delivery)
+        && !looks_like_structured_machine_output(delivery)
+        && !looks_like_raw_command_snapshot(delivery)
+        && !message_is_non_answer_separator(delivery)
 }
 
 fn matrix_final_answer_shape_class(
@@ -5689,7 +5743,8 @@ fn deterministic_missing_observed_target_answer(
         return None;
     }
     let path = missing_file_path_from_loop(loop_state, agent_run_context)?;
-    let prefer_english = prefer_english_for_user_text(state, user_text);
+    let prefer_english =
+        deterministic_template_language_preference(state, user_text, agent_run_context)?;
     let scalar_count = agent_run_context
         .and_then(|ctx| ctx.route_result.as_ref())
         .is_some_and(|route| {
@@ -11722,6 +11777,40 @@ mod tests {
     }
 
     #[test]
+    fn deterministic_missing_observed_target_answer_defers_non_bilingual_template() {
+        let state = test_state();
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
+        route.resolved_intent =
+            "/tmp/rustclaw-missing-ja.txt が存在するか確認してください".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            original_user_request: Some(
+                "/tmp/rustclaw-missing-ja.txt が存在するか確認してください".to_string(),
+            ),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"exists":false,"path":"/tmp/rustclaw-missing-ja.txt","error":"not found"}],"include_missing":true}"#,
+        ));
+
+        assert!(deterministic_missing_observed_target_answer(
+            &state,
+            "/tmp/rustclaw-missing-ja.txt が存在するか確認してください",
+            &loop_state,
+            Some(&agent_run_context),
+        )
+        .is_none());
+    }
+
+    #[test]
     fn deterministic_missing_observed_target_answer_reports_missing_archive_path() {
         let state = test_state();
         let mut route = free_route_result();
@@ -15212,6 +15301,52 @@ mod tests {
         assert_eq!(
             loop_state.last_user_visible_respond.as_deref(),
             Some("垃圾代码端分析报告.md")
+        );
+        assert!(finalizer_summary.is_none());
+    }
+
+    #[test]
+    fn exact_contract_keeps_model_language_verdict_over_observed_scalar() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"kind":"missing","path":"/tmp/rustclaw-missing-ja.txt"}],"include_missing":true}"#,
+        ));
+        let planned = "ファイルは存在しません。".to_string();
+        loop_state.last_user_visible_respond = Some(planned.clone());
+        let mut delivery_messages = vec![planned.clone()];
+        let mut route = scalar_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_plain();
+        route.resolved_intent =
+            "Check if /tmp/rustclaw-missing-ja.txt exists; if not, respond briefly in Japanese"
+                .to_string();
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut finalizer_summary = None;
+
+        prefer_observed_answer_for_exact_contract(
+            &state,
+            "task-ja-existence-verdict",
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut delivery_messages,
+            &mut finalizer_summary,
+        );
+
+        assert_eq!(delivery_messages, vec![planned.clone()]);
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some(planned.as_str())
         );
         assert!(finalizer_summary.is_none());
     }
