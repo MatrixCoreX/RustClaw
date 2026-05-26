@@ -1334,6 +1334,7 @@ fn path_batch_facts(
                     facts.push(json!({
                         "path": path,
                         "exists": false,
+                        "kind": "missing",
                         "error": "not found",
                     }))
                 }
@@ -2901,6 +2902,8 @@ mod tests {
             .and_then(|facts| facts.first())
             .expect("first fact");
         assert_eq!(fact.get("exists").and_then(Value::as_bool), Some(false));
+        assert_eq!(fact.get("kind").and_then(Value::as_str), Some("missing"));
+        assert_eq!(fact.get("error").and_then(Value::as_str), Some("not found"));
         let _ = std::fs::remove_dir_all(root);
     }
 
