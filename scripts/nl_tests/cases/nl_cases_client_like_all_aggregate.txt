@@ -4,7 +4,7 @@
 # Run:
 #   bash scripts/nl_tests/run_client_like_continuous_suite.sh --case-file scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt --prompt-reply-only --quality-guard
 # include_risky=False
-# stats=files_seen=89 files_skipped_risky=2 files_skipped_temp=20 rows_deduped=539 rows_emitted=1225 rows_expect_dropped=70 rows_seen=1318 rows_skipped_risky=5
+# stats=files_seen=90 files_skipped_risky=2 files_skipped_temp=21 rows_deduped=539 rows_emitted=1231 rows_expect_dropped=70 rows_seen=1320 rows_skipped_risky=5
 # Format: suite|name|tags|prompt|expect=optional substring
 
 # source: scripts/nl_tests/cases/_adversarial_v1/cases.txt
@@ -264,6 +264,13 @@ compound|nl_cases_compound_single_language_compound_cn_count_then_compare|cn_act
 compound|nl_cases_compound_single_language_compound_en_fixture_list_then_read|en_act_listing_file_summary_client_like_aggregate|list the file names under scripts/nl_tests/fixtures/device_local/docs, then read the opening of release_checklist.md, and say in one short English sentence whether it is an operator checklist or a general note
 compound|nl_cases_compound_single_language_compound_en_two_commands_raw_lines|en_act_command_raw_client_like_aggregate|run pwd and whoami in order, then output only the two command results, one per line, with no summary
 compound|nl_cases_compound_single_language_compound_en_count_then_compare|en_act_listing_compare_summary_client_like_aggregate|count direct children under scripts/nl_tests/fixtures/device_local/docs, then count direct children under scripts/nl_tests/fixtures/device_local/logs, and say in one short English sentence which has more
+# source: scripts/nl_tests/cases/nl_cases_config_edit_smoke_20260516.txt
+continuous|nl_cases_config_edit_smoke_20260516_config_edit_smoke_turn1|legacy_shape_turn_chain_client_like_aggregate|plan_real_config_no_write_cn
+continuous|nl_cases_config_edit_smoke_20260516_config_edit_smoke_turn2|legacy_shape_turn_chain_client_like_aggregate|act,config,mutate,tool:config_edit
+continuous|nl_cases_config_edit_smoke_20260516_config_edit_smoke_turn3|legacy_shape_turn_chain_client_like_aggregate|只生成变更计划，不要实际修改：把 configs/config.toml 里的 skills.skill_switches.config_edit_nl_plan 设置为 true，然后告诉我会改什么并保留执行过程
+continuous|nl_cases_config_edit_smoke_20260516_config_edit_smoke_turn1|legacy_shape_turn_chain_client_like_aggregate|apply_temp_config_cn
+continuous|nl_cases_config_edit_smoke_20260516_config_edit_smoke_turn2|legacy_shape_turn_chain_client_like_aggregate|act,config,mutate,tool:config_edit
+continuous|nl_cases_config_edit_smoke_20260516_config_edit_smoke_turn3|legacy_shape_turn_chain_client_like_aggregate|在 run/nl_eval_tmp/config_edit_smoke/config.toml 中，把 skills.skill_switches.config_edit_nl_smoke 设置为 true；执行前先生成变更计划，执行后验证 TOML 并读回这个字段，保留执行过程
 # source: scripts/nl_tests/cases/nl_cases_context_chain.txt
 continuous|nl_cases_context_chain_context_last_turn_file_chain_turn1|turn_chain_client_like_aggregate|先记一下，后面我说“那个文件”就是 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md
 continuous|nl_cases_context_chain_context_last_turn_file_chain_turn2|turn_chain_client_like_aggregate|把那个文件开头读 10 行
