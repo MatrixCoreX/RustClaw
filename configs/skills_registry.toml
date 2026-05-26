@@ -464,7 +464,17 @@ output_kind = "text"
 supported_os = ["linux", "macos"]
 optional_bins = ["docker"]
 platform_notes = ["Read-only Docker inspection returns available=false when Docker CLI or daemon is unavailable."]
-input_schema = { type = "object", properties = { action = { type = "string" }, container = { type = "string" }, image = { type = "string" }, name = { type = "string" }, limit = { type = "integer" } } }
+planner_capabilities = [
+  { name = "docker.list_containers", action = "ps", effect = "observe", optional = ["limit"], risk_level = "low", preferred = true },
+  { name = "docker.list_images", action = "images", effect = "observe", optional = ["limit"], risk_level = "low", preferred = true },
+  { name = "docker.version", action = "version", effect = "observe", risk_level = "low", preferred = true },
+  { name = "docker.inspect_container", action = "inspect", effect = "observe", required = ["container"], risk_level = "low", preferred = true },
+  { name = "docker.read_logs", action = "logs", effect = "observe", required = ["container"], optional = ["tail"], risk_level = "medium", preferred = true },
+  { name = "docker.restart_container", action = "restart", effect = "mutate", required = ["container"], risk_level = "high", preferred = true },
+  { name = "docker.start_container", action = "start", effect = "mutate", required = ["container"], risk_level = "high", preferred = true },
+  { name = "docker.stop_container", action = "stop", effect = "mutate", required = ["container"], risk_level = "high", preferred = true },
+]
+input_schema = { type = "object", properties = { action = { type = "string" }, container = { type = "string" }, image = { type = "string" }, name = { type = "string" }, limit = { type = "integer" }, tail = { type = "integer" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
