@@ -142,7 +142,14 @@ EN_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
     "generic_delivery": "Create tmp/contract_matrix_generic_delivery.txt with the content generic delivery case, then send me the file.",
 }
 
-LANGUAGE_VARIANTS = ("zh_cn", "en_us", "mixed")
+LOCALIZED_TASK_WRAPPERS: dict[str, str] = {
+    "ja_jp": "次の RustClaw task を実行して、結果は簡潔に日本語で答えてください: {prompt}",
+    "ko_kr": "다음 RustClaw task를 수행하고 결과를 간결한 한국어로 답하세요: {prompt}",
+    "fr_fr": "Exécute cette tâche RustClaw et réponds brièvement en français : {prompt}",
+    "mixed": "请按这个 English task 执行，并保持结果简短：{prompt}",
+}
+
+LANGUAGE_VARIANTS = ("zh_cn", "en_us", "ja_jp", "ko_kr", "fr_fr", "mixed")
 
 
 def normalize_token(value: str) -> str:
@@ -407,9 +414,10 @@ def base_prompt_for_case(case: dict[str, Any], variant: str = "zh_cn") -> str:
                 f"按 RustClaw 结构化任务 {contract_id} 做一次只读检查，"
                 "需要先观察证据，再按要求给出简短结果。"
             )
-    if variant == "mixed":
+    wrapper = LOCALIZED_TASK_WRAPPERS.get(variant)
+    if wrapper:
         en_prompt = base_prompt_for_case(case, "en_us")
-        return f"请按这个 English task 执行，并保持结果简短：{en_prompt}"
+        return wrapper.format(prompt=en_prompt)
     return prompt
 
 
@@ -988,7 +996,7 @@ def main() -> int:
     parser.add_argument(
         "--multilingual-variants",
         action="store_true",
-        help="with --nl, emit zh-CN/en-US/mixed prompts for each selected contract cell",
+        help="with --nl, emit zh-CN/en-US/ja-JP/ko-KR/fr-FR/mixed prompts for each selected contract cell",
     )
     args = parser.parse_args()
 
