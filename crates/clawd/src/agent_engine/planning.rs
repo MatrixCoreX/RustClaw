@@ -18985,6 +18985,44 @@ mod tests {
     }
 
     #[test]
+    fn normalize_planned_actions_resolves_call_capability_before_policy_gate() {
+        let state = test_state_with_registry();
+        let actions = vec![AgentAction::CallCapability {
+            capability: "filesystem.list_entries".to_string(),
+            args: json!({
+                "path": ".",
+                "names_only": true,
+            }),
+        }];
+
+        let normalized =
+            normalize_planned_actions(&state, None, &LoopState::new(1), "", None, actions);
+
+        assert_eq!(normalized.len(), 1);
+        let args = expect_planned_call(&normalized[0], "fs_basic", "list_dir");
+        assert_eq!(args.get("path").and_then(Value::as_str), Some("."));
+        assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    fn normalize_planned_actions_keeps_unresolved_call_capability_for_verifier() {
+        let state = test_state_with_registry();
+        let actions = vec![AgentAction::CallCapability {
+            capability: "unknown.example".to_string(),
+            args: json!({}),
+        }];
+
+        let normalized =
+            normalize_planned_actions(&state, None, &LoopState::new(1), "", None, actions);
+
+        assert_eq!(normalized.len(), 1);
+        assert!(matches!(
+            &normalized[0],
+            AgentAction::CallCapability { capability, .. } if capability == "unknown.example"
+        ));
+    }
+
+    #[test]
     fn structured_text_read_range_without_bounds_reads_broader_context() {
         let actions = vec![AgentAction::CallTool {
             tool: "fs_basic".to_string(),
