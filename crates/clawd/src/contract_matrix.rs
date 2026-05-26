@@ -316,6 +316,7 @@ pub(crate) struct MatrixContract {
     pub(crate) failure_policy: String,
     pub(crate) locator_kinds: Vec<String>,
     pub(crate) observation_sources: Vec<String>,
+    pub(crate) observation_extractors: Vec<ObservationExtractor>,
     pub(crate) evidence_expression: EvidenceExpression,
 }
 
@@ -336,6 +337,10 @@ impl MatrixContract {
         } else {
             configured
         }
+    }
+
+    fn observation_extractors(&self) -> Vec<ObservationExtractor> {
+        observation_extractors_for_sources(self.observation_sources(), &self.observation_extractors)
     }
 
     fn policy_mode(&self) -> String {
@@ -387,6 +392,7 @@ pub(crate) struct GenericProfile {
     pub(crate) final_answer_shape: String,
     pub(crate) failure_policy: String,
     pub(crate) observation_sources: Vec<String>,
+    pub(crate) observation_extractors: Vec<ObservationExtractor>,
     pub(crate) evidence_expression: EvidenceExpression,
 }
 
@@ -437,6 +443,10 @@ impl GenericProfile {
         }
     }
 
+    fn observation_extractors(&self) -> Vec<ObservationExtractor> {
+        observation_extractors_for_sources(self.observation_sources(), &self.observation_extractors)
+    }
+
     fn policy_mode(&self) -> String {
         normalized_contract_field(&self.policy_mode, "enforce")
     }
@@ -464,6 +474,44 @@ impl GenericProfile {
 
     fn channel_visibility(&self) -> String {
         normalized_contract_field(&self.channel_visibility, "user_visible")
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
+pub(crate) struct ObservationExtractor {
+    pub(crate) source: String,
+    pub(crate) extractor_kind: String,
+}
+
+impl ObservationExtractor {
+    fn normalized(source: &str, extractor_kind: &str) -> Option<Self> {
+        let source = normalize_action_token(source);
+        if source.is_empty() {
+            return None;
+        }
+        Some(Self {
+            source,
+            extractor_kind: normalized_extractor_kind(extractor_kind),
+        })
+    }
+
+    fn from_source(source: &str) -> Option<Self> {
+        Self::normalized(
+            source,
+            default_extractor_kind_for_observation_source(source),
+        )
+    }
+
+    fn to_trace_json(&self) -> Value {
+        json!({
+            "source": self.source,
+            "extractor_kind": self.extractor_kind,
+        })
+    }
+
+    fn stable_key(&self) -> String {
+        format!("{}={}", self.source, self.extractor_kind)
     }
 }
 
@@ -862,6 +910,21 @@ impl<'a> MatchedContract<'a> {
         }
     }
 
+    fn observation_extractors(&self) -> Vec<ObservationExtractor> {
+        match self {
+            Self::Semantic(contract) => contract.observation_extractors(),
+            Self::Generic(profile) => profile.observation_extractors(),
+        }
+    }
+
+    fn observation_extractor_for_source(&self, source: &str) -> Option<ObservationExtractor> {
+        let source = normalize_action_token(source);
+        self.observation_extractors()
+            .into_iter()
+            .find(|extractor| extractor.source == source)
+            .or_else(|| ObservationExtractor::from_source(&source))
+    }
+
     fn policy_mode(&self) -> String {
         match self {
             Self::Semantic(contract) => contract.policy_mode(),
@@ -1084,6 +1147,12 @@ impl ContractMatrix {
                         &contract.artifact_kind,
                         &contract.channel_visibility,
                     );
+                    validate_observation_extractors(
+                        &mut errors,
+                        &format!("contract `{key}`"),
+                        &contract.observation_sources(),
+                        &contract.observation_extractors,
+                    );
                 }
                 None => errors.push(format!("missing contract for semantic `{key}`")),
             }
@@ -1152,6 +1221,12 @@ impl ContractMatrix {
                 &profile.artifact_kind,
                 &profile.channel_visibility,
             );
+            validate_observation_extractors(
+                &mut errors,
+                &format!("generic profile `{}`", profile.name),
+                &profile.observation_sources(),
+                &profile.observation_extractors,
+            );
         }
         errors
     }
@@ -1194,6 +1269,10 @@ impl ContractMatrix {
             input.push_str(&contract.artifact_kind());
             input.push(':');
             input.push_str(&contract.channel_visibility());
+            input.push(':');
+            input.push_str(&observation_extractors_stable_key(
+                &contract.observation_extractors(),
+            ));
         }
         for profile in &self.generic_profiles {
             input.push('|');
@@ -1225,6 +1304,10 @@ impl ContractMatrix {
             input.push_str(&profile.artifact_kind());
             input.push(':');
             input.push_str(&profile.channel_visibility());
+            input.push(':');
+            input.push_str(&observation_extractors_stable_key(
+                &profile.observation_extractors(),
+            ));
         }
         fnv1a_hex(&input)
     }
@@ -1522,6 +1605,7 @@ pub(crate) fn trace_snapshot_for_output_contract(
     let matched = matrix.match_output_contract(output_contract)?;
     let final_answer_shape_kind = final_answer_shape_override_for_output_contract(output_contract)
         .or_else(|| matched.final_answer_shape_kind());
+    let observation_extractors = matched.observation_extractors();
     Some(json!({
         "contract_matrix_version": matrix.matrix_version,
         "contract_matrix_hash": matrix.matrix_version_hash(),
@@ -1545,6 +1629,7 @@ pub(crate) fn trace_snapshot_for_output_contract(
             .evidence_expression()
             .to_trace_json(&matched.required_evidence()),
         "observation_sources": matched.observation_sources(),
+        "observation_extractors": observation_extractors_trace_json(&observation_extractors),
         "final_answer_shape": final_answer_shape_kind
             .map(FinalAnswerShape::as_str)
             .unwrap_or_else(|| matched.final_answer_shape()),
@@ -1565,14 +1650,17 @@ pub(crate) fn action_trace_for_output_contract(
     let matrix = bundled_contract_matrix()?;
     let matched = matrix.match_output_contract(output_contract)?;
     let action = ActionRef::parse(action_ref)?;
+    let action_key = action.as_key();
+    let observation_extractor = matched.observation_extractor_for_source(&action_key);
     let final_answer_shape_kind = final_answer_shape_override_for_output_contract(output_contract)
         .or_else(|| matched.final_answer_shape_kind());
     Some(json!({
         "schema_version": 1,
-        "action_ref": action.as_key(),
+        "action_ref": action_key,
         "contract_match": matched.match_name(),
         "decision": matched.action_policy(&action).as_str(),
         "policy_mode": matched.policy_mode(),
+        "observation_extractor": observation_extractor.as_ref().map(ObservationExtractor::to_trace_json),
         "required_evidence": required_evidence_for_output_contract(output_contract)
             .unwrap_or_else(|| matched.required_evidence()),
         "evidence_expression": matched
@@ -1943,6 +2031,56 @@ fn normalized_tokens(values: &[String]) -> Vec<String> {
         .collect()
 }
 
+fn observation_extractors_for_sources(
+    sources: Vec<String>,
+    configured_extractors: &[ObservationExtractor],
+) -> Vec<ObservationExtractor> {
+    let mut extractors = BTreeMap::new();
+    for source in sources {
+        if let Some(extractor) = ObservationExtractor::from_source(&source) {
+            extractors.insert(extractor.source.clone(), extractor);
+        }
+    }
+    for configured in configured_extractors {
+        if let Some(extractor) =
+            ObservationExtractor::normalized(&configured.source, &configured.extractor_kind)
+        {
+            extractors.insert(extractor.source.clone(), extractor);
+        }
+    }
+    extractors.into_values().collect()
+}
+
+fn observation_extractors_trace_json(extractors: &[ObservationExtractor]) -> Value {
+    json!(extractors
+        .iter()
+        .map(ObservationExtractor::to_trace_json)
+        .collect::<Vec<_>>())
+}
+
+fn observation_extractors_stable_key(extractors: &[ObservationExtractor]) -> String {
+    extractors
+        .iter()
+        .map(ObservationExtractor::stable_key)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn default_extractor_kind_for_observation_source(source: &str) -> &'static str {
+    match normalize_action_token(source).as_str() {
+        "run_cmd" => "text_legacy",
+        _ => "structured_json",
+    }
+}
+
+fn normalized_extractor_kind(value: &str) -> String {
+    normalized_contract_field(value, "structured_json")
+}
+
+fn extractor_kind_is_valid(value: &str) -> bool {
+    matches!(value, "structured_json" | "text_legacy")
+}
+
 fn normalized_contract_field(value: &str, default: &str) -> String {
     let normalized = normalize_action_token(value);
     if normalized.is_empty() {
@@ -2027,6 +2165,47 @@ fn validate_contract_runtime_fields(
         "user_visible",
         &["user_visible", "trace_only"],
     );
+}
+
+fn validate_observation_extractors(
+    errors: &mut Vec<String>,
+    context: &str,
+    observation_sources: &[String],
+    configured_extractors: &[ObservationExtractor],
+) {
+    let known_sources = observation_sources
+        .iter()
+        .map(|source| normalize_action_token(source))
+        .collect::<BTreeSet<_>>();
+    let mut seen_sources = BTreeSet::new();
+    for extractor in configured_extractors {
+        let source = normalize_action_token(&extractor.source);
+        if source.is_empty() {
+            errors.push(format!(
+                "{context} has observation_extractor without source"
+            ));
+            continue;
+        }
+        if !known_sources.contains(&source) {
+            errors.push(format!(
+                "{context} observation_extractor source `{}` is not in observation_sources",
+                extractor.source
+            ));
+        }
+        if !seen_sources.insert(source.clone()) {
+            errors.push(format!(
+                "{context} has duplicate observation_extractor source `{}`",
+                extractor.source
+            ));
+        }
+        let extractor_kind = normalized_extractor_kind(&extractor.extractor_kind);
+        if !extractor_kind_is_valid(&extractor_kind) {
+            errors.push(format!(
+                "{context} observation_extractor source `{}` has invalid extractor_kind `{}`",
+                extractor.source, extractor.extractor_kind
+            ));
+        }
+    }
 }
 
 fn evidence_expression_tokens(expression: &EvidenceExpression) -> Vec<String> {
@@ -2424,6 +2603,30 @@ matrix_version = "broken"
             .is_some_and(|items| items
                 .iter()
                 .any(|item| item.as_str() == Some("fs_basic.list_dir"))));
+        assert!(snapshot
+            .get("observation_extractors")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.iter().any(|item| {
+                item.get("source").and_then(Value::as_str) == Some("fs_basic.list_dir")
+                    && item.get("extractor_kind").and_then(Value::as_str) == Some("structured_json")
+            })));
+    }
+
+    #[test]
+    fn raw_command_observation_source_defaults_to_text_legacy_extractor() {
+        let snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::RawCommandOutput,
+            ..IntentOutputContract::default()
+        })
+        .expect("trace snapshot");
+
+        assert!(snapshot
+            .get("observation_extractors")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.iter().any(|item| {
+                item.get("source").and_then(Value::as_str) == Some("run_cmd")
+                    && item.get("extractor_kind").and_then(Value::as_str) == Some("text_legacy")
+            })));
     }
 
     #[test]
@@ -2496,6 +2699,41 @@ matrix_version = "broken"
                 .and_then(Value::as_array)
                 .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
             Some(vec!["candidates"])
+        );
+        assert_eq!(
+            trace
+                .pointer("/observation_extractor/extractor_kind")
+                .and_then(Value::as_str),
+            Some("structured_json")
+        );
+    }
+
+    #[test]
+    fn action_trace_marks_run_cmd_extractor_as_text_legacy() {
+        let trace = action_trace_for_output_contract(
+            &IntentOutputContract {
+                semantic_kind: OutputSemanticKind::RawCommandOutput,
+                ..IntentOutputContract::default()
+            },
+            "run_cmd",
+        )
+        .expect("action trace should resolve");
+
+        assert_eq!(
+            trace.get("decision").and_then(Value::as_str),
+            Some("allowed")
+        );
+        assert_eq!(
+            trace
+                .pointer("/observation_extractor/source")
+                .and_then(Value::as_str),
+            Some("run_cmd")
+        );
+        assert_eq!(
+            trace
+                .pointer("/observation_extractor/extractor_kind")
+                .and_then(Value::as_str),
+            Some("text_legacy")
         );
     }
 

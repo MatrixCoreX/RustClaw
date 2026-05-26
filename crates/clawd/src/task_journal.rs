@@ -507,17 +507,116 @@ pub(crate) fn observed_evidence_for_step_trace(step: &TaskJournalStepTrace) -> O
         .or_else(|| observed_evidence_from_error(step.error_excerpt.as_deref()))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EvidenceObservationSource {
+    StepOutput,
+    StepError,
+}
+
+impl EvidenceObservationSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            EvidenceObservationSource::StepOutput => "step_output",
+            EvidenceObservationSource::StepError => "step_error",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EvidenceExtractorKind {
+    StructuredJson,
+    TextLegacy,
+}
+
+impl EvidenceExtractorKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            EvidenceExtractorKind::StructuredJson => "structured_json",
+            EvidenceExtractorKind::TextLegacy => "text_legacy",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct EvidenceExtractorSpec {
+    observation_source: EvidenceObservationSource,
+    extractor_ref: &'static str,
+    kind: EvidenceExtractorKind,
+    format: &'static str,
+    schema_version: u64,
+}
+
+impl EvidenceExtractorSpec {
+    fn to_trace_json(self) -> Value {
+        json!({
+            "schema_version": self.schema_version,
+            "extractor_ref": self.extractor_ref,
+            "kind": self.kind.as_str(),
+            "observation_source": self.observation_source.as_str(),
+            "format": self.format,
+        })
+    }
+}
+
+const EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
+    EvidenceExtractorSpec {
+        observation_source: EvidenceObservationSource::StepOutput,
+        extractor_ref: "step_output.structured_json_v1",
+        kind: EvidenceExtractorKind::StructuredJson,
+        format: "json",
+        schema_version: 1,
+    },
+    EvidenceExtractorSpec {
+        observation_source: EvidenceObservationSource::StepOutput,
+        extractor_ref: "step_output.text_legacy_v1",
+        kind: EvidenceExtractorKind::TextLegacy,
+        format: "text",
+        schema_version: 1,
+    },
+    EvidenceExtractorSpec {
+        observation_source: EvidenceObservationSource::StepError,
+        extractor_ref: "step_error.structured_json_v1",
+        kind: EvidenceExtractorKind::StructuredJson,
+        format: "json",
+        schema_version: 1,
+    },
+    EvidenceExtractorSpec {
+        observation_source: EvidenceObservationSource::StepError,
+        extractor_ref: "step_error.text_legacy_v1",
+        kind: EvidenceExtractorKind::TextLegacy,
+        format: "text",
+        schema_version: 1,
+    },
+];
+
+fn evidence_extractor_spec(
+    observation_source: EvidenceObservationSource,
+    kind: EvidenceExtractorKind,
+) -> EvidenceExtractorSpec {
+    EVIDENCE_EXTRACTOR_REGISTRY
+        .iter()
+        .copied()
+        .find(|spec| spec.observation_source == observation_source && spec.kind == kind)
+        .expect("evidence extractor registry contains all built-in extractor specs")
+}
+
 pub(crate) fn observed_evidence_from_output(output: Option<&str>) -> Option<Value> {
     let output = output.map(str::trim).filter(|value| !value.is_empty())?;
     let mut collector = ObservedEvidenceCollector::default();
-    let format = match serde_json::from_str::<Value>(output) {
+    let extractor = match serde_json::from_str::<Value>(output) {
         Ok(value) => {
             collect_json_observed_evidence(&mut collector, "json_output", "", &value, 0);
-            "json"
+            evidence_extractor_spec(
+                EvidenceObservationSource::StepOutput,
+                EvidenceExtractorKind::StructuredJson,
+            )
         }
         Err(_) => {
             collect_text_observed_evidence(&mut collector, output);
-            "text"
+            evidence_extractor_spec(
+                EvidenceObservationSource::StepOutput,
+                EvidenceExtractorKind::TextLegacy,
+            )
         }
     };
     if collector.items.is_empty() {
@@ -527,7 +626,8 @@ pub(crate) fn observed_evidence_from_output(output: Option<&str>) -> Option<Valu
     Some(json!({
         "schema_version": 1,
         "source": "step_output",
-        "format": format,
+        "format": extractor.format,
+        "extractor": extractor.to_trace_json(),
         "storage": "redacted_excerpt_hash",
         "item_count": item_count,
         "truncated": item_count > collector.items.len(),
@@ -538,7 +638,7 @@ pub(crate) fn observed_evidence_from_output(output: Option<&str>) -> Option<Valu
 fn observed_evidence_from_error(error: Option<&str>) -> Option<Value> {
     let error = error.map(str::trim).filter(|value| !value.is_empty())?;
     let mut collector = ObservedEvidenceCollector::default();
-    let format = if let Some(structured) = crate::skills::parse_structured_skill_error(error) {
+    let extractor = if let Some(structured) = crate::skills::parse_structured_skill_error(error) {
         collector.push(json_observed_evidence_item(
             "structured_error",
             "error_text",
@@ -547,10 +647,16 @@ fn observed_evidence_from_error(error: Option<&str>) -> Option<Value> {
         if let Some(extra) = structured.extra.as_ref() {
             collect_json_observed_evidence(&mut collector, "structured_error.extra", "", extra, 0);
         }
-        "json"
+        evidence_extractor_spec(
+            EvidenceObservationSource::StepError,
+            EvidenceExtractorKind::StructuredJson,
+        )
     } else {
         collect_text_observed_evidence(&mut collector, error);
-        "text"
+        evidence_extractor_spec(
+            EvidenceObservationSource::StepError,
+            EvidenceExtractorKind::TextLegacy,
+        )
     };
     if collector.items.is_empty() {
         return None;
@@ -559,7 +665,8 @@ fn observed_evidence_from_error(error: Option<&str>) -> Option<Value> {
     Some(json!({
         "schema_version": 1,
         "source": "step_error",
-        "format": format,
+        "format": extractor.format,
+        "extractor": extractor.to_trace_json(),
         "storage": "redacted_excerpt_hash",
         "item_count": item_count,
         "truncated": item_count > collector.items.len(),
@@ -1175,7 +1282,9 @@ struct TraceStorageStats {
 }
 
 fn trace_json_bytes(value: &Value) -> usize {
-    serde_json::to_vec(value).map(|bytes| bytes.len()).unwrap_or(0)
+    serde_json::to_vec(value)
+        .map(|bytes| bytes.len())
+        .unwrap_or(0)
 }
 
 fn trace_json_hash(value: &Value) -> String {
@@ -1249,13 +1358,8 @@ fn result_trace_json_with_storage_limit(mut trace: Value) -> Value {
     let original_hash = trace_json_hash(&trace);
     if original_bytes <= MAX_RESULT_TRACE_BYTES {
         let stats = TraceStorageStats::default();
-        let meta = result_trace_storage_meta(
-            original_bytes,
-            original_bytes,
-            original_hash,
-            &stats,
-            false,
-        );
+        let meta =
+            result_trace_storage_meta(original_bytes, original_bytes, original_hash, &stats, false);
         insert_result_trace_storage_meta(&mut trace, meta);
         return trace;
     }
@@ -1276,13 +1380,7 @@ fn result_trace_json_with_storage_limit(mut trace: Value) -> Value {
         );
     }
     let stored_bytes = trace_json_bytes(&trace);
-    let meta = result_trace_storage_meta(
-        original_bytes,
-        stored_bytes,
-        original_hash,
-        &stats,
-        true,
-    );
+    let meta = result_trace_storage_meta(original_bytes, stored_bytes, original_hash, &stats, true);
     insert_result_trace_storage_meta(&mut trace, meta);
     trace
 }
@@ -2785,13 +2883,11 @@ mod tests {
                     .and_then(Value::as_u64)
                     .unwrap_or_default()
         );
-        assert!(
-            trace
-                .pointer("/trace_storage/original_hash")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .starts_with("fnv64:")
-        );
+        assert!(trace
+            .pointer("/trace_storage/original_hash")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .starts_with("fnv64:"));
         assert!(
             trace
                 .get("contract_matrix")
@@ -3183,6 +3279,22 @@ mod tests {
             .expect("observed evidence should be present");
         assert_eq!(observed.get("format").and_then(Value::as_str), Some("json"));
         assert_eq!(
+            observed.pointer("/extractor/kind").and_then(Value::as_str),
+            Some("structured_json")
+        );
+        assert_eq!(
+            observed
+                .pointer("/extractor/extractor_ref")
+                .and_then(Value::as_str),
+            Some("step_output.structured_json_v1")
+        );
+        assert_eq!(
+            observed
+                .pointer("/extractor/observation_source")
+                .and_then(Value::as_str),
+            Some("step_output")
+        );
+        assert_eq!(
             observed.get("storage").and_then(Value::as_str),
             Some("redacted_excerpt_hash")
         );
@@ -3227,6 +3339,16 @@ mod tests {
             .and_then(|step| step.get("observed_evidence"))
             .expect("observed evidence should be present");
         assert_eq!(observed.get("format").and_then(Value::as_str), Some("text"));
+        assert_eq!(
+            observed.pointer("/extractor/kind").and_then(Value::as_str),
+            Some("text_legacy")
+        );
+        assert_eq!(
+            observed
+                .pointer("/extractor/extractor_ref")
+                .and_then(Value::as_str),
+            Some("step_output.text_legacy_v1")
+        );
         assert!(observed
             .get("items")
             .and_then(Value::as_array)
