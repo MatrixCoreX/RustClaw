@@ -42,10 +42,14 @@ cd "$ROOT_DIR"
 
 echo "Checking contract matrix generator syntax"
 python3 -m py_compile \
+  "${ROOT_DIR}/scripts/check_skill_prompts.py" \
   "${ROOT_DIR}/scripts/nl_tests/build_client_like_case_aggregate.py" \
   "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
   "${ROOT_DIR}/scripts/nl_tests/evaluate_client_like_run.py" \
   "${ROOT_DIR}/scripts/nl_tests/extract_client_like_replay.py"
+
+echo "Checking layered skill prompt invariants"
+python3 "${ROOT_DIR}/scripts/check_skill_prompts.py"
 
 echo "Checking legacy client-like aggregate is current"
 python3 "${ROOT_DIR}/scripts/nl_tests/build_client_like_case_aggregate.py" --check
