@@ -1510,7 +1510,6 @@ fn observed_evidence_item_supports_scalar(item: &serde_json::Value) -> bool {
             | "state"
             | "status"
             | "subject"
-            | "text_excerpt"
             | "total"
             | "type"
             | "value"
@@ -2601,6 +2600,35 @@ mod tests {
         assert!(observed_scalar_values_from_evidence_map(&journal).contains("3"));
         assert!(structurally_satisfies_answer_contract(
             &route, &journal, "3"
+        ));
+    }
+
+    #[test]
+    fn matrix_scalar_shape_does_not_use_content_excerpt_as_field_value() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-matrix-scalar-content-excerpt",
+            "ask",
+            "service status",
+        );
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_read",
+                "fs_basic",
+                json!({
+                    "action": "read_text_range",
+                    "path": "/tmp/status-notes.md",
+                    "excerpt": "1|running"
+                })
+                .to_string(),
+            ));
+
+        assert!(!observed_scalar_values_from_evidence_map(&journal).contains("1|running"));
+        assert!(!structurally_satisfies_answer_contract(
+            &route, &journal, "running"
         ));
     }
 
