@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Check that every registry skill prompt logical path has a canonical generated body.
+"""Check layered skill prompts and prompt-layer maintenance invariants.
 
 Canonical registry `prompt_file` remains prompts/skills/<name>.md as a logical path.
 Runtime loads skill prompt bodies from the canonical default body:
 prompts/layers/generated/skills/<name>.md
 and may append vendor-specific patches from:
 prompts/layers/vendor_patches/<vendor>/skills/<name>.md.
-This script validates the required canonical baseline under prompts/layers/generated/skills.
+This script validates the required canonical baseline under prompts/layers/generated/skills
+and keeps prompt-layer rules machine-checkable:
+- real prompt markdown files keep the shared Multilingual Reinforcement EOF section;
+- vendor skill patches stay small overlays instead of copied full skill documents.
 Does not touch production code or clawd.
 """
 from __future__ import annotations
@@ -17,7 +20,21 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REGISTRY_PATH = REPO_ROOT / "configs" / "skills_registry.toml"
+PROMPT_LAYERS = REPO_ROOT / "prompts" / "layers"
 GENERATED_SKILLS = REPO_ROOT / "prompts" / "layers" / "generated" / "skills"
+VENDOR_PATCHES = REPO_ROOT / "prompts" / "layers" / "vendor_patches"
+MULTILINGUAL_REINFORCEMENT_HEADING = "## Multilingual Reinforcement"
+FULL_SKILL_SECTION_HEADINGS = (
+    "## Capability",
+    "## Capability Summary",
+    "## Actions",
+    "## Config Entry Points",
+    "## Request",
+    "## Response",
+    "## Error",
+    "## Examples",
+    "### Action",
+)
 
 
 def parse_registry_prompt_files(path: Path) -> list[tuple[str, str]]:
@@ -35,6 +52,74 @@ def parse_registry_prompt_files(path: Path) -> list[tuple[str, str]]:
         if name_m and prompt_m:
             out.append((name_m.group(1), prompt_m.group(1)))
     return out
+
+
+def prompt_markdown_files() -> list[Path]:
+    return sorted(
+        path
+        for path in PROMPT_LAYERS.rglob("*.md")
+        if path.name != "README.md"
+    )
+
+
+def check_multilingual_reinforcement_blocks() -> list[str]:
+    missing: list[str] = []
+    misplaced: list[str] = []
+    for path in prompt_markdown_files():
+        text = path.read_text(encoding="utf-8")
+        heading_pos = text.rfind(MULTILINGUAL_REINFORCEMENT_HEADING)
+        rel = path.relative_to(REPO_ROOT)
+        if heading_pos < 0:
+            missing.append(str(rel))
+            continue
+        tail = text[heading_pos + len(MULTILINGUAL_REINFORCEMENT_HEADING) :]
+        if re.search(r"(?m)^##\s+(?!#)", tail):
+            misplaced.append(str(rel))
+    errors: list[str] = []
+    if missing:
+        errors.append(
+            "Prompt markdown missing Multilingual Reinforcement EOF block:\n"
+            + "\n".join(f"  - {item}" for item in missing)
+        )
+    if misplaced:
+        errors.append(
+            "Prompt markdown has another H2 after Multilingual Reinforcement; keep the block as the EOF section:\n"
+            + "\n".join(f"  - {item}" for item in misplaced)
+        )
+    return errors
+
+
+def check_vendor_skill_patches_are_overlays() -> list[str]:
+    errors: list[str] = []
+    if not VENDOR_PATCHES.exists():
+        return errors
+    for path in sorted(VENDOR_PATCHES.glob("*/skills/*.md")):
+        text = path.read_text(encoding="utf-8")
+        rel = path.relative_to(REPO_ROOT)
+        base_path = GENERATED_SKILLS / path.name
+        if not base_path.is_file():
+            errors.append(
+                f"Vendor skill patch has no generated baseline: {rel} "
+                f"(expected {base_path.relative_to(REPO_ROOT)})"
+            )
+            continue
+        line_count = len(text.splitlines())
+        base_line_count = len(base_path.read_text(encoding="utf-8").splitlines())
+        max_overlay_lines = max(80, base_line_count // 2)
+        if line_count > max_overlay_lines:
+            errors.append(
+                f"Vendor skill patch is too large to be an overlay: {rel} "
+                f"({line_count} lines; baseline {base_line_count}, max {max_overlay_lines})"
+            )
+        copied_sections = [
+            heading for heading in FULL_SKILL_SECTION_HEADINGS if heading in text
+        ]
+        if copied_sections:
+            errors.append(
+                f"Vendor skill patch appears to copy skill-document sections: {rel} "
+                f"sections={','.join(copied_sections)}"
+            )
+    return errors
 
 
 def main() -> int:
@@ -72,8 +157,17 @@ def main() -> int:
         for m in missing:
             print(f"  - {m}", file=sys.stderr)
         return 1
+    prompt_errors = (
+        check_multilingual_reinforcement_blocks()
+        + check_vendor_skill_patches_are_overlays()
+    )
+    if prompt_errors:
+        for error in prompt_errors:
+            print(error, file=sys.stderr)
+        return 1
     print(
-        f"OK: all {len(skills)} registry skills have a generated layered prompt body."
+        f"OK: all {len(skills)} registry skills have a generated layered prompt body; "
+        f"checked {len(prompt_markdown_files())} prompt markdown files."
     )
     return 0
 
