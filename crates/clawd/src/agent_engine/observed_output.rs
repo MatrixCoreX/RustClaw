@@ -1002,6 +1002,21 @@ fn observed_language_supports_bilingual_template(language_hint: &str) -> bool {
     hint == "config_default" || hint.starts_with("en") || hint.starts_with("zh")
 }
 
+fn route_should_synthesize_non_bilingual_existence_with_path(
+    route: Option<&crate::RouteResult>,
+    allow_localized_direct_template: bool,
+) -> bool {
+    if allow_localized_direct_template {
+        return false;
+    }
+    let Some(route) = route else {
+        return false;
+    };
+    route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
+        && crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+            .is_some_and(|shape| shape.allows_model_language())
+}
+
 fn observed_request_prefers_english_template(
     state: Option<&AppState>,
     language_hint: &str,
@@ -1060,6 +1075,9 @@ fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> 
     }
     if semantic_kind == Some(crate::OutputSemanticKind::ExistenceWithPathSummary) {
         return "Return whether the target exists, the resolved path when found, and the requested brief content-grounded purpose or summary. Do not answer from path evidence alone if content evidence is available.".to_string();
+    }
+    if semantic_kind == Some(crate::OutputSemanticKind::ExistenceWithPath) {
+        return "Return a concise existence verdict and include the target path or observed path. This path requirement overrides response_shape=scalar unless the original user explicitly requested one bare boolean/scalar. Do not reduce the answer to only yes/no/exists/missing.".to_string();
     }
     if semantic_kind == Some(crate::OutputSemanticKind::ScalarCount)
         && response_shape != Some(crate::OutputResponseShape::Scalar)
@@ -5826,6 +5844,12 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         }
     }
     let observed_output = extract_latest_generic_successful_output(loop_state)?;
+    if route_should_synthesize_non_bilingual_existence_with_path(
+        route,
+        allow_localized_direct_template,
+    ) {
+        return None;
+    }
     let answer = structured_scalar_candidate(
         state,
         route,
@@ -6017,6 +6041,17 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
         .and_then(|ctx| ctx.auto_locator_path.as_deref())
         .filter(|path| !path.trim().is_empty());
     let prefer_full_path = route.is_some_and(route_requests_scalar_path_only);
+    let request_language_hint = current_turn_request_text(route, agent_run_context)
+        .map(observed_request_language_hint)
+        .unwrap_or("config_default");
+    let allow_localized_direct_template =
+        observed_language_supports_bilingual_template(request_language_hint);
+    if route_should_synthesize_non_bilingual_existence_with_path(
+        route,
+        allow_localized_direct_template,
+    ) {
+        return None;
+    }
     if let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
         if route_needs_structured_scalar_pair_synthesis(loop_state, agent_run_context) {
             return None;
@@ -6056,7 +6091,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
         locator_hint,
         auto_locator_path,
         prefer_full_path,
-        true,
+        allow_localized_direct_template,
         false,
     )
 }
@@ -6149,7 +6184,11 @@ fn extract_direct_answer_from_generic_output_impl(
         route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
             && prefers_english_free_text
     });
-    let existence_with_path_should_use_llm_synthesis = false;
+    let existence_with_path_should_use_llm_synthesis =
+        route_should_synthesize_non_bilingual_existence_with_path(
+            route,
+            allow_localized_direct_template,
+        );
     let hidden_entries_should_use_llm_synthesis = route.is_some_and(|route| {
         route_requests_hidden_entries_check(route)
             && route.output_contract.response_shape != crate::OutputResponseShape::Scalar
@@ -6532,6 +6571,7 @@ fn extract_direct_answer_from_generic_output_impl(
                             prefers_english_presence_answer,
                         )
                     } else if action == Some("path_batch_facts")
+                        && !existence_with_path_should_use_llm_synthesis
                         && route.is_some_and(route_prefers_path_kind_fact_answer)
                     {
                         path_batch_fact_path_kind_candidate(&value, prefers_english_free_text)
@@ -7470,7 +7510,8 @@ mod tests {
         answer_is_direct_observation_passthrough, archive_list_raw_passthrough_replacement,
         archive_list_summary_from_body, cross_turn_observed_output_entries,
         dir_compare_direct_answer_candidate, extract_direct_answer_from_generic_output,
-        extract_direct_scalar_from_generic_output, extract_direct_scalar_from_generic_output_i18n,
+        extract_direct_answer_from_generic_output_i18n, extract_direct_scalar_from_generic_output,
+        extract_direct_scalar_from_generic_output_i18n,
         extract_direct_scalar_from_generic_output_with_locator_hint,
         extract_field_direct_answer_candidate, has_observed_answer_candidates,
         inventory_dir_direct_answer_candidate, normalize_system_basic_match_path,
@@ -9336,6 +9377,52 @@ version.workspace = true
     }
 
     #[test]
+    fn observed_direct_answer_defers_non_bilingual_existence_with_path_template() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"path_batch_facts","count":1,"facts":[{"error":"not found","exists":false,"kind":"missing","path":"/tmp/rustclaw-missing-ja.txt"}],"include_missing":true}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route_result.resolved_intent =
+            "ファイルパス /tmp/rustclaw-missing-ja.txt の存在確認。存在しない場合は日本語で短く回答する。"
+                .to_string();
+        route_result.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        route_result.output_contract.locator_kind = OutputLocatorKind::Path;
+        route_result.output_contract.locator_hint = "/tmp/rustclaw-missing-ja.txt".to_string();
+        let agent_run_context = AgentRunContext {
+            original_user_request: Some(
+                "/tmp/rustclaw-missing-ja.txt が存在するか確認してください。存在しない場合は日本語で短く答えてください。"
+                    .to_string(),
+            ),
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .is_none()
+        );
+        assert!(extract_direct_answer_from_generic_output_i18n(
+            &loop_state,
+            &AppState::test_default_with_fixture_provider(),
+            Some(&agent_run_context)
+        )
+        .is_none());
+        assert!(
+            extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context))
+                .is_none()
+        );
+        assert!(extract_direct_scalar_from_generic_output_i18n(
+            &loop_state,
+            &AppState::test_default_with_fixture_provider(),
+            Some(&agent_run_context)
+        )
+        .is_none());
+    }
+
+    #[test]
     fn observed_response_style_hint_reflects_output_contract_shape() {
         let mut route_result = RouteResult {
             ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
@@ -9391,6 +9478,11 @@ version.workspace = true
         agent_run_context.route_result = Some(route_result.clone());
         assert!(observed_response_style_hint(Some(&agent_run_context))
             .contains("only the final scalar value"));
+
+        route_result.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+        agent_run_context.route_result = Some(route_result.clone());
+        assert!(observed_response_style_hint(Some(&agent_run_context))
+            .contains("overrides response_shape=scalar"));
 
         route_result.output_contract.semantic_kind = OutputSemanticKind::ScalarCount;
         route_result.output_contract.response_shape = OutputResponseShape::OneSentence;
