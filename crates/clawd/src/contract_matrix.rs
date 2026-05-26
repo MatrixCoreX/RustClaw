@@ -2485,6 +2485,77 @@ mod tests {
     }
 
     #[test]
+    fn delete_contracts_cannot_be_satisfied_by_read_or_list_actions() {
+        let matrix = load_workspace_matrix();
+        for (name, contract) in &matrix.contracts {
+            assert_delete_policy_for_actions(
+                &format!("contract `{name}`"),
+                &contract.operation,
+                &contract.allowed_actions,
+            );
+        }
+        for profile in &matrix.generic_profiles {
+            for raw in &profile.allowed_actions {
+                let Some(action) = ActionRef::parse(raw) else {
+                    continue;
+                };
+                assert!(
+                    !action_is_delete_mutation(&action),
+                    "generic profile `{}` allows delete action `{}`",
+                    profile.name,
+                    action.as_key()
+                );
+            }
+        }
+    }
+
+    fn assert_delete_policy_for_actions(context: &str, operation: &str, actions: &[String]) {
+        let operation = normalize_action_token(operation);
+        for raw in actions {
+            let Some(action) = ActionRef::parse(raw) else {
+                continue;
+            };
+            if operation == "delete" {
+                assert!(
+                    !action_is_read_or_list_observation(&action),
+                    "{context} allows read/list observation action `{}` for delete operation",
+                    action.as_key()
+                );
+            } else {
+                assert!(
+                    !action_is_delete_mutation(&action),
+                    "{context} allows delete action `{}` without delete operation",
+                    action.as_key()
+                );
+            }
+        }
+    }
+
+    fn action_is_delete_mutation(action: &ActionRef) -> bool {
+        matches!(
+            (action.skill.as_str(), action.action.as_deref()),
+            ("fs_basic", Some("remove_path")) | ("remove_file", _)
+        )
+    }
+
+    fn action_is_read_or_list_observation(action: &ActionRef) -> bool {
+        matches!(
+            (action.skill.as_str(), action.action.as_deref()),
+            ("read_file" | "list_dir" | "doc_parse", _)
+                | (
+                    "fs_basic",
+                    Some("list_dir" | "read_text_range" | "find_entries" | "grep_text")
+                )
+                | ("archive_basic", Some("list" | "read"))
+                | (
+                    "config_basic",
+                    Some("read_field" | "read_fields" | "list_keys")
+                )
+                | ("db_basic", Some("list_tables" | "query"))
+        )
+    }
+
+    #[test]
     fn failure_attribution_enum_matches_workspace_matrix() {
         let matrix = load_workspace_matrix();
         let configured = matrix
