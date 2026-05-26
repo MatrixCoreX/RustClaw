@@ -368,7 +368,13 @@ fn normalize_target_kind(value: &str) -> &str {
     }
 }
 
-fn line_matches_query(line: &str, query: &str) -> bool {
+fn line_matches_query(line: &str, query: &str, case_insensitive: bool) -> bool {
+    if case_insensitive {
+        let line_folded = line.to_lowercase();
+        let query_folded = query.to_lowercase();
+        return line_folded.contains(&query_folded)
+            || ordered_wildcard_query_matches(&line_folded, &query_folded);
+    }
     line.contains(query) || ordered_wildcard_query_matches(line, query)
 }
 
@@ -586,6 +592,8 @@ fn execute(args: Value) -> Result<Value, String> {
                 .get("query")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "query is required".to_string())?;
+            let case_insensitive =
+                bool_arg(obj, "case_insensitive") || bool_arg(obj, "ignore_case");
             let pattern_norms = optional_file_patterns_from_args(obj);
             let max_line_chars = obj
                 .get("max_line_chars")
@@ -609,7 +617,7 @@ fn execute(args: Value) -> Result<Value, String> {
                     let rel = to_rel(&root, p);
                     let mut file_matched = false;
                     for (idx, line) in text.lines().enumerate() {
-                        if line_matches_query(line, query) {
+                        if line_matches_query(line, query, case_insensitive) {
                             if !file_matched {
                                 results.push(rel.clone());
                                 file_matched = true;
@@ -642,6 +650,7 @@ fn execute(args: Value) -> Result<Value, String> {
                 "action": "grep_text",
                 "root": to_rel(&root, &search_root),
                 "query": query,
+                "case_insensitive": case_insensitive,
                 "patterns": pattern_norms,
                 "count": results.len(),
                 "match_count": matches.len(),
@@ -1341,6 +1350,40 @@ mod tests {
             .get("text")
             .and_then(Value::as_str)
             .is_some_and(|text| text.contains("step_type") && text.contains("run_cmd")));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn grep_text_can_match_case_insensitively() {
+        let root = unique_temp_dir("grep-text-case-insensitive");
+        std::fs::create_dir_all(&root).expect("create root");
+        let file = root.join("release_checklist.md");
+        std::fs::write(&file, "# Release Checklist\n").expect("write sample file");
+
+        let out = execute(json!({
+            "action": "grep_text",
+            "query": "release",
+            "path": file.to_string_lossy().to_string(),
+            "case_insensitive": true,
+            "max_results": 10
+        }))
+        .expect("grep_text succeeds");
+
+        assert_eq!(out.get("count").and_then(Value::as_u64), Some(1));
+        assert_eq!(out.get("match_count").and_then(Value::as_u64), Some(1));
+        assert_eq!(
+            out.get("case_insensitive").and_then(Value::as_bool),
+            Some(true)
+        );
+        let matches = out
+            .get("matches")
+            .and_then(Value::as_array)
+            .expect("matches array");
+        assert!(matches[0]
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| text.contains("Release Checklist")));
 
         let _ = std::fs::remove_dir_all(root);
     }

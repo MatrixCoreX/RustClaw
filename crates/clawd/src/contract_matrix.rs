@@ -235,6 +235,7 @@ pub(crate) enum EvidenceToken {
     Kind,
     Path,
     SizeBytes,
+    Valid,
 }
 
 impl EvidenceToken {
@@ -252,6 +253,7 @@ impl EvidenceToken {
         Self::Kind,
         Self::Path,
         Self::SizeBytes,
+        Self::Valid,
     ];
 
     pub(crate) fn parse(raw: &str) -> Option<Self> {
@@ -268,6 +270,7 @@ impl EvidenceToken {
             "kind" => Some(Self::Kind),
             "path" => Some(Self::Path),
             "size_bytes" => Some(Self::SizeBytes),
+            "valid" => Some(Self::Valid),
             _ => None,
         }
     }
@@ -287,6 +290,7 @@ impl EvidenceToken {
             Self::Kind => "kind",
             Self::Path => "path",
             Self::SizeBytes => "size_bytes",
+            Self::Valid => "valid",
         }
     }
 }
@@ -688,10 +692,9 @@ impl FinalAnswerShape {
         match self {
             Self::DeliveryTokenOrPath => FinalAnswerShapeClass::DeliveryArtifact,
             Self::CreatedArchivePath | Self::SinglePath => FinalAnswerShapeClass::SinglePath,
-            Self::Scalar
-            | Self::SchemaVersion
-            | Self::SingleCommitSubject
-            | Self::ManagerNameWithBasis => FinalAnswerShapeClass::ScalarValue,
+            Self::Scalar | Self::SchemaVersion | Self::SingleCommitSubject => {
+                FinalAnswerShapeClass::ScalarValue
+            }
             Self::ArchiveMemberList
             | Self::ContainerList
             | Self::GroupedNameList
@@ -718,6 +721,7 @@ impl FinalAnswerShape {
             | Self::FailedStepWithEvidence
             | Self::GitStateSummary
             | Self::LogExcerptOrSummary
+            | Self::ManagerNameWithBasis
             | Self::ProjectSummaryGroundedInFiles
             | Self::RawOutputOrShortSummary
             | Self::SummaryGroundedInExcerpt
@@ -1585,6 +1589,42 @@ pub(crate) fn action_trace_for_output_contract(
         "allowed_actions": normalized_tokens(matched.allowed_actions()),
         "forbidden_actions": normalized_tokens(matched.forbidden_actions()),
     }))
+}
+
+pub(crate) fn contract_trace_action_key_for_output_contract(
+    output_contract: &IntentOutputContract,
+    action_ref: &str,
+) -> Option<String> {
+    let matrix = bundled_contract_matrix()?;
+    let matched = matrix.match_output_contract(output_contract)?;
+    let action = ActionRef::parse(action_ref)?;
+    if matched.action_policy(&action) != ActionPolicyDecision::Allowed {
+        return Some(action.as_key());
+    }
+    for raw in matched.allowed_actions() {
+        let Some(policy_ref) = ActionRef::parse(raw) else {
+            continue;
+        };
+        if action_matches_any(&action, std::slice::from_ref(raw)) {
+            return Some(policy_ref.as_key());
+        }
+    }
+    Some(action.as_key())
+}
+
+pub(crate) fn preferred_action_refs_for_output_contract(
+    output_contract: &IntentOutputContract,
+) -> Vec<ActionRef> {
+    bundled_contract_matrix()
+        .and_then(|matrix| matrix.match_output_contract(output_contract))
+        .map(|matched| {
+            matched
+                .preferred_actions()
+                .iter()
+                .filter_map(|action| ActionRef::parse(action))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn contract_policy_action_ref(normalized_skill: &str, args: &Value) -> Option<ActionRef> {
