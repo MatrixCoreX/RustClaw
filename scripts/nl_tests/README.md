@@ -61,6 +61,7 @@ Client-like continuous regression:
   `bash scripts/nl_tests/run_suite.sh contract_matrix_offline`
   This also verifies the multilingual contract-matrix generator path for zh-CN, en-US, ja-JP, ko-KR, fr-FR, and mixed-language variants.
   It first checks that the legacy client-like aggregate is up to date, so old curated NL cases and new matrix-generated cases stay in the same regression loop.
+  The aggregate check also gates metadata coverage for built-in tools, skills, memory, multi-turn context, and structured transformation cases.
   The suite gates attribution fixture coverage for `model_error`, `schema_error`, `code_gap`, `contract_gap`, `tool_gap`, `permission_denied`, `budget_exhausted`, `prompt_budget_error`, `delivery_error`, and `provider_error`, plus the structured negative signals used by the evaluator. Keep multilingual behavior on contract ids, schema fields, action refs, evidence keys, and error codes; do not add runtime natural-language phrase matching for new languages.
 - Generate 100 deterministic contract-matrix seed cases without calling a model:
   `python3 scripts/nl_tests/generate_contract_matrix_cases.py --count 100 --check --report > /tmp/rustclaw-contract-cases.jsonl`

@@ -50,6 +50,68 @@ python3 -m py_compile \
 echo "Checking legacy client-like aggregate is current"
 python3 "${ROOT_DIR}/scripts/nl_tests/build_client_like_case_aggregate.py" --check
 
+echo "Checking legacy client-like aggregate coverage tokens"
+python3 - <<'PY'
+from pathlib import Path
+
+
+aggregate = Path("scripts/nl_tests/cases/nl_cases_client_like_all_aggregate.txt")
+required_groups = {
+    "builtin_tools": {
+        "fs_basic",
+        "config_basic",
+        "db_basic",
+        "package_manager",
+        "archive_basic",
+        "process_basic",
+        "health_check",
+    },
+    "skills": {"builtin_skill", "skill:"},
+    "memory": {"memory"},
+    "multi_turn_context": {"turn_chain", "clarify_chain", "context_chain"},
+    "structured_transform": {"transform", "json", "table", "sqlite"},
+}
+
+seen = {name: set() for name in required_groups}
+current_source = ""
+for raw in aggregate.read_text(encoding="utf-8").splitlines():
+    line = raw.strip()
+    if not line:
+        continue
+    if line.startswith("# source:"):
+        current_source = line.removeprefix("# source:").strip()
+        continue
+    if line.startswith("#"):
+        continue
+    parts = line.split("|", 4)
+    if len(parts) < 4:
+        continue
+    suite, name, tags, prompt = parts[:4]
+    metadata_fields = [current_source, suite, name, tags]
+    if prompt.lower().startswith(("tool:", "skill:", "expect=")):
+        metadata_fields.append(prompt)
+    metadata = " ".join(metadata_fields).lower()
+    for group, tokens in required_groups.items():
+        for token in tokens:
+            if token.lower() in metadata:
+                seen[group].add(token)
+
+missing = {
+    group: sorted(tokens - seen[group])
+    for group, tokens in required_groups.items()
+    if tokens - seen[group]
+}
+if missing:
+    raise SystemExit(f"CLIENT_LIKE_AGGREGATE_COVERAGE_INCOMPLETE missing={missing}")
+print(
+    "CLIENT_LIKE_AGGREGATE_COVERAGE_OK "
+    + " ".join(
+        f"{group}={','.join(sorted(values))}"
+        for group, values in sorted(seen.items())
+    )
+)
+PY
+
 echo "Generating deterministic contract matrix seed cases"
 python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
   --count "${CASE_COUNT}" \
