@@ -38,7 +38,12 @@ flowchart TD
     C --> D[Binding / resume / active-task context]
     D --> E[Intent normalizer LLM]
     E --> EC[Build ask context bundle<br/>memory + attachments + recent execution]
-    EC --> E2[Post-route policy<br/>locator + contract guards]
+    CM[Task contract matrix<br/>semantic kind + required evidence + allowed action + response shape] --> E2
+    CM --> DG
+    CM --> VF
+    CM --> EV
+    CM --> Q
+    EC --> E2[Post-route policy<br/>locator + contract matrix guards]
     E2 -->|schedule direct| SD[Schedule direct finalize]
     E2 -->|resume discussion| RD[Resume discussion prompt]
     E2 -->|resume execution| H
@@ -59,7 +64,7 @@ flowchart TD
     ID -->|no| PL[Planner LLM round<br/>call_capability preferred]
     JD --> RV[CapabilityResolver<br/>capability / legacy action normalization]
     PL --> RV
-    RV --> VF[PlanVerifier<br/>schema + visibility + risk/effect]
+    RV --> VF[PlanVerifier + contract action gate<br/>schema + allowed action + risk/effect]
     VF --> L{Verified action}
     L -->|respond| M[Respond]
     L -->|synthesize_answer| SS[Grounded synthesis LLM]
@@ -77,8 +82,9 @@ flowchart TD
     SR -->|direct run_skill| RSK[run_skill finalize<br/>task result + journal]
     N --> P[Loop observations<br/>failure classification]
     SS --> P
-    P -->|repair / next round| I
-    P -->|observation-only finish| OF[Observed-output finalizer<br/>direct answer or synthesis]
+    P --> EV[Evidence coverage verifier<br/>required evidence + answer shape]
+    EV -->|missing evidence / repair| I
+    EV -->|enough evidence| OF[Observed-output finalizer<br/>direct answer or synthesis]
     M --> VP[User-visible message assembly<br/>execution process when present]
     CR --> VP
     G --> VP
@@ -87,7 +93,7 @@ flowchart TD
     SD --> VP
     RD --> RDL[Resume discussion LLM]
     RDL --> VP
-    VP --> Q[Final delivery / output-contract guard]
+    VP --> Q[Final delivery / output-contract guard<br/>shape + delivery consistency]
     Q --> R[Finalize result<br/>text + messages]
     SD0 --> R
     RSK --> R
@@ -103,6 +109,7 @@ flowchart TD
 - `Task kind`: `kind=ask` enters the normalizer / post-route / ask dispatch flow; `kind=run_skill` bypasses LLM routing and runs the named skill directly through the shared skill dispatch path.
 - `Ask context bundle`: built once after normalization and before ask dispatch; it supplies chat context, execution prompt context, attachments, durable memory, and recent execution context used by post-route locator policy.
 - `Post-route policy`: applies locator resolution, missing-locator clarification, and contract guards after the ask context bundle is available and before dispatch. It can refine the gate from structured state, but it is not a separate semantic router.
+- `Task contract matrix`: keeps semantic kind, allowed action, required evidence, and response shape in one shared contract used by post-route guards, direct-answer preflight, plan verification, evidence coverage checks, and final delivery.
 - `Schedule / resume branches`: scheduler-triggered direct-text tasks can finalize before the normalizer; normal schedule-direct requests can finalize after routing but before the planner; resume-discussion uses a recovery prompt; resume-execution returns to the normal execution runtime.
 - `FirstLayerDecision`: keeps the runtime gate to `Clarify / DirectAnswer / PlannerExecute`. `AskMode` is the code-facing dispatch type; route labels such as `AskClarify`, `Chat`, `Act`, and `ChatAct` are derived only for logs and journals, not stored as a second routing state.
 - `Direct-answer candidate / optional preflight`: before a normal chat answer is sent, the runtime can reuse a grounded scalar/direct candidate when it matches current runtime facts; otherwise it can run a lightweight contract/advice-only check. It keeps pure chat in `DirectAnswer`, but can promote tool-backed requests to `PlannerExecute` or ask one clarification when the normalizer was too weak.
@@ -110,9 +117,9 @@ flowchart TD
 - `Planner / runtime loop`: for `PlannerExecute`, runs multiple rounds. Most rounds call the planner LLM; narrow structured observation contracts can produce a runtime-built deterministic observation plan for that round, but still use the same loop, observations, guards, and finalization path. Planner steps are `think`, `call_capability`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today—execution steps are traced as subtasks in logs, not a nested child loop). `call_capability` is the preferred capability-level planner action; `call_tool` / `call_skill` remain legacy-compatible direct actions.
 - `Execution prompt/context`: reuses the ask context bundle and resolved prompt for `PlannerExecute`, so memory cannot override the latest user instruction.
 - `Skill registry + generated skill docs`: planner-visible skills and capability metadata come from runtime skill views and generated interface docs, primarily `configs/skills_registry.toml`, `crates/skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`. New planner-facing skills should declare `planner_capabilities` instead of adding language-specific planner branches.
-- `CapabilityResolver / PlanVerifier`: capability-level actions are resolved to concrete tools or skills before execution. The verifier then checks visibility, required arguments, risk/effect boundaries, confirmation requirements, and mutation validation before any real action runs.
+- `CapabilityResolver / PlanVerifier`: capability-level actions are resolved to concrete tools or skills before execution. The verifier and contract action gate then check visibility, allowed actions, required arguments, risk/effect boundaries, confirmation requirements, and mutation validation before any real action runs.
 - `call_skill` / direct `run_skill`: both go through `run_skill_with_runner`, which applies policy and skill switches, then dispatches by registry kind: builtins run in-process, external skills run through their external adapter, and runner skills launch `skill-runner` plus the concrete skill binary.
-- `Loop observations` and `Observed-output finalizer`: tool, skill, and synthesis outputs remain grounded evidence inside the loop; recoverable failures publish progress and re-enter the planner with compact attempted-method history, while terminal failures finish with a grounded result; observation-only plans can still finish through runtime-owned structured answers, with observed-answer synthesis only when runtime cannot safely format the answer.
+- `Loop observations`, `Evidence coverage`, and `Observed-output finalizer`: tool, skill, and synthesis outputs remain grounded evidence inside the loop. The evidence verifier checks required evidence and answer shape before publication; recoverable failures re-enter the planner with compact attempted-method history, while terminal failures finish with a grounded result. Observation-only plans can still finish through runtime-owned structured answers, with observed-answer synthesis only when runtime cannot safely format the answer.
 - `User-visible message assembly`: pure chat can remain a single answer. Execution, clarification, retry, and skill paths can attach sanitized `messages` separate from the final deliverable body, so execution stays visible without exposing raw prompts, stack traces, or secrets.
 - `Final delivery / output-contract guard`: normalizes file tokens, `messages`, exact scalar/strict output shapes, and delivery consistency before the result is saved.
 - `Finalize result`: can emit one `text` field and a `messages` array; channel adapters send each publishable message separately when present.
@@ -126,7 +133,12 @@ flowchart TD
     C --> D[Parse JSON]
     D --> E{Structured result}
     E --> Ec[Build ask context bundle<br/>memory + attachments + recent execution]
-    Ec --> E2[Post-route policy<br/>locator + contract guards]
+    CM[Task contract matrix<br/>allowed actions + required evidence + response shape] --> E2
+    CM --> G0
+    CM --> Kv
+    CM --> Ev
+    CM --> R
+    Ec --> E2[Post-route policy<br/>locator + contract matrix guards]
     E2 -->|schedule direct| Fs[Schedule direct finalize<br/>no planner if already grounded]
     E2 -->|resume discussion| Fr[Resume discussion prompt]
     E2 -->|resume execution| H
@@ -148,7 +160,7 @@ flowchart TD
     Ip --> J[Parse plan steps]
     J --> Kr[CapabilityResolver<br/>call_capability -> concrete action]
     Jd --> Kr
-    Kr --> Kv[PlanVerifier<br/>schema + visibility + risk/effect]
+    Kr --> Kv[PlanVerifier + contract action gate<br/>schema + allowed action + risk/effect]
     Kv --> K{Verified step type}
     K -->|respond| L[Respond text]
     K -->|call_tool| M[Execute tool<br/>fs_basic/config_basic/config_edit adapter]
@@ -163,9 +175,10 @@ flowchart TD
     Mse --> O
     Msbinary --> O
     N --> O
-    O --> P{Need another planner round?}
-    P -->|yes| H
-    P -->|no| Q[Observed-output finalizer<br/>direct answer or synthesis if needed]
+    O --> Ev[Evidence coverage check<br/>required evidence + answer shape]
+    Ev --> P{Need another planner round?}
+    P -->|yes / missing evidence / repair| H
+    P -->|no / enough evidence| Q[Observed-output finalizer<br/>direct answer or synthesis if needed]
     L --> VP[User-visible message assembly<br/>execution process when present]
     Q --> VP
     Ic --> VP
@@ -182,13 +195,14 @@ flowchart TD
 - `LLM request 1 / Intent normalizer`: performs structured understanding only; it does not produce the final answer.
 - This diagram covers the normal `kind=ask` LLM path. `kind=run_skill` and scheduler-triggered direct-text asks have no normalizer / planner LLM request and are finalized by their direct task paths.
 - `Build chat prompt / planner runtime context`: combines mode, session state, working context, and output contract for follow-on requests. The full planner prompt is only needed when the current loop round actually calls the planner LLM.
+- `Task contract matrix`: shares the same semantic kind, allowed action, required evidence, and response-shape contract across post-route policy, direct-answer preflight, plan verification, evidence coverage checks, final delivery, and generated NL evaluations.
 - `Skill registry + generated skill docs`: planner prompts and resolver mappings are built from enabled skill views, generated interface documents, and `planner_capabilities`, so skill capability growth should be data/contract driven.
 - `DirectAnswer candidate / preflight`: **DirectAnswer** may reuse a runtime-grounded direct candidate or run a lightweight preflight LLM before the chat reply is sent. If the request is confirmed as direct answer, chat response runs and finalizes; if it detects missing required information, the request becomes clarification; if it detects real tool/workspace/system evidence is needed, it is promoted into `PlannerExecute`.
 - `PlannerExecute`: usually uses one-or-more **planner** calls per loop round; narrow deterministic observation contracts can skip the planner LLM for that round and emit runtime-built observation steps instead. Planner JSON steps are `{think, call_capability, call_tool, call_skill, synthesize_answer, respond}` only (no `clarify` or `delegate` step types). Prefer `call_capability`; `call_tool` and `call_skill` remain compatible direct actions. `AskMode` finalization style controls whether the execution result is returned plainly or chat-wrapped.
-- `CapabilityResolver / PlanVerifier`: `call_capability` is normalized into the current tool/skill implementation before execution. The verifier blocks unavailable capabilities, missing required fields, risk-budget violations, and unsafe mutation plans before the executor sees them.
+- `CapabilityResolver / PlanVerifier`: `call_capability` is normalized into the current tool/skill implementation before execution. The verifier and contract action gate block unavailable capabilities, disallowed actions, missing required fields, risk-budget violations, and unsafe mutation plans before the executor sees them.
 - `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened. Skill execution uses the shared dispatch layer; only runner skills spawn `skill-runner`.
 - `synthesize_answer`: an extra LLM call **scheduled inside the planner loop** when the plan includes that step—**not** always a single fixed “LLM 3 after all planning is done”; rounds can interleave execution, synthesis, and further planning.
-- `Observed-output finalizer`: if a plan ends after observation steps without a terminal `respond`, runtime can still publish a grounded direct answer or run the observed-answer synthesis path. Recoverable failures are fed back to later planner rounds as attempted-method evidence instead of being hidden inside shell fallbacks.
+- `Evidence coverage / observed-output finalizer`: observations must satisfy the contract's required evidence and answer shape before publication. If a plan ends after observation steps without a terminal `respond`, runtime can still publish a grounded direct answer or run the observed-answer synthesis path. Recoverable failures are fed back to later planner rounds as attempted-method evidence instead of being hidden inside shell fallbacks.
 - `User-visible message assembly`: pure chat replies can pass through without an execution-process block. Clarifications and execution paths can include sanitized progress/process messages before final delivery.
 - `Final delivery / output-contract guard`: applies delivery normalization and output-contract verification before final task persistence.
 - `Finalize`: may also start background memory work after the user-visible result is saved, including long-term summary refresh and optional preference extraction controlled by `configs/memory.toml`.

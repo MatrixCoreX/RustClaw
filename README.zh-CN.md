@@ -38,7 +38,12 @@ flowchart TD
     C --> D[绑定 / 恢复 / 活跃任务上下文]
     D --> E[意图归一化 LLM]
     E --> EC[构建 ask 上下文包<br/>记忆 + 附件 + 最近执行]
-    EC --> E2[路由后策略<br/>locator + 契约护栏]
+    CM[任务契约矩阵<br/>semantic kind + required evidence + allowed action + response shape] --> E2
+    CM --> DG
+    CM --> VF
+    CM --> EV
+    CM --> Q
+    EC --> E2[路由后策略<br/>locator + 契约矩阵护栏]
     E2 -->|调度直达| SD[调度直达收尾]
     E2 -->|恢复讨论| RD[恢复讨论提示词]
     E2 -->|恢复执行| H
@@ -59,7 +64,7 @@ flowchart TD
     ID -->|否| PL[规划 LLM 轮次<br/>推荐 call_capability]
     JD --> RV[CapabilityResolver<br/>能力 / 兼容动作归一]
     PL --> RV
-    RV --> VF[PlanVerifier<br/>schema + 可见性 + 风险/效果]
+    RV --> VF[PlanVerifier + 契约动作门禁<br/>schema + allowed action + 风险/效果]
     VF --> L{已验证动作}
     L -->|respond| M[直接回复]
     L -->|synthesize_answer| SS[基于证据的合成 LLM]
@@ -77,8 +82,9 @@ flowchart TD
     SR -->|直接 run_skill| RSK[run_skill 收尾<br/>任务结果 + journal]
     N --> P[循环内观测<br/>失败分类]
     SS --> P
-    P -->|修复 / 继续规划| I
-    P -->|观测后收尾| OF[观测输出收尾<br/>直接答案或合成]
+    P --> EV[证据覆盖校验<br/>required evidence + answer shape]
+    EV -->|缺证据 / 修复| I
+    EV -->|证据足够| OF[观测输出收尾<br/>直接答案或合成]
     M --> VP[用户可见消息组装<br/>有执行时包含过程]
     CR --> VP
     G --> VP
@@ -87,7 +93,7 @@ flowchart TD
     SD --> VP
     RD --> RDL[恢复讨论 LLM]
     RDL --> VP
-    VP --> Q[最终交付 / 输出契约护栏]
+    VP --> Q[最终交付 / 输出契约护栏<br/>shape + delivery consistency]
     Q --> R[收尾结果<br/>text + messages]
     SD0 --> R
     RSK --> R
@@ -103,6 +109,7 @@ flowchart TD
 - **任务类型**：`kind=ask` 进入归一化 / 路由后策略 / ask 分发流程；`kind=run_skill` 不跑 LLM 路由，直接通过共享技能调度路径执行指定技能。
 - **ask 上下文包**：归一化后、ask 分发前统一构建；提供聊天上下文、执行提示词上下文、附件、持久记忆，以及路由后 locator 策略需要的最近执行上下文。
 - **路由后策略**：ask 上下文包可用之后、分发之前处理 locator 解析、缺 locator 澄清和契约护栏；它可以细化门控，但不是语义快路径。
+- **任务契约矩阵**：把 semantic kind、allowed action、required evidence 和 response shape 收敛到同一份共享契约，由路由后护栏、直接回答预检、计划校验、证据覆盖校验和最终交付共同使用。
 - **调度 / 恢复支路**：调度器触发的直达文本任务可在归一化前收尾；普通调度直达请求可在路由后、进入规划器前完成收尾；恢复讨论走恢复提示词；恢复执行回到正常执行运行时。
 - **第一层决策**：运行时门控收敛为 `Clarify / DirectAnswer / PlannerExecute`。`AskMode` 是代码分发类型；`AskClarify`、`Chat`、`Act`、`ChatAct` 这类 route label 只从 `AskMode` 派生用于日志和 journal，不再作为第二套路由状态存储。
 - **直接回答候选 / 可选预检**：正常聊天答案发送前，运行时可在候选答案与当前运行时事实匹配时直接复用；否则可先跑轻量契约 / advice-only 检查。纯聊天仍保持 `DirectAnswer`，但如果发现需要工具证据，会提升到 `PlannerExecute`；如果发现缺少唯一关键参数，会转成一次澄清。
@@ -110,9 +117,9 @@ flowchart TD
 - **规划器 / 运行时循环**：`PlannerExecute` 下多轮执行。大多数轮次会调用规划 LLM；窄范围结构化观测契约可在当前轮由运行时构建确定性观测计划，但仍走同一套循环、观测、护栏与收尾路径。规划步骤类型为 `think`、`call_capability`、`call_tool`、`call_skill`、`synthesize_answer`、`respond`（当前**没有** `delegate` 类型；子任务前缀多用于日志与追踪，而非独立的子循环委派）。`call_capability` 是推荐的能力级规划动作；`call_tool` / `call_skill` 保留为兼容直达动作。
 - **执行提示词 / 上下文**：`PlannerExecute` 执行复用 ask 上下文包和解析后的提示词，避免记忆压过最新用户指令。
 - **技能注册表 + 生成技能文档**：规划器可见技能与 capability metadata 来自运行时 skill views 与生成接口文档，主要由 `configs/skills_registry.toml`、`crates/skills/*/INTERFACE.md`、`prompts/layers/generated/skills/*` 提供。新增规划器可见技能应声明 `planner_capabilities`，而不是新增特定语言的规划分支。
-- **CapabilityResolver / PlanVerifier**：能力级动作会先解析到具体 tool 或 skill，再进入执行。Verifier 会在真实执行前检查能力可见性、必填参数、风险/效果边界、确认要求和 mutation 后验证。
+- **CapabilityResolver / PlanVerifier**：能力级动作会先解析到具体 tool 或 skill，再进入执行。Verifier 和契约动作门禁会在真实执行前检查能力可见性、allowed action、必填参数、风险/效果边界、确认要求和 mutation 后验证。
 - **call_skill / 直接 run_skill**：都经过 `run_skill_with_runner` 做策略与技能开关检查，再按 registry kind 分发：builtin 在进程内运行，external 走 external adapter，runner 才会拉起 `skill-runner` 与具体技能二进制。
-- **循环内观测与观测输出收尾**：工具、技能与合成步骤输出作为循环内证据；可恢复失败会先发布进度，再带着已尝试方法的压缩历史回到规划器；终止型失败会用已观测事实收尾；如果计划只完成观测，也可以通过运行时结构化直答完成交付，只有运行时无法安全格式化时才走观测答案合成。
+- **循环内观测、证据覆盖与观测输出收尾**：工具、技能与合成步骤输出作为循环内证据；证据校验器会在发布前检查 required evidence 和 answer shape。可恢复失败会带着已尝试方法的压缩历史回到规划器；终止型失败会用已观测事实收尾；如果计划只完成观测，也可以通过运行时结构化直答完成交付，只有运行时无法安全格式化时才走观测答案合成。
 - **用户可见消息组装**：纯聊天可以保持单条回答，不额外加执行过程。执行、澄清、重试和技能路径可以附加脱敏后的 `messages`，并与最终交付正文分离；这样既能外露执行过程，也不会暴露原始 prompt、堆栈或密钥。
 - **最终交付 / 输出契约护栏**：在保存结果前规范文件 token、`messages`、精确标量/严格输出形状与交付一致性。
 - **收尾结果**：可同时包含 `text` 和 `messages` 数组；通道适配器在有多条可发布消息时会分别发送。
@@ -126,7 +133,12 @@ flowchart TD
     C --> D[解析 JSON]
     D --> E{结构化结果}
     E --> Ec[构建 ask 上下文包<br/>记忆 + 附件 + 最近执行]
-    Ec --> E2[路由后策略<br/>locator + 契约护栏]
+    CM[任务契约矩阵<br/>allowed actions + required evidence + response shape] --> E2
+    CM --> G0
+    CM --> Kv
+    CM --> Ev
+    CM --> R
+    Ec --> E2[路由后策略<br/>locator + 契约矩阵护栏]
     E2 -->|调度直达| Fs[调度直达收尾<br/>证据足够时不进规划器]
     E2 -->|恢复讨论| Fr[恢复讨论提示词]
     E2 -->|恢复执行| H
@@ -148,7 +160,7 @@ flowchart TD
     Ip --> J[解析规划步骤]
     J --> Kr[CapabilityResolver<br/>call_capability -> 具体动作]
     Jd --> Kr
-    Kr --> Kv[PlanVerifier<br/>schema + 可见性 + 风险/效果]
+    Kr --> Kv[PlanVerifier + 契约动作门禁<br/>schema + allowed action + 风险/效果]
     Kv --> K{已验证步骤类型}
     K -->|respond| L[回复正文]
     K -->|call_tool| M[执行工具<br/>fs_basic/config_basic/config_edit adapter]
@@ -163,9 +175,10 @@ flowchart TD
     Mse --> O
     Msbinary --> O
     N --> O
-    O --> P{是否再规划一轮?}
-    P -->|是| H
-    P -->|否| Q[观测输出收尾<br/>必要时直答或合成]
+    O --> Ev[证据覆盖校验<br/>required evidence + answer shape]
+    Ev --> P{是否再规划一轮?}
+    P -->|是 / 缺证据 / 修复| H
+    P -->|否 / 证据足够| Q[观测输出收尾<br/>必要时直答或合成]
     L --> VP[用户可见消息组装<br/>有执行时包含过程]
     Q --> VP
     Ic --> VP
@@ -182,13 +195,14 @@ flowchart TD
 - **LLM 请求1 / 意图归一化**：只做结构化理解，不产出最终答案。
 - 本图只覆盖常规 `kind=ask` 的 LLM 路径。`kind=run_skill` 和调度器触发的直达文本 ask 不发生归一化 / 规划器 LLM 请求，会走各自的直接任务路径收尾。
 - **构建聊天提示词 / 规划运行时上下文**：把模式、会话态、工作上下文与输出约定拼进后续请求；只有当前循环轮次确实调用规划 LLM 时，才需要构建完整规划提示词。
+- **任务契约矩阵**：把同一套 semantic kind、allowed action、required evidence 和 response shape 同时用于路由后策略、直接回答预检、计划校验、证据覆盖校验、最终交付以及生成式 NL 评测。
 - **技能注册表 + 生成技能文档**：规划提示词与 resolver 映射从已启用技能视图、生成接口文档和 `planner_capabilities` 构建，技能能力增长应由数据/契约驱动。
 - **DirectAnswer 候选 / 预检**：**DirectAnswer** 在发送聊天回复前可能复用运行时证据支撑的直接候选，或先跑一次轻量预检 LLM。确认纯回答时才进入聊天回复并收尾；发现缺少必要信息时转澄清；发现需要真实工具/工作区/系统证据时提升到 `PlannerExecute`。
 - **PlannerExecute**：通常按循环进行**一轮或多轮**规划 LLM；窄范围确定性观测契约可以在当前轮跳过规划 LLM，改由运行时生成观测步骤。规划 JSON 只包含 `{think, call_capability, call_tool, call_skill, synthesize_answer, respond}`（**没有** `clarify`、`delegate` 步骤类型）。优先使用 `call_capability`；`call_tool` 和 `call_skill` 保留为兼容直达动作。`AskMode` 的收尾样式负责控制执行结果是直接返回还是经过聊天包装。
-- **CapabilityResolver / PlanVerifier**：`call_capability` 会在执行前归一到当前具体 tool/skill 实现。Verifier 会在 executor 前阻断不可用能力、缺必填字段、风险预算越界和不安全 mutation 计划。
+- **CapabilityResolver / PlanVerifier**：`call_capability` 会在执行前归一到当前具体 tool/skill 实现。Verifier 和契约动作门禁会在 executor 前阻断不可用能力、契约不允许的动作、缺必填字段、风险预算越界和不安全 mutation 计划。
 - **执行工具或技能**：跑真实能力，避免模型假装已执行。技能执行使用共享调度层；只有 runner 技能会启动 `skill-runner`。
 - **synthesize_answer**：当规划里包含该步骤时会**额外**触发合成 LLM；可与执行交错，**不一定**是「全部规划结束后的固定第三次 LLM」。
-- **观测输出收尾**：如果计划在观测步骤后没有终端 `respond`，运行时仍可发布结构化直答，或走观测答案合成路径。可恢复失败会作为已尝试方法证据交给后续规划轮，而不是藏在 shell fallback 里。
+- **证据覆盖 / 观测输出收尾**：观测必须满足契约里的 required evidence 和 answer shape 后才能发布。如果计划在观测步骤后没有终端 `respond`，运行时仍可发布结构化直答，或走观测答案合成路径。可恢复失败会作为已尝试方法证据交给后续规划轮，而不是藏在 shell fallback 里。
 - **用户可见消息组装**：纯聊天回复可以不带执行过程；澄清与执行路径可以在最终交付前附加脱敏的进度/过程消息。
 - **最终交付 / 输出契约护栏**：在最终任务持久化前执行交付规范化与输出契约验证。
 - **收尾**：保存用户可见结果后，还可能启动后台记忆任务，包括长期摘要刷新，以及受 `configs/memory.toml` 控制的可选偏好抽取。
@@ -292,39 +306,54 @@ Task journal summary 和 trace 会记录 `memory_trace`。它包含 stage、use 
 
 ```mermaid
 flowchart TD
-    User[用户请求] --> Task[POST /v1/tasks]
-    Task --> Worker[worker_once]
-    Worker --> Ask{kind=ask?}
-    Ask -->|是| Normalizer[意图归一化]
-    Ask -->|run_skill| DirectSkill[直接 run_skill 路径]
+    User[用户请求] --> Ingress[通道 / UI / POST /v1/tasks]
+    Ingress --> Identity[解析身份<br/>user_key + user_id + chat_id]
+    Identity --> Session[(conversation_states<br/>别名 + 活跃任务锚点)]
+    Identity --> Worker[worker_once]
+    Worker --> Kind{任务类型}
+    Kind -->|run_skill| DirectSkill[直接 run_skill 路径]
+    Kind -->|ask| Snapshot[会话快照与本地表面信号]
+    Session --> Snapshot
+    Snapshot --> Normalizer[意图归一化]
     Normalizer --> Bundle[Ask 上下文包]
     Bundle --> Recall[结构化记忆召回]
-    Recall --> Policy[Memory use policy]
-    Policy --> Route[路由提示词]
-    Policy --> Planner[规划提示词]
-    Policy --> Chat[聊天提示词]
+    Index[(memory_retrieval_index)] --> Recall
+    Stores[(memories<br/>user_preferences<br/>memory_facts<br/>long_term_memories)] --> Index
+    Recall --> Safety[安全 / 过期 / 状态过滤]
+    Safety --> Policy[Memory use policy<br/>route / planner / chat / skill]
+    Policy --> RouteCtx[路由记忆上下文]
+    Policy --> PlannerCtx[规划器记忆上下文]
+    Policy --> ChatCtx[聊天记忆上下文]
     Policy --> SkillArgs[技能 _memory 参数]
     SkillArgs --> SkillPolicy[Registry memory_policy 裁剪]
-    SkillPolicy --> Runner[skill-runner / builtin / external skill]
-    Route --> Runtime[运行时 / 规划执行]
-    Planner --> Runtime
-    Chat --> Visible[用户可见答案]
+    RouteCtx --> PostRoute[路由后策略<br/>contract + locator 护栏]
+    PlannerCtx --> Runtime[规划器 / 运行时循环]
+    ChatCtx --> Chat[直接聊天回答]
+    SkillPolicy --> SkillRuntime[skill-runner / builtin / external skill]
+    PostRoute --> Runtime
+    PostRoute --> Chat
+    DirectSkill --> SkillRuntime
+    SkillRuntime --> Runtime
     Runtime --> Visible
-    Runner --> Runtime
-    Visible --> Finalize[任务收尾]
-    Finalize --> ShortTerm[(memories)]
-    Finalize -. 可选 .-> Intent[Memory intent extractor]
-    Intent --> Validate[运行时 schema / scope / safety 校验]
+    Chat --> Visible
+    Visible --> Finalize[任务收尾 + journal]
+    Finalize --> RecentWrite[短期写入过滤]
+    RecentWrite --> Memories[(memories)]
+    Finalize -. 可选 .-> MemIntent[结构化记忆意图提取]
+    MemIntent --> Validate[运行时 enum / scope / confidence / safety 校验]
     Validate --> Prefs[(user_preferences)]
     Validate --> Facts[(memory_facts)]
     Finalize -. 可选 .-> Summary[长期摘要刷新]
-    Summary --> Facts
-    Prefs --> Index[(memory_retrieval_index)]
-    Facts --> Index
-    ShortTerm --> Index
-    Index --> Recall
-    Policy --> Journal[Task journal memory_trace]
-    Runtime --> Journal
+    Summary --> LongTerm[(long_term_memories)]
+    Facts --> Conflict[冲突组覆盖 / 过期]
+    Conflict --> Facts
+    Memories --> Reindex[Index 更新 / reindex_on_startup]
+    Prefs --> Reindex
+    Facts --> Reindex
+    LongTerm --> Reindex
+    Reindex --> Index
+    Policy --> Trace[Task journal memory_trace]
+    Runtime --> Trace
 ```
 
 ## 主要组件

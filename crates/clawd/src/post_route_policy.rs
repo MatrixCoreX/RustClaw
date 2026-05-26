@@ -167,18 +167,6 @@ fn should_clear_scalar_path_only_without_locator_binding(route_result: &RouteRes
         && route_result.output_contract.locator_hint.trim().is_empty()
 }
 
-fn should_clear_raw_command_output_for_contract_mismatch(route_result: &RouteResult) -> bool {
-    if route_result.output_contract.semantic_kind != OutputSemanticKind::RawCommandOutput
-        || route_result.output_contract.delivery_required
-    {
-        return false;
-    }
-    matches!(
-        route_result.output_contract.response_shape,
-        OutputResponseShape::OneSentence
-    )
-}
-
 pub(crate) fn apply_post_route_policy(
     route_result: RouteResult,
     locator_resolution: LocatorResolution,
@@ -236,9 +224,6 @@ pub(crate) fn apply_post_route_policy(
         execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
     }
     if should_clear_scalar_path_only_without_locator_binding(&execution_route_result) {
-        execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
-    }
-    if should_clear_raw_command_output_for_contract_mismatch(&execution_route_result) {
         execution_route_result.output_contract.semantic_kind = OutputSemanticKind::None;
     }
 
@@ -987,7 +972,7 @@ mod tests {
     }
 
     #[test]
-    fn one_sentence_command_plus_explanation_clears_raw_command_output() {
+    fn one_sentence_command_summary_keeps_raw_command_output() {
         let mut route = route_result();
         route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
         route.resolved_intent =
@@ -1000,7 +985,7 @@ mod tests {
         let result = apply_post_route_policy(route, LocatorResolution::None);
         assert_eq!(
             result.execution_route_result.output_contract.semantic_kind,
-            OutputSemanticKind::None
+            OutputSemanticKind::RawCommandOutput
         );
         assert!(result.execution_route_result.route_reason.trim().is_empty());
     }
