@@ -7,6 +7,11 @@ const MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS: usize = 240;
 const MAX_OBSERVED_EVIDENCE_KEYS: usize = 16;
 const MAX_OBSERVED_EVIDENCE_DEPTH: usize = 3;
 const MAX_OBSERVED_ARRAY_SAMPLES: usize = 3;
+const MAX_RESULT_TRACE_BYTES: usize = 128 * 1024;
+const MAX_RESULT_TRACE_ARRAY_ITEMS: usize = 24;
+const MAX_RESULT_TRACE_STRING_CHARS: usize = 768;
+const MAX_RESULT_TRACE_COMPACT_ARRAY_ITEMS: usize = 8;
+const MAX_RESULT_TRACE_COMPACT_STRING_CHARS: usize = 240;
 const JSON_EVIDENCE_PRIORITY_KEYS: &[&str] = &[
     "candidates",
     "names",
@@ -1162,6 +1167,126 @@ fn stable_trace_hash(text: &str) -> String {
     format!("fnv64:{hash:016x}")
 }
 
+#[derive(Debug, Default)]
+struct TraceStorageStats {
+    truncated_arrays: usize,
+    omitted_array_items: usize,
+    truncated_strings: usize,
+}
+
+fn trace_json_bytes(value: &Value) -> usize {
+    serde_json::to_vec(value).map(|bytes| bytes.len()).unwrap_or(0)
+}
+
+fn trace_json_hash(value: &Value) -> String {
+    serde_json::to_string(value)
+        .map(|text| stable_trace_hash(&text))
+        .unwrap_or_else(|_| stable_trace_hash("<unserializable-trace>"))
+}
+
+fn compact_result_trace_value(
+    value: &mut Value,
+    stats: &mut TraceStorageStats,
+    max_array_items: usize,
+    max_string_chars: usize,
+) {
+    match value {
+        Value::String(text) => {
+            if text.chars().count() > max_string_chars {
+                let mut truncated = crate::utf8_safe_prefix(text, max_string_chars).to_string();
+                truncated.push_str("...(truncated)");
+                *text = truncated;
+                stats.truncated_strings += 1;
+            }
+        }
+        Value::Array(items) => {
+            if items.len() > max_array_items {
+                stats.truncated_arrays += 1;
+                stats.omitted_array_items += items.len() - max_array_items;
+                items.truncate(max_array_items);
+            }
+            for item in items {
+                compact_result_trace_value(item, stats, max_array_items, max_string_chars);
+            }
+        }
+        Value::Object(map) => {
+            for child in map.values_mut() {
+                compact_result_trace_value(child, stats, max_array_items, max_string_chars);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+fn result_trace_storage_meta(
+    original_bytes: usize,
+    stored_bytes: usize,
+    original_hash: String,
+    stats: &TraceStorageStats,
+    truncated: bool,
+) -> Value {
+    json!({
+        "schema_version": 1,
+        "max_bytes": MAX_RESULT_TRACE_BYTES,
+        "truncated": truncated,
+        "original_bytes": original_bytes,
+        "stored_bytes": stored_bytes,
+        "original_hash": original_hash,
+        "truncated_arrays": stats.truncated_arrays,
+        "omitted_array_items": stats.omitted_array_items,
+        "truncated_strings": stats.truncated_strings,
+    })
+}
+
+fn insert_result_trace_storage_meta(trace: &mut Value, meta: Value) {
+    if let Some(obj) = trace.as_object_mut() {
+        obj.insert("trace_storage".to_string(), meta);
+    }
+}
+
+fn result_trace_json_with_storage_limit(mut trace: Value) -> Value {
+    let original_bytes = trace_json_bytes(&trace);
+    let original_hash = trace_json_hash(&trace);
+    if original_bytes <= MAX_RESULT_TRACE_BYTES {
+        let stats = TraceStorageStats::default();
+        let meta = result_trace_storage_meta(
+            original_bytes,
+            original_bytes,
+            original_hash,
+            &stats,
+            false,
+        );
+        insert_result_trace_storage_meta(&mut trace, meta);
+        return trace;
+    }
+
+    let mut stats = TraceStorageStats::default();
+    compact_result_trace_value(
+        &mut trace,
+        &mut stats,
+        MAX_RESULT_TRACE_ARRAY_ITEMS,
+        MAX_RESULT_TRACE_STRING_CHARS,
+    );
+    if trace_json_bytes(&trace) > MAX_RESULT_TRACE_BYTES {
+        compact_result_trace_value(
+            &mut trace,
+            &mut stats,
+            MAX_RESULT_TRACE_COMPACT_ARRAY_ITEMS,
+            MAX_RESULT_TRACE_COMPACT_STRING_CHARS,
+        );
+    }
+    let stored_bytes = trace_json_bytes(&trace);
+    let meta = result_trace_storage_meta(
+        original_bytes,
+        stored_bytes,
+        original_hash,
+        &stats,
+        true,
+    );
+    insert_result_trace_storage_meta(&mut trace, meta);
+    trace
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct TaskJournalEvidenceCoverage {
     pub(crate) required_evidence: Vec<String>,
@@ -2174,12 +2299,14 @@ impl TaskJournal {
     }
 
     pub(crate) fn attach_to_result(&self, mut result: Value) -> Value {
+        let summary = self.to_summary_json();
+        let trace = result_trace_json_with_storage_limit(self.to_trace_json());
         if let Some(obj) = result.as_object_mut() {
             obj.insert(
                 "task_journal".to_string(),
                 json!({
-                    "summary": self.to_summary_json(),
-                    "trace": self.to_trace_json(),
+                    "summary": summary,
+                    "trace": trace,
                 }),
             );
             result
@@ -2187,8 +2314,8 @@ impl TaskJournal {
             json!({
                 "result": result,
                 "task_journal": {
-                    "summary": self.to_summary_json(),
-                    "trace": self.to_trace_json(),
+                    "summary": summary,
+                    "trace": trace,
                 }
             })
         }
@@ -2614,6 +2741,76 @@ mod tests {
                 .and_then(Value::as_array)
                 .map(Vec::len),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn attach_to_result_caps_large_trace_and_preserves_contract_summary_fields() {
+        let mut journal = TaskJournal::for_task("task-large-trace", "ask", "列出文件名");
+        journal.record_route_result(&route_for_semantic(crate::OutputSemanticKind::FileNames));
+        for idx in 0..300 {
+            journal.push_task_observation(json!({
+                "idx": idx,
+                "payload": "x".repeat(1200),
+                "items": (0..40).map(|value| json!({
+                    "value": value,
+                    "note": "y".repeat(1200),
+                })).collect::<Vec<_>>(),
+            }));
+        }
+
+        let result = journal.attach_to_result(json!({"text": "ok"}));
+        let trace = result
+            .pointer("/task_journal/trace")
+            .expect("trace should be attached");
+        let serialized = serde_json::to_vec(trace).expect("trace should serialize");
+        assert!(
+            serialized.len() <= super::MAX_RESULT_TRACE_BYTES,
+            "stored trace should be bounded, got {} bytes",
+            serialized.len()
+        );
+        assert_eq!(
+            trace
+                .pointer("/trace_storage/truncated")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert!(
+            trace
+                .pointer("/trace_storage/original_bytes")
+                .and_then(Value::as_u64)
+                .unwrap_or_default()
+                > trace
+                    .pointer("/trace_storage/stored_bytes")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default()
+        );
+        assert!(
+            trace
+                .pointer("/trace_storage/original_hash")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .starts_with("fnv64:")
+        );
+        assert!(
+            trace
+                .get("contract_matrix")
+                .and_then(|value| value.get("contract_match"))
+                .and_then(Value::as_str)
+                .is_some(),
+            "contract snapshot should survive trace compaction"
+        );
+        assert!(
+            trace.get("evidence_coverage").is_some(),
+            "evidence coverage should survive trace compaction"
+        );
+        assert!(
+            trace
+                .get("task_observations")
+                .and_then(Value::as_array)
+                .map(|items| items.len() <= super::MAX_RESULT_TRACE_ARRAY_ITEMS)
+                .unwrap_or(false),
+            "task observations should be truncated by count"
         );
     }
 
