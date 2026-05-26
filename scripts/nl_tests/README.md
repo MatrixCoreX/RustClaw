@@ -59,6 +59,9 @@ Client-like continuous regression:
 
 - Run the offline contract-matrix regression suite, including generator checks and attribution fixtures:
   `bash scripts/nl_tests/run_suite.sh contract_matrix_offline`
+  This also verifies the multilingual contract-matrix generator path for zh-CN, en-US, and mixed-language variants.
+  It first checks that the legacy client-like aggregate is up to date, so old curated NL cases and new matrix-generated cases stay in the same regression loop.
+  The suite gates attribution fixture coverage for `model_error`, `schema_error`, `code_gap`, `contract_gap`, `tool_gap`, `permission_denied`, `budget_exhausted`, `prompt_budget_error`, `delivery_error`, and `provider_error`, plus the structured negative signals used by the evaluator. Keep multilingual behavior on contract ids, schema fields, action refs, evidence keys, and error codes; do not add runtime natural-language phrase matching for new languages.
 - Generate 100 deterministic contract-matrix seed cases without calling a model:
   `python3 scripts/nl_tests/generate_contract_matrix_cases.py --count 100 --check --report > /tmp/rustclaw-contract-cases.jsonl`
   Use `--batch N` to rotate the non-mandatory cases while preserving semantic/generic, phase, policy-decision, evidence-expression, and final-answer-shape coverage.
@@ -66,6 +69,7 @@ Client-like continuous regression:
 - Generate 100 live NL replay rows from the same matrix coverage:
   `python3 scripts/nl_tests/generate_contract_matrix_cases.py --count 100 --check --nl --report > /tmp/rustclaw-contract-nl.jsonl`
   Add `--expectations /tmp/rustclaw-contract-nl.expectations.jsonl` to write matching evaluator expectations for contract match, allowed-action phase plan refs, executed skill family, required evidence, missing-evidence status, and final answer shape.
+  Add `--multilingual-variants` to emit zh-CN, en-US, and mixed-language prompts for each selected contract cell while preserving the same structured `[CONTRACT_TEST_HINT]`; this is the preferred regression path for checking that multilingual wording converges to the same semantic kind, allowed action, required evidence, and final answer shape without runtime natural-language hard matching.
   Run them through the client-like path with:
   `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-jsonl /tmp/rustclaw-contract-nl.jsonl --prompt-reply-only --quality-guard`
   Then evaluate the finished run with:
@@ -88,6 +92,7 @@ Client-like continuous regression:
   Expectation rows can assert route, planner capability/tool targets, exact planned `skill.action` refs when present in trace, executed tool/skill, structured `error_kind`, execution failure attribution, stop-signal attribution, verifier issue attribution, contract policy decision, contract match, evidence coverage, verifier approval, finalizer stage/fallback/grounding, finalizer answer shape/class, final text substrings, and final answer shape without making a new LLM request.
 - Extract exact replay prompts and expectations from a finished or interrupted client-like run:
   `python3 scripts/nl_tests/extract_client_like_replay.py scripts/nl_suite_logs/client_like_continuous/<run_id> --case-jsonl /tmp/rustclaw-replay.jsonl --expectations /tmp/rustclaw-replay.expectations.jsonl`
+  Add `--min-repro /tmp/rustclaw-replay.min-repro.jsonl` to also write a sanitized reproduction summary containing the request, route contract, planned/requested actions, observed and missing evidence, failure attribution, and final answer preview.
   `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-jsonl /tmp/rustclaw-replay.jsonl --quality-guard --prompt-reply-only`
 - Focused runtime capability boundary smoke:
   `bash scripts/nl_tests/run_client_like_continuous_suite.sh --skip-smoke --case-file scripts/nl_tests/cases/nl_cases_runtime_capability_boundary_smoke_20260515.txt --quality-guard`
