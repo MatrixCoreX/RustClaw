@@ -2880,24 +2880,18 @@ mod tests {
             crate::task_journal::TaskJournal::for_task("task-array-keys", "ask", "list names");
         journal
             .step_results
-            .push(crate::task_journal::TaskJournalStepTrace {
-                step_id: "step_1".to_string(),
-                skill: "config_basic".to_string(),
-                status: crate::executor::StepExecutionStatus::Ok,
-                output_excerpt: Some(
-                    json!({
-                        "action": "structured_keys",
-                        "exists": true,
-                        "container_type": "array",
-                        "count": 2,
-                        "identity_values": ["fs_basic", "config-basic"]
-                    })
-                    .to_string(),
-                ),
-                error_excerpt: None,
-                started_at: 0,
-                finished_at: 0,
-            });
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "config_basic",
+                json!({
+                    "action": "structured_keys",
+                    "exists": true,
+                    "container_type": "array",
+                    "count": 2,
+                    "identity_values": ["fs_basic", "config-basic"]
+                })
+                .to_string(),
+            ));
 
         assert!(structurally_satisfies_answer_contract(
             &route,
@@ -2916,24 +2910,18 @@ mod tests {
             crate::task_journal::TaskJournal::for_task("task-keys-missing-label", "ask", "keys");
         journal
             .step_results
-            .push(crate::task_journal::TaskJournalStepTrace {
-                step_id: "step_1".to_string(),
-                skill: "config_basic".to_string(),
-                status: crate::executor::StepExecutionStatus::Ok,
-                output_excerpt: Some(
-                    json!({
-                        "action": "structured_keys",
-                        "exists": true,
-                        "container_type": "object",
-                        "count": 3,
-                        "keys": ["app", "features", "paths"]
-                    })
-                    .to_string(),
-                ),
-                error_excerpt: None,
-                started_at: 0,
-                finished_at: 0,
-            });
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "config_basic",
+                json!({
+                    "action": "structured_keys",
+                    "exists": true,
+                    "container_type": "object",
+                    "count": 3,
+                    "keys": ["app", "features", "paths"]
+                })
+                .to_string(),
+            ));
 
         assert!(structurally_satisfies_answer_contract(
             &route,
@@ -2953,22 +2941,16 @@ mod tests {
             crate::task_journal::TaskJournal::for_task("task-read-heading", "ask", "read it");
         journal
             .step_results
-            .push(crate::task_journal::TaskJournalStepTrace {
-                step_id: "step_1".to_string(),
-                skill: "fs_basic".to_string(),
-                status: crate::executor::StepExecutionStatus::Ok,
-                output_excerpt: Some(
-                    json!({
-                        "action": "read_range",
-                        "excerpt": "1|# RustClaw\n2|\n3|<img src=\"./RustClaw.png\" width=\"420\" />\n4|",
-                        "path": "README.md"
-                    })
-                    .to_string(),
-                ),
-                error_excerpt: None,
-                started_at: 0,
-                finished_at: 0,
-            });
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            json!({
+                "action": "read_range",
+                "excerpt": "1|# RustClaw\n2|\n3|<img src=\"./RustClaw.png\" width=\"420\" />\n4|",
+                "path": "README.md"
+            })
+            .to_string(),
+        ));
 
         assert!(structurally_satisfies_answer_contract(
             &route, &journal, "RustClaw"

@@ -123,20 +123,36 @@ pub(crate) struct TaskJournalStepTrace {
 
 #[cfg(test)]
 impl TaskJournalStepTrace {
+    pub(crate) fn new(
+        step_id: impl Into<String>,
+        skill: impl Into<String>,
+        status: crate::executor::StepExecutionStatus,
+        output_excerpt: Option<String>,
+        error_excerpt: Option<String>,
+    ) -> Self {
+        Self {
+            step_id: step_id.into(),
+            skill: skill.into(),
+            status,
+            output_excerpt,
+            error_excerpt,
+            started_at: 0,
+            finished_at: 0,
+        }
+    }
+
     pub(crate) fn ok(
         step_id: impl Into<String>,
         skill: impl Into<String>,
         output: impl Into<String>,
     ) -> Self {
-        Self {
-            step_id: step_id.into(),
-            skill: skill.into(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output_excerpt: Some(output.into()),
-            error_excerpt: None,
-            started_at: 0,
-            finished_at: 0,
-        }
+        Self::new(
+            step_id,
+            skill,
+            crate::executor::StepExecutionStatus::Ok,
+            Some(output.into()),
+            None,
+        )
     }
 }
 
@@ -2580,7 +2596,7 @@ mod tests {
         delivery_payload_consistent, evidence_coverage_for_route, observed_evidence_from_output,
         TaskJournal, TaskJournalFinalStatus, TaskJournalFinalizerFallback,
         TaskJournalFinalizerStage, TaskJournalFinalizerSummary, TaskJournalRoundTrace,
-        TaskJournalVerifyIssue, TaskJournalVerifySummary,
+        TaskJournalStepTrace, TaskJournalVerifyIssue, TaskJournalVerifySummary,
     };
 
     fn route_for_semantic(semantic_kind: crate::OutputSemanticKind) -> crate::RouteResult {
@@ -4757,22 +4773,16 @@ mod tests {
             ..Default::default()
         };
         journal.record_route_result(&route);
-        journal.push_step_result(&crate::executor::StepExecutionResult {
-            step_id: "step_1".to_string(),
-            skill: "fs_basic".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output: Some(
-                json!({
-                    "action": "read_range",
-                    "path": "/tmp/release_checklist.md",
-                    "excerpt": "1|# Release Checklist"
-                })
-                .to_string(),
-            ),
-            error: None,
-            started_at: 1,
-            finished_at: 2,
-        });
+        journal.step_results.push(TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            json!({
+                "action": "read_range",
+                "path": "/tmp/release_checklist.md",
+                "excerpt": "1|# Release Checklist"
+            })
+            .to_string(),
+        ));
 
         let coverage = evidence_coverage_for_route(&route, &journal);
         assert!(coverage.is_complete());
@@ -4798,22 +4808,16 @@ mod tests {
         let mut route = route_for_semantic(crate::OutputSemanticKind::GitCommitSubject);
         route.output_contract.requires_content_evidence = false;
         journal.record_route_result(&route);
-        journal.push_step_result(&crate::executor::StepExecutionResult {
-            step_id: "step_read".to_string(),
-            skill: "fs_basic".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output: Some(
-                json!({
-                    "action": "read_text_range",
-                    "path": "/tmp/commit-message.txt",
-                    "content": "abc1234 add contract matrix tests"
-                })
-                .to_string(),
-            ),
-            error: None,
-            started_at: 1,
-            finished_at: 2,
-        });
+        journal.step_results.push(TaskJournalStepTrace::ok(
+            "step_read",
+            "fs_basic",
+            json!({
+                "action": "read_text_range",
+                "path": "/tmp/commit-message.txt",
+                "content": "abc1234 add contract matrix tests"
+            })
+            .to_string(),
+        ));
 
         let coverage = evidence_coverage_for_route(&route, &journal);
 
@@ -4833,23 +4837,17 @@ mod tests {
         let mut route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
         route.output_contract.requires_content_evidence = false;
         journal.record_route_result(&route);
-        journal.push_step_result(&crate::executor::StepExecutionResult {
-            step_id: "step_parse".to_string(),
-            skill: "doc_parse".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output: Some(
-                json!({
-                    "action": "parse_doc",
-                    "path": "/tmp/service-notes.md",
-                    "status": "running",
-                    "content": "operator notes say the service should be running"
-                })
-                .to_string(),
-            ),
-            error: None,
-            started_at: 1,
-            finished_at: 2,
-        });
+        journal.step_results.push(TaskJournalStepTrace::ok(
+            "step_parse",
+            "doc_parse",
+            json!({
+                "action": "parse_doc",
+                "path": "/tmp/service-notes.md",
+                "status": "running",
+                "content": "operator notes say the service should be running"
+            })
+            .to_string(),
+        ));
 
         let coverage = evidence_coverage_for_route(&route, &journal);
 
