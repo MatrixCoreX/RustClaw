@@ -288,6 +288,39 @@ def contract_test_hint_lines(case: dict[str, Any]) -> list[str]:
             lines.append(f"action_ref={action_ref}")
     if decision:
         lines.append(f"expected_policy_decision={decision}")
+    contract_id = str(case.get("contract_id") or "")
+    if contract_id == "file_names":
+        lines.append("selector_target_kind=file")
+    elif contract_id == "directory_entry_groups":
+        lines.append("selector_target_kind=any")
+    elif contract_id == "content_presence_check":
+        lines.extend(
+            [
+                "selector_query=release",
+                "selector_case_insensitive=true",
+            ]
+        )
+    elif contract_id == "directory_names":
+        lines.append("selector_target_kind=dir")
+    elif contract_id == "file_paths":
+        lines.extend(
+            [
+                "selector_extension=md",
+                "selector_target_kind=file",
+            ]
+        )
+    elif contract_id == "recent_artifacts_judgment":
+        lines.extend(
+            [
+                "selector_limit=2",
+                "selector_sort_by=mtime_desc",
+                "selector_target_kind=file",
+            ]
+        )
+    elif contract_id == "quantity_comparison":
+        lines.append("selector_answer_style=larger_with_sizes")
+    elif contract_id == "sqlite_database_kind_judgment":
+        lines.append("selector_database_kind=test")
     return lines
 
 
@@ -372,6 +405,14 @@ def live_nl_action_preference_applicable(case: dict[str, Any]) -> bool:
     allowed_contracts = archive_action_contracts.get(action)
     if allowed_contracts is not None:
         return contract_id in allowed_contracts
+    prompt_surface_action_contracts = {
+        "file_paths": {"fs_basic.find_entries"},
+        "recent_scalar_equality_check": {"git_basic", "run_cmd"},
+        "scalar_count": {"fs_basic.count_entries", "run_cmd"},
+    }
+    allowed_actions = prompt_surface_action_contracts.get(contract_id)
+    if allowed_actions is not None:
+        return action in allowed_actions
     return True
 
 
@@ -396,17 +437,69 @@ def allowed_execution_skills(case: dict[str, Any]) -> list[str]:
     )
 
 
+def planned_action_equivalents(case: dict[str, Any]) -> list[str]:
+    action_ref = str(case.get("action_ref") or "")
+    if not action_ref:
+        return []
+    contract_id = str(case.get("contract_id") or "")
+    action = normalize_token(action_ref).replace("-", "_")
+    equivalents: dict[tuple[str, str], list[str]] = {
+        ("config_risk_assessment", "config_guard"): [
+            "config_guard",
+            "config_basic.guard_rustclaw_config",
+            "config_edit.guard_config",
+        ],
+        ("config_validation", "config_guard"): [
+            "config_guard",
+            "config_basic.guard_rustclaw_config",
+            "config_edit.guard_config",
+            "config_basic.validate",
+            "config_edit.validate_config",
+        ],
+        ("execution_failed_step", "log_analyze"): ["log_analyze", "run_cmd"],
+        (
+            "existence_with_path_summary",
+            "fs_basic.find_entries",
+        ): ["fs_basic.find_entries", "fs_basic.stat_paths", "fs_basic.read_text_range"],
+        ("generated_file_delivery", "transform"): ["transform", "fs_basic.write_text"],
+        ("git_repository_state", "run_cmd"): ["run_cmd", "git_basic"],
+        ("git_commit_subject", "run_cmd"): ["run_cmd", "git_basic"],
+        ("recent_scalar_equality_check", "run_cmd"): ["run_cmd", "git_basic"],
+    }
+    return equivalents.get((contract_id, action), [action])
+
+
 def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any]:
     row: dict[str, Any] = {
         "case": case_index,
-        "contract_match": case["contract_id"],
-        "contract_final_answer_shape": case.get("final_answer_shape", ""),
     }
+    contract_id = str(case.get("contract_id") or "")
+    if case.get("contract_type") == "generic":
+        if contract_id == "generic_delivery":
+            row["contract_match_any"] = ["generic_delivery", "generated_file_delivery"]
+            row["contract_final_answer_shape_any"] = [
+                "delivery_token_or_path",
+                case.get("final_answer_shape", ""),
+            ]
+        elif contract_id == "generic_path_content":
+            row["contract_match_any"] = ["generic_path_content", "content_excerpt_summary"]
+            row["contract_final_answer_shape_any"] = [
+                "summary_with_evidence",
+                "summary_grounded_in_excerpt",
+            ]
+        else:
+            row["contract_match"] = case["contract_id"]
+            row["contract_final_answer_shape"] = case.get("final_answer_shape", "")
+    else:
+        row["contract_match"] = case["contract_id"]
+        row["contract_final_answer_shape"] = case.get("final_answer_shape", "")
     semantic_kind = case.get("semantic_kind")
     if case.get("contract_type") == "semantic" and semantic_kind:
         row["contract_semantic_kind"] = semantic_kind
 
     required_evidence = case.get("required_evidence") or []
+    if case.get("contract_type") == "generic" and contract_id == "generic_path_content":
+        required_evidence = ["content_excerpt"]
     if required_evidence:
         row["required_evidence_all"] = required_evidence
         row["missing_evidence_empty"] = True
@@ -421,7 +514,7 @@ def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any
         and case.get("action_ref")
         and live_nl_action_preference_applicable(case)
     ):
-        row["planned_action_any"] = [str(case["action_ref"])]
+        row["planned_action_any"] = planned_action_equivalents(case)
 
     if case.get("phase") == "negative_action":
         action_ref = str(case.get("action_ref") or "")
@@ -431,6 +524,25 @@ def expectation_for_case(case: dict[str, Any], case_index: int) -> dict[str, Any
             skill = action_skill(action_ref)
             if skill in forbidden_skills and skill not in allowed_skills:
                 row["executed_none_of"] = [skill]
+    if contract_id == "file_names":
+        row["final_contains"] = ["release_checklist.md", "service_notes.md"]
+        row["final_not_contains"] = ["archive"]
+    elif contract_id == "directory_entry_groups":
+        row["final_contains"] = ["configs", "data", "docs", "logs", "tmp", "README.md", "package.json"]
+    elif contract_id == "directory_names":
+        row["final_contains"] = ["configs", "data", "docs", "logs", "tmp"]
+        row["final_not_contains"] = ["README.md", "package.json"]
+    elif contract_id == "file_paths":
+        row["final_contains"] = ["release_checklist.md", "service_notes.md"]
+        row["final_not_contains"] = ["package.json"]
+    elif contract_id == "recent_artifacts_judgment":
+        row["final_contains"] = ["release_checklist.md", "service_notes.md"]
+    elif contract_id == "content_presence_check":
+        row["final_contains"] = ["release", "# Release Checklist"]
+        row["final_not_contains"] = ["不包含", "Does not contain"]
+    elif contract_id == "quantity_comparison":
+        row["final_contains"] = ["package.json", "246", "release_checklist.md", "153"]
+        row["final_not_contains"] = ["package.json：93 字节", "package.json: 93 bytes"]
 
     return row
 

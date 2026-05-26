@@ -7,6 +7,16 @@ const MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS: usize = 240;
 const MAX_OBSERVED_EVIDENCE_KEYS: usize = 16;
 const MAX_OBSERVED_EVIDENCE_DEPTH: usize = 3;
 const MAX_OBSERVED_ARRAY_SAMPLES: usize = 3;
+const JSON_EVIDENCE_PRIORITY_KEYS: &[&str] = &[
+    "candidates",
+    "names",
+    "names_by_kind",
+    "paths",
+    "files",
+    "dirs",
+    "items",
+    "results",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TaskJournalFinalStatus {
@@ -234,9 +244,21 @@ fn answer_verifier_summary_json(summary: &TaskJournalAnswerVerifierSummary) -> V
     })
 }
 
-fn plan_step_action_ref(step: &crate::PlanStep) -> Option<String> {
-    crate::contract_matrix::ActionRef::from_skill_args(&step.skill, &step.args)
-        .map(|action| action.as_key())
+fn plan_step_action_ref(
+    step: &crate::PlanStep,
+    route: Option<&crate::RouteResult>,
+) -> Option<String> {
+    let action = crate::contract_matrix::ActionRef::from_skill_args(&step.skill, &step.args)?;
+    let raw_key = action.as_key();
+    if let Some(compact) = route.and_then(|route| {
+        crate::contract_matrix::contract_trace_action_key_for_output_contract(
+            &route.output_contract,
+            &raw_key,
+        )
+    }) {
+        return Some(compact);
+    }
+    Some(raw_key)
 }
 
 fn plan_summary_json(plan: &crate::PlanResult) -> Value {
@@ -249,7 +271,7 @@ fn plan_summary_json(plan: &crate::PlanResult) -> Value {
     })
 }
 
-fn plan_trace_json(plan: &crate::PlanResult) -> Value {
+fn plan_trace_json(plan: &crate::PlanResult, route: Option<&crate::RouteResult>) -> Value {
     json!({
         "goal": crate::truncate_for_log(&plan.goal),
         "plan_kind": plan.plan_kind.as_str(),
@@ -261,7 +283,7 @@ fn plan_trace_json(plan: &crate::PlanResult) -> Value {
                 "step_id": &step.step_id,
                 "action_type": &step.action_type,
                 "skill": &step.skill,
-                "action_ref": plan_step_action_ref(step),
+                "action_ref": plan_step_action_ref(step, route),
                 "depends_on": &step.depends_on,
             })
         }).collect::<Vec<_>>(),
@@ -353,7 +375,10 @@ fn requested_capability_from_raw_step(step: &Value) -> Option<RequestedPlanCapab
     })
 }
 
-fn requested_capabilities_for_plan(plan: &crate::PlanResult) -> Vec<RequestedPlanCapability> {
+fn requested_capabilities_for_plan(
+    plan: &crate::PlanResult,
+    route: Option<&crate::RouteResult>,
+) -> Vec<RequestedPlanCapability> {
     let raw_steps = raw_plan_steps(&plan.raw_plan_text);
     plan.steps
         .iter()
@@ -368,7 +393,7 @@ fn requested_capabilities_for_plan(plan: &crate::PlanResult) -> Vec<RequestedPla
                     action_ref: None,
                 });
             if requested.action_ref.is_none() {
-                requested.action_ref = plan_step_action_ref(normalized_step);
+                requested.action_ref = plan_step_action_ref(normalized_step, route);
             }
             requested
         })
@@ -381,7 +406,7 @@ fn requested_capability_queues(
     let mut requested_by_step_id: BTreeMap<String, Vec<RequestedPlanCapability>> = BTreeMap::new();
     for round in &journal.rounds {
         if let Some(plan) = round.plan_result.as_ref() {
-            let requested = requested_capabilities_for_plan(plan);
+            let requested = requested_capabilities_for_plan(plan, journal.route_result.as_ref());
             for (step, requested) in plan.steps.iter().zip(requested.into_iter()) {
                 requested_by_step_id
                     .entry(step.step_id.clone())
@@ -392,7 +417,7 @@ fn requested_capability_queues(
     }
     if requested_by_step_id.is_empty() {
         if let Some(plan) = journal.plan_result.as_ref() {
-            let requested = requested_capabilities_for_plan(plan);
+            let requested = requested_capabilities_for_plan(plan, journal.route_result.as_ref());
             for (step, requested) in plan.steps.iter().zip(requested.into_iter()) {
                 requested_by_step_id
                     .entry(step.step_id.clone())
@@ -567,29 +592,20 @@ fn collect_json_observed_evidence(
             if depth > 0 {
                 collector.push(json_observed_evidence_item(source, prefix, value));
             }
-            for (key, child) in map {
-                let field = if prefix.is_empty() {
-                    key.clone()
-                } else {
-                    format!("{prefix}.{key}")
-                };
-                collector.push(json_observed_evidence_item(source, &field, child));
-                if depth < MAX_OBSERVED_EVIDENCE_DEPTH
-                    && matches!(child, Value::Object(_) | Value::Array(_))
-                {
-                    let child_source = if depth == 0 && key == "extra" {
-                        "json_output.extra"
-                    } else {
-                        source
-                    };
-                    collect_json_observed_evidence(
-                        collector,
-                        child_source,
-                        &field,
-                        child,
-                        depth + 1,
-                    );
+            let mut emitted_priority_keys = BTreeSet::new();
+            if depth == 0 && prefix.is_empty() {
+                for key in JSON_EVIDENCE_PRIORITY_KEYS {
+                    if let Some(child) = map.get(*key) {
+                        collect_json_object_child(collector, source, depth, prefix, key, child);
+                        emitted_priority_keys.insert((*key).to_string());
+                    }
                 }
+            }
+            for (key, child) in map {
+                if emitted_priority_keys.contains(key.as_str()) {
+                    continue;
+                }
+                collect_json_object_child(collector, source, depth, prefix, key, child);
             }
         }
         Value::Array(items) => {
@@ -611,6 +627,30 @@ fn collect_json_observed_evidence(
             }
         }
         _ => collector.push(json_observed_evidence_item(source, "value", value)),
+    }
+}
+
+fn collect_json_object_child(
+    collector: &mut ObservedEvidenceCollector,
+    source: &str,
+    depth: usize,
+    prefix: &str,
+    key: &str,
+    child: &Value,
+) {
+    let field = if prefix.is_empty() {
+        key.to_string()
+    } else {
+        format!("{prefix}.{key}")
+    };
+    collector.push(json_observed_evidence_item(source, &field, child));
+    if depth < MAX_OBSERVED_EVIDENCE_DEPTH && matches!(child, Value::Object(_) | Value::Array(_)) {
+        let child_source = if depth == 0 && key == "extra" {
+            "json_output.extra"
+        } else {
+            source
+        };
+        collect_json_observed_evidence(collector, child_source, &field, child, depth + 1);
     }
 }
 
@@ -693,10 +733,6 @@ fn collect_text_observed_evidence(collector: &mut ObservedEvidenceCollector, out
     }
     if let Some(path) = text_path_evidence(output) {
         collector.push(text_extracted_evidence_item("path", &path));
-    }
-    if let Some(status) = text_status_evidence(output) {
-        collector.push(text_extracted_evidence_item("status", status));
-        collector.push(text_extracted_evidence_item("candidates[0]", status));
     }
     collect_text_machine_key_value_evidence(collector, output);
     if let Some(state) = text_git_state_evidence(output) {
@@ -786,6 +822,8 @@ fn machine_key_value_evidence_key_allowed(key: &str) -> bool {
             | "commit"
             | "valid"
             | "available"
+            | "size_bytes"
+            | "bytes"
             | "exit"
             | "exit_code"
             | "error_kind"
@@ -831,17 +869,6 @@ fn text_count_evidence(output: &str) -> Option<i64> {
         }
     }
     (counts.len() == 1).then(|| *counts.iter().next().expect("single count"))
-}
-
-fn text_status_evidence(output: &str) -> Option<&'static str> {
-    let lowered = output.trim().to_ascii_lowercase();
-    if lowered.is_empty() {
-        return None;
-    }
-    if lowered.contains("docker unavailable") {
-        return Some("docker unavailable");
-    }
-    None
 }
 
 fn text_git_state_evidence(output: &str) -> Option<&'static str> {
@@ -1167,8 +1194,14 @@ pub(crate) fn evidence_coverage_for_route(
 ) -> TaskJournalEvidenceCoverage {
     let required_evidence =
         crate::task_contract::required_evidence_fields_for_output_contract(&route.output_contract);
-    let (observed_fields, mut observed_canonical) = observed_evidence_field_sets(journal);
-    augment_route_canonical_evidence(route, &observed_fields, &mut observed_canonical);
+    let (observed_fields, observed_field_leaf_counts, mut observed_canonical) =
+        observed_evidence_field_sets(journal);
+    augment_route_canonical_evidence(
+        route,
+        &observed_fields,
+        &observed_field_leaf_counts,
+        &mut observed_canonical,
+    );
     let evidence_expression = crate::contract_matrix::bundled_contract_matrix()
         .and_then(|matrix| matrix.match_output_contract(&route.output_contract))
         .map(|matched| matched.evidence_expression());
@@ -1309,8 +1342,11 @@ fn task_outcome_summary_json(journal: &TaskJournal) -> Value {
     })
 }
 
-fn observed_evidence_field_sets(journal: &TaskJournal) -> (BTreeSet<String>, BTreeSet<String>) {
+fn observed_evidence_field_sets(
+    journal: &TaskJournal,
+) -> (BTreeSet<String>, BTreeMap<String, usize>, BTreeSet<String>) {
     let mut observed_fields = BTreeSet::new();
+    let mut observed_field_leaf_counts = BTreeMap::new();
     let mut observed_canonical = BTreeSet::new();
     for step in &journal.step_results {
         if !step_can_supply_contract_evidence(step, journal.route_result.as_ref()) {
@@ -1330,31 +1366,101 @@ fn observed_evidence_field_sets(journal: &TaskJournal) -> (BTreeSet<String>, BTr
             if normalized.is_empty() {
                 continue;
             }
+            *observed_field_leaf_counts
+                .entry(normalized_field_leaf(&normalized).to_string())
+                .or_insert(0) += 1;
             observed_fields.insert(normalized.clone());
             for canonical in canonical_evidence_fields_for_observed_item(&normalized, item) {
                 observed_canonical.insert(canonical);
             }
         }
     }
-    (observed_fields, observed_canonical)
+    (
+        observed_fields,
+        observed_field_leaf_counts,
+        observed_canonical,
+    )
 }
 
 fn augment_route_canonical_evidence(
     route: &crate::RouteResult,
     observed_fields: &BTreeSet<String>,
+    observed_field_leaf_counts: &BTreeMap<String, usize>,
     observed_canonical: &mut BTreeSet<String>,
 ) {
     if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
         && observed_canonical.contains("size_bytes")
-        && observed_fields
-            .iter()
-            .filter(|field| normalized_field_leaf(field) == "size_bytes")
-            .take(2)
-            .count()
+        && observed_field_leaf_counts
+            .get("size_bytes")
+            .copied()
+            .unwrap_or(0)
             >= 2
     {
         observed_canonical.insert("field_value".to_string());
     }
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::GitCommitSubject | crate::OutputSemanticKind::GitRepositoryState
+    ) && (observed_canonical.contains("command_output")
+        || observed_canonical.contains("content_excerpt")
+        || observed_fields.contains("text_excerpt"))
+    {
+        observed_canonical.insert("field_value".to_string());
+    }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
+        && (observed_canonical.contains("path")
+            || observed_canonical.contains("content_match")
+            || observed_canonical.contains("candidates")
+            || observed_field_with_prefix(observed_fields, "results["))
+    {
+        observed_canonical.insert("field_value".to_string());
+    }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
+        && (observed_canonical.contains("value") || observed_canonical.contains("field_value"))
+    {
+        observed_canonical.insert("count".to_string());
+    }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::StructuredKeys
+        && (observed_canonical.contains("keys")
+            || observed_field_with_prefix(observed_fields, "keys["))
+    {
+        observed_canonical.insert("field_value".to_string());
+    }
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::DockerContainerLifecycle
+            | crate::OutputSemanticKind::DockerPs
+            | crate::OutputSemanticKind::DockerImages
+            | crate::OutputSemanticKind::DockerLogs
+    ) && (observed_canonical.contains("command_output")
+        || observed_canonical.contains("content_excerpt")
+        || observed_fields.contains("text_excerpt"))
+    {
+        match route.output_contract.semantic_kind {
+            crate::OutputSemanticKind::DockerContainerLifecycle => {
+                observed_canonical.insert("field_value".to_string());
+            }
+            crate::OutputSemanticKind::DockerPs
+            | crate::OutputSemanticKind::DockerImages
+            | crate::OutputSemanticKind::DockerLogs => {
+                observed_canonical.insert("candidates".to_string());
+            }
+            _ => {}
+        }
+    }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::SqliteDatabaseKindJudgment
+        && (observed_canonical.contains("candidates")
+            || observed_fields.contains("rows")
+            || observed_fields.contains("columns"))
+    {
+        observed_canonical.insert("field_value".to_string());
+    }
+}
+
+fn observed_field_with_prefix(observed_fields: &BTreeSet<String>, prefix: &str) -> bool {
+    observed_fields
+        .iter()
+        .any(|field| field.starts_with(prefix))
 }
 
 fn normalized_field_leaf(field: &str) -> &str {
@@ -1477,6 +1583,17 @@ fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<String> {
                 "commit",
                 "valid",
                 "available",
+                "healthy",
+                "running",
+                "is_running",
+                "port_open",
+                "process_count",
+                "clawd_health_port_open",
+                "clawd_process_count",
+                "modified_ts",
+                "modified",
+                "mtime",
+                "mtime_ts",
                 "exit",
                 "exit_code",
                 "error_kind",
@@ -2140,7 +2257,10 @@ impl TaskJournal {
                         .execution_recipe_summary
                         .as_deref()
                         .map(crate::truncate_for_log),
-                    "plan_result": round.plan_result.as_ref().map(plan_trace_json),
+                    "plan_result": round
+                        .plan_result
+                        .as_ref()
+                        .map(|plan| plan_trace_json(plan, self.route_result.as_ref())),
                     "verify_result": round.verify_result.as_ref().map(verify_trace_json),
                 })
             }).collect::<Vec<_>>(),
@@ -2201,6 +2321,30 @@ mod tests {
         TaskJournalFinalizerStage, TaskJournalFinalizerSummary, TaskJournalRoundTrace,
         TaskJournalVerifyIssue, TaskJournalVerifySummary,
     };
+
+    fn route_for_semantic(semantic_kind: crate::OutputSemanticKind) -> crate::RouteResult {
+        crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                semantic_kind,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                ..Default::default()
+            },
+        }
+    }
 
     #[test]
     fn summary_json_includes_finalizer_and_task_metrics() {
@@ -2611,6 +2755,61 @@ mod tests {
     }
 
     #[test]
+    fn trace_json_compacts_plan_action_ref_to_contract_action() {
+        let mut journal = TaskJournal::for_task("task-service", "ask", "check service");
+        journal.record_route_result(&crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: "check clawd service".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "test".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                response_shape: crate::OutputResponseShape::Strict,
+                requires_content_evidence: true,
+                semantic_kind: crate::OutputSemanticKind::ServiceStatus,
+                ..Default::default()
+            },
+        });
+        let plan = crate::PlanResult {
+            goal: "check service".to_string(),
+            missing_slots: Vec::new(),
+            needs_confirmation: false,
+            steps: vec![crate::PlanStep {
+                step_id: "step_1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "process_basic".to_string(),
+                args: json!({"action": "ps", "filter": "clawd"}),
+                depends_on: Vec::new(),
+                why: "inspect process".to_string(),
+            }],
+            planner_notes: String::new(),
+            plan_kind: crate::PlanKind::Single,
+            raw_plan_text: String::new(),
+        };
+        journal.rounds.push(super::TaskJournalRoundTrace {
+            round_no: 1,
+            goal: "check service".to_string(),
+            plan_result: Some(plan),
+            ..Default::default()
+        });
+
+        let trace = journal.to_trace_json();
+        let plan_action_ref = trace
+            .pointer("/rounds/0/plan_result/steps/0/action_ref")
+            .and_then(Value::as_str);
+        assert_eq!(plan_action_ref, Some("process_basic"));
+    }
+
+    #[test]
     fn trace_json_includes_contract_policy_for_contract_rejection() {
         let mut journal = TaskJournal::for_task("task-contract", "ask", "列出文件名");
         let err = crate::skills::structured_skill_error_from_parts(
@@ -3001,19 +3200,7 @@ mod tests {
         assert!(coverage.is_complete(), "coverage: {coverage:?}");
         assert!(coverage.observed_canonical.contains("field_value"));
 
-        let trace = journal.to_trace_json();
-        let items = trace
-            .get("step_results")
-            .and_then(Value::as_array)
-            .and_then(|steps| steps.first())
-            .and_then(|step| step.get("observed_evidence"))
-            .and_then(|observed| observed.get("items"))
-            .and_then(Value::as_array)
-            .expect("observed evidence items should be present");
-        assert!(items.iter().any(|item| {
-            item.get("field").and_then(Value::as_str) == Some("status")
-                && item.get("excerpt").and_then(Value::as_str) == Some("docker unavailable")
-        }));
+        assert!(coverage.observed_canonical.contains("command_output"));
     }
 
     #[test]
@@ -3165,19 +3352,192 @@ mod tests {
         assert!(coverage.is_complete(), "coverage: {coverage:?}");
         assert!(coverage.observed_canonical.contains("candidates"));
 
-        let trace = journal.to_trace_json();
-        let items = trace
-            .get("step_results")
+        assert!(coverage.observed_canonical.contains("command_output"));
+    }
+
+    #[test]
+    fn structured_keys_array_counts_as_field_value_evidence() {
+        let mut journal = TaskJournal::for_task("task-structured-keys", "ask", "列出配置键");
+        let route = route_for_semantic(crate::OutputSemanticKind::StructuredKeys);
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "config_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "action": "structured_keys",
+                    "exists": true,
+                    "keys": ["app", "features", "paths"],
+                    "count": 3
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("field_value"));
+    }
+
+    #[test]
+    fn docker_command_not_found_text_counts_as_docker_contract_evidence() {
+        for (semantic_kind, expected_canonical) in [
+            (
+                crate::OutputSemanticKind::DockerContainerLifecycle,
+                "field_value",
+            ),
+            (crate::OutputSemanticKind::DockerLogs, "candidates"),
+        ] {
+            let mut journal =
+                TaskJournal::for_task("task-docker-command-not-found", "ask", "检查 Docker");
+            let route = route_for_semantic(semantic_kind);
+            journal.record_route_result(&route);
+            journal.push_step_result(&crate::executor::StepExecutionResult {
+                step_id: "step_1".to_string(),
+                skill: "run_cmd".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output: Some("bash: line 1: docker: command not found\n".to_string()),
+                error: None,
+                started_at: 1,
+                finished_at: 2,
+            });
+
+            let coverage = evidence_coverage_for_route(&route, &journal);
+            assert!(coverage.is_complete(), "coverage: {coverage:?}");
+            assert!(coverage.observed_canonical.contains(expected_canonical));
+        }
+    }
+
+    #[test]
+    fn scalar_count_json_value_counts_as_count_evidence() {
+        let mut journal = TaskJournal::for_task("task-scalar-count", "ask", "输出数量");
+        let route = route_for_semantic(crate::OutputSemanticKind::ScalarCount);
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "run_cmd".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some("3\n".to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("count"));
+    }
+
+    #[test]
+    fn scalar_path_only_results_array_counts_as_field_value_evidence() {
+        let mut journal = TaskJournal::for_task("task-scalar-path", "ask", "找到路径");
+        let route = route_for_semantic(crate::OutputSemanticKind::ScalarPathOnly);
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "action": "find_name",
+                    "count": 1,
+                    "results": ["scripts/nl_tests/fixtures/device_local/package.json"]
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("field_value"));
+    }
+
+    #[test]
+    fn json_observed_evidence_prioritizes_complete_candidate_names_before_entry_details() {
+        let output = r#"{
+            "action": "inventory_dir",
+            "counts": {"dirs": 1, "files": 2, "hidden": 0, "total": 3},
+            "dirs_only": false,
+            "entries": [
+                {"hidden": false, "kind": "dir", "modified_ts": 1, "name": "archive", "path": "docs/archive", "size_bytes": 0},
+                {"hidden": false, "kind": "file", "modified_ts": 1, "name": "release_checklist.md", "path": "docs/release_checklist.md", "size_bytes": 153},
+                {"hidden": false, "kind": "file", "modified_ts": 1, "name": "service_notes.md", "path": "docs/service_notes.md", "size_bytes": 272}
+            ],
+            "names": ["archive", "release_checklist.md", "service_notes.md"],
+            "names_by_kind": {
+                "dirs": ["archive"],
+                "files": ["release_checklist.md", "service_notes.md"],
+                "other": []
+            }
+        }"#;
+
+        let observed = observed_evidence_from_output(Some(output))
+            .expect("json output should produce observed evidence");
+        assert_eq!(
+            observed.get("truncated").and_then(Value::as_bool),
+            Some(true)
+        );
+        let items = observed
+            .get("items")
             .and_then(Value::as_array)
-            .and_then(|steps| steps.first())
-            .and_then(|step| step.get("observed_evidence"))
-            .and_then(|observed| observed.get("items"))
-            .and_then(Value::as_array)
-            .expect("observed evidence items should be present");
+            .expect("observed evidence items");
         assert!(items.iter().any(|item| {
-            item.get("field").and_then(Value::as_str) == Some("candidates[0]")
-                && item.get("excerpt").and_then(Value::as_str) == Some("docker unavailable")
+            item.get("field").and_then(Value::as_str) == Some("names[2]")
+                && item.get("excerpt").and_then(Value::as_str) == Some("service_notes.md")
         }));
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("names_by_kind.files[1]")
+                && item.get("excerpt").and_then(Value::as_str) == Some("service_notes.md")
+        }));
+    }
+
+    #[test]
+    fn service_status_health_check_fields_count_as_field_value_evidence() {
+        let mut journal =
+            TaskJournal::for_task("task-service-status", "ask", "检查 clawd 服务状态");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::ServiceStatus,
+            locator_kind: crate::OutputLocatorKind::None,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "health_check".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(r#"{"clawd_health_port_open":true,"clawd_process_count":1}"#.to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("field_value"));
     }
 
     #[test]
@@ -3235,6 +3595,47 @@ mod tests {
             item.get("field").and_then(Value::as_str) == Some("state")
                 && item.get("excerpt").and_then(Value::as_str) == Some("dirty")
         }));
+    }
+
+    #[test]
+    fn git_subject_plain_text_counts_as_field_value_evidence() {
+        let mut journal = TaskJournal::for_task("task-git-subject", "ask", "最近一次 git 提交标题");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::GitCommitSubject,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "run_cmd".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some("Harden contract matrix execution coverage\n".to_string()),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("field_value"));
     }
 
     #[test]
@@ -3300,6 +3701,61 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_database_kind_uses_db_structure_as_field_value_evidence() {
+        let mut journal =
+            TaskJournal::for_task("task-sqlite-kind", "ask", "判断 sqlite 数据库类型");
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+            requires_content_evidence: true,
+            locator_kind: crate::OutputLocatorKind::Path,
+            locator_hint: "data/test_contract.sqlite".to_string(),
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "db_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "columns": ["name"],
+                    "rows": [
+                        {"name": "orders"},
+                        {"name": "service_logs"},
+                        {"name": "users"}
+                    ]
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("candidates"));
+        assert!(coverage.observed_canonical.contains("field_value"));
+    }
+
+    #[test]
     fn quantity_comparison_size_bytes_counts_as_field_value_evidence() {
         let mut journal =
             TaskJournal::for_task("task-quantity-comparison", "ask", "比较两个文件大小");
@@ -3353,6 +3809,55 @@ mod tests {
                     ]
                 })
                 .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("field_value"));
+        assert!(coverage.observed_canonical.contains("size_bytes"));
+    }
+
+    #[test]
+    fn quantity_comparison_text_size_bytes_counts_as_field_value_evidence() {
+        let mut journal = TaskJournal::for_task(
+            "task-quantity-comparison-text",
+            "ask",
+            "compare two file sizes",
+        );
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: Some(1.0),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract = crate::IntentOutputContract {
+            semantic_kind: crate::OutputSemanticKind::QuantityComparison,
+            locator_kind: crate::OutputLocatorKind::Path,
+            ..Default::default()
+        };
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "run_cmd".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                "path=release_checklist.md size_bytes=153\npath=package.json size_bytes=246"
+                    .to_string(),
             ),
             error: None,
             started_at: 1,

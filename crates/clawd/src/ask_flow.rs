@@ -1003,6 +1003,81 @@ fn direct_answer_gate_can_skip_for_active_task_text_mutation(
             .is_empty()
 }
 
+fn contract_test_hint_requests_planner_execution(current_user_request: &str) -> bool {
+    if crate::intent_router::contract_test_hint_semantic_kind(current_user_request).is_some() {
+        return true;
+    }
+    if crate::intent_router::contract_test_hint_value(current_user_request, "none_passthrough")
+        .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+    {
+        return false;
+    }
+    let allowed_actions = crate::intent_router::contract_test_hint_value(
+        current_user_request,
+        "allowed_actions_json",
+    )
+    .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+    .and_then(|value| {
+        value.as_array().map(|items| {
+            items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .any(|item| !item.trim().is_empty())
+        })
+    })
+    .unwrap_or(false);
+    let required_evidence = crate::intent_router::contract_test_hint_value(
+        current_user_request,
+        "required_evidence_json",
+    )
+    .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+    .and_then(|value| {
+        value.as_array().map(|items| {
+            items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .any(|item| !item.trim().is_empty())
+        })
+    })
+    .unwrap_or(false);
+    allowed_actions || required_evidence
+}
+
+fn contract_test_hint_should_enter_planner_loop(
+    current_user_request: &str,
+    ctx: Option<&crate::agent_engine::AgentRunContext>,
+) -> bool {
+    if !contract_test_hint_requests_planner_execution(current_user_request) {
+        return false;
+    }
+    ctx.and_then(|ctx| ctx.route_result.as_ref())
+        .is_some_and(|route| {
+            !route.needs_clarify
+                && (route.is_execute_gate()
+                    || route.output_contract.requires_content_evidence
+                    || route.output_contract.delivery_required
+                    || route.wants_file_delivery)
+        })
+}
+
+fn contract_test_hint_forced_planner_preflight(
+    ctx: &mut crate::agent_engine::AgentRunContext,
+    current_user_request: &str,
+    reason_tag: &str,
+) -> Option<DirectAnswerPreflight> {
+    if !contract_test_hint_should_enter_planner_loop(current_user_request, Some(ctx)) {
+        return None;
+    }
+    if let Some(route) = ctx.route_result.as_mut() {
+        let finalize_style = planner_finalize_style_for_output_contract(&route.output_contract);
+        route.set_planner_execute_finalize(finalize_style);
+        route.needs_clarify = false;
+        route.clarify_question.clear();
+        append_route_reason(route, reason_tag);
+    }
+    Some(DirectAnswerPreflight::PlannerExecute(ctx.clone()))
+}
+
 fn direct_answer_gate_promotion_depends_only_on_background_context(
     state: &AppState,
     current_user_request: &str,
@@ -2154,6 +2229,13 @@ fn apply_direct_answer_gate_outcome(
     current_user_request: &str,
     gate: DirectAnswerGateOut,
 ) -> DirectAnswerPreflight {
+    if let Some(preflight) = contract_test_hint_forced_planner_preflight(
+        ctx,
+        current_user_request,
+        "direct_answer_gate_contract_hint_forced_planner",
+    ) {
+        return preflight;
+    }
     let decision = parse_direct_answer_gate_decision(&gate.decision);
     if gate.confidence < 0.60 {
         return DirectAnswerPreflight::DirectAnswer;
@@ -3982,6 +4064,25 @@ pub(crate) async fn execute_ask_routed(
                 );
                 return Ok(reply);
             }
+            if contract_test_hint_should_enter_planner_loop(
+                &current_turn_user_request,
+                agent_run_context.as_ref(),
+            ) {
+                tracing::info!(
+                    "{} worker_once: ask contract_test_hint_promoted_to_planner task_id={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id
+                );
+                return execute_via_planner_loop(
+                    state,
+                    task,
+                    prompt_with_memory,
+                    execution_user_request,
+                    &crate::AskMode::planner_execute_chat_wrapped(),
+                    agent_run_context.clone(),
+                )
+                .await;
+            }
             let mut direct_answer_gate_approved = false;
             let skip_direct_answer_gate = direct_answer_gate_can_skip_for_self_contained_payload(
                 &current_turn_user_request,
@@ -4241,6 +4342,7 @@ mod tests {
     use super::{
         apply_direct_answer_gate_outcome, ask_reply_with_chat_process,
         chat_prompt_context_with_route_resolution, chat_request_for_prompt, chat_user_request,
+        contract_test_hint_should_enter_planner_loop,
         current_request_mentions_resolvable_gate_locator, direct_answer_chat_user_request,
         direct_answer_gate_can_skip_for_active_task_text_mutation,
         direct_answer_gate_can_skip_for_self_contained_payload,
@@ -4403,6 +4505,86 @@ mod tests {
         assert!(prompt.contains("REQ: say hi"));
         assert!(prompt.contains("Previous Draft Rejected"));
         assert!(prompt.contains("complete final answer"));
+    }
+
+    #[test]
+    fn contract_test_hint_docker_logs_forces_planner_before_direct_chat() {
+        let mut route = chat_route_for_gate();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::DockerLogs;
+        route.output_contract.requires_content_evidence = true;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let request = concat!(
+            "查看最近一个 Docker 容器日志片段，如果没有容器就说明无法获取日志的原因。\n",
+            "[CONTRACT_TEST_HINT]\n",
+            "semantic_kind=docker_logs\n",
+            "required_evidence_json=[\"candidates\"]\n",
+            "allowed_actions_json=[\"docker_basic\",\"run_cmd\"]\n",
+            "none_passthrough=false\n",
+            "[/CONTRACT_TEST_HINT]"
+        );
+
+        assert!(contract_test_hint_should_enter_planner_loop(
+            request,
+            Some(&ctx)
+        ));
+    }
+
+    #[test]
+    fn contract_test_hint_none_passthrough_does_not_force_planner() {
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(chat_route_for_gate()),
+            ..Default::default()
+        };
+        let request = concat!(
+            "不用执行任何操作，直接回答。\n",
+            "[CONTRACT_TEST_HINT]\n",
+            "semantic_kind=none\n",
+            "required_evidence_json=[]\n",
+            "allowed_actions_json=[]\n",
+            "none_passthrough=true\n",
+            "[/CONTRACT_TEST_HINT]"
+        );
+
+        assert!(!contract_test_hint_should_enter_planner_loop(
+            request,
+            Some(&ctx)
+        ));
+    }
+
+    #[test]
+    fn direct_answer_gate_clarify_cannot_override_contract_hint_planner_execution() {
+        let mut route = chat_route_for_gate();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveRead;
+        route.output_contract.requires_content_evidence = true;
+        let mut ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut gate = gate_out("clarify", gate_contract(false, "none", "none"));
+        gate.clarify_question = "Which archive should I read?".to_string();
+        let state = crate::AppState::test_default_with_fixture_provider();
+        let request = concat!(
+            "Read notes.txt from scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip.\n",
+            "[CONTRACT_TEST_HINT]\n",
+            "semantic_kind=archive_read\n",
+            "required_evidence_json=[\"field_value\"]\n",
+            "allowed_actions_json=[\"archive_basic.read\"]\n",
+            "none_passthrough=false\n",
+            "[/CONTRACT_TEST_HINT]"
+        );
+
+        let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
+
+        assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+        let route = ctx.route_result.expect("route");
+        assert!(!route.needs_clarify);
+        assert!(route.is_execute_gate());
+        assert!(route
+            .route_reason
+            .contains("direct_answer_gate_contract_hint_forced_planner"));
     }
 
     fn chat_route_for_gate() -> crate::RouteResult {

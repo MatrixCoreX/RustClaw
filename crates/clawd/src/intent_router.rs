@@ -1038,6 +1038,17 @@ fn apply_current_turn_structural_contract_repair(
         });
     }
 
+    if let Some(locator_hint) = archive_read_contract_from_surface(output_contract, req_surface) {
+        output_contract.semantic_kind = OutputSemanticKind::ArchiveRead;
+        output_contract.requires_content_evidence = true;
+        output_contract.delivery_required = false;
+        output_contract.delivery_intent = OutputDeliveryIntent::None;
+        output_contract.response_shape = OutputResponseShape::Free;
+        output_contract.locator_kind = OutputLocatorKind::Path;
+        output_contract.locator_hint = locator_hint;
+        reason = Some("archive_read_member_contract_repair");
+    }
+
     if output_contract.semantic_kind == OutputSemanticKind::ScalarPathOnly
         && req_surface.has_structured_target_refinement()
     {
@@ -1094,6 +1105,7 @@ fn apply_current_turn_structural_contract_repair(
 
     if output_contract.requires_content_evidence
         && matches!(output_contract.locator_kind, OutputLocatorKind::None)
+        && !semantic_kind_uses_locatorless_system_observation(output_contract.semantic_kind)
     {
         let filename_candidates = req_surface.filename_candidates_excluding_field_selectors();
         if let Some(locator) =
@@ -1132,6 +1144,19 @@ fn apply_current_turn_structural_contract_repair(
     }
 
     reason
+}
+
+fn semantic_kind_uses_locatorless_system_observation(kind: OutputSemanticKind) -> bool {
+    matches!(
+        kind,
+        OutputSemanticKind::RawCommandOutput
+            | OutputSemanticKind::ServiceStatus
+            | OutputSemanticKind::PackageManagerDetection
+            | OutputSemanticKind::DockerPs
+            | OutputSemanticKind::DockerImages
+            | OutputSemanticKind::DockerLogs
+            | OutputSemanticKind::DockerContainerLifecycle
+    )
 }
 
 fn archive_pair_contract_from_surface(
@@ -1175,7 +1200,9 @@ fn archive_pair_contract_from_surface(
                 | OutputSemanticKind::ScalarPathOnly
                 | OutputSemanticKind::ContentExcerptSummary
         );
-    if already_archive_contract || generated_delivery_contract || scalar_or_drift_contract {
+    if structural_operation_pair
+        && (already_archive_contract || generated_delivery_contract || scalar_or_drift_contract)
+    {
         return Some(inferred_kind);
     }
     None
@@ -1195,10 +1222,31 @@ fn archive_pair_has_structural_operation_shape(
         OutputSemanticKind::ArchiveUnpack => {
             contract_repair_supported_archive_path(left)
                 && !contract_repair_supported_archive_path(right)
-                && contract_repair_path_operand_is_structural(right)
+                && contract_repair_archive_unpack_dest_is_structural(right)
         }
         _ => false,
     }
+}
+
+fn contract_repair_archive_unpack_dest_is_structural(path: &str) -> bool {
+    let path = path.trim();
+    let structurally_path_like = path.starts_with("./")
+        || path.starts_with("../")
+        || path.starts_with('/')
+        || path.starts_with("~/")
+        || path.contains('/')
+        || path.contains('\\');
+    structurally_path_like && !path_basename_looks_like_file(path)
+}
+
+fn path_basename_looks_like_file(path: &str) -> bool {
+    let basename = path.trim().rsplit(['/', '\\']).next().unwrap_or("").trim();
+    let Some((stem, ext)) = basename.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty()
+        && (1..=16).contains(&ext.len())
+        && ext.chars().all(|ch| ch.is_ascii_alphanumeric())
 }
 
 fn contract_repair_path_operand_is_structural(path: &str) -> bool {
@@ -1214,6 +1262,69 @@ fn contract_repair_path_operand_is_structural(path: &str) -> bool {
 fn contract_repair_supported_archive_path(path: &str) -> bool {
     let path = path.trim().to_ascii_lowercase();
     path.ends_with(".zip") || path.ends_with(".tar.gz") || path.ends_with(".tgz")
+}
+
+fn archive_read_contract_from_surface(
+    output_contract: &IntentOutputContract,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> Option<String> {
+    if output_contract.delivery_required
+        || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        || !matches!(
+            output_contract.semantic_kind,
+            OutputSemanticKind::ArchiveRead
+                | OutputSemanticKind::ArchiveUnpack
+                | OutputSemanticKind::ContentExcerptSummary
+                | OutputSemanticKind::None
+        )
+    {
+        return None;
+    }
+
+    if req_surface
+        .locator_target_pair
+        .as_ref()
+        .is_some_and(|(left, right)| {
+            archive_pair_has_structural_operation_shape(
+                OutputSemanticKind::ArchiveUnpack,
+                left,
+                right,
+            )
+        })
+    {
+        return None;
+    }
+
+    let candidates = req_surface.filename_candidates.clone();
+    let archive = if contract_repair_supported_archive_path(&output_contract.locator_hint) {
+        output_contract.locator_hint.trim().to_string()
+    } else {
+        candidates
+            .iter()
+            .find(|candidate| contract_repair_supported_archive_path(candidate))
+            .cloned()?
+    };
+    let archive_key = archive.trim().to_ascii_lowercase();
+    let member = candidates
+        .iter()
+        .find(|candidate| {
+            let candidate = candidate.trim();
+            !candidate.is_empty()
+                && candidate.to_ascii_lowercase() != archive_key
+                && archive_member_candidate_is_structural(candidate)
+        })?
+        .trim()
+        .to_string();
+
+    Some(format!("{} | {}", archive.trim(), member))
+}
+
+fn archive_member_candidate_is_structural(candidate: &str) -> bool {
+    let candidate = candidate.trim();
+    !candidate.is_empty()
+        && !contract_repair_supported_archive_path(candidate)
+        && !candidate.ends_with('/')
+        && (candidate.contains('.') || candidate.contains('/') || candidate.contains('\\'))
 }
 
 fn apply_self_contained_payload_direct_answer_contract_repair(
@@ -1541,8 +1652,118 @@ fn semantic_kind_can_use_workspace_default_for_observation(kind: OutputSemanticK
             | OutputSemanticKind::ScalarCount
             | OutputSemanticKind::ExistenceWithPath
             | OutputSemanticKind::ExistenceWithPathSummary
+            | OutputSemanticKind::GitCommitSubject
             | OutputSemanticKind::GitRepositoryState
+            | OutputSemanticKind::DockerPs
+            | OutputSemanticKind::DockerImages
+            | OutputSemanticKind::DockerLogs
+            | OutputSemanticKind::DockerContainerLifecycle
     )
+}
+
+pub(crate) fn contract_test_hint_value(req: &str, wanted_key: &str) -> Option<String> {
+    let hint_block = req
+        .split_once("[CONTRACT_TEST_HINT]")?
+        .1
+        .split_once("[/CONTRACT_TEST_HINT]")?
+        .0;
+    for line in hint_block.lines().map(str::trim) {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() != wanted_key {
+            continue;
+        }
+        let value = value.trim();
+        return (!value.is_empty()).then(|| value.to_string());
+    }
+    None
+}
+
+pub(crate) fn contract_test_hint_semantic_kind(req: &str) -> Option<OutputSemanticKind> {
+    let semantic_kind =
+        parse_output_semantic_kind(&contract_test_hint_value(req, "semantic_kind")?);
+    (semantic_kind != OutputSemanticKind::None).then_some(semantic_kind)
+}
+
+pub(crate) fn request_without_contract_test_hint(req: &str) -> String {
+    let mut remaining = req;
+    let mut out = String::with_capacity(req.len());
+    while let Some((before, after_start)) = remaining.split_once("[CONTRACT_TEST_HINT]") {
+        out.push_str(before);
+        let Some((_, after_end)) = after_start.split_once("[/CONTRACT_TEST_HINT]") else {
+            remaining = "";
+            break;
+        };
+        remaining = after_end;
+    }
+    out.push_str(remaining);
+    out
+}
+
+fn apply_structured_contract_hint_repair(
+    output_contract: &mut IntentOutputContract,
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
+    wants_file_delivery: &mut bool,
+    needs_clarify: &mut bool,
+    clarify_question: &mut String,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
+) -> Option<&'static str> {
+    let semantic_kind = contract_test_hint_semantic_kind(req)?;
+    let surface_req = request_without_contract_test_hint(req);
+    output_contract.semantic_kind = semantic_kind;
+    output_contract.requires_content_evidence =
+        output_semantic_kind_requires_fresh_evidence(semantic_kind);
+    output_contract.delivery_required = false;
+    output_contract.delivery_intent = OutputDeliveryIntent::None;
+    output_contract.response_shape = response_shape_for_contract_hint_fallback(semantic_kind);
+    apply_contract_hint_delivery_defaults(output_contract, wants_file_delivery);
+    match semantic_kind {
+        OutputSemanticKind::GitCommitSubject | OutputSemanticKind::GitRepositoryState => {
+            if matches!(
+                output_contract.locator_kind,
+                OutputLocatorKind::None | OutputLocatorKind::Path
+            ) && output_contract.locator_hint.trim().is_empty()
+            {
+                output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+                output_contract.locator_hint = workspace_root.display().to_string();
+            }
+        }
+        OutputSemanticKind::PackageManagerDetection => {
+            output_contract.locator_kind = OutputLocatorKind::None;
+            output_contract.locator_hint.clear();
+        }
+        OutputSemanticKind::DockerPs
+        | OutputSemanticKind::DockerImages
+        | OutputSemanticKind::DockerLogs
+        | OutputSemanticKind::DockerContainerLifecycle => {
+            if output_contract.locator_hint.trim().is_empty() {
+                output_contract.locator_kind = OutputLocatorKind::None;
+            }
+        }
+        _ => {}
+    }
+    apply_contract_hint_locator_defaults(
+        output_contract,
+        &surface_req,
+        req_surface,
+        workspace_root,
+    );
+    if output_contract.requires_content_evidence {
+        *needs_clarify = false;
+        clarify_question.clear();
+        *first_layer_decision = FirstLayerDecision::PlannerExecute;
+        *execution_finalize_style =
+            crate::post_route_policy::content_evidence_execution_finalize_style(
+                output_contract,
+                false,
+            )
+            .unwrap_or_else(|| execution_finalize_style_for_contract(output_contract));
+    }
+    Some("structured_contract_hint_repair")
 }
 
 fn apply_workspace_default_observation_clarify_repair(
@@ -2255,6 +2476,7 @@ fn output_semantic_kind_requires_fresh_evidence(kind: OutputSemanticKind) -> boo
             | OutputSemanticKind::RecentArtifactsJudgment
             | OutputSemanticKind::WorkspaceProjectSummary
             | OutputSemanticKind::ScalarCount
+            | OutputSemanticKind::RecentScalarEqualityCheck
             | OutputSemanticKind::ExecutionFailedStep
             | OutputSemanticKind::GeneratedFileDelivery
             | OutputSemanticKind::ExistenceWithPath
@@ -4421,11 +4643,8 @@ fn normalize_output_response_shape_for_schema(raw: &str) -> &'static str {
     if trimmed.contains('{') && trimmed.contains('}') {
         return "strict";
     }
-    // Schema repair only: some small-context models put a localized
-    // one-line description into the enum field. Treat that as the
-    // canonical exact-format contract instead of routing from user text.
-    if trimmed.contains("一行") || trimmed.contains("单行") {
-        return "strict";
+    if trimmed.split_whitespace().nth(1).is_some() {
+        return "free";
     }
     match normalize_schema_token(raw).as_str() {
         "one_sentence" | "single_sentence" | "sentence" | "short_sentence" => "one_sentence",
@@ -6257,7 +6476,33 @@ pub(crate) async fn run_intent_normalizer(
     schedule_rules: &str,
 ) -> IntentNormalizerOutput {
     let req = user_request.trim();
-    let req_surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let surface_req = request_without_contract_test_hint(req);
+    let req_surface = crate::intent::surface_signals::analyze_prompt_surface(&surface_req);
+    if contract_test_hint_semantic_kind(req).is_some() {
+        // This is a machine-readable contract-matrix test hook, not a
+        // natural-language intent classifier. Parse it before the normalizer so
+        // large NL suites do not spend a model call rediscovering the contract.
+        if let Some(fallback) = contract_hint_fallback_decision(
+            req,
+            &req_surface,
+            &state.skill_rt.workspace_root,
+            "contract_hint_fast_path",
+        ) {
+            info!(
+                "{} intent_normalizer task_id={} contract_hint_fast_path reason={} input={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                fallback.reason,
+                crate::truncate_for_log(req)
+            );
+            return normalizer_output_from_fallback(
+                req,
+                "structured_contract_hint_fast_path",
+                fallback,
+                None,
+            );
+        }
+    }
     let context_bundle = crate::task_context_builder::build_route_task_context_bundle(
         state,
         task,
@@ -6297,7 +6542,7 @@ pub(crate) async fn run_intent_normalizer(
                     None,
                 );
             }
-            if let Some(fallback) = directory_pair_fallback_decision(state, req) {
+            if let Some(fallback) = directory_pair_fallback_decision(state, &surface_req) {
                 info!(
                     "{} intent_normalizer task_id={} prompt_missing_directory_pair_fallback reason={} input={}",
                     crate::highlight_tag("routing"),
@@ -6437,6 +6682,26 @@ pub(crate) async fn run_intent_normalizer(
                 "intent_normalizer llm failed, falling back to safe clarify: task_id={} err={}",
                 task.task_id, err
             );
+            if let Some(fallback) = contract_hint_fallback_decision(
+                req,
+                &req_surface,
+                &state.skill_rt.workspace_root,
+                "normalizer_unavailable_contract_hint",
+            ) {
+                info!(
+                    "{} intent_normalizer task_id={} llm_failed_contract_hint_fallback reason={} input={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    fallback.reason,
+                    crate::truncate_for_log(req)
+                );
+                return normalizer_output_from_fallback(
+                    req,
+                    "llm_failed_contract_hint_fallback",
+                    fallback,
+                    None,
+                );
+            }
             if let Some(fallback) = inline_json_transform_fallback_decision(req) {
                 info!(
                     "{} intent_normalizer task_id={} llm_failed_inline_json_transform_fallback input={}",
@@ -6451,7 +6716,7 @@ pub(crate) async fn run_intent_normalizer(
                     None,
                 );
             }
-            if let Some(fallback) = directory_pair_fallback_decision(state, req) {
+            if let Some(fallback) = directory_pair_fallback_decision(state, &surface_req) {
                 info!(
                     "{} intent_normalizer task_id={} llm_failed_directory_pair_fallback reason={} input={}",
                     crate::highlight_tag("routing"),
@@ -6467,7 +6732,7 @@ pub(crate) async fn run_intent_normalizer(
                 );
             }
             if let Some(fallback) = parse_failed_explicit_capability_fallback_decision(
-                req,
+                &surface_req,
                 &req_surface,
                 &state.skill_rt.workspace_root,
             ) {
@@ -6486,7 +6751,7 @@ pub(crate) async fn run_intent_normalizer(
                 );
             }
             if let Some(fallback) = explicit_surface_path_facts_fallback_decision(
-                req,
+                &surface_req,
                 &req_surface,
                 &state.skill_rt.workspace_root,
             ) {
@@ -6654,6 +6919,17 @@ pub(crate) async fn run_intent_normalizer(
             }
         });
         let mut execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
+        let structured_contract_hint_repair = apply_structured_contract_hint_repair(
+            &mut output_contract,
+            req,
+            &req_surface,
+            &state.skill_rt.workspace_root,
+            &mut wants_file_delivery,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut first_layer_decision,
+            &mut execution_finalize_style,
+        );
         if let Some(fallback) = parsed_inline_json_transform_repair_decision(
             req,
             needs_clarify,
@@ -6730,7 +7006,7 @@ pub(crate) async fn run_intent_normalizer(
             route_label_from_first_layer_decision(first_layer_decision, execution_finalize_style);
         let structural_contract_repair = apply_current_turn_structural_contract_repair(
             &mut output_contract,
-            req,
+            &surface_req,
             &req_surface,
             &state.skill_rt.workspace_root,
             first_layer_decision,
@@ -6975,6 +7251,14 @@ pub(crate) async fn run_intent_normalizer(
             }
         }
         if let Some(repair_reason) = self_contained_payload_repair {
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
+        }
+        if let Some(repair_reason) = structured_contract_hint_repair {
             if reason.trim().is_empty() {
                 reason = repair_reason.to_string();
             } else if !reason.contains(repair_reason) {
@@ -7530,7 +7814,7 @@ pub(crate) async fn run_intent_normalizer(
             None,
         );
     }
-    if let Some(fallback) = directory_pair_fallback_decision(state, req) {
+    if let Some(fallback) = directory_pair_fallback_decision(state, &surface_req) {
         info!(
             "{} intent_normalizer task_id={} parse_failed_directory_pair_fallback reason={} input={}",
             crate::highlight_tag("routing"),
@@ -7545,8 +7829,28 @@ pub(crate) async fn run_intent_normalizer(
             None,
         );
     }
-    if let Some(fallback) = parse_failed_explicit_capability_fallback_decision(
+    if let Some(fallback) = contract_hint_fallback_decision(
         req,
+        &req_surface,
+        &state.skill_rt.workspace_root,
+        "normalizer_parse_failed_contract_hint",
+    ) {
+        info!(
+            "{} intent_normalizer task_id={} parse_failed_contract_hint_fallback reason={} input={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            fallback.reason,
+            crate::truncate_for_log(req)
+        );
+        return normalizer_output_from_fallback(
+            req,
+            "parse_failed_contract_hint_fallback",
+            fallback,
+            None,
+        );
+    }
+    if let Some(fallback) = parse_failed_explicit_capability_fallback_decision(
+        &surface_req,
         &req_surface,
         &state.skill_rt.workspace_root,
     ) {
@@ -7565,7 +7869,7 @@ pub(crate) async fn run_intent_normalizer(
         );
     }
     if let Some(fallback) = explicit_surface_path_facts_fallback_decision(
-        req,
+        &surface_req,
         &req_surface,
         &state.skill_rt.workspace_root,
     ) {
@@ -7679,6 +7983,216 @@ fn directory_pair_fallback_decision(state: &AppState, req: &str) -> Option<Route
             ..Default::default()
         },
     })
+}
+
+fn contract_hint_fallback_decision(
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
+    reason: &'static str,
+) -> Option<RouteDecision> {
+    let semantic_kind = contract_test_hint_semantic_kind(req)?;
+    let surface_req = request_without_contract_test_hint(req);
+    let mut wants_file_delivery = false;
+    let mut output_contract = IntentOutputContract {
+        response_shape: response_shape_for_contract_hint_fallback(semantic_kind),
+        requires_content_evidence: output_semantic_kind_requires_fresh_evidence(semantic_kind),
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::None,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind,
+        locator_hint: String::new(),
+        ..Default::default()
+    };
+    apply_contract_hint_delivery_defaults(&mut output_contract, &mut wants_file_delivery);
+    apply_contract_hint_locator_defaults(
+        &mut output_contract,
+        &surface_req,
+        req_surface,
+        workspace_root,
+    );
+
+    let resolved_user_intent = if surface_req.trim().is_empty() {
+        req.trim().to_string()
+    } else {
+        surface_req.trim().to_string()
+    };
+    Some(RouteDecision {
+        resolved_user_intent,
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: reason.to_string(),
+        confidence: Some(0.70),
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract,
+    })
+}
+
+fn response_shape_for_contract_hint_fallback(kind: OutputSemanticKind) -> OutputResponseShape {
+    match kind {
+        OutputSemanticKind::RawCommandOutput
+        | OutputSemanticKind::ServiceStatus
+        | OutputSemanticKind::DirectoryPurposeSummary
+        | OutputSemanticKind::ContentExcerptSummary
+        | OutputSemanticKind::ContentPresenceCheck
+        | OutputSemanticKind::ExcerptKindJudgment
+        | OutputSemanticKind::RecentArtifactsJudgment
+        | OutputSemanticKind::WorkspaceProjectSummary
+        | OutputSemanticKind::ExecutionFailedStep
+        | OutputSemanticKind::ExistenceWithPathSummary
+        | OutputSemanticKind::GitRepositoryState
+        | OutputSemanticKind::ConfigValidation
+        | OutputSemanticKind::ConfigRiskAssessment
+        | OutputSemanticKind::PackageManagerDetection
+        | OutputSemanticKind::SqliteDatabaseKindJudgment
+        | OutputSemanticKind::DockerContainerLifecycle
+        | OutputSemanticKind::ArchiveUnpack => OutputResponseShape::OneSentence,
+        OutputSemanticKind::ScalarCount
+        | OutputSemanticKind::ScalarPathOnly
+        | OutputSemanticKind::RecentScalarEqualityCheck
+        | OutputSemanticKind::GitCommitSubject
+        | OutputSemanticKind::SqliteSchemaVersion
+        | OutputSemanticKind::ArchivePack => OutputResponseShape::Scalar,
+        OutputSemanticKind::GeneratedFileDelivery => OutputResponseShape::FileToken,
+        OutputSemanticKind::None
+        | OutputSemanticKind::HiddenEntriesCheck
+        | OutputSemanticKind::FileNames
+        | OutputSemanticKind::DirectoryNames
+        | OutputSemanticKind::DirectoryEntryGroups
+        | OutputSemanticKind::FilePaths
+        | OutputSemanticKind::QuantityComparison
+        | OutputSemanticKind::ExistenceWithPath
+        | OutputSemanticKind::StructuredKeys
+        | OutputSemanticKind::SqliteTableListing
+        | OutputSemanticKind::SqliteTableNamesOnly
+        | OutputSemanticKind::ArchiveList
+        | OutputSemanticKind::ArchiveRead
+        | OutputSemanticKind::DockerPs
+        | OutputSemanticKind::DockerImages
+        | OutputSemanticKind::DockerLogs => OutputResponseShape::Strict,
+    }
+}
+
+fn apply_contract_hint_delivery_defaults(
+    output_contract: &mut IntentOutputContract,
+    wants_file_delivery: &mut bool,
+) {
+    if output_contract.semantic_kind != OutputSemanticKind::GeneratedFileDelivery {
+        return;
+    }
+    output_contract.delivery_required = true;
+    output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    output_contract.response_shape = OutputResponseShape::FileToken;
+    *wants_file_delivery = true;
+}
+
+fn apply_contract_hint_locator_defaults(
+    output_contract: &mut IntentOutputContract,
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
+) {
+    match output_contract.semantic_kind {
+        OutputSemanticKind::RawCommandOutput
+        | OutputSemanticKind::ServiceStatus
+        | OutputSemanticKind::PackageManagerDetection
+        | OutputSemanticKind::DockerPs
+        | OutputSemanticKind::DockerImages
+        | OutputSemanticKind::DockerLogs
+        | OutputSemanticKind::DockerContainerLifecycle => {
+            output_contract.locator_kind = OutputLocatorKind::None;
+            output_contract.locator_hint.clear();
+        }
+        OutputSemanticKind::GitCommitSubject
+        | OutputSemanticKind::GitRepositoryState
+        | OutputSemanticKind::HiddenEntriesCheck
+        | OutputSemanticKind::RecentScalarEqualityCheck => {
+            output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+            output_contract.locator_hint = workspace_root.display().to_string();
+        }
+        OutputSemanticKind::WorkspaceProjectSummary => {
+            apply_path_locator_defaults_for_contract_hint(
+                output_contract,
+                req,
+                req_surface,
+                workspace_root,
+            );
+        }
+        _ => apply_path_locator_defaults_for_contract_hint(
+            output_contract,
+            req,
+            req_surface,
+            workspace_root,
+        ),
+    }
+}
+
+fn apply_path_locator_defaults_for_contract_hint(
+    output_contract: &mut IntentOutputContract,
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
+) {
+    if matches!(
+        output_contract.semantic_kind,
+        OutputSemanticKind::ArchivePack | OutputSemanticKind::ArchiveUnpack
+    ) {
+        if let Some((semantic_kind, locator_hint)) =
+            archive_pair_contract_from_surface(output_contract, req_surface)
+        {
+            output_contract.semantic_kind = semantic_kind;
+            output_contract.locator_kind = OutputLocatorKind::Path;
+            output_contract.locator_hint = locator_hint;
+            return;
+        }
+    }
+    if output_contract.semantic_kind == OutputSemanticKind::ArchiveRead {
+        if let Some(locator_hint) = archive_read_contract_from_surface(output_contract, req_surface)
+        {
+            output_contract.locator_kind = OutputLocatorKind::Path;
+            output_contract.locator_hint = locator_hint;
+            return;
+        }
+    }
+    if output_contract.semantic_kind == OutputSemanticKind::QuantityComparison {
+        if let Some((left, right)) = req_surface.locator_target_pair.as_ref() {
+            output_contract.locator_kind = OutputLocatorKind::Path;
+            output_contract.locator_hint = format!("{} | {}", left.trim(), right.trim());
+            return;
+        }
+        let targets = explicit_surface_path_fact_targets(req_surface);
+        if targets.len() >= 2 {
+            output_contract.locator_kind = OutputLocatorKind::Path;
+            output_contract.locator_hint = format!("{} | {}", targets[0].trim(), targets[1].trim());
+            return;
+        }
+    }
+    if let Some(locator) =
+        crate::intent::locator_extractor::extract_explicit_locator_for_fallback(req)
+    {
+        output_contract.locator_kind = locator.locator_kind;
+        output_contract.locator_hint = locator.locator_hint;
+        return;
+    }
+    let filename_candidates = req_surface.filename_candidates_excluding_field_selectors();
+    if filename_candidates.len() == 1 {
+        output_contract.locator_kind = OutputLocatorKind::Filename;
+        output_contract.locator_hint = filename_candidates[0].clone();
+        return;
+    }
+    if !filename_candidates.is_empty() {
+        output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        output_contract.locator_hint = workspace_root.display().to_string();
+        return;
+    }
+    if output_contract.requires_content_evidence {
+        output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        output_contract.locator_hint = workspace_root.display().to_string();
+    }
 }
 
 fn parse_failed_explicit_capability_fallback_decision(
@@ -10734,7 +11248,7 @@ mod tests {
             value
                 .pointer("/output_contract/response_shape")
                 .and_then(|v| v.as_str()),
-            Some("strict")
+            Some("free")
         );
         assert_eq!(
             value
@@ -10753,7 +11267,7 @@ mod tests {
             value
                 .pointer("/output_contract/response_shape")
                 .and_then(|v| v.as_str()),
-            Some("strict")
+            Some("free")
         );
     }
 
@@ -13811,6 +14325,414 @@ mod tests {
     }
 
     #[test]
+    fn workspace_default_observation_clarify_repair_routes_docker_contract_to_act() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root");
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            semantic_kind: OutputSemanticKind::DockerContainerLifecycle,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            ..IntentOutputContract::default()
+        };
+        let mut needs_clarify = true;
+        let mut clarify_question = "请提供要读取或检查的具体文件、目录或路径。".to_string();
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+        let reason = super::apply_workspace_default_observation_clarify_repair(
+            &mut contract,
+            workspace_root,
+            None,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(reason, Some("workspace_default_observation_clarify_repair"));
+        assert!(!needs_clarify);
+        assert!(clarify_question.is_empty());
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert_eq!(
+            contract.semantic_kind,
+            OutputSemanticKind::DockerContainerLifecycle
+        );
+    }
+
+    #[test]
+    fn structured_contract_hint_repair_recovers_git_contract_without_nl_matching() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root");
+        let req = concat!(
+            "检查这个仓库当前是否有未提交改动，用一句话说明。\n",
+            "[CONTRACT_TEST_HINT]\n",
+            "contract_id=git_repository_state\n",
+            "semantic_kind=git_repository_state\n",
+            "required_evidence_json=[\"field_value\"]\n",
+            "[/CONTRACT_TEST_HINT]"
+        );
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::OneSentence,
+            semantic_kind: OutputSemanticKind::None,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            locator_hint: workspace_root.display().to_string(),
+            ..IntentOutputContract::default()
+        };
+        let mut needs_clarify = false;
+        let mut clarify_question = String::new();
+        let mut decision = FirstLayerDecision::PlannerExecute;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+        let surface_req = super::request_without_contract_test_hint(req);
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(&surface_req);
+        let mut wants_file_delivery = false;
+        let reason = super::apply_structured_contract_hint_repair(
+            &mut contract,
+            req,
+            &surface,
+            workspace_root,
+            &mut wants_file_delivery,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(reason, Some("structured_contract_hint_repair"));
+        assert_eq!(
+            contract.semantic_kind,
+            OutputSemanticKind::GitRepositoryState
+        );
+        assert!(contract.requires_content_evidence);
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+        assert!(!needs_clarify);
+    }
+
+    #[test]
+    fn structured_contract_hint_repair_keeps_package_manager_locatorless() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root");
+        let req = concat!(
+            "检测这台机器可用的包管理器，并说明依据。\n",
+            "[CONTRACT_TEST_HINT]\n",
+            "contract_id=package_manager_detection\n",
+            "semantic_kind=package_manager_detection\n",
+            "required_evidence_json=[\"field_value\"]\n",
+            "[/CONTRACT_TEST_HINT]"
+        );
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Strict,
+            semantic_kind: OutputSemanticKind::None,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "model-supplied-background-locator".to_string(),
+            ..IntentOutputContract::default()
+        };
+        let mut needs_clarify = true;
+        let mut clarify_question = "请提供要读取或检查的具体文件、目录或路径。".to_string();
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+        let surface_req = super::request_without_contract_test_hint(req);
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(&surface_req);
+        let mut wants_file_delivery = false;
+        let reason = super::apply_structured_contract_hint_repair(
+            &mut contract,
+            req,
+            &surface,
+            workspace_root,
+            &mut wants_file_delivery,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(reason, Some("structured_contract_hint_repair"));
+        assert_eq!(
+            contract.semantic_kind,
+            OutputSemanticKind::PackageManagerDetection
+        );
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+        assert!(contract.locator_hint.is_empty());
+        assert!(!needs_clarify);
+        assert!(clarify_question.is_empty());
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    }
+
+    #[test]
+    fn structured_contract_hint_repair_sets_generated_file_delivery_defaults() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root");
+        let req = concat!(
+            "写一个简单文本文件到 tmp/contract_matrix_generated_note.txt，内容是 RustClaw contract matrix test，然后把文件路径发给我。\n",
+            "[CONTRACT_TEST_HINT]\n",
+            "contract_id=generated_file_delivery\n",
+            "semantic_kind=generated_file_delivery\n",
+            "required_evidence_json=[\"path\"]\n",
+            "[/CONTRACT_TEST_HINT]"
+        );
+        let surface_req = super::request_without_contract_test_hint(req);
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(&surface_req);
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            semantic_kind: OutputSemanticKind::None,
+            requires_content_evidence: false,
+            delivery_required: false,
+            delivery_intent: OutputDeliveryIntent::None,
+            locator_kind: OutputLocatorKind::None,
+            locator_hint: String::new(),
+            ..IntentOutputContract::default()
+        };
+        let mut wants_file_delivery = false;
+        let mut needs_clarify = true;
+        let mut clarify_question = "请提供要发送的文件路径或文件名。".to_string();
+        let mut decision = FirstLayerDecision::Clarify;
+        let mut finalize_style = crate::ActFinalizeStyle::Plain;
+
+        let reason = super::apply_structured_contract_hint_repair(
+            &mut contract,
+            req,
+            &surface,
+            workspace_root,
+            &mut wants_file_delivery,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut decision,
+            &mut finalize_style,
+        );
+
+        assert_eq!(reason, Some("structured_contract_hint_repair"));
+        assert!(wants_file_delivery);
+        assert!(!needs_clarify);
+        assert!(clarify_question.is_empty());
+        assert_eq!(
+            contract.semantic_kind,
+            OutputSemanticKind::GeneratedFileDelivery
+        );
+        assert!(contract.delivery_required);
+        assert_eq!(contract.delivery_intent, OutputDeliveryIntent::FileSingle);
+        assert_eq!(contract.response_shape, OutputResponseShape::FileToken);
+        assert!(contract.requires_content_evidence);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+        assert!(contract
+            .locator_hint
+            .contains("tmp/contract_matrix_generated_note.txt"));
+        assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    }
+
+    #[test]
+    fn request_without_contract_test_hint_removes_machine_block() {
+        let req = "检测包管理器。\n[CONTRACT_TEST_HINT]\nsemantic_kind=package_manager_detection\n[/CONTRACT_TEST_HINT]\n谢谢";
+        let stripped = super::request_without_contract_test_hint(req);
+        assert!(stripped.contains("检测包管理器"));
+        assert!(stripped.contains("谢谢"));
+        assert!(!stripped.contains("CONTRACT_TEST_HINT"));
+        assert!(!stripped.contains("[/"));
+    }
+
+    #[test]
+    fn current_turn_contract_repair_does_not_path_bind_package_manager_hint() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root");
+        let raw_req = concat!(
+            "检测这台机器可用的包管理器。\n",
+            "[CONTRACT_TEST_HINT]\n",
+            "semantic_kind=package_manager_detection\n",
+            "[/CONTRACT_TEST_HINT]"
+        );
+        let surface_req = super::request_without_contract_test_hint(raw_req);
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(&surface_req);
+        let mut contract = IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Strict,
+            semantic_kind: OutputSemanticKind::PackageManagerDetection,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::None,
+            locator_hint: String::new(),
+            ..IntentOutputContract::default()
+        };
+        let _ = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            &surface_req,
+            &surface,
+            workspace_root,
+            FirstLayerDecision::PlannerExecute,
+            "",
+            Some(TurnType::TaskRequest),
+            Some(TargetTaskPolicy::Standalone),
+        );
+
+        assert_eq!(
+            contract.semantic_kind,
+            OutputSemanticKind::PackageManagerDetection
+        );
+        assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+        assert!(contract.locator_hint.is_empty());
+    }
+
+    #[test]
+    fn recent_scalar_equality_requires_fresh_evidence() {
+        assert!(super::output_semantic_kind_requires_fresh_evidence(
+            OutputSemanticKind::RecentScalarEqualityCheck
+        ));
+    }
+
+    #[test]
+    fn contract_hint_fallback_recovers_git_route_without_nl_tokens() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root");
+        let req = concat!(
+            "处理这个请求。\n",
+            "[CONTRACT_TEST_HINT]\n",
+            "semantic_kind=git_repository_state\n",
+            "[/CONTRACT_TEST_HINT]"
+        );
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let decision = super::contract_hint_fallback_decision(
+            req,
+            &surface,
+            workspace_root,
+            "normalizer_parse_failed_contract_hint",
+        )
+        .expect("contract hint fallback");
+
+        assert!(!decision.needs_clarify);
+        assert_eq!(
+            decision.output_contract.semantic_kind,
+            OutputSemanticKind::GitRepositoryState
+        );
+        assert_eq!(
+            decision.output_contract.locator_kind,
+            OutputLocatorKind::CurrentWorkspace
+        );
+        assert_eq!(
+            decision.output_contract.locator_hint,
+            workspace_root.display().to_string()
+        );
+    }
+
+    #[test]
+    fn contract_hint_fallback_keeps_package_manager_locatorless() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root");
+        let req = concat!(
+            "处理这个请求。\n",
+            "[CONTRACT_TEST_HINT]\n",
+            "semantic_kind=package_manager_detection\n",
+            "[/CONTRACT_TEST_HINT]"
+        );
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let decision = super::contract_hint_fallback_decision(
+            req,
+            &surface,
+            workspace_root,
+            "normalizer_parse_failed_contract_hint",
+        )
+        .expect("contract hint fallback");
+
+        assert!(!decision.needs_clarify);
+        assert_eq!(
+            decision.output_contract.semantic_kind,
+            OutputSemanticKind::PackageManagerDetection
+        );
+        assert_eq!(
+            decision.output_contract.locator_kind,
+            OutputLocatorKind::None
+        );
+        assert!(decision.output_contract.locator_hint.is_empty());
+    }
+
+    #[test]
+    fn contract_hint_fallback_extracts_path_locator() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root");
+        let req = concat!(
+            "处理 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md。\n",
+            "[CONTRACT_TEST_HINT]\n",
+            "semantic_kind=content_excerpt_summary\n",
+            "[/CONTRACT_TEST_HINT]"
+        );
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let decision = super::contract_hint_fallback_decision(
+            req,
+            &surface,
+            workspace_root,
+            "normalizer_parse_failed_contract_hint",
+        )
+        .expect("contract hint fallback");
+
+        assert!(!decision.needs_clarify);
+        assert_eq!(
+            decision.output_contract.semantic_kind,
+            OutputSemanticKind::ContentExcerptSummary
+        );
+        assert_eq!(
+            decision.output_contract.locator_kind,
+            OutputLocatorKind::Path
+        );
+        assert!(decision
+            .output_contract
+            .locator_hint
+            .contains("release_checklist.md"));
+    }
+
+    #[test]
+    fn contract_hint_workspace_summary_preserves_explicit_directory_locator() {
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root");
+        let req = concat!(
+            "快速看一下 scripts/nl_tests/fixtures/device_local，用非技术用户能听懂的话总结它是什么项目。\n",
+            "[CONTRACT_TEST_HINT]\n",
+            "semantic_kind=workspace_project_summary\n",
+            "[/CONTRACT_TEST_HINT]"
+        );
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let decision = super::contract_hint_fallback_decision(
+            req,
+            &surface,
+            workspace_root,
+            "normalizer_parse_failed_contract_hint",
+        )
+        .expect("contract hint fallback");
+
+        assert!(!decision.needs_clarify);
+        assert_eq!(
+            decision.output_contract.semantic_kind,
+            OutputSemanticKind::WorkspaceProjectSummary
+        );
+        assert_eq!(
+            decision.output_contract.locator_kind,
+            OutputLocatorKind::Path
+        );
+        assert!(decision
+            .output_contract
+            .locator_hint
+            .contains("scripts/nl_tests/fixtures/device_local"));
+    }
+
+    #[test]
     fn structured_observation_clarify_repair_routes_two_explicit_targets_to_act() {
         let req = "比较 configs/skills_registry.toml 和 docker/config/skills_registry.toml 哪个文件更大，只回答文件名和大小差";
         let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
@@ -14370,6 +15292,195 @@ mod tests {
         assert_eq!(
             contract.locator_hint,
             "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | tmp/contract_matrix_unpacked"
+        );
+    }
+
+    #[test]
+    fn archive_read_member_repairs_content_excerpt_drift_contract() {
+        let req = concat!(
+            "读取 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 里的 notes.txt 内容片段，并简短总结。",
+            "\n[CONTRACT_TEST_HINT]\n",
+            "contract_id=archive_read\n",
+            "semantic_kind=archive_read\n",
+            "preferred_action_ref=archive_basic.read\n",
+            "[/CONTRACT_TEST_HINT]"
+        );
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        assert!(surface
+            .filename_candidates
+            .iter()
+            .any(|candidate| candidate == "test_bundle.zip"));
+        assert!(surface
+            .filename_candidates
+            .iter()
+            .any(|candidate| candidate == "notes.txt"));
+        assert!(!surface
+            .filename_candidates
+            .iter()
+            .any(|candidate| candidate.contains("archive_basic.read")));
+
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip".to_string(),
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(reason, Some("archive_read_member_contract_repair"));
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveRead);
+        assert_eq!(contract.response_shape, OutputResponseShape::Free);
+        assert!(contract.requires_content_evidence);
+        assert!(!contract.delivery_required);
+        assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
+        assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+        assert_eq!(
+            contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | notes.txt"
+        );
+    }
+
+    #[test]
+    fn archive_read_member_pair_is_not_treated_as_unpack_destination() {
+        let req = "读取 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 中 notes.txt 的内容片段并简短总结";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip".to_string(),
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(reason, Some("archive_read_member_contract_repair"));
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveRead);
+        assert_eq!(
+            contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | notes.txt"
+        );
+    }
+
+    #[test]
+    fn archive_read_member_repairs_archive_unpack_drift_contract() {
+        let req = "从压缩包 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 中提取 notes.txt 文件内容并简短总结";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::ArchiveUnpack,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip".to_string(),
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(reason, Some("archive_read_member_contract_repair"));
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveRead);
+        assert_eq!(contract.response_shape, OutputResponseShape::Free);
+        assert_eq!(
+            contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | notes.txt"
+        );
+    }
+
+    #[test]
+    fn archive_read_nested_member_path_is_not_unpack_destination() {
+        let req = "读取 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 中 nested/config.ini 的内容片段并简短总结";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::ArchiveUnpack,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip".to_string(),
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_eq!(reason, Some("archive_read_member_contract_repair"));
+        assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchiveRead);
+        assert_eq!(
+            contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip | nested/config.ini"
+        );
+    }
+
+    #[test]
+    fn archive_read_member_repair_requires_member_candidate() {
+        let req = "读取 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 内容片段，并简短总结。";
+        let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+        let mut contract = IntentOutputContract {
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip".to_string(),
+            ..IntentOutputContract::default()
+        };
+
+        let reason = super::apply_current_turn_structural_contract_repair(
+            &mut contract,
+            req,
+            &surface,
+            std::path::Path::new("/workspace"),
+            FirstLayerDecision::PlannerExecute,
+            "",
+            None,
+            None,
+        );
+
+        assert_ne!(reason, Some("archive_read_member_contract_repair"));
+        assert_eq!(
+            contract.semantic_kind,
+            OutputSemanticKind::ContentExcerptSummary
+        );
+        assert_eq!(
+            contract.locator_hint,
+            "scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip"
         );
     }
 

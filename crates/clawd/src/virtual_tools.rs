@@ -304,6 +304,15 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
         "grep_text" => {
             move_value_alias_if_missing(&mut obj, "root", &["path", "dir", "directory"]);
             move_value_alias_if_missing(&mut obj, "query", &["text", "keyword"]);
+            move_value_alias_if_missing(&mut obj, "max_results", &["max_matches", "limit"]);
+            if obj
+                .get("case_sensitive")
+                .and_then(Value::as_bool)
+                .is_some_and(|case_sensitive| !case_sensitive)
+            {
+                obj.entry("case_insensitive".to_string())
+                    .or_insert(Value::Bool(true));
+            }
             promote_grep_pattern_to_query_if_missing(&mut obj);
             drop_redundant_grep_filename_filters(&mut obj);
             obj.insert("action".to_string(), Value::String("grep_text".to_string()));

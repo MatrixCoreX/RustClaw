@@ -501,6 +501,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         }
         OutputSemanticKind::RecentArtifactsJudgment => {
             fields.insert("candidates");
+            fields.insert("field_value");
         }
         OutputSemanticKind::FileNames
         | OutputSemanticKind::DirectoryNames
@@ -518,13 +519,15 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         OutputSemanticKind::ServiceStatus
         | OutputSemanticKind::PackageManagerDetection
         | OutputSemanticKind::StructuredKeys
-        | OutputSemanticKind::ConfigValidation
         | OutputSemanticKind::SqliteDatabaseKindJudgment
         | OutputSemanticKind::SqliteSchemaVersion
         | OutputSemanticKind::RecentScalarEqualityCheck
         | OutputSemanticKind::ExecutionFailedStep
         | OutputSemanticKind::DockerContainerLifecycle => {
             fields.insert("field_value");
+        }
+        OutputSemanticKind::ConfigValidation => {
+            fields.insert("valid");
         }
         OutputSemanticKind::ConfigRiskAssessment => {
             fields.insert("candidates");

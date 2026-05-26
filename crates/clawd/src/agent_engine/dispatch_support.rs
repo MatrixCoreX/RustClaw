@@ -110,6 +110,16 @@ fn synthesize_direct_observed_fallback_answer(
     .filter(|answer| !answer.is_empty())
 }
 
+fn synthesize_contract_matrix_direct_observed_fallback_answer(
+    state: &AppState,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    let route = agent_run_context.and_then(|context| context.route_result.as_ref())?;
+    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)?;
+    synthesize_direct_observed_fallback_answer(state, loop_state, agent_run_context)
+}
+
 fn synthesize_direct_fallback_would_passthrough_multiline_read_range(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -807,6 +817,7 @@ mod tests {
         classify_skill_failure_recovery, deterministic_observed_execution_status_answer,
         deterministic_scalar_markdown_heading_answer, strip_internal_execution_args,
         synthesize_answer_allows_direct_fallback,
+        synthesize_contract_matrix_direct_observed_fallback_answer,
         synthesize_direct_fallback_would_passthrough_multiline_read_range,
         synthesize_direct_observed_fallback_answer, synthesize_failure_observed_facts,
         synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
@@ -1655,6 +1666,70 @@ mod tests {
             .expect("scalar path fallback");
 
         assert_eq!(answer, "/home/guagua/rustclaw");
+    }
+
+    #[test]
+    fn contract_matrix_synthesis_prefers_observed_answer_over_step_status() {
+        let state = test_state_with_registry();
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "archive_basic",
+            "dest_path=/tmp/rustclaw-workspace/tmp/contract_matrix_unpacked\nexit=0\nArchive: /tmp/test_bundle.zip\n inflating: /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked/notes.txt\n",
+        ));
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "system_basic".to_string(),
+            status: StepExecutionStatus::Error,
+            output: None,
+            error: Some("__RC_SKILL_ERROR__:{\"error_kind\":\"contract_action_rejected\",\"error_text\":\"action `system_basic.inventory_dir` is rejected by contract `archive_unpack`\"}".to_string()),
+            started_at: 0,
+            finished_at: 0,
+        });
+        let route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent:
+                "把 test_bundle.zip 解压到 tmp/contract_matrix_unpacked，并简短说明结果".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "structured_contract_hint_fast_path; contract_hint_fast_path".to_string(),
+            route_confidence: Some(0.9),
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Low,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: crate::OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::Path,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::ArchiveUnpack,
+                locator_hint: "/tmp/test_bundle.zip | tmp/contract_matrix_unpacked".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let ctx = AgentRunContext {
+            route_result: Some(route),
+            ..AgentRunContext::default()
+        };
+
+        let answer = synthesize_contract_matrix_direct_observed_fallback_answer(
+            &state,
+            &loop_state,
+            Some(&ctx),
+        )
+        .expect("contract matrix observed fallback");
+
+        assert!(answer.contains("/tmp/rustclaw-workspace/tmp/contract_matrix_unpacked"));
+        assert!(answer.contains("notes.txt"), "answer: {answer}");
+        assert!(!answer.contains("第 1 步"), "answer: {answer}");
+        assert!(!answer.contains("system_basic"), "answer: {answer}");
     }
 
     #[test]
@@ -2605,6 +2680,13 @@ pub(super) async fn handle_synthesize_answer_action(
     );
     let step_execution =
         crate::executor::execute_step(&format!("step_{global_step}"), action, || async {
+            if let Some(answer) = synthesize_contract_matrix_direct_observed_fallback_answer(
+                state,
+                loop_state,
+                agent_run_context,
+            ) {
+                return Ok(answer);
+            }
             if let Some(answer) =
                 deterministic_observed_execution_status_answer(state, task, user_text, loop_state)
             {
