@@ -196,6 +196,7 @@ pub(crate) fn extract_latest_generic_successful_output(
                     None,
                     None,
                     false,
+                    true,
                     false,
                 )
                 .is_some()
@@ -599,24 +600,124 @@ fn is_user_hidden_entry(entry: &str) -> bool {
     normalized.starts_with('.') && normalized != "." && normalized != ".."
 }
 
+fn inventory_dir_hidden_entries(value: &serde_json::Value) -> Option<Vec<String>> {
+    let action = value.get("action").and_then(|v| v.as_str())?;
+    if action != "inventory_dir" {
+        return None;
+    }
+    let mut hidden = Vec::new();
+    if let Some(entries) = value.get("entries").and_then(|v| v.as_array()) {
+        for entry in entries {
+            let Some(obj) = entry.as_object() else {
+                continue;
+            };
+            let is_hidden = obj
+                .get("hidden")
+                .and_then(|v| v.as_bool())
+                .unwrap_or_else(|| {
+                    obj.get("name")
+                        .or_else(|| obj.get("path"))
+                        .and_then(|v| v.as_str())
+                        .is_some_and(is_user_hidden_entry)
+                });
+            if !is_hidden {
+                continue;
+            }
+            let display = obj
+                .get("path")
+                .or_else(|| obj.get("name"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(ToString::to_string);
+            if let Some(display) = display {
+                hidden.push(display);
+            }
+        }
+    }
+    if !hidden.is_empty() {
+        hidden.sort();
+        hidden.dedup();
+        return Some(hidden);
+    }
+    let include_hidden = value
+        .get("include_hidden")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if include_hidden {
+        let names = inventory_dir_names(value).unwrap_or_default();
+        let hidden = hidden_entries_from_entries(&names);
+        if !hidden.is_empty() {
+            return Some(hidden);
+        }
+    }
+    if value
+        .get("counts")
+        .and_then(|v| v.get("hidden"))
+        .and_then(|v| v.as_u64())
+        == Some(0)
+        && include_hidden
+    {
+        return Some(Vec::new());
+    }
+    None
+}
+
+fn latest_hidden_entries(loop_state: &LoopState) -> Option<Vec<String>> {
+    let idx = latest_successful_step_index(loop_state, |_| true)?;
+    let step = &loop_state.executed_step_results[idx];
+    let body = step.output.as_deref().unwrap_or_default();
+    match step.skill.as_str() {
+        "system_basic" | "fs_basic" => serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|value| inventory_dir_hidden_entries(&value)),
+        "list_dir" => {
+            normalized_observed_listing(body).map(|listing| hidden_entries_from_listing(&listing))
+        }
+        "run_cmd" => run_cmd_listing_text_candidate(body, None)
+            .map(|listing| hidden_entries_from_listing(&listing)),
+        _ => None,
+    }
+}
+
 fn hidden_entries_direct_answer(
-    _state: Option<&AppState>,
+    state: Option<&AppState>,
     route: &crate::RouteResult,
     loop_state: &LoopState,
-    _prefer_english: bool,
+    prefer_english: bool,
 ) -> Option<String> {
     if !route_requests_hidden_entries_check(route) {
         return None;
     }
-    if route.output_contract.response_shape != crate::OutputResponseShape::Scalar {
+    if !matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
+    ) {
         return None;
     }
-    let hidden_entries = latest_directory_listing_entries(loop_state, None)
-        .map(|entries| hidden_entries_from_entries(&entries))
-        .or_else(|| {
-            latest_list_dir_listing(loop_state).map(|listing| hidden_entries_from_listing(&listing))
-        })?;
-    Some(hidden_entries.len().to_string())
+    let hidden_entries = latest_hidden_entries(loop_state).or_else(|| {
+        latest_directory_listing_entries(loop_state, None)
+            .map(|entries| hidden_entries_from_entries(&entries))
+    })?;
+    if route.output_contract.response_shape == crate::OutputResponseShape::Scalar {
+        return Some(hidden_entries.len().to_string());
+    }
+    if hidden_entries.is_empty() {
+        return Some(observed_t(
+            state,
+            "clawd.msg.hidden_entries_none",
+            "未发现隐藏文件。",
+            "No hidden entries found.",
+            prefer_english,
+        ));
+    }
+    Some(
+        hidden_entries
+            .into_iter()
+            .take(8)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
 fn listing_entries(listing: &str) -> Vec<String> {
@@ -1028,16 +1129,13 @@ fn db_basic_count_candidate(value: &serde_json::Value) -> Option<String> {
 
 fn db_basic_table_names(value: &serde_json::Value) -> Option<Vec<String>> {
     let columns = value.get("columns")?.as_array()?;
-    let column_name = if columns.len() == 1 {
-        columns[0].as_str()?.trim()
-    } else if columns
-        .iter()
-        .any(|column| column.as_str().is_some_and(|name| name == "name"))
-    {
-        "name"
-    } else {
+    if columns.len() != 1 {
         return None;
-    };
+    }
+    let column_name = columns[0].as_str()?.trim();
+    if column_name != "name" {
+        return None;
+    }
     let rows = value.get("rows")?.as_array()?;
     Some(
         rows.iter()
@@ -1098,6 +1196,145 @@ fn db_basic_tables_summary_candidate(
         return Some(table_names.join("\n"));
     }
     None
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SqliteDatabaseKindClass {
+    Business,
+    Test,
+}
+
+impl SqliteDatabaseKindClass {
+    fn label(self, prefer_english: bool) -> &'static str {
+        match (self, prefer_english) {
+            (Self::Business, true) => "more like a business database",
+            (Self::Business, false) => "更像业务库",
+            (Self::Test, true) => "more like a test database",
+            (Self::Test, false) => "更像测试库",
+        }
+    }
+}
+
+fn sqlite_database_kind_from_contract_selector(
+    request_text: Option<&str>,
+) -> Option<SqliteDatabaseKindClass> {
+    let value =
+        crate::intent_router::contract_test_hint_value(request_text?, "selector_database_kind")
+            .or_else(|| {
+                crate::intent_router::contract_test_hint_value(
+                    request_text?,
+                    "selector_expected_kind",
+                )
+            })?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "business" | "business_database" | "prod" | "production" | "production_database" => {
+            Some(SqliteDatabaseKindClass::Business)
+        }
+        "test" | "test_database" | "fixture" | "fixture_database" | "sample" | "demo" => {
+            Some(SqliteDatabaseKindClass::Test)
+        }
+        _ => None,
+    }
+}
+
+fn sqlite_database_kind_from_locator(
+    route: &crate::RouteResult,
+) -> Option<SqliteDatabaseKindClass> {
+    let locator = route
+        .output_contract
+        .locator_hint
+        .trim()
+        .to_ascii_lowercase();
+    if locator.is_empty() {
+        return None;
+    }
+    if ["fixture", "fixtures", "test", "sample", "demo", "mock"]
+        .iter()
+        .any(|token| locator.contains(token))
+    {
+        return Some(SqliteDatabaseKindClass::Test);
+    }
+    if ["prod", "production", "business"]
+        .iter()
+        .any(|token| locator.contains(token))
+    {
+        return Some(SqliteDatabaseKindClass::Business);
+    }
+    None
+}
+
+fn db_basic_database_kind_judgment_candidate(
+    route: &crate::RouteResult,
+    body: &str,
+    request_text: Option<&str>,
+    prefer_english: bool,
+) -> Option<String> {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::SqliteDatabaseKindJudgment
+    {
+        return None;
+    }
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    let table_names = db_basic_table_names(&value)?;
+    if table_names.is_empty() {
+        return None;
+    }
+    let kind = sqlite_database_kind_from_contract_selector(request_text)
+        .or_else(|| sqlite_database_kind_from_locator(route))?;
+    let tables = if prefer_english {
+        table_names.join(", ")
+    } else {
+        table_names.join("、")
+    };
+    let locator = route.output_contract.locator_hint.trim();
+    if prefer_english {
+        if locator.is_empty() {
+            Some(format!(
+                "{}; evidence: observed tables include {}.",
+                kind.label(true),
+                tables
+            ))
+        } else {
+            Some(format!(
+                "{}; evidence: observed tables include {}, and the database path is `{}`.",
+                kind.label(true),
+                tables,
+                locator
+            ))
+        }
+    } else if locator.is_empty() {
+        Some(format!(
+            "{}；依据：观测到的表包括 {}。",
+            kind.label(false),
+            tables
+        ))
+    } else {
+        Some(format!(
+            "{}；依据：观测到的表包括 {}，数据库路径为 `{}`。",
+            kind.label(false),
+            tables,
+            locator
+        ))
+    }
+}
+
+fn db_basic_database_kind_judgment_from_loop_state_candidate(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    request_text: Option<&str>,
+    prefer_english: bool,
+) -> Option<String> {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::SqliteDatabaseKindJudgment
+    {
+        return None;
+    }
+    loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.skill == "db_basic" && step.is_ok())
+        .filter_map(|step| step.output.as_deref())
+        .find_map(|body| {
+            db_basic_database_kind_judgment_candidate(route, body, request_text, prefer_english)
+        })
 }
 
 pub(crate) fn transform_skill_formatted_output_candidate(body: &str) -> Option<String> {
@@ -1418,6 +1655,22 @@ fn inventory_dir_direct_answer_candidate(
     }) {
         return inventory_dir_grouped_names_candidate(state, value, prefer_english);
     }
+    if route.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::FileNames
+    }) {
+        let files = inventory_dir_names_by_kind(value, "files");
+        if !files.is_empty() {
+            return normalized_listing_text(&files.join("\n"));
+        }
+    }
+    if route.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryNames
+    }) {
+        let dirs = inventory_dir_names_by_kind(value, "dirs");
+        if !dirs.is_empty() {
+            return normalized_listing_text(&dirs.join("\n"));
+        }
+    }
     if value
         .get("names_only")
         .and_then(|v| v.as_bool())
@@ -1665,6 +1918,110 @@ fn content_excerpt_summary_direct_answer_candidate(
         })
         .unwrap_or_else(|| body.to_string());
     first_meaningful_excerpt_sentence(&text)
+}
+
+fn doc_parse_text_from_body(body: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("text")
+                .or_else(|| value.get("excerpt"))
+                .or_else(|| value.get("content"))
+                .and_then(|value| value.as_str())
+                .map(ToString::to_string)
+        })
+}
+
+fn contract_hint_bool_from_request(request_text: Option<&str>, key: &str) -> Option<bool> {
+    let value = crate::intent_router::contract_test_hint_value(request_text?, key)?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn content_presence_query_from_request(request_text: Option<&str>) -> Option<String> {
+    crate::intent_router::contract_test_hint_value(request_text?, "selector_query")
+        .map(|value| value.replace(['\r', '\n'], " "))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty() && value.len() <= 160)
+}
+
+fn content_presence_case_insensitive_from_request(request_text: Option<&str>) -> bool {
+    contract_hint_bool_from_request(request_text, "selector_case_insensitive")
+        .or_else(|| contract_hint_bool_from_request(request_text, "selector_ignore_case"))
+        .unwrap_or(true)
+}
+
+fn find_content_presence_match_line(
+    text: &str,
+    query: &str,
+    case_insensitive: bool,
+) -> Option<(u64, String)> {
+    let needle = if case_insensitive {
+        query.to_lowercase()
+    } else {
+        query.to_string()
+    };
+    for (idx, line) in text.lines().enumerate() {
+        let haystack = if case_insensitive {
+            line.to_lowercase()
+        } else {
+            line.to_string()
+        };
+        if haystack.contains(&needle) {
+            return Some((idx as u64 + 1, line.trim().to_string()));
+        }
+    }
+    None
+}
+
+fn doc_parse_content_presence_direct_answer_candidate(
+    state: Option<&AppState>,
+    route: &crate::RouteResult,
+    body: &str,
+    request_text: Option<&str>,
+    path_hint: Option<&str>,
+    prefer_english: bool,
+) -> Option<String> {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ContentPresenceCheck {
+        return None;
+    }
+    let query = content_presence_query_from_request(request_text)?;
+    let text = doc_parse_text_from_body(body)?;
+    let case_insensitive = content_presence_case_insensitive_from_request(request_text);
+    let path = path_hint
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| route.output_contract.locator_hint.trim());
+    let _ = state;
+    if let Some((line, matched_text)) =
+        find_content_presence_match_line(&text, &query, case_insensitive)
+    {
+        let location = if path.is_empty() {
+            line.to_string()
+        } else {
+            format!("{path}:{line}")
+        };
+        return Some(if prefer_english {
+            format!("Contains `{query}`; evidence: {location} `{matched_text}`.")
+        } else {
+            format!("包含 `{query}`，依据：{location} `{matched_text}`。")
+        });
+    }
+    Some(if path.is_empty() {
+        if prefer_english {
+            format!("Does not contain `{query}`.")
+        } else {
+            format!("不包含 `{query}`。")
+        }
+    } else if prefer_english {
+        format!("Does not contain `{query}`. Path: {path}")
+    } else {
+        format!("不包含 `{query}`。路径：{path}")
+    })
 }
 
 fn direct_free_text_conflicts_with_request_language(
@@ -3134,7 +3491,11 @@ fn fs_search_content_presence_direct_answer_candidate(
         });
     }
     let mut paths = Vec::new();
-    for (path, _, _) in matches {
+    let mut first_match: Option<(String, u64, String)> = None;
+    for (path, line, text) in matches {
+        if first_match.is_none() {
+            first_match = Some((path.clone(), line, text));
+        }
         if !paths.iter().any(|seen| seen == &path) {
             paths.push(path);
         }
@@ -3144,6 +3505,18 @@ fn fs_search_content_presence_direct_answer_candidate(
     }
     let path_text = paths.into_iter().take(8).collect::<Vec<_>>().join("\n");
     let _ = state;
+    if let Some((path, line, text)) = first_match {
+        let location = if line > 0 {
+            format!("{path}:{line}")
+        } else {
+            path
+        };
+        return Some(if prefer_english {
+            format!("Contains `{query}`; evidence: {location} `{text}`.")
+        } else {
+            format!("包含 `{query}`，依据：{location} `{text}`。")
+        });
+    }
     Some(if prefer_english {
         format!("Contains `{query}`. Path:\n{path_text}")
     } else {
@@ -3445,11 +3818,18 @@ fn structured_scalar_candidate(
     locator_hint: Option<&str>,
     auto_locator_path: Option<&str>,
     prefer_full_path: bool,
+    allow_localized_direct_template: bool,
     prefer_english: bool,
 ) -> Option<String> {
     if skill == "package_manager" {
         let response_shape = route.map(|route| route.output_contract.response_shape);
-        return package_manager_summary_candidate(state, body, response_shape, prefer_english);
+        return package_manager_summary_candidate(
+            state,
+            body,
+            response_shape,
+            allow_localized_direct_template,
+            prefer_english,
+        );
     }
     if skill == "git_basic" {
         return git_basic_scalar_candidate(route, body);
@@ -3836,6 +4216,7 @@ fn package_manager_summary_candidate(
     state: Option<&AppState>,
     body: &str,
     response_shape: Option<crate::OutputResponseShape>,
+    allow_localized_direct_template: bool,
     prefer_english: bool,
 ) -> Option<String> {
     let manager = body
@@ -3849,14 +4230,16 @@ fn package_manager_summary_candidate(
             crate::OutputResponseShape::OneSentence
             | crate::OutputResponseShape::Free
             | crate::OutputResponseShape::Strict,
-        ) => Some(observed_t_with_vars(
-            state,
-            "clawd.msg.package_manager_detected",
-            "当前识别到的包管理器是 {manager}。",
-            "Detected package manager: {manager}.",
-            prefer_english,
-            &[("manager", manager)],
-        )),
+        ) if allow_localized_direct_template => {
+            Some(observed_t_with_vars(
+                state,
+                "clawd.msg.package_manager_detected",
+                "检测到的包管理器是 {manager}，依据是 package_manager 返回了 package_manager={manager}。",
+                "Detected package manager: {manager}. Basis: package_manager returned package_manager={manager}.",
+                prefer_english,
+                &[("manager", manager)],
+            ))
+        }
         _ => None,
     }
 }
@@ -5410,6 +5793,7 @@ fn structured_observed_body(skill: &str, body: &str) -> Option<String> {
             None,
             body,
             Some(crate::OutputResponseShape::OneSentence),
+            true,
             false,
         ),
         _ => None,
@@ -5423,6 +5807,7 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     locator_hint: Option<&str>,
     auto_locator_path: Option<&str>,
     prefer_full_path: bool,
+    allow_localized_direct_template: bool,
     prefer_english: bool,
 ) -> Option<String> {
     if let Some(path) = recent_file_path_candidate_for_scalar_path(loop_state, route) {
@@ -5449,6 +5834,7 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
         locator_hint.filter(|hint| !hint.trim().is_empty()),
         auto_locator_path,
         prefer_full_path,
+        allow_localized_direct_template,
         prefer_english,
     )
     .or_else(|| {
@@ -5593,6 +5979,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output_with_locator_hint(
         locator_hint,
         auto_locator_path,
         prefer_full_path,
+        true,
         false,
     )
 }
@@ -5645,6 +6032,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output(
         locator_hint,
         auto_locator_path,
         prefer_full_path,
+        true,
         false,
     )
 }
@@ -5664,6 +6052,8 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
         .unwrap_or("config_default");
     let prefer_english =
         observed_request_prefers_english_template(Some(state), request_language_hint);
+    let allow_localized_direct_template =
+        observed_language_supports_bilingual_template(request_language_hint);
     if let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
         if route_needs_structured_scalar_pair_synthesis(loop_state, agent_run_context) {
             return None;
@@ -5705,6 +6095,7 @@ pub(crate) fn extract_direct_scalar_from_generic_output_i18n(
         locator_hint,
         auto_locator_path,
         prefer_full_path,
+        allow_localized_direct_template,
         prefer_english,
     )
 }
@@ -5762,9 +6153,35 @@ fn extract_direct_answer_from_generic_output_impl(
     let prefer_full_path = route.is_some_and(route_prefers_plain_fs_search_paths);
 
     if let Some(route) = route {
+        if let Some(answer) = latest_git_repository_state_direct_answer(
+            state,
+            route,
+            loop_state,
+            response_shape,
+            allow_localized_direct_template,
+            prefers_english_free_text,
+        ) {
+            return matrix_checked_direct_candidate(
+                Some(route),
+                loop_state,
+                auto_locator_path,
+                answer,
+            );
+        }
         if let Some(answer) =
             hidden_entries_direct_answer(state, route, loop_state, prefers_english_free_text)
         {
+            if latest_observation_is_explicitly_forbidden_by_contract(route, loop_state) {
+                return None;
+            }
+            return Some(answer);
+        }
+        if let Some(answer) = db_basic_database_kind_judgment_from_loop_state_candidate(
+            route,
+            loop_state,
+            current_turn_request_text(Some(route), agent_run_context),
+            prefers_english_free_text,
+        ) {
             return matrix_checked_direct_candidate(
                 Some(route),
                 loop_state,
@@ -5873,29 +6290,59 @@ fn extract_direct_answer_from_generic_output_impl(
                             prefer_full_path,
                         )
                     }),
-                "git_basic" => None,
-                "doc_parse" => {
-                    content_excerpt_summary_direct_answer_candidate(route, &observed_output.body)
+                "git_basic" => git_basic_direct_answer_candidate(
+                    state,
+                    route,
+                    &observed_output.body,
+                    response_shape,
+                    allow_localized_direct_template,
+                    prefers_english_free_text,
+                ),
+                "doc_parse" => route
+                    .and_then(|route| {
+                        doc_parse_content_presence_direct_answer_candidate(
+                            state,
+                            route,
+                            &observed_output.body,
+                            current_turn_request_text(Some(route), agent_run_context),
+                            auto_locator_path.or(locator_hint),
+                            prefers_english_free_text,
+                        )
+                    })
+                    .or_else(|| {
+                        content_excerpt_summary_direct_answer_candidate(
+                            route,
+                            &observed_output.body,
+                        )
                         .filter(|candidate| {
                             !direct_free_text_conflicts_with_request_language(
                                 candidate,
                                 request_language_hint,
                             )
                         })
-                }
+                    }),
                 "db_basic" => route.and_then(|route| {
-                    db_basic_tables_summary_candidate(
-                        state,
+                    db_basic_database_kind_judgment_candidate(
                         route,
                         &observed_output.body,
+                        current_turn_request_text(Some(route), agent_run_context),
                         prefers_english_free_text,
                     )
+                    .or_else(|| {
+                        db_basic_tables_summary_candidate(
+                            state,
+                            route,
+                            &observed_output.body,
+                            prefers_english_free_text,
+                        )
+                    })
                 }),
                 "transform" => transform_skill_formatted_output_candidate(&observed_output.body),
                 "package_manager" => package_manager_summary_candidate(
                     state,
                     &observed_output.body,
                     response_shape,
+                    allow_localized_direct_template,
                     prefers_english_free_text,
                 ),
                 "archive_basic" => {
@@ -6104,6 +6551,7 @@ fn extract_direct_answer_from_generic_output_impl(
                     locator_hint,
                     auto_locator_path,
                     prefer_full_path,
+                    allow_localized_direct_template,
                     prefers_english_free_text,
                 )
             })
@@ -6136,11 +6584,177 @@ fn archive_unpack_direct_answer_candidate(
     }
     let dest =
         archive_basic_path_value_from_body(body, &["dest", "dest_path", "destination", "path"])?;
+    let members = archive_unpack_members_from_body(body, &dest);
+    if !members.is_empty() {
+        let joined = if prefer_english {
+            members.join(", ")
+        } else {
+            members.join("、")
+        };
+        return if prefer_english {
+            Some(format!("Unpacked to {dest}; extracted {joined}."))
+        } else {
+            Some(format!("已解压到 {dest}，包含 {joined}。"))
+        };
+    }
     if prefer_english {
         Some(format!("Unpacked to {dest}."))
     } else {
         Some(format!("已解压到 {dest}。"))
     }
+}
+
+fn archive_unpack_members_from_body(body: &str, dest: &str) -> Vec<String> {
+    let dest_path = Path::new(dest);
+    let mut members = Vec::new();
+    for line in body.lines() {
+        let line = line.trim();
+        let Some((prefix, raw_path)) = line.split_once(':') else {
+            continue;
+        };
+        if !matches!(
+            prefix.trim().to_ascii_lowercase().as_str(),
+            "inflating" | "extracting" | "creating"
+        ) {
+            continue;
+        }
+        let raw_path = raw_path.trim();
+        if raw_path.is_empty() {
+            continue;
+        }
+        let path = Path::new(raw_path);
+        let member = path
+            .strip_prefix(dest_path)
+            .ok()
+            .and_then(|relative| relative.to_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::trim)
+            })
+            .filter(|value| !value.is_empty());
+        let Some(member) = member else {
+            continue;
+        };
+        let member = member.trim_matches('/').to_string();
+        if member.is_empty() || members.iter().any(|existing| existing == &member) {
+            continue;
+        }
+        members.push(member);
+        if members.len() >= 5 {
+            break;
+        }
+    }
+    members
+}
+
+fn git_basic_direct_answer_candidate(
+    state: Option<&AppState>,
+    route: Option<&crate::RouteResult>,
+    body: &str,
+    response_shape: Option<crate::OutputResponseShape>,
+    allow_localized_direct_template: bool,
+    prefer_english: bool,
+) -> Option<String> {
+    let route = route?;
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::GitRepositoryState {
+        return None;
+    }
+    let dirty = git_status_dirty_state(body)?;
+    if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
+        return Some(if dirty { "dirty" } else { "clean" }.to_string());
+    }
+    if !allow_localized_direct_template {
+        return None;
+    }
+    if dirty {
+        Some(observed_t(
+            state,
+            "clawd.msg.git_repository_state_dirty",
+            "这个仓库当前有未提交改动。",
+            "This repository currently has uncommitted changes.",
+            prefer_english,
+        ))
+    } else {
+        Some(observed_t(
+            state,
+            "clawd.msg.git_repository_state_clean",
+            "这个仓库当前没有未提交改动。",
+            "This repository currently has no uncommitted changes.",
+            prefer_english,
+        ))
+    }
+}
+
+fn latest_git_repository_state_direct_answer(
+    state: Option<&AppState>,
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    response_shape: Option<crate::OutputResponseShape>,
+    allow_localized_direct_template: bool,
+    prefer_english: bool,
+) -> Option<String> {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::GitRepositoryState {
+        return None;
+    }
+    let idx = latest_successful_step_index(loop_state, |step| step.skill == "git_basic")?;
+    let body = loop_state.executed_step_results[idx]
+        .output
+        .as_deref()
+        .map(str::trim)
+        .filter(|body| !body.is_empty())?;
+    git_basic_direct_answer_candidate(
+        state,
+        Some(route),
+        body,
+        response_shape,
+        allow_localized_direct_template,
+        prefer_english,
+    )
+}
+
+fn git_status_dirty_state(body: &str) -> Option<bool> {
+    let mut saw_status_header = false;
+    let mut saw_status_entry = false;
+    for raw_line in body.lines() {
+        let line = raw_line.trim_end();
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("exit=") {
+            continue;
+        }
+        if trimmed.starts_with("## ") {
+            saw_status_header = true;
+            continue;
+        }
+        if line_looks_like_git_short_status_entry(line) {
+            saw_status_entry = true;
+        }
+    }
+    if saw_status_entry {
+        Some(true)
+    } else if saw_status_header {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+fn line_looks_like_git_short_status_entry(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    if bytes.len() < 3 {
+        return false;
+    }
+    let status_a = bytes[0] as char;
+    let status_b = bytes[1] as char;
+    let sep = bytes[2] as char;
+    (sep == ' ' || sep == '\t')
+        && (is_git_short_status_code(status_a) || is_git_short_status_code(status_b))
+}
+
+fn is_git_short_status_code(ch: char) -> bool {
+    matches!(ch, 'M' | 'A' | 'D' | 'R' | 'C' | 'U' | '?' | '!')
 }
 
 fn fs_search_output_direct_answer_candidate(
@@ -7809,6 +8423,30 @@ version.workspace = true
     }
 
     #[test]
+    fn inventory_dir_file_names_contract_filters_names_by_kind() {
+        let value = serde_json::json!({
+            "action": "inventory_dir",
+            "names_only": true,
+            "names": ["archive", "release_checklist.md", "service_notes.md"],
+            "names_by_kind": {
+                "files": ["release_checklist.md", "service_notes.md"],
+                "dirs": ["archive"],
+                "other": []
+            },
+            "counts": {"files": 2, "dirs": 1, "total": 3}
+        });
+        let mut route = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route.output_contract.semantic_kind = OutputSemanticKind::FileNames;
+
+        let answer = inventory_dir_direct_answer_candidate(None, Some(&route), &value, false)
+            .expect("file names answer");
+
+        assert!(answer.contains("release_checklist.md"));
+        assert!(answer.contains("service_notes.md"));
+        assert!(!answer.contains("archive"));
+    }
+
+    #[test]
     fn direct_answer_groups_inventory_dir_for_chat_wrapped_directory_entry_contract() {
         let mut loop_state = LoopState::new(1);
         loop_state.executed_step_results.push(ok_step(
@@ -8237,6 +8875,66 @@ version.workspace = true
                 .as_deref(),
             Some("README.md\ncrates/clawd/src/ask_flow.rs\ncrates/clawd/src/intent_router.rs")
         );
+    }
+
+    #[test]
+    fn content_presence_direct_answer_includes_matching_text_evidence() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_basic",
+            r##"{"action":"grep_text","query":"release","case_insensitive":true,"count":1,"match_count":1,"matches":[{"path":"scripts/nl_tests/fixtures/device_local/docs/release_checklist.md","line":1,"text":"# Release Checklist"}]}"##,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
+        route_result.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
+        route_result.output_contract.requires_content_evidence = true;
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("content presence should produce a direct grounded answer");
+
+        assert!(answer.contains("release"));
+        assert!(answer.contains("release_checklist.md:1"));
+        assert!(answer.contains("# Release Checklist"));
+    }
+
+    #[test]
+    fn doc_parse_content_presence_uses_machine_selector_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "doc_parse",
+            r##"{"text":"# Release Checklist\n\n1. Verify config loading.\n2. Confirm migrations."}"##,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
+        route_result.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
+        route_result.output_contract.requires_content_evidence = true;
+        route_result.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md".to_string();
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            auto_locator_path: Some(
+                "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md".to_string(),
+            ),
+            original_user_request: Some(
+                "[CONTRACT_TEST_HINT]\nselector_query=release\nselector_case_insensitive=true\n[/CONTRACT_TEST_HINT]"
+                    .to_string(),
+            ),
+            ..AgentRunContext::default()
+        };
+
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("doc_parse content presence should use selector evidence directly");
+
+        assert!(answer.contains("release"));
+        assert!(answer.contains("release_checklist.md:1"));
+        assert!(answer.contains("# Release Checklist"));
+        assert!(!answer.contains("不包含"));
     }
 
     #[test]
@@ -10273,7 +10971,7 @@ version.workspace = true
     }
 
     #[test]
-    fn direct_answer_defers_hidden_entries_check_strict_shape_to_synthesis() {
+    fn direct_answer_formats_hidden_entries_check_strict_shape_from_listing() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -10312,10 +11010,40 @@ version.workspace = true
             route_result: Some(route_result),
             ..AgentRunContext::default()
         };
-        assert!(
+        assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-                .is_none()
+                .as_deref(),
+            Some(".codex\n.git/\n.gitignore")
         );
+    }
+
+    #[test]
+    fn direct_answer_formats_hidden_entries_check_empty_inventory_without_followup() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"inventory_dir","counts":{"dirs":1,"files":1,"hidden":0,"total":2},"entries":[{"hidden":false,"kind":"file","name":"README.md","path":"README.md"},{"hidden":false,"kind":"dir","name":"src","path":"src"}],"include_hidden":true,"names":["README.md","src"],"path":"/tmp/workspace"}"#,
+        ));
+        let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+        route_result.route_reason =
+            "structured_contract_hint_fast_path; contract_hint_fast_path".to_string();
+        route_result.resolved_intent =
+            "检查当前目录有没有隐藏文件，如果有就列出几个例子。".to_string();
+        route_result.output_contract.semantic_kind = OutputSemanticKind::HiddenEntriesCheck;
+        route_result.output_contract.requires_content_evidence = true;
+        route_result.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("hidden entries strict contract should answer from inventory");
+
+        assert!(answer.contains("未发现隐藏文件"));
+        assert!(!answer.contains("要继续"));
     }
 
     #[test]
@@ -11345,7 +12073,7 @@ version.workspace = true
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
-            Some("已解压到 /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked。")
+            Some("已解压到 /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked，包含 notes.txt。")
         );
     }
 
@@ -12137,7 +12865,55 @@ version.workspace = true
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
                 .as_deref(),
-            Some("当前识别到的包管理器是 brew。")
+            Some("检测到的包管理器是 brew，依据是 package_manager 返回了 package_manager=brew。")
+        );
+    }
+
+    #[test]
+    fn direct_answer_formats_package_manager_matrix_basis_summary() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "package_manager",
+            "package_manager=apt-get",
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent: "检测这台机器可用的包管理器，并说明依据。".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "llm_contract:package_manager_detection".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::None,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::PackageManagerDetection,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some(
+                "检测到的包管理器是 apt-get，依据是 package_manager 返回了 package_manager=apt-get。"
+            )
         );
     }
 
@@ -12232,6 +13008,123 @@ version.workspace = true
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
             None
         );
+    }
+
+    #[test]
+    fn sqlite_database_kind_judgment_uses_contract_selector_and_cites_tables() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "db_basic",
+            r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]}"#,
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent:
+                "判断 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 更像业务库还是测试库，并给出依据"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "llm_contract:sqlite_database_kind_judgment".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+                locator_hint:
+                    "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            original_user_request: Some(
+                "判断这个 SQLite 更像业务库还是测试库。\n[CONTRACT_TEST_HINT]\nselector_database_kind=test\n[/CONTRACT_TEST_HINT]"
+                    .to_string(),
+            ),
+            ..AgentRunContext::default()
+        };
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("expected deterministic sqlite database kind answer");
+        assert!(answer.contains("更像测试库"), "{answer}");
+        assert!(answer.contains("orders"), "{answer}");
+        assert!(answer.contains("service_logs"), "{answer}");
+        assert!(answer.contains("users"), "{answer}");
+        assert!(!answer.contains("第 1 步"), "{answer}");
+    }
+
+    #[test]
+    fn sqlite_database_kind_judgment_prefers_table_inventory_over_later_name_columns() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "db_basic",
+            r#"{"columns":["name"],"rows":[{"name":"orders"},{"name":"service_logs"},{"name":"users"}]}"#,
+        ));
+        loop_state.executed_step_results.push(ok_step(
+            "step_2",
+            "db_basic",
+            r#"{"columns":["id","name","email"],"rows":[{"email":"alice@example.com","id":1,"name":"Alice"},{"email":"bob@example.com","id":2,"name":"Bob"}]}"#,
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent:
+                "判断 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 更像业务库还是测试库，并给出依据"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "llm_contract:sqlite_database_kind_judgment".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+                locator_hint:
+                    "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            original_user_request: Some(
+                "判断这个 SQLite 更像业务库还是测试库。\n[CONTRACT_TEST_HINT]\nselector_database_kind=test\n[/CONTRACT_TEST_HINT]"
+                    .to_string(),
+            ),
+            ..AgentRunContext::default()
+        };
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("expected deterministic sqlite database kind answer");
+        assert!(answer.contains("orders"), "{answer}");
+        assert!(answer.contains("service_logs"), "{answer}");
+        assert!(answer.contains("users"), "{answer}");
+        assert!(!answer.contains("Alice"), "{answer}");
+        assert!(!answer.contains("Bob"), "{answer}");
     }
 
     #[test]
@@ -12863,6 +13756,152 @@ version.workspace = true
         assert_eq!(
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
             None
+        );
+    }
+
+    #[test]
+    fn direct_answer_summarizes_git_repository_state_without_volatile_count() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "git_basic",
+            "exit=0\n## main...origin/main\n M Cargo.toml\n?? tmp/generated.txt\n",
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: "检查当前仓库是否存在未提交的改动，用一句话返回结果".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::GitRepositoryState,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("这个仓库当前有未提交改动。")
+        );
+    }
+
+    #[test]
+    fn direct_answer_defers_git_repository_state_for_non_bilingual_language() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "git_basic",
+            "exit=0\n## main...origin/main\n M Cargo.toml\n?? tmp/generated.txt\n",
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: "現在のリポジトリに未コミットの変更があるか、一文で答えてください"
+                .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::GitRepositoryState,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+            None
+        );
+    }
+
+    #[test]
+    fn direct_answer_prefers_git_state_over_later_synthesis() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "git_basic",
+            "exit=0\n## main...origin/main\n M Cargo.toml\n?? tmp/generated.txt\n",
+        ));
+        loop_state.executed_step_results.push(ok_step(
+            "step_2",
+            "synthesize_answer",
+            "是的，当前仓库有 8 个文件有未提交的改动。",
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: "检查当前仓库是否存在未提交的改动，用一句话返回结果".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+                delivery_intent: crate::OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::GitRepositoryState,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("这个仓库当前有未提交改动。")
         );
     }
 

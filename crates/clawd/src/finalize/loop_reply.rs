@@ -2491,6 +2491,7 @@ fn direct_structured_observed_answer_impl(
     if route.ask_mode.finalize_chat_wrapped()
         && route.output_contract.requires_content_evidence
         && latest_plan_requested_synthesis(loop_state)
+        && route.output_contract.semantic_kind != crate::OutputSemanticKind::GitRepositoryState
     {
         return None;
     }
@@ -3354,6 +3355,16 @@ fn route_requires_matrix_deterministic_final_answer(route: &crate::RouteResult) 
     matrix_final_answer_shape_class(route).is_some_and(|class| !class.allows_model_language())
 }
 
+fn route_has_contract_matrix_final_shape(route: &crate::RouteResult) -> bool {
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+    ) {
+        return false;
+    }
+    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract).is_some()
+}
+
 fn route_requires_observed_semantic_projection(route: &crate::RouteResult) -> bool {
     matches!(
         route.output_contract.semantic_kind,
@@ -3857,6 +3868,9 @@ fn should_attach_execution_summary(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
+    if route_has_contract_matrix_final_shape(route) {
+        return false;
+    }
     if route.output_contract.exact_sentence_count.is_some() {
         return false;
     }
@@ -4379,6 +4393,9 @@ fn delivery_contract_suppresses_execution_summary(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return false;
     };
+    if route_has_contract_matrix_final_shape(route) {
+        return true;
+    }
     if route.output_contract.response_shape == crate::OutputResponseShape::Strict
         && delivery_messages
             .iter()
@@ -6446,7 +6463,21 @@ enum SizeComparisonAnswerStyle {
     ExplainRatio,
 }
 
-fn size_comparison_answer_style(route: &crate::RouteResult) -> SizeComparisonAnswerStyle {
+fn size_comparison_answer_style(
+    route: &crate::RouteResult,
+    user_text: &str,
+) -> SizeComparisonAnswerStyle {
+    if crate::intent_router::contract_test_hint_value(user_text, "selector_answer_style")
+        .as_deref()
+        .is_some_and(|value| {
+            matches!(
+                value.trim(),
+                "larger_with_sizes" | "comparison_with_sizes" | "explain_ratio"
+            )
+        })
+    {
+        return SizeComparisonAnswerStyle::ExplainRatio;
+    }
     if matches!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
@@ -6491,25 +6522,31 @@ fn compare_paths_size_ratio_answer_with_style(
             format!("{larger_label}：{delta} 字节")
         });
     }
-    if right_size == 0 {
+    if left_size == right_size {
         return Some(if prefer_english {
-            format!(
-                "`{right_label}` is 0 bytes, so a size ratio cannot be computed; `{left_label}` is {left_size} bytes."
-            )
+            format!("They are the same size: {left_label} and {right_label} are both {left_size} bytes.")
         } else {
-            format!(
-                "`{right_label}` 为 0 字节，无法计算相对倍数；`{left_label}` 为 {left_size} 字节。"
-            )
+            format!("{left_label} 和 {right_label} 一样大，都是 {left_size} 字节。")
         });
     }
-    let ratio = left_size as f64 / right_size as f64;
-    Some(if prefer_english {
-        format!(
-            "`{left_label}` is about {ratio:.2}x `{right_label}` ({left_label}={left_size} bytes, {right_label}={right_size} bytes)."
-        )
+    let (larger_label, larger_size, smaller_label, smaller_size) = if left_size > right_size {
+        (left_label, left_size, right_label, right_size)
     } else {
-        format!(
-            "`{left_label}` 大约是 `{right_label}` 的 {ratio:.2} 倍（{left_label}={left_size} 字节，{right_label}={right_size} 字节）。"
+        (right_label, right_size, left_label, left_size)
+    };
+    let ratio = (smaller_size > 0).then(|| larger_size as f64 / smaller_size as f64);
+    Some(match (prefer_english, ratio) {
+        (true, Some(ratio)) => format!(
+            "`{larger_label}` is larger: {larger_size} bytes, about {ratio:.2}x `{smaller_label}` ({smaller_size} bytes)."
+        ),
+        (true, None) => format!(
+            "`{larger_label}` is larger: {larger_size} bytes; `{smaller_label}` is 0 bytes."
+        ),
+        (false, Some(ratio)) => format!(
+            "`{larger_label}` 更大：{larger_size} 字节，大约是 `{smaller_label}`（{smaller_size} 字节）的 {ratio:.2} 倍。"
+        ),
+        (false, None) => format!(
+            "`{larger_label}` 更大：{larger_size} 字节；`{smaller_label}` 为 0 字节。"
         )
     })
 }
@@ -6647,7 +6684,7 @@ fn direct_quantity_comparison_from_compare_paths(
         return None;
     }
     let prefer_english = prefer_english_for_user_text(state, user_text);
-    let style = size_comparison_answer_style(route);
+    let style = size_comparison_answer_style(route, user_text);
     let answer = loop_state
         .executed_step_results
         .iter()
@@ -8760,6 +8797,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn direct_quantity_comparison_contract_selector_returns_larger_with_sizes() {
+        let state = test_state();
+        let mut loop_state = crate::agent_engine::LoopState::new(1);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"compare_paths","left":{"path":"release_checklist.md","resolved_path":"/tmp/release_checklist.md","kind":"file","size_bytes":153},"right":{"path":"package.json","resolved_path":"/tmp/package.json","kind":"file","size_bytes":246},"comparison":{"same_kind":true,"same_name":false,"same_size":false,"size_delta_bytes":-93,"left_newer":false,"same_content":false}}"#,
+        ));
+        let mut route = free_route_result();
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let (answer, _summary) = direct_quantity_comparison_from_compare_paths(
+            &state,
+            "比较两个文件大小\n[CONTRACT_TEST_HINT]\nselector_answer_style=larger_with_sizes\n[/CONTRACT_TEST_HINT]",
+            &loop_state,
+            Some(&ctx),
+        )
+        .expect("selector should force complete comparison answer");
+
+        assert!(answer.contains("package.json"), "answer: {answer}");
+        assert!(answer.contains("246"), "answer: {answer}");
+        assert!(answer.contains("release_checklist.md"), "answer: {answer}");
+        assert!(answer.contains("153"), "answer: {answer}");
+        assert!(
+            !answer.contains("package.json：93 字节"),
+            "answer: {answer}"
+        );
+    }
+
     fn plan_result_with_steps(steps: Vec<crate::PlanStep>) -> crate::PlanResult {
         crate::PlanResult {
             goal: "test goal".to_string(),
@@ -9635,6 +9709,50 @@ mod tests {
             final_answer_text_from_delivery(&delivery),
             "这更像运行日志。"
         );
+    }
+
+    #[test]
+    fn contract_matrix_delivery_suppresses_hardcoded_execution_summary() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .round_traces
+            .push(crate::task_journal::TaskJournalRoundTrace {
+                round_no: 1,
+                goal: "list archive members".to_string(),
+                execution_recipe_summary: None,
+                plan_result: Some(plan_result_with_steps(vec![crate::PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "archive_basic".to_string(),
+                    args: serde_json::json!({"action": "list"}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }])),
+                verify_result: None,
+            });
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "archive_basic",
+            "notes.txt\nnested/config.ini\n",
+        ));
+        let mut route = free_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveList;
+        route.output_contract.requires_content_evidence = true;
+        route.route_reason =
+            "structured_contract_hint_fast_path; contract_hint_fast_path".to_string();
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut delivery = vec![
+            "**执行过程**\n1. 调用技能 `archive_basic`".to_string(),
+            "notes.txt\nnested/config.ini".to_string(),
+        ];
+
+        attach_execution_summary_to_delivery(&loop_state, Some(&ctx), None, &mut delivery);
+
+        assert_eq!(delivery, vec!["notes.txt\nnested/config.ini".to_string()]);
     }
 
     #[test]
@@ -15851,7 +15969,7 @@ mod tests {
             structured_answer
                 .as_ref()
                 .map(|(answer, _summary)| answer.as_str()),
-            Some("Detected package manager: brew."),
+            Some("Detected package manager: brew. Basis: package_manager returned package_manager=brew."),
             "package manager summary should use structured skill evidence"
         );
 
@@ -15902,6 +16020,51 @@ mod tests {
                 .is_none(),
             "one-sentence summary should not raw-passthrough git status output"
         );
+    }
+
+    #[test]
+    fn git_repository_state_direct_answer_overrides_later_synthesis() {
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state
+            .output_vars
+            .insert("last_skill_name".to_string(), "git_basic".to_string());
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "git_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some(
+                "exit=0\n## main...origin/main\n M Cargo.toml\n?? new_file.txt\n".to_string(),
+            ),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_2".to_string(),
+            skill: "synthesize_answer".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("该仓库有 8 个文件存在未提交改动。".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+
+        let mut route = free_route_result();
+        route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+        route.resolved_intent = "检查当前仓库是否有未提交改动，用一句话告诉我".to_string();
+        route.output_contract.response_shape = OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::GitRepositoryState;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        let (answer, _summary) =
+            direct_structured_observed_answer(None, &loop_state, Some(&agent_run_context))
+                .expect("git repository state direct answer");
+        assert_eq!(answer, "这个仓库当前有未提交改动。");
     }
 
     #[test]

@@ -1530,6 +1530,7 @@ fn semantic_kind_can_execute_without_locator(kind: crate::OutputSemanticKind) ->
             | crate::OutputSemanticKind::ServiceStatus
             | crate::OutputSemanticKind::HiddenEntriesCheck
             | crate::OutputSemanticKind::WorkspaceProjectSummary
+            | crate::OutputSemanticKind::RecentScalarEqualityCheck
             | crate::OutputSemanticKind::GitCommitSubject
             | crate::OutputSemanticKind::GitRepositoryState
             | crate::OutputSemanticKind::PackageManagerDetection
@@ -2833,6 +2834,28 @@ mod tests {
 
         assert!(!unbound_targeted_evidence_route_should_force_clarify(
             "check hidden entries in the current workspace and list examples",
+            &route,
+            &snapshot,
+        ));
+    }
+
+    #[test]
+    fn current_workspace_scalar_equality_check_does_not_trigger_unbound_fallback_guard() {
+        let mut route = executable_filename_route();
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+            conversation_state: None,
+            active_followup_frame: None,
+            active_clarify_state: None,
+            active_observed_facts: None,
+        };
+
+        assert!(!unbound_targeted_evidence_route_should_force_clarify(
+            "check whether the current git branch equals main",
             &route,
             &snapshot,
         ));

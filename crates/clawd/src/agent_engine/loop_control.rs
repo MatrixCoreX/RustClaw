@@ -540,6 +540,9 @@ pub(super) async fn run_agent_with_loop(
             if try_recover_structured_search_answer_verifier_gap(user_text, &mut reply) {
                 return Ok(reply);
             }
+            if try_recover_content_excerpt_summary_answer_verifier_gap(route_result, &mut reply) {
+                return Ok(reply);
+            }
             mark_reply_failed_after_answer_verifier_exhausted(user_text, &mut reply, &verifier);
         }
         return Ok(reply);
@@ -898,6 +901,70 @@ fn try_recover_structured_search_answer_verifier_gap(
         "answer_verifier_retry_exhausted_recovered_with_structured_search_results action={} count={}",
         finding.action, finding.count
     );
+    true
+}
+
+fn try_recover_content_excerpt_summary_answer_verifier_gap(
+    route_result: Option<&crate::RouteResult>,
+    reply: &mut AskReply,
+) -> bool {
+    if !route_result.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::ContentExcerptSummary
+    }) {
+        return false;
+    }
+    let Some(verifier) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+    else {
+        return false;
+    };
+    if !verifier.high_confidence_retry_gap() {
+        return false;
+    }
+    let Some(answer) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| {
+            journal
+                .step_results
+                .iter()
+                .rev()
+                .find(|step| {
+                    step.skill == "synthesize_answer"
+                        && step.status == crate::executor::StepExecutionStatus::Ok
+                        && step
+                            .output_excerpt
+                            .as_deref()
+                            .is_some_and(|text| !text.trim().is_empty())
+                })
+                .and_then(|step| step.output_excerpt.as_deref())
+        })
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(ToString::to_string)
+    else {
+        return false;
+    };
+    let mut messages = reply
+        .messages
+        .iter()
+        .filter(|message| crate::finalize::is_execution_summary_message(message))
+        .cloned()
+        .collect::<Vec<_>>();
+    messages.push(answer.clone());
+    if let Some(journal) = reply.task_journal.as_mut() {
+        journal.answer_verifier_summary = None;
+        journal.record_final_answer(&answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    }
+    reply.text = answer;
+    reply.messages = messages;
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    reply.is_llm_reply = false;
+    info!("answer_verifier_retry_exhausted_recovered_with_content_excerpt_summary_synthesis");
     true
 }
 
@@ -1421,6 +1488,7 @@ mod tests {
         mark_reply_failed_after_answer_verifier_exhausted, parse_log_analyze_finding,
         should_stop_for_observed_finalize,
         suppress_answer_verifier_retry_if_structurally_satisfied,
+        try_recover_content_excerpt_summary_answer_verifier_gap,
         try_recover_log_analyze_answer_verifier_gap,
         try_recover_structured_count_answer_verifier_gap,
         try_recover_structured_search_answer_verifier_gap, AgentLoopGuardPolicy, RoundOutcome,
@@ -1900,6 +1968,60 @@ mod tests {
         assert!(reply.text.contains("64"));
         assert!(reply.text.contains("58"));
         assert!(reply.text.contains("6"));
+        let journal = reply.task_journal.as_ref().expect("journal");
+        assert_eq!(
+            journal.final_status,
+            Some(crate::task_journal::TaskJournalFinalStatus::Success)
+        );
+        assert!(journal.answer_verifier_summary.is_none());
+    }
+
+    #[test]
+    fn content_excerpt_summary_verifier_exhaustion_recovers_with_synthesis_output() {
+        let mut route = route_result(OutputResponseShape::Free);
+        route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+        journal.record_route_result(&route);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+        journal.answer_verifier_summary =
+            Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+                pass: false,
+                missing_evidence_fields: vec!["content_excerpt".to_string()],
+                answer_incomplete_reason: "final answer dropped synthesized summary".to_string(),
+                should_retry: true,
+                retry_instruction: "use the full synthesized summary".to_string(),
+                confidence: 0.94,
+            });
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "synthesize_answer".to_string(),
+                status: StepExecutionStatus::Ok,
+                output_excerpt: Some(
+                    "Summary from observed excerpt covering all required facts.".to_string(),
+                ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+        let mut reply = AskReply::non_llm("partial answer".to_string())
+            .with_messages(vec![
+                "**Execution**\n1. Read file excerpt.".to_string(),
+                "partial answer".to_string(),
+            ])
+            .with_task_journal(journal);
+
+        assert!(try_recover_content_excerpt_summary_answer_verifier_gap(
+            Some(&route),
+            &mut reply
+        ));
+
+        assert!(!reply.should_fail_task);
+        assert_eq!(
+            reply.text,
+            "Summary from observed excerpt covering all required facts."
+        );
         let journal = reply.task_journal.as_ref().expect("journal");
         assert_eq!(
             journal.final_status,

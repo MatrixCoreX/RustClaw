@@ -711,6 +711,12 @@ def evaluate(obs: Observation, expected: dict[str, Any]) -> list[str]:
         for value in values:
             if str(value) not in obs.final_text:
                 failures.append(f"final_contains: missing {value!r}")
+    if "final_not_contains" in expected:
+        values = expected["final_not_contains"]
+        values = values if isinstance(values, list) else [values]
+        for value in values:
+            if str(value) in obs.final_text:
+                failures.append(f"final_not_contains: forbidden {value!r}")
     return failures
 
 
