@@ -1147,6 +1147,14 @@ impl ContractMatrix {
                         &contract.artifact_kind,
                         &contract.channel_visibility,
                     );
+                    validate_artifact_shape_contract(
+                        &mut errors,
+                        &format!("contract `{key}`"),
+                        Some(&contract.delivery_shape),
+                        &contract.final_answer_shape,
+                        &contract.artifact_kind,
+                        &contract.channel_visibility,
+                    );
                     validate_observation_extractors(
                         &mut errors,
                         &format!("contract `{key}`"),
@@ -1218,6 +1226,14 @@ impl ContractMatrix {
                 &profile.policy_mode,
                 &profile.evidence_scope,
                 &profile.freshness,
+                &profile.artifact_kind,
+                &profile.channel_visibility,
+            );
+            validate_artifact_shape_contract(
+                &mut errors,
+                &format!("generic profile `{}`", profile.name),
+                None,
+                &profile.final_answer_shape,
                 &profile.artifact_kind,
                 &profile.channel_visibility,
             );
@@ -2167,6 +2183,38 @@ fn validate_contract_runtime_fields(
     );
 }
 
+fn validate_artifact_shape_contract(
+    errors: &mut Vec<String>,
+    context: &str,
+    delivery_shape: Option<&str>,
+    final_answer_shape: &str,
+    artifact_kind: &str,
+    channel_visibility: &str,
+) {
+    let normalized_artifact = normalized_contract_field(artifact_kind, "text");
+    let normalized_visibility = normalized_contract_field(channel_visibility, "user_visible");
+    let shape = FinalAnswerShape::parse(final_answer_shape);
+    if shape.is_some_and(|shape| shape.class() == FinalAnswerShapeClass::DeliveryArtifact) {
+        if normalized_artifact == "text" {
+            errors.push(format!(
+                "{context} delivery artifact final_answer_shape must declare non-text artifact_kind"
+            ));
+        }
+        if normalized_visibility != "user_visible" {
+            errors.push(format!(
+                "{context} delivery artifact final_answer_shape must be user_visible"
+            ));
+        }
+    }
+    if delivery_shape.is_some_and(|value| normalize_action_token(value) == "file")
+        && normalized_artifact != "file"
+    {
+        errors.push(format!(
+            "{context} delivery_shape=file must declare artifact_kind=file"
+        ));
+    }
+}
+
 fn validate_observation_extractors(
     errors: &mut Vec<String>,
     context: &str,
@@ -3018,6 +3066,54 @@ failure_policy = "no_retry"
         );
         assert!(!FinalAnswerShape::NameList.allows_model_language());
         assert!(FinalAnswerShape::SummaryWithEvidence.allows_model_language());
+    }
+
+    #[test]
+    fn delivery_artifact_contracts_declare_file_artifact_kind() {
+        let matrix = load_workspace_matrix();
+
+        for (key, contract) in &matrix.contracts {
+            let shape = FinalAnswerShape::parse(&contract.final_answer_shape)
+                .expect("contract final_answer_shape should be typed");
+            if shape.class() == FinalAnswerShapeClass::DeliveryArtifact {
+                assert_eq!(
+                    contract.artifact_kind(),
+                    "file",
+                    "delivery artifact contract `{key}` must not default to text"
+                );
+                assert_eq!(
+                    contract.channel_visibility(),
+                    "user_visible",
+                    "delivery artifact contract `{key}` must be user visible"
+                );
+            }
+            if normalize_action_token(&contract.delivery_shape) == "file" {
+                assert_eq!(
+                    contract.artifact_kind(),
+                    "file",
+                    "file delivery-shape contract `{key}` must declare artifact_kind=file"
+                );
+            }
+        }
+
+        for profile in &matrix.generic_profiles {
+            let shape = FinalAnswerShape::parse(&profile.final_answer_shape)
+                .expect("profile final_answer_shape should be typed");
+            if shape.class() == FinalAnswerShapeClass::DeliveryArtifact {
+                assert_eq!(
+                    profile.artifact_kind(),
+                    "file",
+                    "delivery artifact generic profile `{}` must not default to text",
+                    profile.name
+                );
+                assert_eq!(
+                    profile.channel_visibility(),
+                    "user_visible",
+                    "delivery artifact generic profile `{}` must be user visible",
+                    profile.name
+                );
+            }
+        }
     }
 
     #[test]
