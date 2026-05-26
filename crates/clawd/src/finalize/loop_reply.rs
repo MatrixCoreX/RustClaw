@@ -3151,6 +3151,9 @@ async fn direct_publishable_observed_answer(
     let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
         return None;
     };
+    if route_requires_matrix_deterministic_final_answer(route) {
+        return None;
+    }
     if route.output_contract.requires_content_evidence
         || matches!(
             route.output_contract.response_shape,
@@ -3353,6 +3356,14 @@ fn matrix_final_answer_shape_class(
 
 fn route_requires_matrix_deterministic_final_answer(route: &crate::RouteResult) -> bool {
     matrix_final_answer_shape_class(route).is_some_and(|class| !class.allows_model_language())
+}
+
+fn agent_context_allows_observed_output_language_fallback(
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .is_none_or(|route| !route_requires_matrix_deterministic_final_answer(route))
 }
 
 fn route_has_contract_matrix_final_shape(route: &crate::RouteResult) -> bool {
@@ -8014,7 +8025,9 @@ pub(crate) async fn finalize_loop_reply(
         return Ok(reply);
     }
 
-    if loop_state.delivery_messages.is_empty() {
+    if loop_state.delivery_messages.is_empty()
+        && agent_context_allows_observed_output_language_fallback(agent_run_context)
+    {
         match crate::agent_engine::observed_output::try_synthesize_answer_from_observed_output(
             state,
             task,
@@ -8449,6 +8462,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
+        agent_context_allows_observed_output_language_fallback,
         attach_deterministic_observed_execution_status_answer,
         attach_execution_recipe_closeout_to_delivery, attach_execution_summary_to_delivery,
         auto_requested_success_marker, backfill_delivery_from_last_outputs,
@@ -15346,6 +15360,55 @@ mod tests {
         let mut route = free_route_result();
         route.output_contract.response_shape = crate::OutputResponseShape::Strict;
         route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(direct_publishable_observed_answer(
+            &state,
+            &task,
+            &loop_state,
+            Some(&agent_run_context)
+        )
+        .await
+        .is_none());
+    }
+
+    #[test]
+    fn observed_output_language_fallback_skips_matrix_deterministic_shape() {
+        let mut route = free_route_result();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+
+        assert!(!agent_context_allows_observed_output_language_fallback(
+            Some(&agent_run_context)
+        ));
+        assert!(agent_context_allows_observed_output_language_fallback(None));
+    }
+
+    #[tokio::test]
+    async fn direct_publishable_observed_answer_skips_matrix_deterministic_shape() {
+        let state = test_state();
+        let task = claimed_task("task-matrix-strict-no-raw-publishable");
+        let mut loop_state = crate::agent_engine::LoopState::new(1);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: StepExecutionStatus::Ok,
+            output: Some("README.md\nCargo.toml\n".to_string()),
+            error: None,
+            started_at: 0,
+            finished_at: 0,
+        });
+        let mut route = free_route_result();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
         let agent_run_context = crate::agent_engine::AgentRunContext {
             route_result: Some(route),
             ..Default::default()
