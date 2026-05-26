@@ -1742,7 +1742,7 @@ fn step_can_supply_contract_evidence(
     }
 }
 
-fn step_reads_text_content(step: &TaskJournalStepTrace) -> bool {
+pub(crate) fn step_reads_text_content(step: &TaskJournalStepTrace) -> bool {
     match step.skill.as_str() {
         "read_file" | "doc_parse" => return true,
         _ => {}

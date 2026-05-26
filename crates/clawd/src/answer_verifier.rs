@@ -1128,6 +1128,23 @@ fn step_can_supply_verifier_observation(step: &crate::task_journal::TaskJournalS
     step.status == crate::executor::StepExecutionStatus::Ok && !is_synthesis_or_verifier_step(step)
 }
 
+fn step_can_supply_verifier_observation_for_route(
+    route: &RouteResult,
+    step: &crate::task_journal::TaskJournalStepTrace,
+) -> bool {
+    if !step_can_supply_verifier_observation(step) {
+        return false;
+    }
+    if !route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
+        && !route.wants_file_delivery
+        && crate::task_journal::step_reads_text_content(step)
+    {
+        return false;
+    }
+    true
+}
+
 fn is_synthesis_or_verifier_step(step: &crate::task_journal::TaskJournalStepTrace) -> bool {
     matches!(
         step.skill.as_str(),
@@ -1148,7 +1165,7 @@ fn existence_with_path_answer_is_grounded_in_observation(
         return false;
     }
     journal.step_results.iter().any(|step| {
-        step_can_supply_verifier_observation(step)
+        step_can_supply_verifier_observation_for_route(route, step)
             && step.output_excerpt.as_deref().is_some_and(|output| {
                 path_batch_facts_contain_answer_path(output, candidate_answer)
             })
@@ -2971,28 +2988,22 @@ mod tests {
             crate::task_journal::TaskJournal::for_task("task-exists", "ask", "check path");
         journal
             .step_results
-            .push(crate::task_journal::TaskJournalStepTrace {
-                step_id: "step_1".to_string(),
-                skill: "system_basic".to_string(),
-                status: crate::executor::StepExecutionStatus::Ok,
-                output_excerpt: Some(
-                    json!({
-                        "action": "path_batch_facts",
-                        "facts": [{
-                            "exists": true,
-                            "path": "README.md",
-                            "fact": {
-                                "kind": "file",
-                                "resolved_path": "/repo/README.md"
-                            }
-                        }]
-                    })
-                    .to_string(),
-                ),
-                error_excerpt: None,
-                started_at: 0,
-                finished_at: 0,
-            });
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "system_basic",
+                json!({
+                    "action": "path_batch_facts",
+                    "facts": [{
+                        "exists": true,
+                        "path": "README.md",
+                        "fact": {
+                            "kind": "file",
+                            "resolved_path": "/repo/README.md"
+                        }
+                    }]
+                })
+                .to_string(),
+            ));
 
         assert!(structurally_satisfies_answer_contract(
             &route,
@@ -3010,30 +3021,100 @@ mod tests {
             crate::task_journal::TaskJournal::for_task("task-missing", "ask", "check path");
         journal
             .step_results
-            .push(crate::task_journal::TaskJournalStepTrace {
-                step_id: "step_1".to_string(),
-                skill: "system_basic".to_string(),
-                status: crate::executor::StepExecutionStatus::Ok,
-                output_excerpt: Some(
-                    json!({
-                        "action": "path_batch_facts",
-                        "facts": [{
-                            "exists": false,
-                            "path": "missing.txt",
-                            "error": "not found"
-                        }]
-                    })
-                    .to_string(),
-                ),
-                error_excerpt: None,
-                started_at: 0,
-                finished_at: 0,
-            });
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "system_basic",
+                json!({
+                    "action": "path_batch_facts",
+                    "facts": [{
+                        "exists": false,
+                        "path": "missing.txt",
+                        "error": "not found"
+                    }]
+                })
+                .to_string(),
+            ));
 
         assert!(structurally_satisfies_answer_contract(
             &route,
             &journal,
             "未找到 `missing.txt`，请确认路径后再继续。"
+        ));
+    }
+
+    #[test]
+    fn existence_with_path_answer_ignores_doc_parse_path_facts() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.requires_content_evidence = false;
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-exists-doc-parse",
+            "ask",
+            "check path",
+        );
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_parse",
+                "doc_parse",
+                json!({
+                    "action": "parse_doc",
+                    "path": "README.md",
+                    "facts": [{
+                        "exists": true,
+                        "path": "README.md",
+                        "fact": {
+                            "kind": "file",
+                            "resolved_path": "/repo/README.md"
+                        }
+                    }]
+                })
+                .to_string(),
+            ));
+
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "有，路径：/repo/README.md"
+        ));
+    }
+
+    #[test]
+    fn existence_with_path_answer_ignores_read_text_path_facts() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Free;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
+        route.output_contract.requires_content_evidence = false;
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-exists-read-text",
+            "ask",
+            "check path",
+        );
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_read",
+                "fs_basic",
+                json!({
+                    "action": "read_text_range",
+                    "path": "README.md",
+                    "facts": [{
+                        "exists": true,
+                        "path": "README.md",
+                        "fact": {
+                            "kind": "file",
+                            "resolved_path": "/repo/README.md"
+                        }
+                    }]
+                })
+                .to_string(),
+            ));
+
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "有，路径：/repo/README.md"
         ));
     }
 
