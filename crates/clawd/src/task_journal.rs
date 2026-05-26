@@ -1701,6 +1701,14 @@ fn step_can_supply_contract_evidence(
     ) {
         return false;
     }
+    if route.is_some_and(|route| {
+        !route.output_contract.requires_content_evidence
+            && !route.output_contract.delivery_required
+            && !route.wants_file_delivery
+    }) && step_reads_text_content(step)
+    {
+        return false;
+    }
     match step.status {
         crate::executor::StepExecutionStatus::Ok => true,
         crate::executor::StepExecutionStatus::Error => {
@@ -1715,6 +1723,34 @@ fn step_can_supply_contract_evidence(
                         .any(|field| field == "command_output")
                 })
         }
+    }
+}
+
+fn step_reads_text_content(step: &TaskJournalStepTrace) -> bool {
+    match step.skill.as_str() {
+        "read_file" | "doc_parse" => return true,
+        _ => {}
+    }
+    let Some(output) = step.output_excerpt.as_deref().map(str::trim) else {
+        return false;
+    };
+    if output.is_empty() {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(output) else {
+        return false;
+    };
+    let action = value
+        .get("action")
+        .and_then(Value::as_str)
+        .map(normalize_evidence_field);
+    match step.skill.as_str() {
+        "fs_basic" | "system_basic" => matches!(
+            action.as_deref(),
+            Some("read_range" | "read_text_range" | "read_file" | "read")
+        ),
+        "archive_basic" => matches!(action.as_deref(), Some("read")),
+        _ => false,
     }
 }
 
@@ -4750,6 +4786,76 @@ mod tests {
                 .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
             Some(vec!["content_excerpt", "content_match"])
         );
+    }
+
+    #[test]
+    fn non_content_route_ignores_read_text_observation_as_field_value_evidence() {
+        let mut journal = TaskJournal::for_task(
+            "task-non-content-read-evidence",
+            "ask",
+            "current git commit subject",
+        );
+        let mut route = route_for_semantic(crate::OutputSemanticKind::GitCommitSubject);
+        route.output_contract.requires_content_evidence = false;
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_read".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "action": "read_text_range",
+                    "path": "/tmp/commit-message.txt",
+                    "content": "abc1234 add contract matrix tests"
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+
+        assert!(!coverage.is_complete());
+        assert_eq!(coverage.missing_evidence, vec!["field_value"]);
+        assert!(!coverage.observed_canonical.contains("field_value"));
+        assert!(!coverage.observed_canonical.contains("content_excerpt"));
+    }
+
+    #[test]
+    fn non_content_route_ignores_doc_parse_observation_as_structured_evidence() {
+        let mut journal = TaskJournal::for_task(
+            "task-non-content-doc-parse-evidence",
+            "ask",
+            "service status",
+        );
+        let mut route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
+        route.output_contract.requires_content_evidence = false;
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_parse".to_string(),
+            skill: "doc_parse".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "action": "parse_doc",
+                    "path": "/tmp/service-notes.md",
+                    "status": "running",
+                    "content": "operator notes say the service should be running"
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+
+        assert!(!coverage.is_complete());
+        assert_eq!(coverage.missing_evidence, vec!["field_value"]);
+        assert!(!coverage.observed_canonical.contains("field_value"));
     }
 
     #[test]
