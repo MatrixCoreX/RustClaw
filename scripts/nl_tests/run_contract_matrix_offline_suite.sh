@@ -42,8 +42,13 @@ cd "$ROOT_DIR"
 
 echo "Checking contract matrix generator syntax"
 python3 -m py_compile \
+  "${ROOT_DIR}/scripts/nl_tests/build_client_like_case_aggregate.py" \
   "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
-  "${ROOT_DIR}/scripts/nl_tests/evaluate_client_like_run.py"
+  "${ROOT_DIR}/scripts/nl_tests/evaluate_client_like_run.py" \
+  "${ROOT_DIR}/scripts/nl_tests/extract_client_like_replay.py"
+
+echo "Checking legacy client-like aggregate is current"
+python3 "${ROOT_DIR}/scripts/nl_tests/build_client_like_case_aggregate.py" --check
 
 echo "Generating deterministic contract matrix seed cases"
 python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
@@ -60,6 +65,16 @@ python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
   --expectations /tmp/rustclaw-contract-matrix-nl.expectations.jsonl \
   --report \
   > /tmp/rustclaw-contract-matrix-nl.jsonl
+
+echo "Generating multilingual contract matrix live NL rows"
+python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
+  --count "${CASE_COUNT}" \
+  --check \
+  --nl \
+  --multilingual-variants \
+  --expectations /tmp/rustclaw-contract-matrix-nl-multilingual.expectations.jsonl \
+  --report \
+  > /tmp/rustclaw-contract-matrix-nl-multilingual.jsonl
 
 fixtures=(
   observed_finalizer_scalar
@@ -81,5 +96,107 @@ for fixture in "${fixtures[@]}"; do
     "${ROOT_DIR}/scripts/nl_tests/fixtures/client_like_runs/${fixture}" \
     --expectations "${ROOT_DIR}/scripts/nl_tests/expectations/${fixture}_fixture.jsonl"
 done
+
+echo "Checking attribution fixture coverage"
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+
+root = Path("scripts/nl_tests/expectations")
+files = sorted(root.glob("*_attribution_fixture.jsonl"))
+files.append(root / "verifier_issue_missing_arg_fixture.jsonl")
+
+required_attributions = {
+    "model_error",
+    "schema_error",
+    "code_gap",
+    "contract_gap",
+    "tool_gap",
+    "permission_denied",
+    "budget_exhausted",
+    "prompt_budget_error",
+    "delivery_error",
+    "provider_error",
+}
+required_error_kinds = {
+    "capability_unavailable",
+    "channel_send_failed",
+    "contract_action_rejected",
+    "evidence_extractor_failed",
+    "permission_denied",
+    "provider_unavailable",
+    "schema_validation_failed",
+}
+required_stop_signals = {
+    "prompt_budget_error",
+    "recipe_repair_budget_exhausted",
+}
+
+
+def add_values(value, target):
+    if isinstance(value, str):
+        target.add(value)
+        return
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, str):
+                target.add(item)
+
+
+attributions = set()
+error_kinds = set()
+stop_signals = set()
+for path in files:
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        add_values(row.get("failure_attribution_any"), attributions)
+        add_values(row.get("stop_failure_attribution"), attributions)
+        add_values(row.get("verifier_failure_attribution_any"), attributions)
+        add_values(row.get("error_kind_any"), error_kinds)
+        add_values(row.get("stop_signal"), stop_signals)
+
+missing_attributions = sorted(required_attributions - attributions)
+missing_error_kinds = sorted(required_error_kinds - error_kinds)
+missing_stop_signals = sorted(required_stop_signals - stop_signals)
+if missing_attributions or missing_error_kinds or missing_stop_signals:
+    raise SystemExit(
+        "Attribution fixture coverage incomplete: "
+        f"missing_attributions={missing_attributions} "
+        f"missing_error_kinds={missing_error_kinds} "
+        f"missing_stop_signals={missing_stop_signals}"
+    )
+
+print(
+    "ATTRIBUTION_COVERAGE_OK "
+    f"categories={','.join(sorted(attributions))} "
+    f"error_kinds={','.join(sorted(error_kinds))} "
+    f"stop_signals={','.join(sorted(stop_signals))}"
+)
+PY
+
+echo "Extracting minimal replay reproduction fixture"
+python3 "${ROOT_DIR}/scripts/nl_tests/extract_client_like_replay.py" \
+  "${ROOT_DIR}/scripts/nl_tests/fixtures/client_like_runs/contract_rejection_attribution" \
+  --case-jsonl /tmp/rustclaw-contract-replay.jsonl \
+  --expectations /tmp/rustclaw-contract-replay.expectations.jsonl \
+  --min-repro /tmp/rustclaw-contract-replay.min-repro.jsonl
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("/tmp/rustclaw-contract-replay.min-repro.jsonl")
+rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+assert len(rows) == 1, f"expected one min-repro row, got {len(rows)}"
+row = rows[0]
+assert row["request"], "min repro must include request"
+assert row["route_contract"]["contract_match"], "min repro must include route contract"
+assert row["planned_actions"], "min repro must include planned actions"
+assert "missing_evidence" in row, "min repro must include evidence fields"
+assert row["final_answer_preview"], "min repro must include final answer preview"
+print("MIN_REPRO_EXTRACT_OK")
+PY
 
 echo "CONTRACT_MATRIX_OFFLINE_SUITE_OK"
