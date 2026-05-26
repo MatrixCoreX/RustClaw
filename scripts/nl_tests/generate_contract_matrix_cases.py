@@ -94,6 +94,56 @@ NL_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
     "generic_delivery": "生成一个 tmp/contract_matrix_generic_delivery.txt 文件，内容是 generic delivery case，然后把文件发给我。",
 }
 
+EN_PROMPTS_BY_CONTRACT: dict[str, str] = {
+    "none": "Do not run any operation. In one sentence, explain what kind of local assistant RustClaw is.",
+    "raw_command_output": "Run pwd and briefly tell me what the command printed.",
+    "service_status": "Check the current clawd service status and state the source in one sentence.",
+    "hidden_entries_check": "Check whether the current directory has hidden entries, and list a few examples if any exist.",
+    "file_names": f"List the file names under {FIXTURE_DOCS_DIR}. Output only the file-name list.",
+    "directory_names": f"List the folder names under {FIXTURE_ROOT}. Output only the names.",
+    "directory_entry_groups": f"List the direct children under {FIXTURE_ROOT}, grouped into files and folders.",
+    "file_paths": f"Find markdown file paths under {FIXTURE_ROOT}. Output only the path list.",
+    "directory_purpose_summary": f"Inspect {FIXTURE_DOCS_DIR} and explain in one sentence what these files are for.",
+    "content_excerpt_summary": f"Read the first 20 lines of {FIXTURE_DOC} and summarize them in three sentences.",
+    "content_presence_check": f"Check whether {FIXTURE_DOC} mentions release. Answer yes or no and include the evidence.",
+    "excerpt_kind_judgment": f"Read the beginning of {FIXTURE_DOC} and judge whether it is more like a checklist, log, or config.",
+    "recent_artifacts_judgment": f"List the 2 most recently modified files in {FIXTURE_DOCS_DIR}, then judge whether they look like docs or artifacts.",
+    "workspace_project_summary": f"Take a quick look at {FIXTURE_ROOT} and summarize the project in beginner-friendly words.",
+    "scalar_count": f"Count the direct children under {FIXTURE_DOCS_DIR}. Output only the number.",
+    "quantity_comparison": f"Compare {FIXTURE_DOC} and {FIXTURE_PACKAGE}; tell me which file is larger and include the evidence.",
+    "execution_failed_step": "Run this read-only check that should fail: cat /definitely_missing_rustclaw_contract_case. Then explain the failure reason.",
+    "generated_file_delivery": "Write a simple text file to tmp/contract_matrix_generated_note.txt with the content RustClaw contract matrix test, then send me the file path.",
+    "scalar_path_only": f"Output only the path {FIXTURE_PACKAGE}. Do not explain.",
+    "existence_with_path": f"Check whether {FIXTURE_PACKAGE} exists. Answer with the existence result and path only.",
+    "existence_with_path_summary": f"Check whether {FIXTURE_PACKAGE} exists. If it does, explain in one sentence what kind of file it is.",
+    "recent_scalar_equality_check": "Check whether the current git branch name equals main. Answer only with the judgment and evidence.",
+    "git_commit_subject": "Tell me only the latest git commit subject. Do not explain.",
+    "git_repository_state": "Check whether this repository currently has uncommitted changes, and explain in one sentence.",
+    "structured_keys": f"Read the top-level keys from {FIXTURE_CONFIG}. Output only the key-name list.",
+    "config_validation": f"Validate whether {FIXTURE_CONFIG} is a readable config file, and briefly explain the result.",
+    "config_risk_assessment": "Check the risk-related settings in configs/config.toml and briefly say whether there is any obvious high-risk setting.",
+    "sqlite_table_listing": f"List the tables in {FIXTURE_DB} and briefly explain the result.",
+    "sqlite_table_names_only": f"Output only the table-name list in {FIXTURE_DB}.",
+    "sqlite_database_kind_judgment": f"Judge whether {FIXTURE_DB} looks more like a business database or a test database, and include the evidence.",
+    "sqlite_schema_version": f"Read the schema version from {FIXTURE_DB} and briefly tell me the result.",
+    "package_manager_detection": "Detect which package managers are available on this machine and state the evidence.",
+    "archive_list": f"List the members inside {FIXTURE_ARCHIVE}.",
+    "archive_read": f"Read a content excerpt from notes.txt inside {FIXTURE_ARCHIVE}, then summarize it briefly.",
+    "archive_pack": f"Pack {FIXTURE_DOCS_DIR} into tmp/contract_matrix_docs_bundle.zip and tell me the generated path.",
+    "archive_unpack": f"Unpack {FIXTURE_ARCHIVE} into tmp/contract_matrix_unpacked and briefly describe the result.",
+    "docker_ps": "List the current Docker containers. If there are none, say what you observed.",
+    "docker_images": "List the current Docker images. If there are none, say what you observed.",
+    "docker_logs": "Read a recent log excerpt from the latest Docker container. If no container exists, explain why logs cannot be read.",
+    "docker_container_lifecycle": "Check whether Docker is available and say whether container lifecycle operations can be performed.",
+}
+
+EN_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
+    "generic_path_content": f"Inspect {FIXTURE_DOC}, then explain its main point in one beginner-friendly sentence.",
+    "generic_delivery": "Create tmp/contract_matrix_generic_delivery.txt with the content generic delivery case, then send me the file.",
+}
+
+LANGUAGE_VARIANTS = ("zh_cn", "en_us", "mixed")
+
 
 def normalize_token(value: str) -> str:
     return value.strip().lower()
@@ -335,26 +385,49 @@ def append_contract_test_hint(prompt: str, case: dict[str, Any]) -> str:
     )
 
 
-def generated_prompt_for_case(case: dict[str, Any]) -> str:
+def base_prompt_for_case(case: dict[str, Any], variant: str = "zh_cn") -> str:
     contract_id = str(case.get("contract_id") or "")
-    if case.get("contract_type") == "generic":
+    if variant == "en_us":
+        if case.get("contract_type") == "generic":
+            prompt = EN_PROMPTS_BY_GENERIC_PROFILE.get(contract_id)
+        else:
+            prompt = EN_PROMPTS_BY_CONTRACT.get(contract_id)
+    elif case.get("contract_type") == "generic":
         prompt = NL_PROMPTS_BY_GENERIC_PROFILE.get(contract_id)
     else:
         prompt = NL_PROMPTS_BY_CONTRACT.get(contract_id)
     if not prompt:
-        prompt = (
-            f"按 RustClaw 结构化任务 {contract_id} 做一次只读检查，"
-            "需要先观察证据，再按要求给出简短结果。"
-        )
+        if variant == "en_us":
+            prompt = (
+                f"Run the RustClaw structured task {contract_id}. "
+                "Observe evidence first, then return a concise result in the required shape."
+            )
+        else:
+            prompt = (
+                f"按 RustClaw 结构化任务 {contract_id} 做一次只读检查，"
+                "需要先观察证据，再按要求给出简短结果。"
+            )
+    if variant == "mixed":
+        en_prompt = base_prompt_for_case(case, "en_us")
+        return f"请按这个 English task 执行，并保持结果简短：{en_prompt}"
+    return prompt
+
+
+def generated_prompt_for_case(case: dict[str, Any]) -> str:
+    variant = str(case.get("nl_variant") or "zh_cn")
+    prompt = base_prompt_for_case(case, variant)
     return append_contract_test_hint(prompt, case)
 
 
 def as_nl_case(case: dict[str, Any]) -> dict[str, Any]:
     contract_id = str(case.get("contract_id") or "unknown")
     phase = str(case.get("phase") or "case")
+    variant = str(case.get("nl_variant") or "zh_cn")
     name = f"contract_matrix_{contract_id}_{phase}"
     if case.get("action_ref"):
         name = f"{name}_{str(case['action_ref']).replace('.', '_')}"
+    if variant != "zh_cn":
+        name = f"{name}_{variant}"
     tags = [
         "contract_matrix",
         "generated",
@@ -363,6 +436,8 @@ def as_nl_case(case: dict[str, Any]) -> dict[str, Any]:
         contract_id,
         phase,
     ]
+    if variant:
+        tags.extend(["same_contract_cell", variant])
     if case.get("expected_policy_decision"):
         tags.append(str(case["expected_policy_decision"]))
     row = {
@@ -374,6 +449,19 @@ def as_nl_case(case: dict[str, Any]) -> dict[str, Any]:
     }
     row.update(case)
     return row
+
+
+def expand_language_variants(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    expanded: list[dict[str, Any]] = []
+    for case in cases:
+        base_id = str(case.get("case_id") or "")
+        for variant in LANGUAGE_VARIANTS:
+            clone = dict(case)
+            clone["base_case_id"] = base_id
+            clone["case_id"] = f"{base_id}.{variant}"
+            clone["nl_variant"] = variant
+            expanded.append(clone)
+    return expanded
 
 
 def action_skill(action_ref: str) -> str:
@@ -897,6 +985,11 @@ def main() -> int:
         type=Path,
         help="write evaluator expectations JSONL for the selected case order; intended for --nl replay",
     )
+    parser.add_argument(
+        "--multilingual-variants",
+        action="store_true",
+        help="with --nl, emit zh-CN/en-US/mixed prompts for each selected contract cell",
+    )
     args = parser.parse_args()
 
     if args.update_history and args.history is None:
@@ -914,12 +1007,13 @@ def main() -> int:
                 print(f"ERROR: {error}", file=sys.stderr)
             return 1
 
-    output_cases = [as_nl_case(case) for case in cases] if args.nl else cases
+    expectation_cases = expand_language_variants(cases) if args.multilingual_variants else cases
+    output_cases = [as_nl_case(case) for case in expectation_cases] if args.nl else expectation_cases
     for case in output_cases:
         print(json.dumps(case, ensure_ascii=False, sort_keys=True))
 
     if args.expectations is not None:
-        write_expectations(args.expectations, cases)
+        write_expectations(args.expectations, expectation_cases)
 
     if args.update_history and args.history is not None:
         append_history_case_ids(args.history, cases)
