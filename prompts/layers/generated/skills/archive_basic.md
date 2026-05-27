@@ -64,6 +64,31 @@
 - Non-zero archive command exit codes are returned as `status=error` with `error_text=archive command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including `action`, relevant paths, and `output`.
 
+## Structured Evidence Contract (from interface)
+- Matrix admission status: built-in structured evidence only; do not use natural-language `text` as strict evidence when the same value exists in `extra`.
+- `list` success `extra` fields:
+  - `action`: string, always `list`; evidence role `status`.
+  - `archive`: string absolute/resolved archive path; evidence role `path`.
+  - `output`: string command observation; fallback evidence only, not strict list evidence.
+- `read` success `extra` fields:
+  - `action`: string, always `read`; evidence role `status`.
+  - `archive`: string absolute/resolved archive path; evidence role `path`.
+  - `member`: string archive member path; evidence role `path`.
+  - `content`: string member content; evidence role `field_value`.
+- `pack` success `extra` fields:
+  - `action`: string, always `pack`; evidence role `status`.
+  - `format`: string archive format; evidence role `field_value`.
+  - `source`: string resolved source path; evidence role `path`.
+  - `archive`: string output archive path; evidence role `artifact_path`.
+  - `output`: string command observation; fallback evidence only.
+- `unpack` success `extra` fields:
+  - `action`: string, always `unpack`; evidence role `status`.
+  - `archive`: string input archive path; evidence role `path`.
+  - `dest`: string extraction directory; evidence role `path`.
+  - `output`: string command observation; fallback evidence only.
+- Sensitive fields: archive member `content` may include user data. Provider-facing traces should prefer excerpt/hash/length metadata unless the user explicitly requested the content.
+- Error responses include top-level `error_kind`; `extra.error_kind` is present when the error has path/action context.
+
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:

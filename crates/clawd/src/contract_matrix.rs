@@ -11,7 +11,7 @@ use crate::{
 #[cfg(test)]
 use anyhow::{Context, Result};
 #[cfg(test)]
-use claw_core::skill_registry::SkillsRegistry;
+use claw_core::skill_registry::{SkillKind, SkillsRegistry};
 #[cfg(test)]
 use std::path::Path;
 
@@ -504,9 +504,14 @@ impl ObservationExtractor {
     }
 
     fn to_trace_json(&self) -> Value {
+        let registry = crate::task_journal::evidence_extractor_registry_trace(
+            &self.source,
+            &self.extractor_kind,
+        );
         json!({
             "source": self.source,
             "extractor_kind": self.extractor_kind,
+            "registry": registry,
         })
     }
 
@@ -1374,6 +1379,33 @@ impl ContractMatrix {
     }
 
     #[cfg(test)]
+    pub(crate) fn external_observation_admission_errors(
+        &self,
+        registry: &SkillsRegistry,
+    ) -> Vec<String> {
+        let mut errors = BTreeSet::new();
+        for (key, contract) in &self.contracts {
+            collect_external_observation_admission_errors(
+                &mut errors,
+                &format!("contract `{key}`"),
+                &contract.observation_sources(),
+                &contract.observation_extractors(),
+                registry,
+            );
+        }
+        for profile in &self.generic_profiles {
+            collect_external_observation_admission_errors(
+                &mut errors,
+                &format!("generic profile `{}`", profile.name),
+                &profile.observation_sources(),
+                &profile.observation_extractors(),
+                registry,
+            );
+        }
+        errors.into_iter().collect()
+    }
+
+    #[cfg(test)]
     pub(crate) fn backing_tool_refs_in_main_contracts(&self) -> Vec<String> {
         const BACKING_TOOL_NAMES: &[&str] = &[
             "system_basic",
@@ -2013,6 +2045,56 @@ fn collect_action_tokens(out: &mut BTreeSet<String>, values: &[String]) {
     }
 }
 
+#[cfg(test)]
+fn collect_external_observation_admission_errors(
+    errors: &mut BTreeSet<String>,
+    context: &str,
+    observation_sources: &[String],
+    observation_extractors: &[ObservationExtractor],
+    registry: &SkillsRegistry,
+) {
+    for token in observation_sources {
+        let Some(action_ref) = ActionRef::parse(token) else {
+            continue;
+        };
+        let Some(entry) = registry.get(&action_ref.skill) else {
+            continue;
+        };
+        let requires_admission = entry.matrix_admission.is_some()
+            || entry.kind == SkillKind::External
+            || entry
+                .external_bundle_dir
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty());
+        if !requires_admission {
+            continue;
+        }
+        if !registry.matrix_admission_eligible(&action_ref.skill, action_ref.action.as_deref()) {
+            errors.insert(format!(
+                "{context} observation_source `{}` requires matrix_admission.eligible=true for strict evidence use",
+                action_ref.as_key()
+            ));
+        }
+        let uses_text_legacy = observation_extractors.iter().any(|extractor| {
+            extractor.extractor_kind == "text_legacy"
+                && (extractor.source == action_ref.as_key() || extractor.source == action_ref.skill)
+        });
+        if uses_text_legacy {
+            let admission_allows_text_legacy = entry
+                .matrix_admission
+                .as_ref()
+                .and_then(|admission| admission.extractor_kind.as_deref())
+                .is_some_and(|kind| normalize_action_token(kind) == "text_legacy");
+            if !admission_allows_text_legacy {
+                errors.insert(format!(
+                    "{context} observation_source `{}` uses text_legacy extractor without matrix_admission.extractor_kind=text_legacy",
+                    action_ref.as_key()
+                ));
+            }
+        }
+    }
+}
+
 fn action_matches_any(action: &ActionRef, policies: &[String]) -> bool {
     policies.iter().any(|policy| {
         let Some(policy_ref) = ActionRef::parse(policy) else {
@@ -2054,14 +2136,14 @@ fn observation_extractors_for_sources(
     let mut extractors = BTreeMap::new();
     for source in sources {
         if let Some(extractor) = ObservationExtractor::from_source(&source) {
-            extractors.insert(extractor.source.clone(), extractor);
+            extractors.insert(extractor.stable_key(), extractor);
         }
     }
     for configured in configured_extractors {
         if let Some(extractor) =
             ObservationExtractor::normalized(&configured.source, &configured.extractor_kind)
         {
-            extractors.insert(extractor.source.clone(), extractor);
+            extractors.insert(extractor.stable_key(), extractor);
         }
     }
     extractors.into_values().collect()
@@ -2225,7 +2307,7 @@ fn validate_observation_extractors(
         .iter()
         .map(|source| normalize_action_token(source))
         .collect::<BTreeSet<_>>();
-    let mut seen_sources = BTreeSet::new();
+    let mut seen_extractors = BTreeSet::new();
     for extractor in configured_extractors {
         let source = normalize_action_token(&extractor.source);
         if source.is_empty() {
@@ -2240,16 +2322,24 @@ fn validate_observation_extractors(
                 extractor.source
             ));
         }
-        if !seen_sources.insert(source.clone()) {
-            errors.push(format!(
-                "{context} has duplicate observation_extractor source `{}`",
-                extractor.source
-            ));
-        }
         let extractor_kind = normalized_extractor_kind(&extractor.extractor_kind);
         if !extractor_kind_is_valid(&extractor_kind) {
             errors.push(format!(
                 "{context} observation_extractor source `{}` has invalid extractor_kind `{}`",
+                extractor.source, extractor.extractor_kind
+            ));
+            continue;
+        }
+        let extractor_key = format!("{source}={extractor_kind}");
+        if !seen_extractors.insert(extractor_key) {
+            errors.push(format!(
+                "{context} has duplicate observation_extractor source `{}` extractor_kind `{}`",
+                extractor.source, extractor.extractor_kind
+            ));
+        }
+        if !crate::task_journal::evidence_extractor_registry_contains(&source, &extractor_kind) {
+            errors.push(format!(
+                "{context} observation_extractor source `{}` with extractor_kind `{}` is not declared in the evidence extractor registry",
                 extractor.source, extractor.extractor_kind
             ));
         }
@@ -2309,6 +2399,18 @@ mod tests {
 
     fn load_workspace_matrix() -> ContractMatrix {
         ContractMatrix::load_from_workspace(&workspace_root()).expect("load contract matrix")
+    }
+
+    fn load_registry_from_text(raw: &str) -> SkillsRegistry {
+        let path = std::env::temp_dir().join(format!(
+            "contract_matrix_test_registry_{}_{}.toml",
+            std::process::id(),
+            fnv1a_hex(raw)
+        ));
+        std::fs::write(&path, raw).expect("write registry fixture");
+        let registry = SkillsRegistry::load_from_path(&path).expect("load registry fixture");
+        let _ = std::fs::remove_file(path);
+        registry
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2749,6 +2851,45 @@ matrix_version = "broken"
     }
 
     #[test]
+    fn configured_legacy_text_observation_extractors_extend_default_structured_extractors() {
+        let git_snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::GitCommitSubject,
+            ..IntentOutputContract::default()
+        })
+        .expect("git trace snapshot");
+        let git_extractors = git_snapshot
+            .get("observation_extractors")
+            .and_then(Value::as_array)
+            .expect("git observation extractors");
+        assert!(git_extractors.iter().any(|item| {
+            item.get("source").and_then(Value::as_str) == Some("git_basic")
+                && item.get("extractor_kind").and_then(Value::as_str) == Some("structured_json")
+        }));
+        assert!(git_extractors.iter().any(|item| {
+            item.get("source").and_then(Value::as_str) == Some("git_basic")
+                && item.get("extractor_kind").and_then(Value::as_str) == Some("text_legacy")
+        }));
+
+        let archive_snapshot = trace_snapshot_for_output_contract(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::ArchiveList,
+            ..IntentOutputContract::default()
+        })
+        .expect("archive trace snapshot");
+        let archive_extractors = archive_snapshot
+            .get("observation_extractors")
+            .and_then(Value::as_array)
+            .expect("archive observation extractors");
+        assert!(archive_extractors.iter().any(|item| {
+            item.get("source").and_then(Value::as_str) == Some("archive_basic.list")
+                && item.get("extractor_kind").and_then(Value::as_str) == Some("structured_json")
+        }));
+        assert!(archive_extractors.iter().any(|item| {
+            item.get("source").and_then(Value::as_str) == Some("archive_basic")
+                && item.get("extractor_kind").and_then(Value::as_str) == Some("text_legacy")
+        }));
+    }
+
+    #[test]
     fn final_shape_honors_scalar_hidden_entries_and_structured_key_verdicts() {
         assert_eq!(
             final_answer_shape_for_output_contract(&IntentOutputContract {
@@ -2854,6 +2995,12 @@ matrix_version = "broken"
                 .and_then(Value::as_str),
             Some("text_legacy")
         );
+        assert_eq!(
+            trace
+                .pointer("/observation_extractor/registry/extractor_ref")
+                .and_then(Value::as_str),
+            Some("run_cmd.text_legacy_v1")
+        );
     }
 
     #[test]
@@ -2900,6 +3047,20 @@ failure_policy = "no_retry"
         .expect_err("invalid runtime field should fail shape validation");
 
         assert!(err.contains("invalid policy_mode"));
+    }
+
+    #[test]
+    fn configured_observation_extractors_must_exist_in_registry() {
+        let source = format!(
+            "{}\n[[contracts.service_status.observation_extractors]]\nsource = \"run_cmd\"\nextractor_kind = \"structured_json\"\n",
+            include_str!("../../../configs/task_contract_matrix.toml")
+        );
+        let err = parse_contract_matrix_source(&source)
+            .expect_err("unregistered explicit extractor should fail validation");
+
+        assert!(err.contains(
+            "observation_extractor source `run_cmd` with extractor_kind `structured_json` is not declared in the evidence extractor registry"
+        ));
     }
 
     #[test]
@@ -3507,6 +3668,234 @@ failure_policy = "no_retry"
         missing.dedup();
 
         assert!(missing.is_empty(), "missing registry schemas: {missing:?}");
+    }
+
+    #[test]
+    fn legacy_virtual_tool_canonicalizations_are_covered_by_matrix_action_policy() {
+        let cases = [
+            (
+                OutputSemanticKind::ExistenceWithPath,
+                "system_basic",
+                json!({"action":"path_batch_facts", "paths":["README.md"]}),
+                "fs_basic.stat_paths",
+            ),
+            (
+                OutputSemanticKind::FileNames,
+                "system_basic",
+                json!({"action":"inventory_dir", "path":"scripts"}),
+                "fs_basic.list_dir",
+            ),
+            (
+                OutputSemanticKind::ScalarCount,
+                "system_basic",
+                json!({"action":"count_inventory", "path":"scripts"}),
+                "fs_basic.count_entries",
+            ),
+            (
+                OutputSemanticKind::ContentExcerptSummary,
+                "system_basic",
+                json!({"action":"read_range", "path":"README.md", "mode":"head", "n":5}),
+                "fs_basic.read_text_range",
+            ),
+            (
+                OutputSemanticKind::QuantityComparison,
+                "system_basic",
+                json!({"action":"compare_paths", "paths":["Cargo.toml", "README.md"]}),
+                "fs_basic.compare_paths",
+            ),
+            (
+                OutputSemanticKind::ConfigValidation,
+                "system_basic",
+                json!({"action":"validate_structured", "path":"configs/config.toml", "format":"toml"}),
+                "config_basic.validate",
+            ),
+            (
+                OutputSemanticKind::FilePaths,
+                "fs_search",
+                json!({"action":"find_ext", "root":"scripts", "ext":"sh"}),
+                "fs_basic.find_entries",
+            ),
+            (
+                OutputSemanticKind::ContentPresenceCheck,
+                "fs_search",
+                json!({"action":"grep_text", "root":".", "query":"FirstLayerDecision"}),
+                "fs_basic.grep_text",
+            ),
+            (
+                OutputSemanticKind::ConfigRiskAssessment,
+                "config_guard",
+                json!({"path":"configs/config.toml"}),
+                "config_guard",
+            ),
+            (
+                OutputSemanticKind::ContentExcerptSummary,
+                "read_file",
+                json!({"path":"README.md"}),
+                "fs_basic.read_text_range",
+            ),
+            (
+                OutputSemanticKind::FileNames,
+                "list_dir",
+                json!({"path":"scripts"}),
+                "fs_basic.list_dir",
+            ),
+            (
+                OutputSemanticKind::GeneratedFileDelivery,
+                "write_file",
+                json!({"path":"tmp/out.txt", "content":"ok"}),
+                "fs_basic.write_text",
+            ),
+        ];
+
+        for (semantic_kind, skill, args, expected_action_key) in cases {
+            let route = IntentOutputContract {
+                semantic_kind,
+                ..IntentOutputContract::default()
+            };
+            let policy = action_policy_for_output_contract(Some(&route), skill, &args)
+                .unwrap_or_else(|| panic!("missing policy for {skill} -> {expected_action_key}"));
+            assert!(
+                policy.is_allowed(),
+                "legacy {skill} should be allowed as {expected_action_key}, got {:?}",
+                policy.decision
+            );
+            assert_eq!(policy.action_key, expected_action_key);
+        }
+    }
+
+    #[test]
+    fn bundled_matrix_observation_sources_have_extractor_registry_refs() {
+        let matrix = load_workspace_matrix();
+        let mut missing = Vec::new();
+
+        for (name, contract) in &matrix.contracts {
+            for extractor in contract.observation_extractors() {
+                if crate::task_journal::evidence_extractor_registry_trace(
+                    &extractor.source,
+                    &extractor.extractor_kind,
+                )
+                .is_none()
+                {
+                    missing.push(format!(
+                        "contract `{name}` observation_source `{}` extractor_kind `{}`",
+                        extractor.source, extractor.extractor_kind
+                    ));
+                }
+            }
+        }
+        for profile in &matrix.generic_profiles {
+            for extractor in profile.observation_extractors() {
+                if crate::task_journal::evidence_extractor_registry_trace(
+                    &extractor.source,
+                    &extractor.extractor_kind,
+                )
+                .is_none()
+                {
+                    missing.push(format!(
+                        "generic profile `{}` observation_source `{}` extractor_kind `{}`",
+                        profile.name, extractor.source, extractor.extractor_kind
+                    ));
+                }
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "missing observation extractor registry refs: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn contract_matrix_external_observation_sources_are_admitted() {
+        let matrix = load_workspace_matrix();
+        let registry_path = workspace_root().join("configs/skills_registry.toml");
+        let registry = SkillsRegistry::load_from_path(&registry_path).expect("load registry");
+
+        let errors = matrix.external_observation_admission_errors(&registry);
+
+        assert!(
+            errors.is_empty(),
+            "external observation sources need matrix admission: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn external_observation_source_requires_matrix_admission() {
+        let matrix = ContractMatrix {
+            generic_profiles: vec![GenericProfile {
+                name: "external_scalar".to_string(),
+                required_evidence: vec!["field_value".to_string()],
+                observation_sources: vec!["demo_skill.ping".to_string()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let not_admitted = load_registry_from_text(
+            r#"
+[[skills]]
+name = "demo_skill"
+kind = "runner"
+matrix_admission = { eligible = false, declared_actions = [], evidence_sources = [], required_extra_fields = [], extractor_kind = "structured_json", admission_version = "external-v1" }
+"#,
+        );
+
+        let errors = matrix.external_observation_admission_errors(&not_admitted);
+
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("demo_skill.ping"));
+        assert!(errors[0].contains("matrix_admission.eligible=true"));
+
+        let action_mismatch = load_registry_from_text(
+            r#"
+[[skills]]
+name = "demo_skill"
+kind = "runner"
+matrix_admission = { eligible = true, declared_actions = ["other"], evidence_sources = ["structured_json"], required_extra_fields = ["extra.message"], extractor_kind = "structured_json", admission_version = "external-v1" }
+"#,
+        );
+        let errors = matrix.external_observation_admission_errors(&action_mismatch);
+        assert_eq!(errors.len(), 1);
+
+        let admitted = load_registry_from_text(
+            r#"
+[[skills]]
+name = "demo_skill"
+kind = "runner"
+matrix_admission = { eligible = true, declared_actions = ["ping"], evidence_sources = ["structured_json"], required_extra_fields = ["extra.message"], extractor_kind = "structured_json", admission_version = "external-v1" }
+"#,
+        );
+        assert!(matrix
+            .external_observation_admission_errors(&admitted)
+            .is_empty());
+
+        let text_legacy_matrix = ContractMatrix {
+            generic_profiles: vec![GenericProfile {
+                name: "external_scalar".to_string(),
+                required_evidence: vec!["field_value".to_string()],
+                observation_sources: vec!["demo_skill.ping".to_string()],
+                observation_extractors: vec![ObservationExtractor {
+                    source: "demo_skill.ping".to_string(),
+                    extractor_kind: "text_legacy".to_string(),
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let errors = text_legacy_matrix.external_observation_admission_errors(&admitted);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("text_legacy extractor"));
+
+        let text_legacy_admitted = load_registry_from_text(
+            r#"
+[[skills]]
+name = "demo_skill"
+kind = "runner"
+matrix_admission = { eligible = true, declared_actions = ["ping"], evidence_sources = ["text_legacy"], required_extra_fields = ["extra.message"], extractor_kind = "text_legacy", admission_version = "external-v1" }
+"#,
+        );
+        assert!(text_legacy_matrix
+            .external_observation_admission_errors(&text_legacy_admitted)
+            .is_empty());
     }
 
     #[test]

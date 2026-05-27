@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 struct Req {
     request_id: String,
     args: Value,
+    #[allow(dead_code)]
     #[serde(default)]
     context: Option<Value>,
     #[allow(dead_code)]
@@ -47,15 +48,15 @@ fn main() -> anyhow::Result<()> {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    extra: None,
-                    error_text: Some(err),
+                    extra: Some(json!({"error_kind": err.kind})),
+                    error_text: Some(err.message),
                 },
             },
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
-                extra: None,
+                extra: Some(json!({"error_kind":"invalid_input"})),
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -66,17 +67,37 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value) -> Result<(String, Value), String> {
+struct SkillErr {
+    kind: &'static str,
+    message: String,
+}
+
+impl SkillErr {
+    fn new(kind: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+}
+
+fn execute(args: Value) -> Result<(String, Value), SkillErr> {
     let obj = args
         .as_object()
-        .ok_or_else(|| "args must be object".to_string())?;
+        .ok_or_else(|| SkillErr::new("invalid_args", "args must be object"))?;
     let action = obj
         .get("action")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "action is required".to_string())?;
+        .ok_or_else(|| SkillErr::new("missing_action", "action is required"))?;
 
     match action {
-        "ping" => Ok(("TODO: implement ping".to_string(), json!({"action":"ping"}))),
-        _ => Err(format!("unsupported action: {action}; use "ping"")),
+        "ping" => Ok((
+            "pong".to_string(),
+            json!({"action":"ping","ok":true,"message":"pong"}),
+        )),
+        _ => Err(SkillErr::new(
+            "unsupported_action",
+            format!("unsupported action: {action}; use \"ping\""),
+        )),
     }
 }

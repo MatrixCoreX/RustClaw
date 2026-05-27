@@ -59,6 +59,23 @@
 - `grep_text` also returns `patterns`, `match_count`, and `matches` items with `path`, `line`, and `text` so callers can answer content-check questions without reading whole files.
 - Successful responses also mirror that parsed JSON into the optional `extra` field for machine-readable consumers.
 
+## Structured Evidence Contract (from interface)
+- Matrix admission status: built-in structured evidence only; strict search evidence must come from `extra.results`, `extra.matches`, and count fields.
+- `find_name`, `find_ext`, and `find_images` success `extra` fields:
+  - `action`: string action name; evidence role `status`.
+  - `root`: string resolved/bounded search root; evidence role `path`.
+  - `count`: integer number of returned results; evidence role `count`.
+  - `results`: string array candidate paths; evidence roles `results`, `entries`, and `path`.
+  - `ext`, `patterns`, `target_kind`, and cap fields when present; evidence role `field_value`.
+- `grep_text` success `extra` fields:
+  - `action`: string, always `grep_text`; evidence role `status`.
+  - `root`: string search root; evidence role `path`.
+  - `patterns`: string array filename filters; evidence role `entries`.
+  - `match_count`: integer match count; evidence role `count`.
+  - `matches`: array of objects with `path`, `line`, and `text`; evidence roles `results`, `path`, `table_cell`, and `field_value`.
+- Sensitive fields: `matches[].text` may include user data. Provider-facing traces should prefer short excerpts, hashes, line numbers, and paths unless the user requested matched content.
+- Error responses include readable `error_text`; top-level `error_kind` should be used when available.
+
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:

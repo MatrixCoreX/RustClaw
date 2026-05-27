@@ -39,6 +39,7 @@ fn record_run_skill_task_observation(
     validation: Option<&Value>,
     extra: Option<&Value>,
     notify: Option<bool>,
+    external_skill_admission: Option<&Value>,
 ) {
     let mut payload = json!({
         "source": "direct_run_skill",
@@ -70,9 +71,43 @@ fn record_run_skill_task_observation(
             "source": "direct_run_skill",
             "skill": skill_name,
             "status": status,
+            "external_skill_admission": external_skill_admission,
             "observed_evidence": observed_evidence,
         }));
     }
+}
+
+fn external_skill_admission_trace(state: &AppState, skill_name: &str) -> Option<Value> {
+    let registry = state.get_skills_registry()?;
+    let canonical = state.resolve_canonical_skill_name(skill_name);
+    let entry = registry.get(&canonical)?;
+    let is_external = entry.kind == claw_core::skill_registry::SkillKind::External
+        || entry
+            .external_bundle_dir
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        || entry.matrix_admission.is_some();
+    if !is_external {
+        return None;
+    }
+    let admission = entry.matrix_admission.as_ref();
+    Some(json!({
+        "schema_version": 1,
+        "source": "skills_registry",
+        "skill": canonical,
+        "eligible": admission.map(|value| value.eligible).unwrap_or(false),
+        "declared_actions": admission
+            .map(|value| value.declared_actions.clone())
+            .unwrap_or_default(),
+        "evidence_sources": admission
+            .map(|value| value.evidence_sources.clone())
+            .unwrap_or_default(),
+        "required_extra_fields": admission
+            .map(|value| value.required_extra_fields.clone())
+            .unwrap_or_default(),
+        "extractor_kind": admission.and_then(|value| value.extractor_kind.clone()),
+        "admission_version": admission.and_then(|value| value.admission_version.clone()),
+    }))
 }
 
 async fn finalize_run_skill_success(
@@ -108,6 +143,7 @@ async fn finalize_run_skill_success(
         Some(clean_text.clone()),
         None,
     ));
+    let external_skill_admission = external_skill_admission_trace(state, skill_name);
     record_run_skill_task_observation(
         &mut journal,
         skill_name,
@@ -117,6 +153,7 @@ async fn finalize_run_skill_success(
         outcome.validation.as_ref(),
         outcome.extra.as_ref(),
         outcome.notify,
+        external_skill_admission.as_ref(),
     );
     journal.record_delivery_consistent(crate::task_journal::delivery_payload_consistent(
         &clean_text,
@@ -214,6 +251,7 @@ async fn finalize_run_skill_failure(
         None,
         Some(err_text.to_string()),
     ));
+    let external_skill_admission = external_skill_admission_trace(state, skill_name);
     record_run_skill_task_observation(
         &mut journal,
         skill_name,
@@ -223,6 +261,7 @@ async fn finalize_run_skill_failure(
         None,
         None,
         None,
+        external_skill_admission.as_ref(),
     );
     journal.record_delivery_consistent(crate::task_journal::delivery_payload_consistent(
         err_text,
@@ -326,6 +365,13 @@ mod tests {
                 }
             })),
             Some(true),
+            Some(&json!({
+                "schema_version": 1,
+                "source": "skills_registry",
+                "skill": "demo",
+                "eligible": false,
+                "admission_version": "external-v1"
+            })),
         );
 
         let trace = journal.to_trace_json();
@@ -356,6 +402,16 @@ mod tests {
             token_item.get("redacted").and_then(Value::as_bool),
             Some(true)
         );
+        let admission = trace
+            .get("task_observations")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(|entry| entry.get("external_skill_admission"))
+            .expect("external skill admission trace");
+        assert_eq!(
+            admission.get("eligible").and_then(Value::as_bool),
+            Some(false)
+        );
     }
 
     #[test]
@@ -369,6 +425,7 @@ mod tests {
             "error",
             None,
             Some("missing required field: path"),
+            None,
             None,
             None,
             None,

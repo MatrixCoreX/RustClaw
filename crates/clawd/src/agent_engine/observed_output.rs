@@ -1296,6 +1296,18 @@ fn db_basic_database_kind_judgment_candidate(
     if table_names.is_empty() {
         return None;
     }
+    sqlite_database_kind_judgment_answer(route, &table_names, request_text, prefer_english)
+}
+
+fn sqlite_database_kind_judgment_answer(
+    route: &crate::RouteResult,
+    table_names: &[String],
+    request_text: Option<&str>,
+    prefer_english: bool,
+) -> Option<String> {
+    if table_names.is_empty() {
+        return None;
+    }
     let kind = sqlite_database_kind_from_contract_selector(request_text)
         .or_else(|| sqlite_database_kind_from_locator(route))?;
     let tables = if prefer_english {
@@ -1332,6 +1344,72 @@ fn db_basic_database_kind_judgment_candidate(
             tables,
             locator
         ))
+    }
+}
+
+fn run_cmd_sqlite_table_names(body: &str) -> Vec<String> {
+    body.split_whitespace()
+        .map(str::trim)
+        .filter(|token| !token.is_empty() && !token.starts_with("exit="))
+        .filter(|token| {
+            token
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+        })
+        .take(64)
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn run_cmd_sqlite_schema_version(body: &str) -> Option<String> {
+    body.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("exit="))
+        .find_map(|line| {
+            line.strip_prefix("schema_version=")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .or_else(|| {
+                    line.chars()
+                        .all(|ch| ch.is_ascii_digit())
+                        .then(|| line.to_string())
+                })
+        })
+}
+
+fn sqlite_table_listing_markdown(table_names: &[String]) -> Option<String> {
+    if table_names.is_empty() {
+        return None;
+    }
+    let mut lines = vec!["| name |".to_string(), "| --- |".to_string()];
+    lines.extend(table_names.iter().map(|name| format!("| {name} |")));
+    Some(lines.join("\n"))
+}
+
+fn run_cmd_sqlite_direct_answer_candidate(
+    route: &crate::RouteResult,
+    body: &str,
+    request_text: Option<&str>,
+    prefer_english: bool,
+) -> Option<String> {
+    match route.output_contract.semantic_kind {
+        crate::OutputSemanticKind::SqliteDatabaseKindJudgment => {
+            let table_names = run_cmd_sqlite_table_names(body);
+            sqlite_database_kind_judgment_answer(route, &table_names, request_text, prefer_english)
+        }
+        crate::OutputSemanticKind::SqliteSchemaVersion => {
+            run_cmd_sqlite_schema_version(body).map(|value| format!("schema_version={value}"))
+        }
+        crate::OutputSemanticKind::SqliteTableNamesOnly => {
+            let table_names = run_cmd_sqlite_table_names(body);
+            (!table_names.is_empty()).then(|| table_names.join("\n"))
+        }
+        crate::OutputSemanticKind::SqliteTableListing => {
+            let table_names = run_cmd_sqlite_table_names(body);
+            sqlite_table_listing_markdown(&table_names)
+        }
+        _ => None,
     }
 }
 
@@ -1478,6 +1556,142 @@ fn service_control_status_direct_answer_candidate(
             ("state", service_state),
         ],
     ))
+}
+
+fn health_check_service_status_direct_answer_candidate(
+    state: Option<&AppState>,
+    value: &serde_json::Value,
+    response_shape: Option<crate::OutputResponseShape>,
+    prefer_english: bool,
+) -> Option<String> {
+    let process_count = value.get("clawd_process_count").and_then(|v| v.as_i64());
+    let port_open = value
+        .get("clawd_health_port_open")
+        .and_then(|v| v.as_bool());
+    let status = match (process_count, port_open) {
+        (Some(count), Some(true)) if count > 0 => "running",
+        (Some(count), _) if count <= 0 => "not_running",
+        (Some(_), Some(false)) => "degraded",
+        (None, Some(true)) => "reachable",
+        _ => "unknown",
+    };
+    if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
+        return Some(status.to_string());
+    }
+    let process_count_text = process_count
+        .map(|count| count.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let port_text = port_open
+        .map(|open| open.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let key = match status {
+        "running" => "clawd.msg.health_check_service_status_running",
+        "not_running" => "clawd.msg.health_check_service_status_not_running",
+        "degraded" => "clawd.msg.health_check_service_status_degraded",
+        "reachable" => "clawd.msg.health_check_service_status_reachable",
+        _ => "clawd.msg.health_check_service_status_unknown",
+    };
+    let (zh, en) = match status {
+        "running" => (
+            "clawd 正在运行：health_check 显示 clawd_process_count={process_count}，clawd_health_port_open={port_open}。",
+            "clawd is running: health_check reports clawd_process_count={process_count} and clawd_health_port_open={port_open}.",
+        ),
+        "not_running" => (
+            "clawd 未运行：health_check 显示 clawd_process_count={process_count}，clawd_health_port_open={port_open}。",
+            "clawd is not running: health_check reports clawd_process_count={process_count} and clawd_health_port_open={port_open}.",
+        ),
+        "degraded" => (
+            "clawd 状态异常：health_check 显示 clawd_process_count={process_count}，但 clawd_health_port_open={port_open}。",
+            "clawd is degraded: health_check reports clawd_process_count={process_count}, but clawd_health_port_open={port_open}.",
+        ),
+        "reachable" => (
+            "clawd 可访问性部分正常：health_check 显示 clawd_health_port_open={port_open}，但 clawd_process_count={process_count}。",
+            "clawd appears reachable: health_check reports clawd_health_port_open={port_open}, but clawd_process_count={process_count}.",
+        ),
+        _ => (
+            "clawd 状态不明确：health_check 未提供完整的 clawd_process_count 和 clawd_health_port_open。",
+            "clawd status is unclear: health_check did not provide complete clawd_process_count and clawd_health_port_open fields.",
+        ),
+    };
+    Some(observed_t_with_vars(
+        state,
+        key,
+        zh,
+        en,
+        prefer_english,
+        &[
+            ("process_count", process_count_text.as_str()),
+            ("port_open", port_text.as_str()),
+        ],
+    ))
+}
+
+fn process_basic_service_status_direct_answer_candidate(
+    state: Option<&AppState>,
+    body: &str,
+    response_shape: Option<crate::OutputResponseShape>,
+    prefer_english: bool,
+) -> Option<String> {
+    let rows = process_basic_table_rows(body);
+    let status = if rows.is_empty() {
+        "not_running"
+    } else {
+        "running"
+    };
+    if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
+        return Some(status.to_string());
+    }
+    let row_count_text = rows.len().to_string();
+    let comm = rows
+        .first()
+        .and_then(|row| row.split_whitespace().last())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("unknown");
+    let key = if rows.is_empty() {
+        "clawd.msg.process_basic_service_status_not_running"
+    } else {
+        "clawd.msg.process_basic_service_status_running"
+    };
+    let (zh, en) = if rows.is_empty() {
+        (
+            "clawd 未运行：process_basic 没有返回匹配的进程记录。",
+            "clawd is not running: process_basic returned no matching process records.",
+        )
+    } else {
+        (
+            "clawd 正在运行：process_basic 返回 {count} 条进程记录，COMM={comm}。",
+            "clawd is running: process_basic returned {count} process record(s), COMM={comm}.",
+        )
+    };
+    Some(observed_t_with_vars(
+        state,
+        key,
+        zh,
+        en,
+        prefer_english,
+        &[("count", row_count_text.as_str()), ("comm", comm)],
+    ))
+}
+
+fn process_basic_table_rows(body: &str) -> Vec<&str> {
+    let mut saw_header = false;
+    let mut rows = Vec::new();
+    for line in body.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        if line.starts_with("exit=") {
+            continue;
+        }
+        let columns = line.split_whitespace().collect::<Vec<_>>();
+        if columns.iter().any(|column| *column == "PID")
+            && columns.iter().any(|column| *column == "COMM")
+        {
+            saw_header = true;
+            continue;
+        }
+        if saw_header && columns.len() >= 2 {
+            rows.push(line);
+        }
+    }
+    rows
 }
 
 fn system_basic_info_scalar_path_candidate(value: &serde_json::Value) -> Option<String> {
@@ -6204,8 +6418,12 @@ fn extract_direct_answer_from_generic_output_impl(
             response_shape,
             Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar)
         );
+    let health_check_service_status_direct_allowed = route.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+    });
     if has_successful_step_for_skill(loop_state, "health_check")
         && !health_check_prefers_raw_payload
+        && !health_check_service_status_direct_allowed
         && matches!(
             response_shape,
             Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar)
@@ -6272,17 +6490,28 @@ fn extract_direct_answer_from_generic_output_impl(
         .or_else(|| {
             let observed_output = extract_latest_generic_successful_output(loop_state)?;
             if observed_output.skill == "run_cmd" {
-                (!existence_with_path_should_use_llm_synthesis)
-                    .then(|| {
-                        run_cmd_presence_with_path_candidate(
-                            state,
+                route
+                    .and_then(|route| {
+                        run_cmd_sqlite_direct_answer_candidate(
+                            route,
                             &observed_output.body,
-                            locator_hint,
-                            auto_locator_path,
-                            prefers_english_presence_answer,
+                            current_turn_request_text(Some(route), agent_run_context),
+                            prefers_english_free_text,
                         )
                     })
-                    .flatten()
+                    .or_else(|| {
+                        (!existence_with_path_should_use_llm_synthesis)
+                            .then(|| {
+                                run_cmd_presence_with_path_candidate(
+                                    state,
+                                    &observed_output.body,
+                                    locator_hint,
+                                    auto_locator_path,
+                                    prefers_english_presence_answer,
+                                )
+                            })
+                            .flatten()
+                    })
                     .or_else(|| {
                         (allow_raw_listing_direct_answer
                             && !existence_with_path_should_use_llm_synthesis)
@@ -6318,11 +6547,42 @@ fn extract_direct_answer_from_generic_output_impl(
                 None
             }
             .or_else(|| match observed_output.skill.as_str() {
-                "health_check" => {
-                    health_check_prefers_raw_payload.then_some(observed_output.body.clone())
-                }
+                "health_check" => serde_json::from_str::<serde_json::Value>(&observed_output.body)
+                    .ok()
+                    .and_then(|value| {
+                        route
+                            .is_some_and(|route| {
+                                route.output_contract.semantic_kind
+                                    == crate::OutputSemanticKind::ServiceStatus
+                            })
+                            .then(|| {
+                                health_check_service_status_direct_answer_candidate(
+                                    state,
+                                    &value,
+                                    response_shape,
+                                    prefers_english_free_text,
+                                )
+                            })
+                            .flatten()
+                    })
+                    .or_else(|| {
+                        health_check_prefers_raw_payload.then_some(observed_output.body.clone())
+                    }),
                 "http_basic" => None,
-                "process_basic" => None,
+                "process_basic" => route
+                    .is_some_and(|route| {
+                        route.output_contract.semantic_kind
+                            == crate::OutputSemanticKind::ServiceStatus
+                    })
+                    .then(|| {
+                        process_basic_service_status_direct_answer_candidate(
+                            state,
+                            &observed_output.body,
+                            response_shape,
+                            prefers_english_free_text,
+                        )
+                    })
+                    .flatten(),
                 "service_control" => {
                     serde_json::from_str::<serde_json::Value>(&observed_output.body)
                         .ok()
@@ -13188,6 +13448,157 @@ version.workspace = true
     }
 
     #[test]
+    fn sqlite_database_kind_judgment_uses_run_cmd_table_names_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "run_cmd",
+            "orders\nservice_logs\nusers\n",
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent:
+                "判断 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 更像业务库还是测试库，并给出依据"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "llm_contract:sqlite_database_kind_judgment".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
+                locator_hint:
+                    "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            original_user_request: Some(
+                "判断这个 SQLite 更像业务库还是测试库。\n[CONTRACT_TEST_HINT]\nselector_database_kind=test\n[/CONTRACT_TEST_HINT]"
+                    .to_string(),
+            ),
+            ..AgentRunContext::default()
+        };
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("expected deterministic run_cmd sqlite database kind answer");
+        assert!(answer.contains("更像测试库"), "{answer}");
+        assert!(answer.contains("orders"), "{answer}");
+        assert!(answer.contains("service_logs"), "{answer}");
+        assert!(answer.contains("users"), "{answer}");
+    }
+
+    #[test]
+    fn sqlite_schema_version_uses_run_cmd_value_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "run_cmd", "schema_version=7\n"));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent:
+                "读取 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的 schema 版本"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "llm_contract:sqlite_schema_version".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::SqliteSchemaVersion,
+                locator_hint:
+                    "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("schema_version=7")
+        );
+    }
+
+    #[test]
+    fn sqlite_table_listing_uses_run_cmd_table_names_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "run_cmd",
+            "orders\nservice_logs\nusers\n",
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent:
+                "列出 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里的表"
+                    .to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: "llm_contract:sqlite_table_listing".to_string(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::Free,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::Path,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: crate::OutputSemanticKind::SqliteTableListing,
+                locator_hint: "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite"
+                    .to_string(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+        assert_eq!(
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .as_deref(),
+            Some("| name |\n| --- |\n| orders |\n| service_logs |\n| users |")
+        );
+    }
+
+    #[test]
     fn sqlite_database_kind_judgment_prefers_table_inventory_over_later_name_columns() {
         let mut loop_state = LoopState::new(2);
         loop_state.executed_step_results.push(ok_step(
@@ -13568,7 +13979,8 @@ version.workspace = true
         let agent_run_context = AgentRunContext {
             route_result: Some(route),
             original_user_request: Some(
-                "/tmp/test_bundle.zip 에 notes.txt 가 있는지만 말해. 압축 풀지 마.".to_string(),
+                "Only tell me whether notes.txt exists in /tmp/test_bundle.zip; do not extract it."
+                    .to_string(),
             ),
             auto_locator_path: Some("/tmp/test_bundle.zip".to_string()),
             ..AgentRunContext::default()
@@ -14519,6 +14931,55 @@ version.workspace = true
     }
 
     #[test]
+    fn direct_answer_formats_health_check_service_status_contract_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        let body = r#"{"clawd_process_count":1,"clawd_health_port_open":true,"clawd_log":{"exists":true,"keyword_error_count":0}}"#;
+        loop_state
+            .executed_step_results
+            .push(ok_step("step_1", "health_check", body));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent: "检查 clawd 服务当前状态，并用一句话说明来源。".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::None,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ServiceStatus,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("service_status should use structured health_check evidence directly");
+
+        assert!(answer.contains("health_check"));
+        assert!(answer.contains("clawd_process_count=1"));
+        assert!(answer.contains("clawd_health_port_open=true"));
+        assert!(!answer.contains(r#""clawd_process_count""#));
+    }
+
+    #[test]
     fn direct_answer_defers_health_check_summary_for_act_free_shape() {
         let mut loop_state = LoopState::new(2);
         let body = r#"{"clawd_process_count":7,"telegramd_process_count":0,"clawd_health_port_open":false,"clawd_log":{"exists":false},"telegramd_log":{"exists":false},"system_health":{"os_family":"macos","warnings":[]}}"#;
@@ -14991,6 +15452,55 @@ version.workspace = true
             extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
             None
         );
+    }
+
+    #[test]
+    fn direct_answer_formats_process_basic_service_status_contract_without_llm() {
+        let mut loop_state = LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "process_basic",
+            "exit=0\nPID PPID %CPU %MEM COMM\n413590 7620 1.0 0.2 clawd",
+        ));
+        let route_result = RouteResult {
+            ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+            resolved_intent: "检查 clawd 服务当前状态，并用一句话说明来源。".to_string(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: RiskCeiling::Unknown,
+            resume_behavior: ResumeBehavior::None,
+            schedule_kind: ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: IntentOutputContract {
+                exact_sentence_count: None,
+                response_shape: OutputResponseShape::OneSentence,
+                requires_content_evidence: true,
+                delivery_required: false,
+                locator_kind: OutputLocatorKind::None,
+                delivery_intent: OutputDeliveryIntent::None,
+                semantic_kind: OutputSemanticKind::ServiceStatus,
+                locator_hint: String::new(),
+                self_extension: crate::SelfExtensionContract::default(),
+            },
+        };
+        let agent_run_context = AgentRunContext {
+            route_result: Some(route_result),
+            ..AgentRunContext::default()
+        };
+
+        let answer =
+            extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+                .expect("service_status should use process_basic table evidence directly");
+
+        assert!(answer.contains("process_basic"));
+        assert!(answer.contains("COMM=clawd"));
+        assert!(!answer.contains("PID PPID"));
     }
 
     #[test]

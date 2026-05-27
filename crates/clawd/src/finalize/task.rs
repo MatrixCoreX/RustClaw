@@ -250,6 +250,91 @@ fn resume_failure_is_structured_service_status_result(
             .is_some_and(structured_service_status_error_is_answerable)
 }
 
+fn resume_context_extra_string<'a>(
+    error: &'a crate::skills::StructuredSkillError,
+    key: &str,
+) -> Option<&'a str> {
+    error
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get(key))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn resume_context_extra_i64(error: &crate::skills::StructuredSkillError, key: &str) -> Option<i64> {
+    error
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get(key))
+        .and_then(|value| value.as_i64())
+}
+
+fn compact_resume_error_text(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn resume_failure_execution_failed_step_answer(
+    route_result: &crate::RouteResult,
+    resume_ctx: &Value,
+    prefer_english: bool,
+) -> Option<String> {
+    if route_result.output_contract.semantic_kind != crate::OutputSemanticKind::ExecutionFailedStep
+    {
+        return None;
+    }
+    let body = resume_context_body(resume_ctx);
+    let failed_step = body.get("failed_step")?;
+    let action = failed_step
+        .get("action")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("step");
+    let raw_error = failed_step
+        .get("error")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let structured = resume_context_failed_structured_skill_error(resume_ctx);
+    let command = structured
+        .as_ref()
+        .and_then(|error| resume_context_extra_string(error, "command"));
+    let exit_code = structured
+        .as_ref()
+        .and_then(|error| resume_context_extra_i64(error, "exit_code"));
+    let detail = structured
+        .as_ref()
+        .and_then(|error| resume_context_extra_string(error, "stderr"))
+        .or_else(|| structured.as_ref().map(|error| error.error_text.trim()))
+        .or(raw_error)
+        .map(compact_resume_error_text)
+        .filter(|value| !value.is_empty())?;
+
+    if prefer_english {
+        let subject = command
+            .map(|command| format!("Command `{command}`"))
+            .unwrap_or_else(|| format!("Step `{action}`"));
+        if let Some(exit_code) = exit_code {
+            Some(format!(
+                "{subject} failed with exit code {exit_code}: {detail}"
+            ))
+        } else {
+            Some(format!("{subject} failed: {detail}"))
+        }
+    } else {
+        let subject = command
+            .map(|command| format!("命令 `{command}`"))
+            .unwrap_or_else(|| format!("步骤 `{action}`"));
+        if let Some(exit_code) = exit_code {
+            Some(format!("{subject}执行失败，退出码为 {exit_code}：{detail}"))
+        } else {
+            Some(format!("{subject}执行失败：{detail}"))
+        }
+    }
+}
+
 fn resume_context_user_visible_step_error(error: &str) -> String {
     crate::skills::parse_structured_skill_error(error)
         .map(|structured| crate::skills::normalize_skill_error_for_user(&structured.skill, error))
@@ -979,27 +1064,35 @@ pub(crate) async fn finalize_ask_result(
                     &user_error,
                     &resume_payload,
                 ) {
-                    Some("missing_file_delivery")
+                    Some(("missing_file_delivery", user_error.clone()))
                 } else if resume_failure_is_structured_service_status_result(
                     route_result,
                     &resume_payload,
                 ) {
-                    Some("structured_service_status")
+                    Some(("structured_service_status", user_error.clone()))
+                } else if let Some(answer) = resume_failure_execution_failed_step_answer(
+                    route_result,
+                    &resume_payload,
+                    prefer_english,
+                ) {
+                    Some(("execution_failed_step", answer))
                 } else {
                     None
                 };
-                if let Some(qualified_resume_reason) = qualified_resume_completion {
+                if let Some((qualified_resume_reason, qualified_answer)) =
+                    qualified_resume_completion
+                {
                     let mut answer_messages =
                         resume_context_execution_summary_messages(&resume_payload, prefer_english);
-                    answer_messages.push(user_error.clone());
+                    answer_messages.push(qualified_answer.clone());
                     journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
                     journal
                         .record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
                     journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
-                    journal.record_final_answer(&user_error);
+                    journal.record_final_answer(&qualified_answer);
                     crate::finalize::ensure_task_metrics(
                         &mut journal,
-                        &user_error,
+                        &qualified_answer,
                         &answer_messages,
                     );
                     journal
@@ -1009,7 +1102,7 @@ pub(crate) async fn finalize_ask_result(
                         task,
                         payload,
                         prompt,
-                        &user_error,
+                        &qualified_answer,
                         &answer_messages,
                         false,
                         route_result.should_refresh_long_term_memory,
@@ -1025,7 +1118,7 @@ pub(crate) async fn finalize_ask_result(
                         route_result,
                         turn_analysis,
                         resolved_prompt_for_execution,
-                        &user_error,
+                        &qualified_answer,
                         &answer_messages,
                         false,
                         fuzzy_locator_suggestions,
@@ -1556,6 +1649,58 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert!(messages[0].contains("no matching service found"));
         assert!(!messages[0].contains("__RC_SKILL_ERROR__"));
+    }
+
+    #[test]
+    fn resume_failure_execution_failed_step_is_success_answer_with_remaining_actions() {
+        let mut route = crate::RouteResult {
+            ask_mode: crate::AskMode::planner_execute_plain(),
+            resolved_intent: String::new(),
+            needs_clarify: false,
+            clarify_question: String::new(),
+            route_reason: String::new(),
+            route_confidence: None,
+            visible_skill_candidates: Vec::new(),
+            risk_ceiling: crate::RiskCeiling::Unknown,
+            resume_behavior: crate::ResumeBehavior::None,
+            schedule_kind: crate::ScheduleKind::None,
+            schedule_intent: None,
+            wants_file_delivery: false,
+            should_refresh_long_term_memory: false,
+            agent_display_name_hint: String::new(),
+            output_contract: crate::IntentOutputContract::default(),
+        };
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
+        let resume_ctx = json!({
+            "failed_step": {
+                "action": "skill(run_cmd)",
+                "error": "command failed with exit code 1; stderr: cat: /definitely_missing_rustclaw_contract_case: No such file or directory (os error 2)",
+                "structured_error": {
+                    "skill": "run_cmd",
+                    "error_kind": "nonzero_exit",
+                    "error_text": "Command failed with exit code 1\nstderr:\ncat: /definitely_missing_rustclaw_contract_case: No such file or directory (os error 2)",
+                    "platform": "linux",
+                    "extra": {
+                        "command": "cat /definitely_missing_rustclaw_contract_case",
+                        "exit_code": 1,
+                        "stderr": "cat: /definitely_missing_rustclaw_contract_case: No such file or directory (os error 2)\n"
+                    }
+                }
+            },
+            "remaining_actions": [
+                {"type": "call_skill", "skill": "log_analyze"},
+                {"type": "synthesize_answer"}
+            ]
+        });
+
+        let answer = super::resume_failure_execution_failed_step_answer(&route, &resume_ctx, false)
+            .expect("execution-failed-step answer");
+
+        assert!(answer.contains("cat /definitely_missing_rustclaw_contract_case"));
+        assert!(answer.contains("退出码为 1"));
+        assert!(answer.contains("No such file or directory"));
+        assert!(!answer.contains("继续"));
+        assert!(!answer.contains("暂停"));
     }
 
     #[test]

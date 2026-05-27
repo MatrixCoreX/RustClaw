@@ -26,6 +26,13 @@
 - When required params are missing: return `status=error` with readable `error_text`.
 - 当 action 不支持：返回 `unsupported action: <name>`。
 
+## Structured Evidence Contract
+- Matrix admission status: not eligible by default.
+- To request matrix evidence eligibility, declare stable success `extra` fields per action.
+- For each field, document type, meaning, sensitivity, and which evidence role it can satisfy (`field_value`, `count`, `path`, `results`, `delivery_artifact`, etc.).
+- Error responses should include `extra.error_kind` when feasible.
+- Do not rely on natural-language `text` as strict matrix evidence.
+
 ## Request/Response Examples
 
 ### Example 1: action_a success

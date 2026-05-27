@@ -40,6 +40,17 @@
 - HTTP responses with non-2xx status codes are successful observations, not transport failures.
 - Received responses mirror structured metadata into `extra`, including `action`, `url`, `status_code`, `success_status`, and `body_preview`.
 
+## Structured Evidence Contract (from interface)
+- Matrix admission status: built-in structured evidence only; HTTP status evidence must come from `extra.status_code` and `extra.success_status`.
+- `get` and `post_json` success `extra` fields:
+  - `action`: string action name; evidence role `status`.
+  - `url`: string requested URL; evidence role `field_value`.
+  - `status_code`: integer HTTP status code; evidence role `status`.
+  - `success_status`: boolean 2xx status flag; evidence role `status`.
+  - `body_preview`: string bounded response preview; evidence role `field_value` only when the user requested response content or a validation condition.
+- Sensitive fields: URLs, headers, and body previews can contain tokens or private data. Provider-facing traces should redact headers and prefer body excerpt/hash/keys.
+- Error responses include readable `error_text`; top-level `error_kind` should be used when available.
+
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:
