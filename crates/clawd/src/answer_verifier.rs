@@ -123,6 +123,13 @@ pub(crate) fn structurally_satisfies_answer_contract(
     {
         return true;
     }
+    if archive_unpack_summary_answer_is_grounded_in_observation(
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
+        return true;
+    }
     if raw_command_answer_is_exact_single_successful_observation(journal, candidate_answer) {
         return true;
     }
@@ -261,6 +268,141 @@ fn candidate_answer_has_grounded_existing_plain_path(
         return false;
     };
     file_token_path_is_grounded_in_observations(journal, &canonical_candidate_path)
+}
+
+fn archive_unpack_summary_answer_is_grounded_in_observation(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ArchiveUnpack {
+        return false;
+    }
+    let candidate_answer = candidate_answer.trim();
+    if candidate_answer.is_empty() || candidate_answer.lines().count() > 1 {
+        return false;
+    }
+    let observed_paths = observed_archive_unpack_destination_paths(route, journal);
+    !observed_paths.is_empty()
+        && observed_paths
+            .iter()
+            .any(|path| answer_mentions_observed_path(candidate_answer, path))
+}
+
+fn observed_archive_unpack_destination_paths(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> BTreeSet<String> {
+    let mut paths = observed_single_path_values_from_evidence_map_for_route(route, journal);
+    for step in &journal.step_results {
+        if !step_can_supply_verifier_observation_for_route(route, step) {
+            continue;
+        }
+        if !step_can_supply_strict_evidence_for_route(route, step) {
+            continue;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        collect_archive_unpack_destination_paths_from_output(output, &mut paths);
+    }
+    paths
+}
+
+fn collect_archive_unpack_destination_paths_from_output(
+    output: &str,
+    paths: &mut BTreeSet<String>,
+) {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) {
+        collect_archive_unpack_destination_paths_from_json(&value, paths);
+        return;
+    }
+    for line in output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if archive_unpack_destination_key(key.trim()) {
+            let value = value.trim();
+            if !value.is_empty() {
+                paths.insert(value.to_string());
+            }
+        }
+    }
+}
+
+fn collect_archive_unpack_destination_paths_from_json(
+    value: &serde_json::Value,
+    paths: &mut BTreeSet<String>,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                if archive_unpack_destination_key(key) {
+                    if let Some(path) = child
+                        .as_str()
+                        .map(str::trim)
+                        .filter(|path| !path.is_empty())
+                    {
+                        paths.insert(path.to_string());
+                    }
+                }
+                collect_archive_unpack_destination_paths_from_json(child, paths);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_archive_unpack_destination_paths_from_json(item, paths);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn archive_unpack_destination_key(key: &str) -> bool {
+    matches!(
+        key,
+        "dest" | "dest_path" | "destination" | "destination_path" | "path"
+    )
+}
+
+fn answer_mentions_observed_path(answer: &str, observed_path: &str) -> bool {
+    let observed_path = observed_path.trim();
+    if observed_path.is_empty() {
+        return false;
+    }
+    if answer.contains(observed_path) {
+        return true;
+    }
+    answer.split_whitespace().any(|token| {
+        let token = token
+            .trim_matches(|ch: char| {
+                matches!(
+                    ch,
+                    '`' | '"'
+                        | '\''
+                        | '('
+                        | ')'
+                        | '['
+                        | ']'
+                        | '{'
+                        | '}'
+                        | ','
+                        | '，'
+                        | '.'
+                        | '。'
+                        | ';'
+                        | '；'
+                        | ':'
+                        | '：'
+                )
+            })
+            .trim();
+        !token.is_empty() && single_path_matches_observed(token, observed_path)
+    })
 }
 
 fn strict_single_path_answer(answer: &str) -> Option<String> {
@@ -477,6 +619,9 @@ fn observed_table_cells(
         if !step_can_supply_verifier_observation_for_route(route, step) {
             continue;
         }
+        if !step_can_supply_strict_evidence_for_route(route, step) {
+            continue;
+        }
         let Some(output) = step.output_excerpt.as_deref() else {
             continue;
         };
@@ -659,6 +804,9 @@ fn observed_strict_list_items(
     let mut items = observed_strict_list_items_from_evidence_map_for_route(route, journal);
     for step in &journal.step_results {
         if !step_can_supply_verifier_observation_for_route(route, step) {
+            continue;
+        }
+        if !step_can_supply_strict_evidence_for_route(route, step) {
             continue;
         }
         let Some(output) = step.output_excerpt.as_deref() else {
@@ -910,6 +1058,9 @@ fn count_summary_answer_is_grounded_in_successful_observation(
         if !step_can_supply_verifier_observation_for_route(route, step) {
             continue;
         }
+        if !step_can_supply_strict_evidence_for_route(route, step) {
+            continue;
+        }
         if let Some(output) = step.output_excerpt.as_deref() {
             observed_values.extend(observed_scalar_values_from_output(output));
         }
@@ -1119,6 +1270,15 @@ fn observed_output_contains_path(
         return json_value_contains_path(&value, canonical_token_path, current_dir);
     }
     candidate_path_matches(output.trim(), canonical_token_path, current_dir)
+        || output.split_whitespace().any(|token| {
+            candidate_path_matches(
+                token.trim_matches(|ch: char| {
+                    matches!(ch, '"' | '\'' | '`' | ',' | ';' | ':' | ')' | ']' | '}')
+                }),
+                canonical_token_path,
+                current_dir,
+            )
+        })
 }
 
 fn json_value_contains_path(
@@ -1432,6 +1592,7 @@ fn scalar_answer_value_is_grounded_in_successful_observation(
     }
     journal.step_results.iter().any(|step| {
         step_can_supply_verifier_observation_for_route(route, step)
+            && step_can_supply_strict_evidence_for_route(route, step)
             && step.output_excerpt.as_deref().is_some_and(|output| {
                 observed_output_contains_scalar_answer(output, candidate_answer)
             })
@@ -1498,11 +1659,49 @@ fn successful_observed_evidence_items_for_route(
         let Some(evidence) = crate::task_journal::observed_evidence_for_step_trace(step) else {
             continue;
         };
+        if route_requires_strict_extractor_eligibility(route)
+            && !observed_evidence_is_strict_shape_eligible(&evidence)
+        {
+            continue;
+        }
         if let Some(evidence_items) = evidence.get("items").and_then(|value| value.as_array()) {
             items.extend(evidence_items.iter().cloned());
         }
     }
     items
+}
+
+fn route_requires_strict_extractor_eligibility(route: &RouteResult) -> bool {
+    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+        .is_some_and(|shape| {
+            matches!(
+                shape.class(),
+                crate::contract_matrix::FinalAnswerShapeClass::ScalarValue
+                    | crate::contract_matrix::FinalAnswerShapeClass::StrictList
+                    | crate::contract_matrix::FinalAnswerShapeClass::Table
+                    | crate::contract_matrix::FinalAnswerShapeClass::SinglePath
+                    | crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact
+            )
+        })
+}
+
+fn observed_evidence_is_strict_shape_eligible(evidence: &serde_json::Value) -> bool {
+    evidence
+        .pointer("/extractor/strict_shape_eligible")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+fn step_can_supply_strict_evidence_for_route(
+    route: &RouteResult,
+    step: &crate::task_journal::TaskJournalStepTrace,
+) -> bool {
+    if !route_requires_strict_extractor_eligibility(route) {
+        return true;
+    }
+    crate::task_journal::observed_evidence_for_step_trace(step)
+        .as_ref()
+        .is_some_and(observed_evidence_is_strict_shape_eligible)
 }
 
 #[cfg(test)]
@@ -1760,14 +1959,15 @@ fn observed_evidence_item_supports_strict_list(item: &serde_json::Value) -> bool
 fn observed_evidence_item_supports_table_cell(item: &serde_json::Value) -> bool {
     if !matches!(
         observed_evidence_kind(item),
-        Some("string" | "number" | "bool")
+        Some("string" | "number" | "bool" | "text")
     ) {
         return false;
     }
     let Some(field) = observed_evidence_field(item) else {
         return false;
     };
-    field.to_ascii_lowercase().contains("rows[")
+    let normalized = field.to_ascii_lowercase();
+    normalized.contains("rows[") || array_item_field_matches(&normalized, "results")
 }
 
 fn observed_evidence_field_leaf(field: &str) -> String {
@@ -2190,6 +2390,8 @@ mod tests {
         assert!(!block.contains("sk-test-secret-token-that-should-not-leak"));
         assert!(!block.contains("password=secret-value-that-should-not-leak"));
         assert!(block.contains("\"redacted\": true"));
+        assert!(block.contains("\"provider_evidence_view\": \"provider_safe_redacted\""));
+        assert!(block.contains("\"raw_excerpt_policy\": \"no_full_raw_excerpt\""));
     }
 
     #[test]
@@ -2334,6 +2536,46 @@ mod tests {
                     })
                     .to_string(),
                 ),
+                error_excerpt: None,
+                started_at: 0,
+                finished_at: 0,
+            });
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            &format!("FILE:{}", file.display())
+        ));
+
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn grounded_file_token_uses_path_token_from_write_text_output() {
+        let root = std::env::temp_dir().join(format!(
+            "rustclaw-answer-verifier-write-text-token-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("create temp root");
+        let file = root.join("contract_matrix_generic_delivery.txt");
+        std::fs::write(&file, "generic delivery case").expect("write temp file");
+
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.wants_file_delivery = true;
+        route.output_contract.delivery_required = true;
+        route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
+        let mut journal =
+            crate::task_journal::TaskJournal::for_task("task-file-token", "ask", "send that file");
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace {
+                step_id: "step_1".to_string(),
+                skill: "fs_basic".to_string(),
+                status: crate::executor::StepExecutionStatus::Ok,
+                output_excerpt: Some(format!("written 21 bytes to {}", file.display())),
                 error_excerpt: None,
                 started_at: 0,
                 finished_at: 0,
@@ -2803,6 +3045,74 @@ mod tests {
     }
 
     #[test]
+    fn matrix_scalar_shape_rejects_unregistered_fallback_extractor_values() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-matrix-scalar-fallback-extractor",
+            "ask",
+            "count them",
+        );
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "unregistered_external_skill",
+                json!({"count": 3, "items": ["a", "b", "c"]}).to_string(),
+            ));
+
+        assert!(observed_scalar_values_from_evidence_map(&journal).contains("3"));
+        assert!(
+            !observed_scalar_values_from_evidence_map_for_route(&route, &journal).contains("3")
+        );
+        assert!(!structurally_satisfies_answer_contract(
+            &route, &journal, "3"
+        ));
+    }
+
+    #[test]
+    fn matrix_scalar_shape_accepts_admitted_external_extra_count() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-matrix-external-admitted",
+            "ask",
+            "count them",
+        );
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "external_counter",
+                json!({
+                    "action": "count",
+                    "text": "3",
+                    "extra": {
+                        "action": "count",
+                        "count": 3,
+                        "results": ["a", "b", "c"]
+                    },
+                    "_matrix_admission": {
+                        "schema_version": 1,
+                        "source": "skills_registry",
+                        "skill": "external_counter",
+                        "eligible": true,
+                        "extractor_kind": "structured_json",
+                        "required_extra_fields": ["extra.count"]
+                    }
+                })
+                .to_string(),
+            ));
+
+        assert!(observed_scalar_values_from_evidence_map_for_route(&route, &journal).contains("3"));
+        assert!(structurally_satisfies_answer_contract(
+            &route, &journal, "3"
+        ));
+    }
+
+    #[test]
     fn matrix_scalar_shape_does_not_use_content_excerpt_as_field_value() {
         let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
         route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -3109,6 +3419,32 @@ mod tests {
     }
 
     #[test]
+    fn matrix_table_shape_uses_run_cmd_results_as_table_cells() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::SqliteTableListing;
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-matrix-table-run-cmd",
+            "ask",
+            "list tables",
+        );
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "run_cmd",
+                "orders\nservice_logs\nusers\n",
+            ));
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "| name |\n| --- |\n| orders |\n| service_logs |\n| users |"
+        ));
+    }
+
+    #[test]
     fn matrix_single_path_shape_uses_observed_evidence_map_paths() {
         let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
         route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
@@ -3136,6 +3472,37 @@ mod tests {
             &route,
             &journal,
             "/tmp/rustclaw/report.zip"
+        ));
+    }
+
+    #[test]
+    fn archive_unpack_summary_is_satisfied_by_observed_destination_path() {
+        let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ArchiveUnpack;
+        let mut journal = crate::task_journal::TaskJournal::for_task(
+            "task-archive-unpack-summary",
+            "ask",
+            "unpack archive",
+        );
+        journal
+            .step_results
+            .push(crate::task_journal::TaskJournalStepTrace::ok(
+                "step_1",
+                "archive_basic",
+                "dest_path=/tmp/rustclaw-workspace/tmp/contract_matrix_unpacked\nexit=0\nArchive: /tmp/test_bundle.zip\n inflating: /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked/notes.txt\n",
+            ));
+
+        assert!(structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "已解压到 /tmp/rustclaw-workspace/tmp/contract_matrix_unpacked，包含 notes.txt。"
+        ));
+        assert!(!structurally_satisfies_answer_contract(
+            &route,
+            &journal,
+            "已完成解压。"
         ));
     }
 

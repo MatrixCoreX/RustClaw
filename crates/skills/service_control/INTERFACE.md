@@ -64,6 +64,22 @@ The skill always returns a JSON object (in the runner response `text` field) wit
 
 Failure responses must include `failure_reason` and should include stable `error_kind`; when logs were inspected, key evidence is in `key_evidence`. Runner-level failure responses also expose top-level `error_kind` and `platform` so `clawd` can classify failure without parsing OS/systemd text.
 
+## Structured Evidence Contract
+- Matrix admission status: built-in structured evidence only; service state evidence must come from the structured JSON object in `text`/`extra`, not from natural-language summaries.
+- Successful and failed service observation fields:
+  - `status`: string operation status; evidence role `status`.
+  - `service_name`: string resolved target; evidence role `field_value`.
+  - `manager_type`: string resolved manager; evidence role `field_value`.
+  - `requested_action`: string requested action; evidence role `status`.
+  - `executed_actions`: string array executed checks/actions; evidence role `entries`.
+  - `pre_state`, `post_state`: string service states; evidence role `status`.
+  - `verified`: boolean verification flag; evidence role `status`.
+  - `key_evidence`: string array bounded status/log evidence; evidence role `entries`.
+  - `error_kind`, `failure_reason`, `next_step`: structured failure fields; evidence roles `status` and `field_value`.
+  - `summary`: short human-readable summary; not strict evidence when machine fields above are present.
+- Sensitive fields: logs can include private runtime data. Provider-facing traces should prefer state fields, selected evidence lines, excerpts, or hashes.
+- Error responses expose top-level `error_kind` and `platform` where possible; callers must not classify service failures by matching localized `failure_reason` text.
+
 ## Log Paths (rustclaw only)
 
 - `logs/clawd.log`, `logs/telegramd.log`, `logs/whatsappd.log`, `logs/whatsapp_webd.log`, `logs/feishud.log`, `logs/larkd.log`.

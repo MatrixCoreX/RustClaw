@@ -165,6 +165,30 @@ These examples are config field examples, not language-trigger rules.
 - `permission_denied`: OS permission failure.
 - `unsupported_action`: unknown action.
 
+## Structured Evidence Contract
+
+- Matrix admission status: built-in structured evidence only; config mutation proof must come from `extra`, not natural-language `text`.
+- `plan_config_change` success `extra` fields:
+  - `action`: string, always `plan_config_change`; evidence role `status`.
+  - `path`: string config path; evidence role `path`.
+  - `field_path`: string structured field path; evidence role `field_value`.
+  - `would_change`: boolean preview result; evidence role `status`.
+- `apply_config_change` success `extra` fields:
+  - `action`: string, always `apply_config_change`; evidence role `status`.
+  - `applied`: boolean mutation result; evidence role `status`.
+  - `validated`: boolean post-write syntax validation result; evidence role `status`.
+  - `path`, `field_path`, and typed target value fields when present; evidence roles `path` and `field_value`.
+- `validate_config` and `guard_config` success `extra` fields:
+  - `action`: string action name; evidence role `status`.
+  - `valid` or risk/count fields when present; evidence roles `status` and `count`.
+- `read_back` success `extra` fields:
+  - `action`: string, always `read_back`; evidence role `status`.
+  - `path`: string config path; evidence role `path`.
+  - `field_path`: string structured field path; evidence role `field_value`.
+  - `value`, `value_type`, or `value_text`: observed typed value; evidence role `field_value`.
+- Sensitive fields: secret-like values are redacted. Provider-facing traces should keep redaction and prefer field paths plus typed summaries.
+- Error responses include top-level `error_kind` and contextual `extra` such as `operation` and `path` when available.
+
 ## Safety Notes
 
 - `apply_config_change` mutates files and must go through runtime confirmation.

@@ -39,6 +39,18 @@
   - `disk_root_total_bytes`, `disk_root_available_bytes`
   - `warnings` (`disk_root_low`, `memory_available_low`, `load_high`)
 
+## Structured Evidence Contract
+- Matrix admission status: built-in structured evidence only; use `extra` fields for strict health/status evidence.
+- Success `extra` fields:
+  - `workspace_root`: string path; evidence role `path`.
+  - `log_dir`: string path; evidence role `path`.
+  - `clawd_process_count`, `telegramd_process_count`: integer counts; evidence role `count`.
+  - `clawd_health_port_open`: boolean; evidence role `status`.
+  - `clawd_log`, `telegramd_log`: object or scalar log observations; evidence role `field_value`.
+  - `system_health`: object containing OS, CPU, uptime, load, memory, disk, and warning fields; evidence roles `field_value`, `count`, and `status`.
+- Sensitive fields: log observations can include user data. Provider-facing traces should prefer warnings, counts, selected keys, excerpts, or hashes.
+- Error responses include readable `error_text`; `extra.error_kind` should be used when implementation-specific context is available.
+
 ## Request/Response Examples
 ### Example 1
 Request:

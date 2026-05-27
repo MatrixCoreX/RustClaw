@@ -142,6 +142,39 @@ EN_PROMPTS_BY_GENERIC_PROFILE: dict[str, str] = {
     "generic_delivery": "Create tmp/contract_matrix_generic_delivery.txt with the content generic delivery case, then send me the file.",
 }
 
+JA_PROMPTS_BY_CONTRACT: dict[str, str] = {
+    "existence_with_path": f"{FIXTURE_PACKAGE} が存在するか確認し、存在結果とパスだけを答えてください。",
+    "scalar_count": f"{FIXTURE_DOCS_DIR} の直下にある項目数を数え、数字だけを出力してください。",
+    "scalar_path_only": f"{FIXTURE_PACKAGE} のパスだけを出力してください。説明は不要です。",
+    "file_names": f"{FIXTURE_DOCS_DIR} のファイル名を列挙し、ファイル名リストだけを出力してください。",
+    "structured_keys": f"{FIXTURE_CONFIG} のトップレベルキーを読み取り、キー名リストだけを出力してください。",
+    "sqlite_table_names_only": f"{FIXTURE_DB} にあるテーブル名だけをリストで出力してください。",
+    "generated_file_delivery": "tmp/contract_matrix_generated_note.txt に RustClaw contract matrix test という内容のテキストファイルを作成し、そのファイルパスを送ってください。",
+    "git_repository_state": "このリポジトリに未コミットの変更があるか確認し、一文で答えてください。",
+}
+
+KO_PROMPTS_BY_CONTRACT: dict[str, str] = {
+    "existence_with_path": f"{FIXTURE_PACKAGE} 파일이 존재하는지 확인하고, 존재 여부와 경로만 답하세요.",
+    "scalar_count": f"{FIXTURE_DOCS_DIR} 바로 아래 항목 수를 세고 숫자만 출력하세요.",
+    "scalar_path_only": f"{FIXTURE_PACKAGE} 경로만 출력하세요. 설명은 하지 마세요.",
+    "file_names": f"{FIXTURE_DOCS_DIR} 디렉터리의 파일명을 나열하고 파일명 목록만 출력하세요.",
+    "structured_keys": f"{FIXTURE_CONFIG} 의 최상위 키를 읽고 키 이름 목록만 출력하세요.",
+    "sqlite_table_names_only": f"{FIXTURE_DB} 안의 테이블 이름만 목록으로 출력하세요.",
+    "generated_file_delivery": "tmp/contract_matrix_generated_note.txt 파일을 만들고 내용은 RustClaw contract matrix test 로 넣은 뒤, 생성된 파일 경로를 보내세요.",
+    "git_repository_state": "이 저장소에 커밋되지 않은 변경 사항이 있는지 확인하고 한 문장으로 답하세요.",
+}
+
+FR_PROMPTS_BY_CONTRACT: dict[str, str] = {
+    "existence_with_path": f"Vérifie si {FIXTURE_PACKAGE} existe, puis réponds uniquement avec le résultat d'existence et le chemin.",
+    "scalar_count": f"Compte les éléments directement sous {FIXTURE_DOCS_DIR} et affiche uniquement le nombre.",
+    "scalar_path_only": f"Affiche uniquement le chemin {FIXTURE_PACKAGE}. N'ajoute aucune explication.",
+    "file_names": f"Liste les noms de fichiers dans {FIXTURE_DOCS_DIR}. Affiche uniquement la liste des noms.",
+    "structured_keys": f"Lis les clés de premier niveau dans {FIXTURE_CONFIG}. Affiche uniquement la liste des clés.",
+    "sqlite_table_names_only": f"Affiche uniquement la liste des tables dans {FIXTURE_DB}.",
+    "generated_file_delivery": "Crée le fichier tmp/contract_matrix_generated_note.txt avec le contenu RustClaw contract matrix test, puis envoie-moi le chemin du fichier.",
+    "git_repository_state": "Vérifie si ce dépôt contient des modifications non validées et réponds en une phrase.",
+}
+
 LOCALIZED_TASK_WRAPPERS: dict[str, str] = {
     "ja_jp": "次の RustClaw task を実行して、結果は簡潔に日本語で答えてください: {prompt}",
     "ko_kr": "다음 RustClaw task를 수행하고 결과를 간결한 한국어로 답하세요: {prompt}",
@@ -150,6 +183,24 @@ LOCALIZED_TASK_WRAPPERS: dict[str, str] = {
 }
 
 LANGUAGE_VARIANTS = ("zh_cn", "en_us", "ja_jp", "ko_kr", "fr_fr", "mixed")
+STRICT_NATIVE_PROMPT_CONTRACTS = frozenset(
+    {
+        "existence_with_path",
+        "scalar_count",
+        "scalar_path_only",
+        "file_names",
+        "structured_keys",
+        "sqlite_table_names_only",
+        "generated_file_delivery",
+        "git_repository_state",
+    }
+)
+STRICT_NATIVE_PROMPT_VARIANTS = ("ja_jp", "ko_kr", "fr_fr")
+NATIVE_PROMPTS_BY_VARIANT: dict[str, dict[str, str]] = {
+    "ja_jp": JA_PROMPTS_BY_CONTRACT,
+    "ko_kr": KO_PROMPTS_BY_CONTRACT,
+    "fr_fr": FR_PROMPTS_BY_CONTRACT,
+}
 
 
 def normalize_token(value: str) -> str:
@@ -392,33 +443,53 @@ def append_contract_test_hint(prompt: str, case: dict[str, Any]) -> str:
     )
 
 
-def base_prompt_for_case(case: dict[str, Any], variant: str = "zh_cn") -> str:
+def base_prompt_and_source_for_case(
+    case: dict[str, Any],
+    variant: str = "zh_cn",
+) -> tuple[str, str]:
     contract_id = str(case.get("contract_id") or "")
-    if variant == "en_us":
+    if variant == "zh_cn":
+        if case.get("contract_type") == "generic":
+            prompt = NL_PROMPTS_BY_GENERIC_PROFILE.get(contract_id)
+        else:
+            prompt = NL_PROMPTS_BY_CONTRACT.get(contract_id)
+        if prompt:
+            return prompt, "native_zh_cn"
+    elif variant == "en_us":
         if case.get("contract_type") == "generic":
             prompt = EN_PROMPTS_BY_GENERIC_PROFILE.get(contract_id)
         else:
             prompt = EN_PROMPTS_BY_CONTRACT.get(contract_id)
-    elif case.get("contract_type") == "generic":
-        prompt = NL_PROMPTS_BY_GENERIC_PROFILE.get(contract_id)
-    else:
-        prompt = NL_PROMPTS_BY_CONTRACT.get(contract_id)
-    if not prompt:
-        if variant == "en_us":
-            prompt = (
-                f"Run the RustClaw structured task {contract_id}. "
-                "Observe evidence first, then return a concise result in the required shape."
-            )
-        else:
-            prompt = (
-                f"按 RustClaw 结构化任务 {contract_id} 做一次只读检查，"
-                "需要先观察证据，再按要求给出简短结果。"
-            )
+        if prompt:
+            return prompt, "native_en_us"
+    elif case.get("contract_type") != "generic":
+        prompt = NATIVE_PROMPTS_BY_VARIANT.get(variant, {}).get(contract_id)
+        if prompt:
+            return prompt, f"native_{variant}"
     wrapper = LOCALIZED_TASK_WRAPPERS.get(variant)
     if wrapper:
-        en_prompt = base_prompt_for_case(case, "en_us")
-        return wrapper.format(prompt=en_prompt)
+        en_prompt, _ = base_prompt_and_source_for_case(case, "en_us")
+        return wrapper.format(prompt=en_prompt), f"wrapper_{variant}_en_us"
+    if variant == "en_us":
+        return (
+            f"Run the RustClaw structured task {contract_id}. "
+            "Observe evidence first, then return a concise result in the required shape."
+        ), "fallback_en_us"
+    return (
+        f"按 RustClaw 结构化任务 {contract_id} 做一次只读检查，"
+        "需要先观察证据，再按要求给出简短结果。"
+    ), "fallback_zh_cn"
+
+
+def base_prompt_for_case(case: dict[str, Any], variant: str = "zh_cn") -> str:
+    prompt, _ = base_prompt_and_source_for_case(case, variant)
     return prompt
+
+
+def prompt_source_for_case(case: dict[str, Any]) -> str:
+    variant = str(case.get("nl_variant") or "zh_cn")
+    _, source = base_prompt_and_source_for_case(case, variant)
+    return source
 
 
 def generated_prompt_for_case(case: dict[str, Any]) -> str:
@@ -454,6 +525,8 @@ def as_nl_case(case: dict[str, Any]) -> dict[str, Any]:
         "tags": tags,
         "prompt": generated_prompt_for_case(case),
         "expect": "",
+        "nl_prompt_source": prompt_source_for_case(case),
+        "nl_prompt_language": variant,
     }
     row.update(case)
     return row
@@ -505,6 +578,7 @@ def live_nl_action_preference_applicable(case: dict[str, Any]) -> bool:
         "file_paths": {"fs_basic.find_entries"},
         "recent_scalar_equality_check": {"git_basic", "run_cmd"},
         "scalar_count": {"fs_basic.count_entries", "run_cmd"},
+        "structured_keys": {"config_basic.list_keys", "config_basic.read_fields"},
     }
     allowed_actions = prompt_surface_action_contracts.get(contract_id)
     if allowed_actions is not None:
@@ -664,6 +738,85 @@ def generate_all_cases(matrix: dict[str, Any]) -> list[dict[str, Any]]:
         contract_id = profile.get("name", "unnamed_generic")
         cases.extend(generate_contract_cases(matrix, "generic", contract_id, profile))
     return unique_cases(cases)
+
+
+def generate_external_admission_cases(matrix: dict[str, Any]) -> list[dict[str, Any]]:
+    base = {
+        "source": "external_skill_matrix_admission",
+        "matrix_version": matrix.get("matrix_version"),
+        "matrix_hash": matrix_hash(matrix),
+        "contract_type": "external_admission",
+        "semantic_kind": "scalar_count",
+        "action_ref": "smoke_ping_demo.ping",
+        "required_evidence": ["field_value"],
+        "evidence_expression": {
+            "all_of": ["field_value"],
+            "one_of": [],
+            "any_of": [],
+            "negative_evidence": [],
+        },
+        "final_answer_shape": "scalar",
+        "allowed_actions": ["smoke_ping_demo.ping"],
+        "forbidden_actions": [],
+        "none_passthrough": False,
+        "failure_policy": "retry_then_fail",
+    }
+    cases = [
+        {
+            **base,
+            "case_id": "external_admission.not_admitted_text_only",
+            "contract_id": "not_admitted_text_only",
+            "phase": "negative_text_only",
+            "expected_policy_decision": "contract_gap",
+            "matrix_admission_eligible": False,
+            "extractor_kind": "text_legacy",
+            "skill_response_shape": "text_only",
+            "expected_strict_evidence_eligible": False,
+        },
+        {
+            **base,
+            "case_id": "external_admission.admitted_extra_count",
+            "contract_id": "admitted_extra_count",
+            "phase": "positive_extra_count",
+            "expected_policy_decision": "allowed",
+            "matrix_admission_eligible": True,
+            "extractor_kind": "structured_json",
+            "skill_response_shape": "extra.count",
+            "expected_strict_evidence_eligible": True,
+        },
+        {
+            **base,
+            "case_id": "external_admission.admitted_extra_results",
+            "contract_id": "admitted_extra_results",
+            "phase": "positive_extra_results",
+            "expected_policy_decision": "allowed",
+            "matrix_admission_eligible": True,
+            "extractor_kind": "structured_json",
+            "skill_response_shape": "extra.results",
+            "expected_strict_evidence_eligible": True,
+        },
+        {
+            **base,
+            "case_id": "external_admission.admitted_extra_path",
+            "contract_id": "admitted_extra_path",
+            "semantic_kind": "scalar_path_only",
+            "phase": "positive_extra_path",
+            "expected_policy_decision": "allowed",
+            "required_evidence": ["path"],
+            "evidence_expression": {
+                "all_of": ["path"],
+                "one_of": [],
+                "any_of": [],
+                "negative_evidence": [],
+            },
+            "final_answer_shape": "single_path",
+            "matrix_admission_eligible": True,
+            "extractor_kind": "structured_json",
+            "skill_response_shape": "extra.path",
+            "expected_strict_evidence_eligible": True,
+        },
+    ]
+    return cases
 
 
 def generate_contract_cases(
@@ -888,6 +1041,31 @@ def coverage_report(cases: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def language_prompt_source_report(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    by_variant: dict[str, dict[str, int]] = {}
+    missing_native: list[str] = []
+    for case in cases:
+        variant = str(case.get("nl_variant") or "")
+        if not variant:
+            continue
+        source = prompt_source_for_case(case)
+        variant_counts = by_variant.setdefault(variant, {})
+        variant_counts[source] = variant_counts.get(source, 0) + 1
+        contract_id = str(case.get("contract_id") or "")
+        if (
+            variant in STRICT_NATIVE_PROMPT_VARIANTS
+            and contract_id in STRICT_NATIVE_PROMPT_CONTRACTS
+            and source != f"native_{variant}"
+        ):
+            missing_native.append(str(case.get("case_id") or contract_id))
+    return {
+        "language_variants": sorted(by_variant),
+        "language_prompt_sources": by_variant,
+        "strict_native_prompt_contracts": sorted(STRICT_NATIVE_PROMPT_CONTRACTS),
+        "strict_native_prompt_missing": sorted(missing_native),
+    }
+
+
 def validate_selected_cases(
     cases: list[dict[str, Any]],
     requested_count: int,
@@ -945,6 +1123,62 @@ def validate_selected_cases(
     return errors
 
 
+def validate_external_admission_cases(cases: list[dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    ids = {str(case.get("case_id") or "") for case in cases}
+    required_ids = {
+        "external_admission.not_admitted_text_only",
+        "external_admission.admitted_extra_count",
+        "external_admission.admitted_extra_path",
+        "external_admission.admitted_extra_results",
+    }
+    missing = sorted(required_ids - ids)
+    if missing:
+        errors.append(f"external admission generated cases missing: {missing}")
+    negative = [
+        case
+        for case in cases
+        if case.get("expected_strict_evidence_eligible") is False
+    ]
+    positive = [
+        case
+        for case in cases
+        if case.get("expected_strict_evidence_eligible") is True
+    ]
+    if not negative:
+        errors.append("external admission generated cases missing strict-evidence negative")
+    expected_positive_shapes = {"extra.count", "extra.path", "extra.results"}
+    observed_positive_shapes = {
+        str(case.get("skill_response_shape") or "") for case in positive
+    }
+    missing_positive_shapes = sorted(expected_positive_shapes - observed_positive_shapes)
+    if missing_positive_shapes:
+        errors.append(
+            "external admission generated cases missing positive response shapes: "
+            + ", ".join(missing_positive_shapes)
+        )
+    for case in positive:
+        if not case.get("matrix_admission_eligible"):
+            errors.append(f"{case.get('case_id')} positive case lacks matrix admission")
+        if case.get("extractor_kind") != "structured_json":
+            errors.append(f"{case.get('case_id')} positive case must use structured_json")
+    for case in negative:
+        if case.get("matrix_admission_eligible"):
+            errors.append(f"{case.get('case_id')} negative case is marked admitted")
+    return errors
+
+
+def validate_multilingual_prompt_coverage(cases: list[dict[str, Any]]) -> list[str]:
+    report = language_prompt_source_report(cases)
+    missing = report["strict_native_prompt_missing"]
+    if missing:
+        return [
+            "strict multilingual prompts missing native surfaces for selected cases: "
+            + ", ".join(missing)
+        ]
+    return []
+
+
 def read_history_case_ids(path: Path | None) -> set[str]:
     if path is None or not path.exists():
         return set()
@@ -998,6 +1232,11 @@ def main() -> int:
         action="store_true",
         help="with --nl, emit zh-CN/en-US/ja-JP/ko-KR/fr-FR/mixed prompts for each selected contract cell",
     )
+    parser.add_argument(
+        "--external-admission-cases",
+        action="store_true",
+        help="emit deterministic external skill matrix admission positive/negative cases",
+    )
     args = parser.parse_args()
 
     if args.update_history and args.history is None:
@@ -1005,11 +1244,20 @@ def main() -> int:
 
     with args.matrix.open("rb") as fh:
         matrix = tomllib.load(fh)
-    seen_case_ids = read_history_case_ids(args.history)
-    cases = select_cases(generate_all_cases(matrix), args.count, args.batch, seen_case_ids)
+    if args.external_admission_cases:
+        seen_case_ids: set[str] = set()
+        cases = generate_external_admission_cases(matrix)
+    else:
+        seen_case_ids = read_history_case_ids(args.history)
+        cases = select_cases(generate_all_cases(matrix), args.count, args.batch, seen_case_ids)
 
     if args.check:
-        errors = validate_selected_cases(cases, args.count, matrix)
+        if args.external_admission_cases:
+            errors = validate_external_admission_cases(cases)
+        else:
+            errors = validate_selected_cases(cases, args.count, matrix)
+        if args.multilingual_variants and not args.external_admission_cases:
+            errors.extend(validate_multilingual_prompt_coverage(expand_language_variants(cases)))
         if errors:
             for error in errors:
                 print(f"ERROR: {error}", file=sys.stderr)
@@ -1027,7 +1275,10 @@ def main() -> int:
         append_history_case_ids(args.history, cases)
 
     if args.report:
-        print(json.dumps(coverage_report(cases), ensure_ascii=False, sort_keys=True), file=sys.stderr)
+        report = coverage_report(cases)
+        if args.multilingual_variants:
+            report.update(language_prompt_source_report(expectation_cases))
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True), file=sys.stderr)
 
     return 0
 

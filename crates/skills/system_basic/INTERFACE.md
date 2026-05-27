@@ -112,6 +112,35 @@
 - Runtime data collection should degrade gracefully where possible (for example, missing `/proc` fields produce fallback values instead of fabricated data).
 - Successful responses that already use JSON text are also mirrored into the optional `extra` field for machine-readable consumers.
 
+## Structured Evidence Contract
+- Matrix admission status: built-in structured evidence only; strict filesystem/config/runtime evidence must come from `extra` fields.
+- `info` success `extra` fields:
+  - `hostname`, `pid`, `cwd`, `workspace_root`, `os`, `arch`, timestamps, uptime, RSS, and executable path; evidence roles `field_value`, `count`, and `path`.
+- `inventory_dir` success `extra` fields:
+  - `action`, `path`, `resolved_path`, `names`, `entries`, `counts`, and truncation/cap metadata; evidence roles `path`, `entries`, `results`, and `count`.
+- `count_inventory` success `extra` fields:
+  - `action`, `path`, `resolved_path`, `counts`, filters, and recursion flags; evidence roles `path` and `count`.
+- `workspace_glance`, `tree_summary`, and `dir_compare` success `extra` fields:
+  - structured path/count/entry/diff fields; evidence roles `path`, `entries`, `results`, and `count`.
+- `extract_field` success `extra` fields:
+  - `action`, `path`, `field_path`, `exists`, `value_type`, `value_text`, `value`, `resolved_field_path`, `match_strategy`, and `match_count`; evidence roles `field_value`, `status`, and `count`.
+- `extract_fields` success `extra` fields:
+  - `action`, `path`, `count`, and `results[]` objects with field path, existence, value type, and value fields; evidence roles `results`, `field_value`, and `count`.
+- `structured_keys` success `extra` fields:
+  - `action`, `path`, `field_path`, `keys`, `count`, and truncation metadata; evidence roles `entries` and `count`.
+- `validate_structured` success `extra` fields:
+  - `action`, `path`, `valid`, format, and parse details; evidence role `status`.
+- `find_path` success `extra` fields:
+  - `action`, `root`, `count`, and `results`; evidence roles `path`, `results`, and `count`.
+- `read_range` success `extra` fields:
+  - `action`, `path`, `start_line`, `end_line`, `line_count`, and `excerpt`; evidence roles `path`, `field_value`, and `count`.
+- `compare_paths` and `path_batch_facts` success `extra` fields:
+  - structured path fact objects with `exists`, `kind`, `size`, modified time, and requested fields; evidence roles `path`, `status`, `field_value`, and `count`.
+- `diagnose_runtime` success `extra` fields:
+  - selected process, port, and environment summary fields; evidence roles `status`, `entries`, and `count`.
+- Sensitive fields: excerpts, process snapshots, environment summaries, and structured values may include user data. Provider-facing traces should prefer keys, counts, paths, excerpts, or hashes rather than full values unless the user requested the value.
+- Error responses include top-level `error_kind` and `platform`; contextual `extra.error_kind` appears for IO/path errors.
+
 ## Request/Response Examples
 ### Example 1
 Request:

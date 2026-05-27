@@ -86,6 +86,22 @@ pub struct PlannerCapabilityMapping {
     pub preferred: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+pub struct MatrixAdmissionConfig {
+    #[serde(default)]
+    pub eligible: bool,
+    #[serde(default)]
+    pub declared_actions: Vec<String>,
+    #[serde(default)]
+    pub evidence_sources: Vec<String>,
+    #[serde(default)]
+    pub required_extra_fields: Vec<String>,
+    #[serde(default)]
+    pub extractor_kind: Option<String>,
+    #[serde(default)]
+    pub admission_version: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SkillMemoryPolicyProfile {
@@ -394,6 +410,11 @@ pub struct SkillRegistryEntry {
     /// `capabilities`, which declares runtime/security resources.
     #[serde(default)]
     pub planner_capabilities: Vec<PlannerCapabilityMapping>,
+    /// Optional matrix evidence admission metadata. Runtime enablement and
+    /// matrix evidence eligibility are intentionally separate: an external
+    /// skill can be callable while still ineligible for strict evidence use.
+    #[serde(default)]
+    pub matrix_admission: Option<MatrixAdmissionConfig>,
     /// Structured memory sources this skill may receive in its `_memory`
     /// payload. This is runtime policy metadata, not natural-language routing.
     #[serde(default)]
@@ -534,6 +555,18 @@ fn normalize_planner_capabilities(
         });
     }
     out
+}
+
+fn normalize_matrix_admission(config: &MatrixAdmissionConfig) -> MatrixAdmissionConfig {
+    MatrixAdmissionConfig {
+        eligible: config.eligible,
+        declared_actions: normalize_schema_tokens(&config.declared_actions),
+        evidence_sources: normalize_schema_tokens(&config.evidence_sources),
+        required_extra_fields: normalize_metadata_lines(&config.required_extra_fields),
+        extractor_kind: trim_optional_string(config.extractor_kind.as_deref())
+            .map(|value| normalize_schema_token(&value)),
+        admission_version: trim_optional_string(config.admission_version.as_deref()),
+    }
 }
 
 fn normalize_metadata_lines(values: &[String]) -> Vec<String> {
@@ -775,6 +808,10 @@ impl SkillsRegistry {
             entry.platform_notes = normalize_metadata_lines(&entry.platform_notes);
             entry.planner_capabilities =
                 normalize_planner_capabilities(&entry.planner_capabilities);
+            entry.matrix_admission = entry
+                .matrix_admission
+                .as_ref()
+                .map(normalize_matrix_admission);
             entry.memory_policy = entry
                 .memory_policy
                 .as_ref()
@@ -1030,6 +1067,29 @@ impl SkillsRegistry {
             Some(entry) => entry.planner_capabilities.as_slice(),
             None => &[],
         }
+    }
+
+    pub fn matrix_admission(&self, canonical_name: &str) -> Option<&MatrixAdmissionConfig> {
+        self.get(canonical_name)
+            .and_then(|entry| entry.matrix_admission.as_ref())
+    }
+
+    pub fn matrix_admission_eligible(&self, canonical_name: &str, action: Option<&str>) -> bool {
+        let Some(admission) = self.matrix_admission(canonical_name) else {
+            return false;
+        };
+        if !admission.eligible {
+            return false;
+        }
+        let Some(action) = action else {
+            return true;
+        };
+        let action = normalize_schema_token(action);
+        admission.declared_actions.is_empty()
+            || admission
+                .declared_actions
+                .iter()
+                .any(|candidate| candidate == &action)
     }
 
     pub fn memory_policy(&self, canonical_name: &str) -> Option<&SkillMemoryPolicyConfig> {
@@ -1506,6 +1566,7 @@ capabilities = ["llm", "net", "fs.write", "llm", "secrets.image_generation_minim
 	  { name = "Database::List-Tables", action = "List-Tables", effect = "observe", required = ["DB-Path"], optional = ["Limit"], preferred = true, risk_level = "low" },
 	  { name = "database::list-tables", action = "duplicate-ignored" }
 	]
+	matrix_admission = { eligible = true, declared_actions = ["List-Tables"], evidence_sources = ["structured-json"], required_extra_fields = ["extra.tables", "extra.count", "extra.tables"], extractor_kind = "Structured-Json", admission_version = "external-v1" }
 	"#;
         let path = std::env::temp_dir().join("test_registry_planner_metadata.toml");
         std::fs::write(&path, toml).unwrap();
@@ -1573,6 +1634,23 @@ capabilities = ["llm", "net", "fs.write", "llm", "secrets.image_generation_minim
             reg.planner_capabilities("db_basic"),
             manifest.planner_capabilities.as_slice()
         );
+        let admission = reg
+            .matrix_admission("db_basic")
+            .expect("matrix admission metadata should load");
+        assert!(admission.eligible);
+        assert_eq!(admission.declared_actions, vec!["list_tables".to_string()]);
+        assert_eq!(
+            admission.evidence_sources,
+            vec!["structured_json".to_string()]
+        );
+        assert_eq!(
+            admission.required_extra_fields,
+            vec!["extra.tables".to_string(), "extra.count".to_string()]
+        );
+        assert_eq!(admission.extractor_kind.as_deref(), Some("structured_json"));
+        assert_eq!(admission.admission_version.as_deref(), Some("external-v1"));
+        assert!(reg.matrix_admission_eligible("db_basic", Some("list-tables")));
+        assert!(!reg.matrix_admission_eligible("db_basic", Some("query")));
         let _ = std::fs::remove_file(path);
     }
 
