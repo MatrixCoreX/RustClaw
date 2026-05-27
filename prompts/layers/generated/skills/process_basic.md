@@ -41,6 +41,18 @@
 - Non-zero subprocess exit codes are returned as `status=error` with `error_text=process command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including fields like `action`, `exit_code`, `platform`, `command_tool` for `port_list`, and `output`.
 
+## Structured Evidence Contract (from interface)
+- Matrix admission status: built-in structured evidence only; `output` remains legacy text evidence unless a stricter parser is explicitly registered.
+- Successful response `extra` fields:
+  - `action`: string action name; evidence role `status`.
+  - `exit_code`: integer subprocess exit code; evidence role `status`.
+  - `platform`: string OS/platform; evidence role `field_value`.
+  - `command_tool`: string selected probe for `port_list`; evidence role `field_value`.
+  - `limit`, `filter`, `pid`, `signal`, `path`, or `n`: echoed typed inputs when applicable; evidence roles `field_value` and `path`.
+  - `output`: string bounded process/log observation; fallback evidence only.
+- Sensitive fields: process command lines and log tails can contain secrets or user data. Provider-facing traces should prefer counts, selected fields, excerpts, or hashes.
+- Error responses include readable `error_text`; top-level `error_kind` should be used when available.
+
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:

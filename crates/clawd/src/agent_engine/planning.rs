@@ -3173,6 +3173,17 @@ fn scalar_path_find_entries_args(path: &str) -> Value {
     })
 }
 
+fn route_prefers_text_excerpt_action_for_contract_hint(route: &RouteResult) -> bool {
+    !route.needs_clarify
+        && !route.output_contract.delivery_required
+        && route.output_contract.requires_content_evidence
+        && route.output_contract.locator_kind == crate::OutputLocatorKind::Path
+        && matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None | crate::OutputSemanticKind::WorkspaceProjectSummary
+        )
+}
+
 fn contract_hint_selector_value(original_user_text: &str, key: &str) -> Option<String> {
     crate::intent_router::contract_test_hint_value(original_user_text, key)
         .map(|value| value.trim().to_string())
@@ -3278,6 +3289,22 @@ fn preferred_run_cmd_for_contract_hint(
                 shell_single_quote(&filter)
             )
         }
+        crate::OutputSemanticKind::SqliteTableListing
+        | crate::OutputSemanticKind::SqliteTableNamesOnly
+        | crate::OutputSemanticKind::SqliteDatabaseKindJudgment => {
+            let db_path = first_route_locator_target(route, auto_locator_path)?;
+            format!(
+                "sqlite3 {} '.tables' | tr -s ' ' '\\n' | sed '/^$/d'",
+                shell_single_quote(&db_path)
+            )
+        }
+        crate::OutputSemanticKind::SqliteSchemaVersion => {
+            let db_path = first_route_locator_target(route, auto_locator_path)?;
+            format!(
+                "sqlite3 {} 'PRAGMA schema_version;' | awk '{{print \"schema_version=\" $0}}'",
+                shell_single_quote(&db_path)
+            )
+        }
         crate::OutputSemanticKind::DockerPs => "docker ps 2>&1 || true".to_string(),
         crate::OutputSemanticKind::DockerImages => "docker images 2>&1 || true".to_string(),
         crate::OutputSemanticKind::DockerLogs => "docker ps 2>&1 || true".to_string(),
@@ -3302,6 +3329,15 @@ fn preferred_fs_basic_for_contract_hint(
     auto_locator_path: Option<&str>,
     original_user_text: &str,
 ) -> Option<AgentAction> {
+    let action_name = if action_name != "read_text_range"
+        && (route.output_contract.semantic_kind
+            == crate::OutputSemanticKind::WorkspaceProjectSummary
+            || route_prefers_text_excerpt_action_for_contract_hint(route))
+    {
+        "read_text_range"
+    } else {
+        action_name
+    };
     let mut args = match action_name {
         "stat_paths" => {
             if route.output_contract.semantic_kind
@@ -3650,18 +3686,41 @@ fn preferred_structured_action_for_contract_hint(
                 "manager_type": "rustclaw",
             }),
         }),
-        "git_basic" if git_basic_available_for_plan(state) => Some(AgentAction::CallSkill {
-            skill: "git_basic".to_string(),
-            args: serde_json::json!({
-                "action": match route.output_contract.semantic_kind {
-                    crate::OutputSemanticKind::GitCommitSubject => "log",
-                    crate::OutputSemanticKind::GitRepositoryState => "status",
-                    crate::OutputSemanticKind::RecentScalarEqualityCheck => "current_branch",
-                    _ => preferred.action.as_deref().unwrap_or("status"),
-                },
-            }),
-        }),
+        "git_basic" if git_basic_available_for_plan(state) => {
+            if route.output_contract.semantic_kind
+                == crate::OutputSemanticKind::WorkspaceProjectSummary
+            {
+                preferred_fs_basic_for_contract_hint(
+                    state,
+                    route,
+                    "read_text_range",
+                    auto_locator_path,
+                    original_user_text,
+                )
+            } else {
+                Some(AgentAction::CallSkill {
+                    skill: "git_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": match route.output_contract.semantic_kind {
+                            crate::OutputSemanticKind::GitCommitSubject => "log",
+                            crate::OutputSemanticKind::GitRepositoryState => "status",
+                            crate::OutputSemanticKind::RecentScalarEqualityCheck => "current_branch",
+                            _ => preferred.action.as_deref().unwrap_or("status"),
+                        },
+                    }),
+                })
+            }
+        }
         "db_basic" => {
+            if !matches!(
+                route.output_contract.semantic_kind,
+                crate::OutputSemanticKind::SqliteSchemaVersion
+                    | crate::OutputSemanticKind::SqliteTableListing
+                    | crate::OutputSemanticKind::SqliteTableNamesOnly
+                    | crate::OutputSemanticKind::SqliteDatabaseKindJudgment
+            ) {
+                return None;
+            }
             let db_path = first_route_locator_target(route, auto_locator_path)?;
             Some(AgentAction::CallSkill {
                 skill: "db_basic".to_string(),
@@ -21567,6 +21626,196 @@ planner_kind = "tool"
     }
 
     #[test]
+    fn contract_hint_preferred_run_cmd_sqlite_uses_structured_locator() {
+        let state = test_state_with_enabled_skills(&["run_cmd", "db_basic"]);
+        let mut route = base_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = OutputSemanticKind::SqliteDatabaseKindJudgment;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint =
+            "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string();
+        let request = "[CONTRACT_TEST_HINT]\npreferred_action_ref=run_cmd\n[/CONTRACT_TEST_HINT]";
+
+        let plan = contract_hint_preferred_action_deterministic_plan_result(
+            &state,
+            "inspect sqlite database kind",
+            Some(&route),
+            &LoopState::new(1),
+            request,
+            None,
+        )
+        .expect("machine hint should select sqlite run_cmd probe");
+
+        assert_eq!(plan.steps.len(), 1);
+        assert_eq!(plan.steps[0].skill, "run_cmd");
+        let command = plan.steps[0]
+            .args
+            .get("command")
+            .and_then(Value::as_str)
+            .expect("command");
+        assert!(command.contains("sqlite3"));
+        assert!(command.contains("test_contract.sqlite"));
+        assert!(command.contains(".tables"));
+    }
+
+    #[test]
+    fn contract_hint_preferred_db_basic_does_not_claim_structured_keys_config_file() {
+        let root = TempDirGuard::new("contract_hint_structured_keys_db_basic");
+        let config_path = root.path.join("config.toml");
+        fs::write(&config_path, "alpha = 1\n[beta]\nvalue = 2\n").expect("write config");
+        let config_path = config_path.display().to_string();
+        let state = test_state_with_enabled_skills(&["config_basic", "db_basic"]);
+        let mut route = base_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = OutputSemanticKind::StructuredKeys;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = config_path.clone();
+        let request = "[CONTRACT_TEST_HINT]\npreferred_action_ref=db_basic\n[/CONTRACT_TEST_HINT]";
+
+        assert!(contract_hint_preferred_action_deterministic_plan_result(
+            &state,
+            "list structured keys",
+            Some(&route),
+            &LoopState::new(1),
+            request,
+            Some(&config_path),
+        )
+        .is_none());
+
+        let plan = structured_keys_deterministic_plan_result(
+            &state,
+            "list structured keys",
+            Some(&route),
+            &LoopState::new(1),
+            Some(&config_path),
+        )
+        .expect("structured keys should fall back to config_basic list_keys");
+        assert_eq!(plan.steps.len(), 1);
+        let action = plan.steps[0].to_agent_action().expect("agent action");
+        let args = expect_planned_call(&action, "config_basic", "list_keys");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some(config_path.as_str())
+        );
+    }
+
+    #[test]
+    fn contract_hint_workspace_summary_list_dir_prefers_text_excerpt_evidence() {
+        let root = TempDirGuard::new("contract_hint_workspace_summary_list_dir");
+        fs::write(
+            root.path.join("README.md"),
+            "# Fixture\n\nThis directory contains local test fixtures.",
+        )
+        .expect("write README");
+        let root_path = root.path.display().to_string();
+        let state = test_state_with_enabled_skills(&["fs_basic"]);
+        let mut route = base_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = root_path.clone();
+        let request =
+            "[CONTRACT_TEST_HINT]\npreferred_action_ref=fs_basic.list_dir\n[/CONTRACT_TEST_HINT]";
+
+        let plan = contract_hint_preferred_action_deterministic_plan_result(
+            &state,
+            "summarize workspace",
+            Some(&route),
+            &LoopState::new(1),
+            request,
+            Some(&root_path),
+        )
+        .expect("workspace summary should use readable text evidence");
+
+        assert_eq!(plan.steps.len(), 1);
+        let action = plan.steps[0].to_agent_action().expect("agent action");
+        let args = expect_planned_call(&action, "fs_basic", "read_text_range");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some(root.path.join("README.md").display().to_string().as_str())
+        );
+    }
+
+    #[test]
+    fn contract_hint_workspace_summary_git_basic_prefers_text_excerpt_evidence() {
+        let root = TempDirGuard::new("contract_hint_workspace_summary_git_basic");
+        fs::write(
+            root.path.join("README.md"),
+            "# Fixture\n\nThis directory contains local test fixtures.",
+        )
+        .expect("write README");
+        let root_path = root.path.display().to_string();
+        let state = test_state_with_enabled_skills(&["fs_basic", "git_basic"]);
+        let mut route = base_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = root_path.clone();
+        let request = "[CONTRACT_TEST_HINT]\npreferred_action_ref=git_basic\n[/CONTRACT_TEST_HINT]";
+
+        let plan = contract_hint_preferred_action_deterministic_plan_result(
+            &state,
+            "summarize workspace",
+            Some(&route),
+            &LoopState::new(1),
+            request,
+            Some(&root_path),
+        )
+        .expect("workspace summary should use readable text evidence");
+
+        assert_eq!(plan.steps.len(), 1);
+        let action = plan.steps[0].to_agent_action().expect("agent action");
+        let args = expect_planned_call(&action, "fs_basic", "read_text_range");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some(root.path.join("README.md").display().to_string().as_str())
+        );
+    }
+
+    #[test]
+    fn contract_hint_generic_path_content_stat_paths_prefers_text_excerpt_evidence() {
+        let root = TempDirGuard::new("contract_hint_generic_path_content_stat_paths");
+        let doc_path = root.path.join("release_checklist.md");
+        fs::write(
+            &doc_path,
+            "# Release Checklist\n\n- Verify config loading\n- Check recent logs\n",
+        )
+        .expect("write doc");
+        let doc_path = doc_path.display().to_string();
+        let state = test_state_with_enabled_skills(&["fs_basic"]);
+        let mut route = base_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Free;
+        route.output_contract.semantic_kind = OutputSemanticKind::None;
+        route.output_contract.locator_kind = OutputLocatorKind::Path;
+        route.output_contract.locator_hint = doc_path.clone();
+        let request =
+            "[CONTRACT_TEST_HINT]\npreferred_action_ref=fs_basic.stat_paths\n[/CONTRACT_TEST_HINT]";
+
+        let plan = contract_hint_preferred_action_deterministic_plan_result(
+            &state,
+            "summarize file",
+            Some(&route),
+            &LoopState::new(1),
+            request,
+            Some(&doc_path),
+        )
+        .expect("generic file summary should use readable text evidence");
+
+        assert_eq!(plan.steps.len(), 1);
+        let action = plan.steps[0].to_agent_action().expect("agent action");
+        let args = expect_planned_call(&action, "fs_basic", "read_text_range");
+        assert_eq!(
+            args.get("path").and_then(Value::as_str),
+            Some(doc_path.as_str())
+        );
+    }
+
+    #[test]
     fn contract_hint_preferred_fs_stat_paths_uses_locator_contract() {
         let state = test_state_with_enabled_skills(&["fs_basic"]);
         let mut route = base_route_result();
@@ -21594,6 +21843,34 @@ planner_kind = "tool"
         assert_eq!(
             plan.steps[0].args.get("action").and_then(Value::as_str),
             Some("stat_paths")
+        );
+    }
+
+    #[test]
+    fn contract_hint_scalar_equality_without_locator_falls_back_to_git_branch() {
+        let state = test_state_with_enabled_skills(&["fs_basic", "git_basic", "run_cmd"]);
+        let mut route = base_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = OutputSemanticKind::RecentScalarEqualityCheck;
+        route.output_contract.locator_kind = OutputLocatorKind::None;
+        let request = "[CONTRACT_TEST_HINT]\nsemantic_kind=recent_scalar_equality_check\ncandidate_wrong_action_ref=db_basic\n[/CONTRACT_TEST_HINT]";
+
+        let plan = contract_hint_preferred_action_deterministic_plan_result(
+            &state,
+            "check scalar equality",
+            Some(&route),
+            &LoopState::new(1),
+            request,
+            None,
+        )
+        .expect("matrix fallback should select git_basic when no path locator exists");
+
+        assert_eq!(plan.steps.len(), 1);
+        assert_eq!(plan.steps[0].skill, "git_basic");
+        assert_eq!(
+            plan.steps[0].args.get("action").and_then(Value::as_str),
+            Some("current_branch")
         );
     }
 

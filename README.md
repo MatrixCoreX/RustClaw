@@ -21,7 +21,7 @@ Current repository highlights:
 
 ## Planner-First Architecture
 
-RustClaw's main natural-language path is moving toward a planner-first single-loop design. The goal is to keep one authoritative runtime path for normal requests: bind the turn to session state, run a single intent-normalizer LLM for routing signals and the first-layer decision, then clarify, answer directly once, or enter the planner/runtime loop for tools, skills, optional grounded synthesis, and response. Post-route policy runs before dispatch; final delivery and output-contract guards run before the result is saved.
+RustClaw's main natural-language path is moving toward a planner-first single-loop design. The goal is to keep one authoritative runtime path for normal requests: bind the turn to session state, run the intent-normalizer LLM for routing signals and the first-layer decision, optionally use the contract-repair judge for schema-backed semantic repair, then clarify, answer directly once, or enter the planner/runtime loop for tools, skills, optional grounded synthesis, and response. Post-route policy runs before dispatch; final delivery and output-contract guards run before the result is saved.
 
 ### Runtime Flow
 
@@ -37,7 +37,10 @@ flowchart TD
     C0 -->|no| C[Session snapshot + local surface hints]
     C --> D[Binding / resume / active-task context]
     D --> E[Intent normalizer LLM]
-    E --> EC[Build ask context bundle<br/>memory + attachments + recent execution]
+    E --> ER{Contract repair needed?}
+    ER -->|optional| RJ[Contract-repair judge LLM<br/>schema-backed semantic repair]
+    ER -->|no| EC[Build ask context bundle<br/>memory + attachments + recent execution]
+    RJ --> EC
     CM[Task contract matrix<br/>semantic kind + required evidence + allowed action + response shape] --> E2
     CM --> DG
     CM --> VF
@@ -68,7 +71,7 @@ flowchart TD
     VF --> L{Verified action}
     L -->|respond| M[Respond]
     L -->|synthesize_answer| SS[Grounded synthesis LLM]
-    L -->|call_tool| N[Tool execution<br/>fs_basic/config_basic/config_edit adapter]
+    L -->|call_tool| N[Tool execution<br/>virtual tool dispatch]
     L -->|call_skill| N1[run_skill_with_runner<br/>skill dispatch]
     RS --> N1
     N1 -->|builtin| N1B[In-process builtin skill]
@@ -104,7 +107,7 @@ flowchart TD
 ```
 
 - `Session snapshot + local surface hints`: attaches each turn to the active conversation and extracts bounded local facts before routing; this is not a separate “taxonomy engine” LLM.
-- `Intent normalizer LLM`: one call that emits `first_layer_decision`, `needs_clarify`, `output_contract`, and optional `turn_type` / `target_task_policy` style fields. Runtime then derives `ask_mode` and a log-only route label. **Clarify vs DirectAnswer vs PlannerExecute is decided here**, not via a `clarify` action inside the planner JSON.
+- `Intent normalizer LLM`: emits `first_layer_decision`, `needs_clarify`, `output_contract`, and optional `turn_type` / `target_task_policy` style fields. Runtime then derives `ask_mode` and a log-only route label. When schema repair marks a semantic contract as suspect, an optional contract-repair judge LLM can refine the structured contract before dispatch. **Clarify vs DirectAnswer vs PlannerExecute is decided before planner JSON**, not via a `clarify` action inside the planner steps.
 - `Task queue`: HTTP callers submit `POST /v1/tasks`; channel daemons also hand work to the same queued worker path.
 - `Task kind`: `kind=ask` enters the normalizer / post-route / ask dispatch flow; `kind=run_skill` bypasses LLM routing and runs the named skill directly through the shared skill dispatch path.
 - `Ask context bundle`: built once after normalization and before ask dispatch; it supplies chat context, execution prompt context, attachments, durable memory, and recent execution context used by post-route locator policy.
@@ -116,7 +119,7 @@ flowchart TD
 - `Chat response LLM`: handles confirmed `DirectAnswer` replies; pure chat requests do not enter the execution planner loop.
 - `Planner / runtime loop`: for `PlannerExecute`, runs multiple rounds. Most rounds call the planner LLM; narrow structured observation contracts can produce a runtime-built deterministic observation plan for that round, but still use the same loop, observations, guards, and finalization path. Planner steps are `think`, `call_capability`, `call_tool`, `call_skill`, `synthesize_answer`, and `respond` (there is **no** `delegate` step type today—execution steps are traced as subtasks in logs, not a nested child loop). `call_capability` is the preferred capability-level planner action; `call_tool` / `call_skill` remain legacy-compatible direct actions.
 - `Execution prompt/context`: reuses the ask context bundle and resolved prompt for `PlannerExecute`, so memory cannot override the latest user instruction.
-- `Skill registry + generated skill docs`: planner-visible skills and capability metadata come from runtime skill views and generated interface docs, primarily `configs/skills_registry.toml`, `crates/skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`. New planner-facing skills should declare `planner_capabilities` instead of adding language-specific planner branches.
+- `Skill registry + generated skill docs`: planner-visible skills and capability metadata come from runtime skill views and generated interface docs, primarily `configs/skills_registry.toml`, `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`. New planner-facing skills should declare `planner_capabilities` instead of adding language-specific planner branches.
 - `CapabilityResolver / PlanVerifier`: capability-level actions are resolved to concrete tools or skills before execution. The verifier and contract action gate then check visibility, allowed actions, required arguments, risk/effect boundaries, confirmation requirements, and mutation validation before any real action runs.
 - `call_skill` / direct `run_skill`: both go through `run_skill_with_runner`, which applies policy and skill switches, then dispatches by registry kind: builtins run in-process, external skills run through their external adapter, and runner skills launch `skill-runner` plus the concrete skill binary.
 - `Loop observations`, `Evidence coverage`, and `Observed-output finalizer`: tool, skill, and synthesis outputs remain grounded evidence inside the loop. The evidence verifier checks required evidence and answer shape before publication; recoverable failures re-enter the planner with compact attempted-method history, while terminal failures finish with a grounded result. Observation-only plans can still finish through runtime-owned structured answers, with observed-answer synthesis only when runtime cannot safely format the answer.
@@ -132,7 +135,10 @@ flowchart TD
     B --> C[LLM request 1<br/>Intent normalizer]
     C --> D[Parse JSON]
     D --> E{Structured result}
-    E --> Ec[Build ask context bundle<br/>memory + attachments + recent execution]
+    E --> Er{Semantic contract repair needed?}
+    Er -->|yes| Ej[Optional contract-repair judge LLM]
+    Er -->|no| Ec[Build ask context bundle<br/>memory + attachments + recent execution]
+    Ej --> Ec
     CM[Task contract matrix<br/>allowed actions + required evidence + response shape] --> E2
     CM --> G0
     CM --> Kv
@@ -152,18 +158,18 @@ flowchart TD
     E2 -->|first_layer_decision=planner_execute| H[Build planner/runtime context]
     SK[Skill registry + generated skill docs<br/>planner capabilities] --> H
     SK --> Kr
-    G --> Ic[LLM request 2<br/>Chat response]
-    Fr --> Ir[LLM request 2<br/>Resume discussion]
+    G --> Ic[Next LLM request<br/>Chat response]
+    Fr --> Ir[Next LLM request<br/>Resume discussion]
     H --> H0{Narrow deterministic<br/>observation contract?}
     H0 -->|yes| Jd[Runtime-built observation plan<br/>no planner LLM]
-    H0 -->|no| Ip[LLM request 2+<br/>Planner per round]
+    H0 -->|no| Ip[Next LLM request+<br/>Planner per round]
     Ip --> J[Parse plan steps]
     J --> Kr[CapabilityResolver<br/>call_capability -> concrete action]
     Jd --> Kr
     Kr --> Kv[PlanVerifier + contract action gate<br/>schema + allowed action + risk/effect]
     Kv --> K{Verified step type}
     K -->|respond| L[Respond text]
-    K -->|call_tool| M[Execute tool<br/>fs_basic/config_basic/config_edit adapter]
+    K -->|call_tool| M[Execute tool<br/>virtual tool dispatch]
     K -->|call_skill| Ms[run_skill_with_runner<br/>skill dispatch]
     Ms -->|builtin| Msb[In-process builtin skill]
     Ms -->|external| Mse[External skill adapter]
@@ -192,7 +198,7 @@ flowchart TD
     S -. optional background .-> U[Memory preference extraction LLM]
 ```
 
-- `LLM request 1 / Intent normalizer`: performs structured understanding only; it does not produce the final answer.
+- `LLM request 1 / Intent normalizer`: performs structured understanding only; it does not produce the final answer. If schema normalization flags a semantic contract that cannot be safely repaired deterministically, an optional contract-repair judge LLM can run before the ask context bundle is dispatched.
 - This diagram covers the normal `kind=ask` LLM path. `kind=run_skill` and scheduler-triggered direct-text asks have no normalizer / planner LLM request and are finalized by their direct task paths.
 - `Build chat prompt / planner runtime context`: combines mode, session state, working context, and output contract for follow-on requests. The full planner prompt is only needed when the current loop round actually calls the planner LLM.
 - `Task contract matrix`: shares the same semantic kind, allowed action, required evidence, and response-shape contract across post-route policy, direct-answer preflight, plan verification, evidence coverage checks, final delivery, and generated NL evaluations.
@@ -407,6 +413,7 @@ flowchart TD
 - `crates/telegramd`, `crates/wechatd`, `crates/feishud`, `crates/larkd`, `crates/whatsappd`, `crates/whatsapp_webd`: channel daemons
 - `services/wa-web-bridge`: local Node bridge used by the WhatsApp Web channel
 - `crates/skills/*`: skill implementations and `INTERFACE.md` specs
+- `external_skills/*`: externally submitted skills and their required `INTERFACE.md` specs
 - `UI/`: Vite + React local console
 - `pi_app/`: small-screen desktop monitor and launcher scripts
 
@@ -651,10 +658,11 @@ UI notes:
 RustClaw currently ships a broad skill set. Representative groups:
 
 - system and ops: `system_basic`, `process_basic`, `service_control`, `health_check`, `log_analyze`, `task_control`
-- files, config, and developer tools: `fs_basic`, `config_basic`, `config_edit`, `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
+- files, config, and developer tools: `run_cmd`, `fs_basic`, `config_basic`, `config_edit`, `config_guard`, `archive_basic`, `fs_search`, `git_basic`, `package_manager`, `install_module`, `docker_basic`, `db_basic`
 - network and content: `http_basic`, `rss_fetch`, `browser_web`, `doc_parse`, `transform`, `web_search_extract`
 - multimodal: `image_generate`, `image_edit`, `image_vision`, `audio_transcribe`, `audio_synthesize`
-- domain skills: `crypto`, `stock`, `weather`, `map_merchant`, `kb`, `x`
+- workflow and publishing: `schedule`, `extension_manager`, `photo_organize`, `invest_copy`, `x`
+- domain and knowledge skills: `crypto`, `stock`, `weather`, `map_merchant`, `kb`
 
 If you need to answer “how is this skill configured / bound / enabled, and what prerequisite is missing”, start with `prompts/references/skill_setup_guide.md`.
 
@@ -663,6 +671,7 @@ Skill discovery and runtime behavior are driven by:
 - `configs/skills_registry.toml`
 - `[skills]` in `configs/config.toml`
 - `crates/skills/*/INTERFACE.md`
+- `external_skills/*/INTERFACE.md`
 - `prompts/layers/generated/skills/*.md`
 
 Planner skill selection is registry-, capability-, and interface-driven. After a skill is registered, enabled, documented in `INTERFACE.md`, synced with `python3 scripts/sync_skill_docs.py`, and, when planner-facing, given `planner_capabilities` in `configs/skills_registry.toml`, the planner should learn when to use it from registry metadata plus the generated skill prompt. Do not add per-skill selection branches to `clawd` just to make new natural-language examples pass. If selection accuracy is weak, improve the registry capability metadata, skill interface, generated prompt, or model-specific vendor patch; keep Rust code for protocol validation, resolver/verifier boundaries, permission/safety checks, runner dispatch, output-contract enforcement, and deterministic execution compatibility.
@@ -710,6 +719,7 @@ The empty `api_key` is accepted only for loopback `custom` providers (`localhost
 
 - `configs/`: runtime, channel, model, memory, and skill configuration
 - `crates/`: Rust services, daemons, CLI, and skills
+- `external_skills/`: externally submitted skills and example scaffolds
 - `prompts/`: prompt layers and generated skill prompt files
 - `scripts/`: setup, regression, maintenance, and skill-call helpers
 - `services/`: non-Rust helper services such as the WhatsApp Web bridge

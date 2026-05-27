@@ -794,9 +794,32 @@ submit_turn() {
   local case_tags="${5:-}"
   local turn_external_chat_id="${6:-$EXTERNAL_CHAT_ID_VALUE}"
   local submit_raw task_id status text messages error
+  local submit_attempt submit_status submit_extract
+  local max_submit_attempts="${SUBMIT_RETRIES:-5}"
+  local submit_retry_sleep_seconds="${SUBMIT_RETRY_SLEEP_SECONDS:-30}"
 
-  submit_raw="$(submit_client_like_telegram_task "$prompt" "true" "" "$EXTERNAL_USER_ID_VALUE" "$turn_external_chat_id")"
-  task_id="$(extract_submit_task_id "$submit_raw")"
+  [[ "$max_submit_attempts" =~ ^[0-9]+$ ]] || max_submit_attempts=1
+  [[ "$submit_retry_sleep_seconds" =~ ^[0-9]+$ ]] || submit_retry_sleep_seconds=30
+  if [[ "$max_submit_attempts" -lt 1 ]]; then
+    max_submit_attempts=1
+  fi
+
+  for ((submit_attempt = 1; submit_attempt <= max_submit_attempts; submit_attempt++)); do
+    submit_raw="$(submit_client_like_telegram_task "$prompt" "true" "" "$EXTERNAL_USER_ID_VALUE" "$turn_external_chat_id")"
+    submit_status=0
+    submit_extract="$(extract_submit_task_id "$submit_raw" 2>&1)" || submit_status=$?
+    if [[ "$submit_status" -eq 0 ]]; then
+      task_id="$submit_extract"
+      break
+    fi
+    echo "[TURN ${turn}] submit_failed attempt=${submit_attempt}/${max_submit_attempts} status=${submit_status} error=${submit_extract}" >&2
+    if [[ "$submit_attempt" -lt "$max_submit_attempts" && "${submit_raw} ${submit_extract}" == *"Rate limit"* ]]; then
+      echo "[TURN ${turn}] submit_retry sleep_seconds=${submit_retry_sleep_seconds}" >&2
+      sleep "$submit_retry_sleep_seconds"
+      continue
+    fi
+    return 1
+  done
   TASK_IDS+=("$task_id")
   echo "[TURN ${turn}] task_id=${task_id}"
   if [[ "$PROMPT_REPLY_ONLY" -eq 1 ]]; then

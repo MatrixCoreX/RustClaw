@@ -37,6 +37,27 @@
 - Non-zero install command exit codes are returned as `status=error` with `error_text=package install failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including `action`, `manager`, `platform`, `packages`, and `output`.
 
+## Structured Evidence Contract (from interface)
+- Matrix admission status: built-in structured evidence only; package manager selection must come from `extra`, not from natural-language `text`.
+- `detect` success `extra` fields:
+  - `action`: string, always `detect`; evidence role `status`.
+  - `manager`: string detected manager; evidence role `field_value`.
+  - `platform`: string OS/platform; evidence role `field_value`.
+  - `candidate_order`: string array candidate managers; evidence role `entries`.
+  - `manager_scope`: string such as `project` or `system` when present; evidence role `field_value`.
+  - `marker`: string project marker filename when present; evidence role `path`.
+  - `output`: string observation summary; fallback evidence only.
+- `install` and `smart_install` success `extra` fields:
+  - `action`: string action name; evidence role `status`.
+  - `manager`: string selected manager; evidence role `field_value`.
+  - `platform`: string OS/platform; evidence role `field_value`.
+  - `packages`: string array requested packages; evidence role `entries`.
+  - `dry_run`: boolean preview flag; evidence role `status`.
+  - `command`: string command preview/executed command; evidence role `field_value`.
+  - `output`: string bounded install observation; fallback evidence only.
+- Sensitive fields: package names and command strings are usually low sensitivity, but provider-facing traces should still avoid full stderr dumps unless needed.
+- Error responses include readable `error_text`; top-level or `extra.error_kind` should be preferred over matching error text when present.
+
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:

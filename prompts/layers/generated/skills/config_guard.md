@@ -32,10 +32,21 @@ The skill currently checks:
 - `telegram.sendfile.full_access`
 
 ## Error Contract (from interface)
-- Read failures return `read config failed: ...`.
-- TOML parse failures return `parse toml failed: ...`.
+- Read failures return structured `error_kind` values such as `not_found`, `permission_denied`, or `io_error`.
+- TOML parse failures return `error_kind=invalid_data`.
+- Invalid input shape returns `error_kind=invalid_input`.
 - The skill does not echo secret values; it only reports that a key appears real.
 - Patch/write requests are outside the current implementation and should not be planned as `config_guard` calls.
+
+## Structured Evidence Contract (from interface)
+- Matrix admission status: built-in structured evidence only; risk evidence must come from `extra`, not natural-language `text`.
+- Success `extra` fields:
+  - `action`: string, always `scan`; evidence role `status`.
+  - `path`: string config path; evidence role `path`.
+  - `risk_count`: integer number of detected risks; evidence role `count`.
+  - `risks`: string array of stable risk identifiers/descriptions; evidence role `entries`.
+- Sensitive fields: secret values are never returned. Risk entries may name secret field paths but must not include secret contents.
+- Error responses include top-level `error_kind` and `platform`, and contextual `extra.error_kind`, `extra.operation`, and `extra.path` when available.
 
 ## Request/Response Examples (from interface)
 ### Example 1
@@ -45,7 +56,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"{\"path\":\"configs/config.toml\",\"risk_count\":1,\"risks\":[\"tools.allow_sudo=true\"]}","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"{\"action\":\"scan\",\"path\":\"configs/config.toml\",\"risk_count\":1,\"risks\":[\"tools.allow_sudo=true\"]}","extra":{"action":"scan","path":"configs/config.toml","risk_count":1,"risks":["tools.allow_sudo=true"]},"error_text":null}
 ```
 
 ## Output Contract

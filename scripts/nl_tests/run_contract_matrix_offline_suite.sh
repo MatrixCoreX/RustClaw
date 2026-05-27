@@ -40,13 +40,61 @@ fi
 
 cd "$ROOT_DIR"
 
+echo "Checking docker contract matrix copy is current"
+if ! cmp -s \
+  "${ROOT_DIR}/configs/task_contract_matrix.toml" \
+  "${ROOT_DIR}/docker/config/task_contract_matrix.toml"; then
+  diff -u \
+    "${ROOT_DIR}/configs/task_contract_matrix.toml" \
+    "${ROOT_DIR}/docker/config/task_contract_matrix.toml" || true
+  echo "docker/config/task_contract_matrix.toml must match configs/task_contract_matrix.toml" >&2
+  exit 1
+fi
+
 echo "Checking contract matrix generator syntax"
 python3 -m py_compile \
+  "${ROOT_DIR}/scripts/sync_skill_docs.py" \
   "${ROOT_DIR}/scripts/check_skill_prompts.py" \
   "${ROOT_DIR}/scripts/nl_tests/build_client_like_case_aggregate.py" \
+  "${ROOT_DIR}/scripts/nl_tests/compare_contract_provider_runs.py" \
+  "${ROOT_DIR}/scripts/nl_tests/compare_multilingual_contract_cells.py" \
   "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
   "${ROOT_DIR}/scripts/nl_tests/evaluate_client_like_run.py" \
   "${ROOT_DIR}/scripts/nl_tests/extract_client_like_replay.py"
+bash -n "${ROOT_DIR}/scripts/nl_tests/run_contract_provider_ab_suite.sh"
+
+echo "Checking provider A/B missing-key preflight"
+PROVIDER_PREFLIGHT_DIR="$(mktemp -d)"
+printf '{"case_id":"provider-key-preflight","prompt":"provider key preflight"}\n' > "${PROVIDER_PREFLIGHT_DIR}/cases.jsonl"
+env -u OPENAI_API_KEY \
+  bash "${ROOT_DIR}/scripts/nl_tests/run_contract_provider_ab_suite.sh" \
+    --run-side right \
+    --provider openai \
+    --case-jsonl "${PROVIDER_PREFLIGHT_DIR}/cases.jsonl" \
+    --out-dir "${PROVIDER_PREFLIGHT_DIR}" \
+  > "${PROVIDER_PREFLIGHT_DIR}/preflight.out"
+grep -q 'PROVIDER_AB_RUN_SIDE_INCONCLUSIVE side=right provider=openai reason=missing_env:OPENAI_API_KEY' \
+  "${PROVIDER_PREFLIGHT_DIR}/preflight.out"
+python3 - "${PROVIDER_PREFLIGHT_DIR}/right/metadata.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+metadata = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert metadata["status"] == "inconclusive", metadata
+assert metadata["attempts"] == 0, metadata
+assert metadata["reason"] == "missing_env:OPENAI_API_KEY", metadata
+print("PROVIDER_AB_MISSING_KEY_PREFLIGHT_OK")
+PY
+
+echo "Checking skill doc sync self-test"
+python3 "${ROOT_DIR}/scripts/sync_skill_docs.py" --self-test
+
+echo "Checking provider comparator self-test"
+python3 "${ROOT_DIR}/scripts/nl_tests/compare_contract_provider_runs.py" --self-test
+
+echo "Checking multilingual contract cell comparator self-test"
+python3 "${ROOT_DIR}/scripts/nl_tests/compare_multilingual_contract_cells.py" --self-test
 
 echo "Checking layered skill prompt invariants"
 python3 "${ROOT_DIR}/scripts/check_skill_prompts.py"
@@ -122,6 +170,13 @@ python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
   --check \
   --report \
   > /tmp/rustclaw-contract-matrix-cases.jsonl
+
+echo "Generating external skill admission contract cases"
+python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \
+  --external-admission-cases \
+  --check \
+  --report \
+  > /tmp/rustclaw-external-admission-cases.jsonl
 
 echo "Generating deterministic contract matrix live NL rows"
 python3 "${ROOT_DIR}/scripts/nl_tests/generate_contract_matrix_cases.py" \

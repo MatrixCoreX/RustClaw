@@ -41,6 +41,18 @@
 - For mutating/container-specific actions, non-zero `docker` command exit codes are returned as `status=error` with `error_text=docker command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including `action`, `exit_code`, `docker_args`, and `output`.
 
+## Structured Evidence Contract (from interface)
+- Matrix admission status: built-in structured evidence only; command `output` is legacy text evidence unless a stricter parser is explicitly registered.
+- Successful response `extra` fields:
+  - `action`: string action name; evidence role `status`.
+  - `exit_code`: integer Docker CLI exit code; evidence role `status`.
+  - `docker_args`: string array of Docker CLI args; evidence role `field_value`.
+  - `output`: string bounded Docker observation; fallback evidence only.
+  - `available`: boolean availability observation for read-only unavailable cases; evidence role `status`.
+  - `command_succeeded`: boolean command success flag for read-only unavailable cases; evidence role `status`.
+- Sensitive fields: `logs` and `inspect` output can contain application data or secrets. Provider-facing traces should prefer bounded excerpts, selected keys, or hashes.
+- Error responses include readable `error_text`; top-level `error_kind` is used when available.
+
 ## Request/Response Examples (from interface)
 ### Example 1
 Request:

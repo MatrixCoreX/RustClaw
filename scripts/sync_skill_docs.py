@@ -33,6 +33,20 @@ Keep only language-specific nuances here; keep general rules in the main prompt 
 - Resolve Chinese deictic references only from immediate, concrete, type-compatible context; do not guess unsupported targets or invent missing args just to force a skill call.
 """
 RESERVED_PROMPT_STEMS = {"README"}
+MATRIX_ADMISSION_DECLARATION_RE = re.compile(
+    r"(?im)^\s*(?:[-*]\s*)?`?(?:matrix_admission\.eligible\s*(?:=|:)\s*true|matrix admission status\s*:\s*eligible\b)"
+)
+MATRIX_EVIDENCE_ROLE_TOKENS = {
+    "field_value",
+    "count",
+    "path",
+    "results",
+    "delivery_artifact",
+    "artifact_path",
+    "entries",
+    "table_cell",
+    "status",
+}
 
 
 @dataclass
@@ -113,6 +127,13 @@ def interface_template(skill: str) -> str:
 ## Error Contract
 - TODO: list error cases and corresponding `error_text` conventions.
 
+## Structured Evidence Contract
+- Matrix admission status: not eligible by default.
+- To request matrix evidence eligibility, declare stable success `extra` fields per action.
+- For each field, document type, meaning, sensitivity, and which evidence role it can satisfy (`field_value`, `count`, `path`, `results`, `delivery_artifact`, etc.).
+- Error responses should include `extra.error_kind` when feasible.
+- Do not rely on natural-language `text` as strict matrix evidence.
+
 ## Request/Response Examples
 ### Example 1
 Request:
@@ -136,6 +157,40 @@ def _extract_section(md: str, title: str) -> str:
     return match.group(1).strip()
 
 
+def declares_matrix_admission(interface_md: str) -> bool:
+    return bool(MATRIX_ADMISSION_DECLARATION_RE.search(interface_md))
+
+
+def validate_external_matrix_admission(
+    skill: str, interface_path: Path, interface_md: str
+) -> list[str]:
+    if not declares_matrix_admission(interface_md):
+        return []
+
+    section = _extract_section(interface_md, "Structured Evidence Contract")
+    rel_path = interface_path.relative_to(REPO_ROOT).as_posix()
+    if not section:
+        return [
+            f"{rel_path}: external skill `{skill}` declares matrix admission but is missing `## Structured Evidence Contract`"
+        ]
+
+    lower = section.lower()
+    errors: list[str] = []
+    if "extra" not in lower:
+        errors.append(
+            f"{rel_path}: matrix-admitted external skill `{skill}` must document stable success `extra` fields"
+        )
+    if "sensitive" not in lower:
+        errors.append(
+            f"{rel_path}: matrix-admitted external skill `{skill}` must document sensitive-field handling"
+        )
+    if not any(token in lower for token in MATRIX_EVIDENCE_ROLE_TOKENS):
+        errors.append(
+            f"{rel_path}: matrix-admitted external skill `{skill}` must document at least one evidence role"
+        )
+    return errors
+
+
 def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
     capability = _extract_section(interface_md, "Capability Summary")
     config_entry_points = _extract_section(interface_md, "Config Entry Points")
@@ -143,6 +198,7 @@ def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
     actions = _extract_section(interface_md, "Actions")
     params = _extract_section(interface_md, "Parameter Contract")
     errors = _extract_section(interface_md, "Error Contract")
+    structured_evidence = _extract_section(interface_md, "Structured Evidence Contract")
     examples = _extract_section(interface_md, "Request/Response Examples")
     capability = capability or f"- TODO: summarize `{skill}` capability."
     config_entry_points = config_entry_points or "- No dedicated config entry points declared."
@@ -157,6 +213,12 @@ def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
         memory_section = f"""
 ## Memory Entry Points (from interface)
 {memory_entry_points}
+"""
+    structured_evidence_section = ""
+    if structured_evidence:
+        structured_evidence_section = f"""
+## Structured Evidence Contract (from interface)
+{structured_evidence}
 """
 
     content = f"""{PROMPT_MANAGED_MARKER}
@@ -182,7 +244,7 @@ def prompt_template(skill: str, interface_md: str, interface_path: Path) -> str:
 
 ## Error Contract (from interface)
 {errors}
-
+{structured_evidence_section}
 ## Request/Response Examples (from interface)
 {examples}
 
@@ -246,6 +308,64 @@ def remove_file(path: Path, apply: bool) -> bool:
     return True
 
 
+def run_self_test() -> int:
+    base = REPO_ROOT / "external_skills" / "demo" / "INTERFACE.md"
+    cases = [
+        (
+            "not_eligible_without_section",
+            "# demo\n\n## Capability Summary\n- demo\n",
+            False,
+        ),
+        (
+            "eligible_missing_section",
+            "# demo\n\nmatrix_admission.eligible = true\n",
+            True,
+        ),
+        (
+            "eligible_incomplete_section",
+            "# demo\n\nMatrix admission status: eligible\n\n## Structured Evidence Contract\n- placeholder\n",
+            True,
+        ),
+        (
+            "eligible_complete_section",
+            """# demo
+
+Matrix admission status: eligible
+
+## Structured Evidence Contract
+- Success `extra` fields:
+  - `count`: integer result count.
+- Evidence role: `count`.
+- Sensitive fields: none.
+""",
+            False,
+        ),
+        (
+            "not_eligible_status_line",
+            """# demo
+
+## Structured Evidence Contract
+- Matrix admission status: not eligible by default.
+""",
+            False,
+        ),
+    ]
+
+    failures: list[str] = []
+    for name, md, should_error in cases:
+        errors = validate_external_matrix_admission("demo", base, md)
+        if bool(errors) != should_error:
+            failures.append(f"{name}: expected_error={should_error} errors={errors}")
+
+    if failures:
+        for failure in failures:
+            print(f"[self-test-fail] {failure}", file=sys.stderr)
+        return 1
+
+    print("SYNC_SKILL_DOCS_SELF_TEST_OK")
+    return 0
+
+
 def sync(apply: bool, adopt_skills: set[str] | None = None) -> int:
     skill_dirs = discover_skill_dirs()
     skills = sorted(skill_dirs.keys())
@@ -255,6 +375,7 @@ def sync(apply: bool, adopt_skills: set[str] | None = None) -> int:
     adopt_skills = adopt_skills or set()
 
     missing_external_interface: list[Path] = []
+    admission_errors: list[str] = []
 
     for skill in skills:
         entry = skill_dirs[skill]
@@ -273,6 +394,10 @@ def sync(apply: bool, adopt_skills: set[str] | None = None) -> int:
             if interface_path.exists()
             else interface_template(skill)
         )
+        if entry.source == "external":
+            admission_errors.extend(
+                validate_external_matrix_admission(skill, interface_path, interface_md)
+            )
         prompt_md = prompt_template(skill, interface_md, interface_path)
         if skill in adopt_skills:
             if write_adopted(prompt_path, prompt_md, apply):
@@ -287,6 +412,16 @@ def sync(apply: bool, adopt_skills: set[str] | None = None) -> int:
             print(f"  - {p.relative_to(REPO_ROOT)}", file=sys.stderr)
         print(
             "[hint] each external skill must provide INTERFACE.md before sync/build/start",
+            file=sys.stderr,
+        )
+        return -1
+
+    if admission_errors:
+        print("[error] invalid external skill matrix admission declarations:", file=sys.stderr)
+        for error in admission_errors:
+            print(f"  - {error}", file=sys.stderr)
+        print(
+            "[hint] external skills may be enabled without matrix admission; only declare eligibility after the structured `extra` evidence contract is documented",
             file=sys.stderr,
         )
         return -1
@@ -322,7 +457,15 @@ def main() -> int:
         action="store_true",
         help="Adopt all skill prompts into managed mode (overwrite all prompts/layers/generated/skills/<skill>.md).",
     )
+    parser.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Run static validation self-tests and exit.",
+    )
     args = parser.parse_args()
+
+    if args.self_test:
+        return run_self_test()
 
     skills = sorted(discover_skill_dirs().keys())
     skill_set = set(skills)
