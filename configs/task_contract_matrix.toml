@@ -35,7 +35,7 @@ evidence_scope = "current_task"
 freshness = "current_task"
 artifact_kind = "text"
 channel_visibility = "user_visible"
-allowed_actions = ["fs_basic.stat_paths", "fs_basic.read_text_range", "fs_basic.list_dir", "fs_basic.find_entries", "doc_parse"]
+allowed_actions = ["fs_basic.read_text_range", "doc_parse"]
 forbidden_actions = ["run_cmd"]
 required_evidence = ["content_excerpt", "path"]
 final_answer_shape = "summary_with_evidence"
@@ -50,7 +50,7 @@ evidence_scope = "current_task"
 freshness = "current_task"
 artifact_kind = "file"
 channel_visibility = "user_visible"
-allowed_actions = ["fs_basic.stat_paths", "fs_basic.read_text_range", "fs_basic.write_text"]
+allowed_actions = ["fs_basic.write_text"]
 required_evidence = ["path"]
 final_answer_shape = "delivery_token_or_path"
 failure_policy = "retry_with_alternatives"
@@ -215,8 +215,8 @@ semantic_kind = "workspace_project_summary"
 operation = "summarize"
 target_object = "directory"
 delivery_shape = "summary"
-allowed_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "fs_basic.find_entries", "git_basic"]
-preferred_actions = ["fs_basic.read_text_range", "fs_basic.list_dir"]
+allowed_actions = ["fs_basic.read_text_range"]
+preferred_actions = ["fs_basic.read_text_range"]
 required_evidence = ["content_excerpt"]
 final_answer_shape = "project_summary_grounded_in_files"
 failure_policy = "retry_with_alternatives"
@@ -231,6 +231,11 @@ preferred_actions = ["fs_basic.count_entries"]
 required_evidence = ["count"]
 final_answer_shape = "scalar"
 failure_policy = "retry_with_alternatives"
+observation_sources = ["fs_basic.count_entries", "db_basic", "archive_basic.list", "archive_basic", "run_cmd"]
+
+[[contracts.scalar_count.observation_extractors]]
+source = "archive_basic"
+extractor_kind = "text_legacy"
 
 [contracts.quantity_comparison]
 semantic_kind = "quantity_comparison"
@@ -310,7 +315,7 @@ operation = "validate"
 target_object = "unknown"
 delivery_shape = "raw"
 allowed_actions = ["fs_basic.stat_paths", "git_basic", "run_cmd"]
-preferred_actions = ["fs_basic.stat_paths"]
+preferred_actions = ["fs_basic.stat_paths", "git_basic", "run_cmd"]
 required_evidence = ["field_value"]
 final_answer_shape = "scalar_equality_verdict"
 failure_policy = "retry_with_alternatives"
@@ -326,6 +331,10 @@ required_evidence = ["field_value"]
 final_answer_shape = "single_commit_subject"
 failure_policy = "retry_with_alternatives"
 
+[[contracts.git_commit_subject.observation_extractors]]
+source = "git_basic"
+extractor_kind = "text_legacy"
+
 [contracts.git_repository_state]
 semantic_kind = "git_repository_state"
 operation = "inspect"
@@ -337,12 +346,16 @@ required_evidence = ["field_value"]
 final_answer_shape = "git_state_summary"
 failure_policy = "retry_with_alternatives"
 
+[[contracts.git_repository_state.observation_extractors]]
+source = "git_basic"
+extractor_kind = "text_legacy"
+
 [contracts.structured_keys]
 semantic_kind = "structured_keys"
 operation = "inspect"
 target_object = "config_key"
 delivery_shape = "summary"
-allowed_actions = ["config_basic.list_keys", "config_basic.read_fields", "db_basic"]
+allowed_actions = ["config_basic.list_keys", "config_basic.read_fields"]
 preferred_actions = ["config_basic.list_keys"]
 required_evidence = ["field_value"]
 final_answer_shape = "key_list_or_key_summary"
@@ -435,6 +448,11 @@ preferred_actions = ["archive_basic.list"]
 required_evidence = ["candidates"]
 final_answer_shape = "archive_member_list"
 failure_policy = "retry_with_alternatives"
+observation_sources = ["archive_basic.list", "archive_basic"]
+
+[[contracts.archive_list.observation_extractors]]
+source = "archive_basic"
+extractor_kind = "text_legacy"
 
 [contracts.archive_read]
 semantic_kind = "archive_read"
@@ -458,6 +476,11 @@ preferred_actions = ["archive_basic.pack"]
 required_evidence = ["path"]
 final_answer_shape = "created_archive_path"
 failure_policy = "retry_with_alternatives"
+observation_sources = ["archive_basic.pack", "archive_basic"]
+
+[[contracts.archive_pack.observation_extractors]]
+source = "archive_basic"
+extractor_kind = "text_legacy"
 
 [contracts.archive_unpack]
 semantic_kind = "archive_unpack"
@@ -469,6 +492,11 @@ preferred_actions = ["archive_basic.unpack"]
 required_evidence = ["path"]
 final_answer_shape = "unpack_destination_summary"
 failure_policy = "retry_with_alternatives"
+observation_sources = ["archive_basic.unpack", "archive_basic"]
+
+[[contracts.archive_unpack.observation_extractors]]
+source = "archive_basic"
+extractor_kind = "text_legacy"
 
 [contracts.docker_ps]
 semantic_kind = "docker_ps"

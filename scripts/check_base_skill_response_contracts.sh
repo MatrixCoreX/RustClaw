@@ -120,6 +120,52 @@ check_ok_extra() {
   RESULT_LINES+=("- PASS: \`$skill\`")
 }
 
+check_error_contract() {
+  local skill="$1"
+  local args_json="$2"
+  local error_expr="${3:-((.extra.error_kind? // .error_kind?) | type == \"string\" and length > 0)}"
+  local wrapper="$ROOT_DIR/scripts/skill_calls/call_${skill}.sh"
+  local stdout_log="$LOG_DIR/${skill}.error.stdout.log"
+  local stderr_log="$LOG_DIR/${skill}.error.stderr.log"
+
+  echo "== $skill error contract =="
+  set +e
+  bash "$wrapper" --profile "$PROFILE" --raw --args "$args_json" >"$stdout_log" 2>"$stderr_log"
+  local rc=$?
+  set -e
+
+  if [[ "$rc" -ne 0 ]]; then
+    FAIL=$((FAIL + 1))
+    echo "FAIL $skill error contract exit=$rc"
+    RESULT_LINES+=("- FAIL: \`$skill\` error contract exit=$rc ([stdout]($stdout_log), [stderr]($stderr_log))")
+    return
+  fi
+
+  local resp
+  resp="$(tr -d '\r' <"$stdout_log" | tail -n 1)"
+  if [[ -z "$resp" ]]; then
+    FAIL=$((FAIL + 1))
+    echo "FAIL $skill error contract empty output"
+    RESULT_LINES+=("- FAIL: \`$skill\` error contract empty output ([stdout]($stdout_log), [stderr]($stderr_log))")
+    return
+  fi
+
+  if ! printf '%s\n' "$resp" | jq -e "
+    .status == \"error\"
+    and (.error_text | type == \"string\" and length > 0)
+    and ($error_expr)
+  " >/dev/null 2>&1; then
+    FAIL=$((FAIL + 1))
+    echo "FAIL $skill error contract mismatch"
+    RESULT_LINES+=("- FAIL: \`$skill\` error contract mismatch ([stdout]($stdout_log), [stderr]($stderr_log))")
+    return
+  fi
+
+  PASS=$((PASS + 1))
+  echo "PASS $skill error contract"
+  RESULT_LINES+=("- PASS: \`$skill\` error contract")
+}
+
 skip_check() {
   local skill="$1"
   local reason="$2"
@@ -146,6 +192,7 @@ check_ok_extra "git_basic" '{"action":"status"}' '.extra != null and .extra.acti
 check_ok_extra "package_manager" '{"action":"detect"}' '.extra != null and .extra.action == "detect" and (.extra | has("manager")) and (.extra | has("output"))'
 check_ok_extra "archive_basic" '{"action":"pack","source":"scripts/skill_calls","archive":"tmp/archive-basic-contract.zip","format":"zip"}' '.extra != null and .extra.action == "pack" and .extra.format == "zip" and (.extra | has("source")) and (.extra | has("archive")) and (.extra | has("output"))'
 check_ok_extra "db_basic" '{"action":"sqlite_query","db_path":"data/db-basic-contract.sqlite","sql":"PRAGMA schema_version;"}' '.extra != null and .extra.action == "sqlite_query" and (.extra | has("db_path")) and (.extra | has("sql")) and (.extra.result | has("columns")) and (.extra.result | has("rows"))'
+check_ok_extra "config_guard" '{"path":"configs/config.toml"}' '.extra != null and .extra.action == "scan" and (.extra | has("path")) and (.extra | has("risk_count")) and (.extra | has("risks"))'
 if start_http_contract_server; then
   check_ok_extra "http_basic" '{"action":"get","url":"http://127.0.0.1:18087/index.json","timeout_seconds":5}' '.extra != null and .extra.action == "get" and .extra.status_code == 200 and (.extra | has("url")) and (.extra | has("body_preview"))'
   kill "$HTTP_SERVER_PID" >/dev/null 2>&1 || true
@@ -159,6 +206,11 @@ if command -v docker >/dev/null 2>&1; then
 else
   skip_check "docker_basic" "docker command not available"
 fi
+
+check_error_contract "db_basic" '{"action":"sqlite_query","db_path":"data/db-basic-contract.sqlite","sql":"DELETE FROM demo"}' '.extra.error_kind == "unsafe_sql"'
+check_error_contract "config_guard" '{"path":"configs/does-not-exist.toml"}' '.extra.error_kind == "not_found"'
+check_error_contract "system_basic" '{"action":"read_range","path":"."}' '((.extra.error_kind? // .error_kind?) == "is_directory")'
+check_error_contract "archive_basic" '{"action":"nope"}' '((.extra.error_kind? // .error_kind?) == "invalid_input")'
 
 echo
 echo "==== Base Skill Contract Summary ===="

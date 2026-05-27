@@ -146,6 +146,7 @@ struct ExternalSkillRegistrationReport {
     workspace_member_added: bool,
     registry_entry_added: bool,
     switch_recorded_enabled: bool,
+    matrix_admission_eligible: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1448,6 +1449,7 @@ fn register_external_skill(
         workspace_member_added,
         registry_entry_added,
         switch_recorded_enabled,
+        matrix_admission_eligible: false,
     })
 }
 
@@ -1711,6 +1713,7 @@ auto_invocable = false
 requires_confirmation = true
 side_effect = true
 retryable = false
+matrix_admission = {{ eligible = false, declared_actions = [], evidence_sources = [], required_extra_fields = [], extractor_kind = "structured_json", admission_version = "external-v1" }}
 "#
     )
 }
@@ -2462,7 +2465,7 @@ fn interface_template(skill_name: &str, capability_summary: &str, actions: &[Str
         .join("\n\n");
 
     format!(
-        "# {skill_name} Interface Spec\n\n> This file was scaffolded by `extension_manager`.\n> Keep it aligned with `external_skills/{skill_name}/src/main.rs`.\n\n## Capability Summary\n- {capability_summary}\n- This scaffold stays unregistered until validation passes; registration enables it in config.\n\n## Config Entry Points\n- If this skill has dedicated setup, list the real entry points here: config file, environment variable, local DB/API, login/session state, or dependency.\n- If it does not need dedicated setup, state that explicitly.\n\n## Actions\n{action_lines}\n\n## Parameter Contract\n| Action | Param | Required | Type | Default | Description |\n|---|---|---|---|---|---|\n{param_rows}\n\n## Error Contract\n- Return `status=error` with readable `error_text` when required params are missing.\n- Return `unsupported action: <name>` for unknown actions.\n- Keep request/response payloads as single-line JSON objects over stdin/stdout.\n\n## Request/Response Examples\n{request_examples}\n"
+        "# {skill_name} Interface Spec\n\n> This file was scaffolded by `extension_manager`.\n> Keep it aligned with `external_skills/{skill_name}/src/main.rs`.\n\n## Capability Summary\n- {capability_summary}\n- This scaffold stays unregistered until validation passes; registration enables it in config.\n\n## Config Entry Points\n- If this skill has dedicated setup, list the real entry points here: config file, environment variable, local DB/API, login/session state, or dependency.\n- If it does not need dedicated setup, state that explicitly.\n\n## Actions\n{action_lines}\n\n## Parameter Contract\n| Action | Param | Required | Type | Default | Description |\n|---|---|---|---|---|---|\n{param_rows}\n\n## Error Contract\n- Return `status=error` with readable `error_text` when required params are missing.\n- Return `unsupported action: <name>` for unknown actions.\n- Keep request/response payloads as single-line JSON objects over stdin/stdout.\n\n## Structured Evidence Contract\n- Matrix admission status: not eligible by default.\n- To request matrix evidence eligibility, declare stable success `extra` fields per action.\n- For each field, document type, meaning, sensitivity, and which evidence role it can satisfy (`field_value`, `count`, `path`, `results`, `delivery_artifact`, etc.).\n- Error responses should include `extra.error_kind` when feasible.\n- Do not rely on natural-language `text` as strict matrix evidence.\n\n## Request/Response Examples\n{request_examples}\n"
     )
 }
 
@@ -2896,6 +2899,7 @@ mod tests {
         assert!(first.workspace_member_added);
         assert!(first.registry_entry_added);
         assert!(first.switch_recorded_enabled);
+        assert!(!first.matrix_admission_eligible);
 
         let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).expect("read Cargo.toml");
         assert!(cargo_toml.contains("\"external_skills/demo_skill\","));
@@ -2905,6 +2909,7 @@ mod tests {
         assert!(registry.contains("name = \"demo_skill\""));
         assert!(registry.contains("planner_kind = \"skill\""));
         assert!(registry.contains("requires_confirmation = true"));
+        assert!(registry.contains("matrix_admission = { eligible = false"));
 
         let config = fs::read_to_string(root.join("configs/config.toml")).expect("read config");
         assert!(config.contains("demo_skill = true"));
@@ -2914,6 +2919,7 @@ mod tests {
         assert!(!second.workspace_member_added);
         assert!(!second.registry_entry_added);
         assert!(!second.switch_recorded_enabled);
+        assert!(!second.matrix_admission_eligible);
 
         let _ = fs::remove_dir_all(root);
     }

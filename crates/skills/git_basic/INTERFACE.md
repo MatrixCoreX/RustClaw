@@ -43,6 +43,17 @@ Action selection notes:
 - Non-zero `git` command exit codes are returned as `status=error` with `error_text=git command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including `action`, `subcommand`, `exit_code`, and `output`.
 
+## Structured Evidence Contract
+- Matrix admission status: built-in structured evidence only; `output` is legacy text evidence unless a stricter parser is explicitly registered.
+- Successful response `extra` fields:
+  - `action`: string action name; evidence role `status`.
+  - `subcommand`: string Git subcommand used; evidence role `field_value`.
+  - `exit_code`: integer Git exit code; evidence role `status`.
+  - `target`, `path`, `n`, or `limit`: echoed typed inputs when applicable; evidence roles `field_value` and `path`.
+  - `output`: string bounded Git observation; fallback evidence only.
+- Sensitive fields: diffs and file-at-revision output can contain source or secrets. Provider-facing traces should prefer file lists, stats, excerpts, or hashes unless content was requested.
+- Error responses include readable `error_text`; top-level `error_kind` should be used when available.
+
 ## Request/Response Examples
 ### Example 1
 Request:

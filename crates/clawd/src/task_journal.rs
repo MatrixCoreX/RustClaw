@@ -282,6 +282,11 @@ fn plan_step_action_ref(
     Some(raw_key)
 }
 
+fn plan_step_raw_action_ref(step: &crate::PlanStep) -> Option<String> {
+    crate::contract_matrix::ActionRef::from_skill_args(&step.skill, &step.args)
+        .map(|action| action.as_key())
+}
+
 fn plan_summary_json(plan: &crate::PlanResult) -> Value {
     json!({
         "goal": crate::truncate_for_log(&plan.goal),
@@ -300,11 +305,15 @@ fn plan_trace_json(plan: &crate::PlanResult, route: Option<&crate::RouteResult>)
         "raw_plan_text": crate::truncate_for_log(&plan.raw_plan_text),
         "step_count": plan.steps.len(),
         "steps": plan.steps.iter().map(|step| {
+            let raw_action_ref = plan_step_raw_action_ref(step);
+            let matrix_action_ref = plan_step_action_ref(step, route);
             json!({
                 "step_id": &step.step_id,
                 "action_type": &step.action_type,
                 "skill": &step.skill,
-                "action_ref": plan_step_action_ref(step, route),
+                "action_ref": matrix_action_ref.clone(),
+                "matrix_action_ref": matrix_action_ref,
+                "raw_action_ref": raw_action_ref,
                 "depends_on": &step.depends_on,
             })
         }).collect::<Vec<_>>(),
@@ -519,7 +528,7 @@ fn step_contract_trace_json(
 }
 
 pub(crate) fn observed_evidence_for_step_trace(step: &TaskJournalStepTrace) -> Option<Value> {
-    observed_evidence_from_output(step.output_excerpt.as_deref())
+    observed_evidence_from_step_output(step)
         .or_else(|| observed_evidence_from_error(step.error_excerpt.as_deref()))
 }
 
@@ -560,6 +569,10 @@ struct EvidenceExtractorSpec {
     kind: EvidenceExtractorKind,
     format: &'static str,
     schema_version: u64,
+    source_action_ref: Option<&'static str>,
+    provided_evidence: &'static [&'static str],
+    strict_shape_eligible: bool,
+    fallback: bool,
 }
 
 impl EvidenceExtractorSpec {
@@ -570,8 +583,22 @@ impl EvidenceExtractorSpec {
             "kind": self.kind.as_str(),
             "observation_source": self.observation_source.as_str(),
             "format": self.format,
+            "source_action_ref": self.source_action_ref,
+            "provided_evidence": self.provided_evidence,
+            "strict_shape_eligible": self.strict_shape_eligible,
+            "fallback": self.fallback,
+            "provider_safety": extractor_provider_safety_trace_json(),
         })
     }
+}
+
+fn extractor_provider_safety_trace_json() -> Value {
+    json!({
+        "provider_evidence_view": "provider_safe_redacted",
+        "raw_excerpt_policy": "no_full_raw_excerpt",
+        "storage": "redacted_excerpt_hash",
+        "sensitive_field_policy": "redact_sensitive_keys_and_secret_like_values",
+    })
 }
 
 const EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
@@ -581,6 +608,10 @@ const EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         kind: EvidenceExtractorKind::StructuredJson,
         format: "json",
         schema_version: 1,
+        source_action_ref: None,
+        provided_evidence: &["generic_json_fields"],
+        strict_shape_eligible: false,
+        fallback: true,
     },
     EvidenceExtractorSpec {
         observation_source: EvidenceObservationSource::StepOutput,
@@ -588,6 +619,10 @@ const EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         kind: EvidenceExtractorKind::TextLegacy,
         format: "text",
         schema_version: 1,
+        source_action_ref: None,
+        provided_evidence: &["legacy_text_excerpt"],
+        strict_shape_eligible: false,
+        fallback: true,
     },
     EvidenceExtractorSpec {
         observation_source: EvidenceObservationSource::StepError,
@@ -595,6 +630,10 @@ const EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         kind: EvidenceExtractorKind::StructuredJson,
         format: "json",
         schema_version: 1,
+        source_action_ref: None,
+        provided_evidence: &["error_text", "error_kind", "generic_json_fields"],
+        strict_shape_eligible: false,
+        fallback: true,
     },
     EvidenceExtractorSpec {
         observation_source: EvidenceObservationSource::StepError,
@@ -602,8 +641,270 @@ const EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         kind: EvidenceExtractorKind::TextLegacy,
         format: "text",
         schema_version: 1,
+        source_action_ref: None,
+        provided_evidence: &["legacy_error_excerpt"],
+        strict_shape_eligible: false,
+        fallback: true,
     },
 ];
+
+const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
+    step_json_extractor(
+        "fs_basic",
+        "fs_basic.structured_json_v1",
+        &[
+            "candidates",
+            "count",
+            "exists",
+            "field_value",
+            "kind",
+            "path",
+            "size_bytes",
+        ],
+    ),
+    step_json_extractor(
+        "fs_basic.stat_paths",
+        "fs_basic.stat_paths.structured_json_v1",
+        &["exists", "field_value", "kind", "path", "size_bytes"],
+    ),
+    step_json_extractor(
+        "fs_basic.compare_paths",
+        "fs_basic.compare_paths.structured_json_v1",
+        &["field_value", "path", "size_bytes"],
+    ),
+    step_json_extractor(
+        "fs_basic.list_dir",
+        "fs_basic.list_dir.structured_json_v1",
+        &["candidates", "count", "field_value", "kind", "path"],
+    ),
+    step_json_extractor(
+        "fs_basic.find_entries",
+        "fs_basic.find_entries.structured_json_v1",
+        &["candidates", "count", "path"],
+    ),
+    step_json_extractor(
+        "fs_basic.count_entries",
+        "fs_basic.count_entries.structured_json_v1",
+        &["count"],
+    ),
+    step_json_extractor(
+        "fs_basic.grep_text",
+        "fs_basic.grep_text.structured_json_v1",
+        &["content_excerpt", "content_match", "path"],
+    ),
+    step_json_extractor(
+        "fs_basic.read_text_range",
+        "fs_basic.read_text_range.structured_json_v1",
+        &["content_excerpt", "path"],
+    ),
+    step_json_extractor(
+        "fs_basic.write_text",
+        "fs_basic.write_text.structured_json_v1",
+        &["path"],
+    ),
+    step_json_extractor(
+        "config_basic.read_field",
+        "config_basic.read_field.structured_json_v1",
+        &["field_value", "path"],
+    ),
+    step_json_extractor(
+        "config_basic.read_fields",
+        "config_basic.read_fields.structured_json_v1",
+        &["field_value", "path"],
+    ),
+    step_json_extractor(
+        "config_basic.list_keys",
+        "config_basic.list_keys.structured_json_v1",
+        &["count", "field_value"],
+    ),
+    step_json_extractor(
+        "config_basic.validate",
+        "config_basic.validate.structured_json_v1",
+        &["field_value", "valid"],
+    ),
+    step_json_extractor(
+        "config_basic.guard_rustclaw_config",
+        "config_basic.guard_rustclaw_config.structured_json_v1",
+        &["candidates", "count", "valid"],
+    ),
+    step_json_extractor(
+        "config_basic",
+        "config_basic.structured_json_v1",
+        &["count", "field_value", "valid"],
+    ),
+    step_json_extractor(
+        "config_edit.guard_config",
+        "config_edit.guard_config.structured_json_v1",
+        &["candidates", "count", "valid"],
+    ),
+    step_json_extractor(
+        "config_edit.validate_config",
+        "config_edit.validate_config.structured_json_v1",
+        &["field_value", "valid"],
+    ),
+    step_json_extractor(
+        "config_guard",
+        "config_guard.structured_json_v1",
+        &["candidates", "count", "valid"],
+    ),
+    step_json_extractor(
+        "db_basic",
+        "db_basic.structured_json_v1",
+        &["candidates", "count", "field_value"],
+    ),
+    step_json_extractor(
+        "doc_parse",
+        "doc_parse.structured_json_v1",
+        &["content_excerpt", "path"],
+    ),
+    step_json_extractor(
+        "git_basic",
+        "git_basic.structured_json_v1",
+        &["field_value", "status"],
+    ),
+    step_json_extractor(
+        "health_check",
+        "health_check.structured_json_v1",
+        &["field_value", "status"],
+    ),
+    step_json_extractor(
+        "log_analyze",
+        "log_analyze.structured_json_v1",
+        &["field_value"],
+    ),
+    step_json_extractor(
+        "package_manager.detect",
+        "package_manager.detect.structured_json_v1",
+        &["field_value"],
+    ),
+    step_json_extractor(
+        "process_basic",
+        "process_basic.structured_json_v1",
+        &["field_value", "status"],
+    ),
+    step_json_extractor(
+        "docker_basic",
+        "docker_basic.structured_json_v1",
+        &["candidates", "field_value", "status"],
+    ),
+    step_json_extractor(
+        "service_control",
+        "service_control.structured_json_v1",
+        &["field_value", "status"],
+    ),
+    step_json_extractor("transform", "transform.structured_json_v1", &["path"]),
+    step_json_extractor(
+        "archive_basic",
+        "archive_basic.structured_json_v1",
+        &["candidates", "content_excerpt", "count", "path"],
+    ),
+    step_json_extractor(
+        "archive_basic.list",
+        "archive_basic.list.structured_json_v1",
+        &["candidates", "count", "path"],
+    ),
+    step_json_extractor(
+        "archive_basic.read",
+        "archive_basic.read.structured_json_v1",
+        &["content_excerpt", "path"],
+    ),
+    step_json_extractor(
+        "archive_basic.pack",
+        "archive_basic.pack.structured_json_v1",
+        &["path"],
+    ),
+    step_json_extractor(
+        "archive_basic.unpack",
+        "archive_basic.unpack.structured_json_v1",
+        &["path"],
+    ),
+    step_text_extractor(
+        "archive_basic",
+        "archive_basic.text_legacy_v1",
+        &["candidates", "count", "legacy_machine_tokens", "path"],
+    ),
+    step_text_extractor(
+        "git_basic",
+        "git_basic.text_legacy_v1",
+        &["field_value", "legacy_machine_tokens", "subject"],
+    ),
+    step_text_extractor(
+        "write_file",
+        "write_file.text_legacy_v1",
+        &["legacy_machine_tokens", "path"],
+    ),
+    EvidenceExtractorSpec {
+        observation_source: EvidenceObservationSource::StepOutput,
+        extractor_ref: "run_cmd.text_legacy_v1",
+        kind: EvidenceExtractorKind::TextLegacy,
+        format: "text",
+        schema_version: 1,
+        source_action_ref: Some("run_cmd"),
+        provided_evidence: &["command_output", "legacy_machine_tokens"],
+        strict_shape_eligible: true,
+        fallback: false,
+    },
+    EvidenceExtractorSpec {
+        observation_source: EvidenceObservationSource::StepOutput,
+        extractor_ref: "list_dir.text_legacy_v1",
+        kind: EvidenceExtractorKind::TextLegacy,
+        format: "text",
+        schema_version: 1,
+        source_action_ref: Some("list_dir"),
+        provided_evidence: &["candidates", "count", "legacy_machine_tokens"],
+        strict_shape_eligible: true,
+        fallback: false,
+    },
+];
+
+const MATRIX_ADMITTED_EXTERNAL_STRUCTURED_JSON_EXTRACTOR: EvidenceExtractorSpec =
+    EvidenceExtractorSpec {
+        observation_source: EvidenceObservationSource::StepOutput,
+        extractor_ref: "matrix_admitted_external.structured_json_v1",
+        kind: EvidenceExtractorKind::StructuredJson,
+        format: "json",
+        schema_version: 1,
+        source_action_ref: Some("matrix_admitted_external"),
+        provided_evidence: &["admitted_extra_fields"],
+        strict_shape_eligible: true,
+        fallback: false,
+    };
+
+const fn step_json_extractor(
+    source_action_ref: &'static str,
+    extractor_ref: &'static str,
+    provided_evidence: &'static [&'static str],
+) -> EvidenceExtractorSpec {
+    EvidenceExtractorSpec {
+        observation_source: EvidenceObservationSource::StepOutput,
+        extractor_ref,
+        kind: EvidenceExtractorKind::StructuredJson,
+        format: "json",
+        schema_version: 1,
+        source_action_ref: Some(source_action_ref),
+        provided_evidence,
+        strict_shape_eligible: true,
+        fallback: false,
+    }
+}
+
+const fn step_text_extractor(
+    source_action_ref: &'static str,
+    extractor_ref: &'static str,
+    provided_evidence: &'static [&'static str],
+) -> EvidenceExtractorSpec {
+    EvidenceExtractorSpec {
+        observation_source: EvidenceObservationSource::StepOutput,
+        extractor_ref,
+        kind: EvidenceExtractorKind::TextLegacy,
+        format: "text",
+        schema_version: 1,
+        source_action_ref: Some(source_action_ref),
+        provided_evidence,
+        strict_shape_eligible: true,
+        fallback: false,
+    }
+}
 
 fn evidence_extractor_spec(
     observation_source: EvidenceObservationSource,
@@ -616,8 +917,94 @@ fn evidence_extractor_spec(
         .expect("evidence extractor registry contains all built-in extractor specs")
 }
 
+pub(crate) fn evidence_extractor_registry_trace(
+    source_action_ref: &str,
+    extractor_kind: &str,
+) -> Option<Value> {
+    explicit_evidence_extractor_spec(source_action_ref, extractor_kind).map(|spec| {
+        json!({
+            "extractor_ref": spec.extractor_ref,
+            "source_action_ref": spec.source_action_ref,
+            "provided_evidence": spec.provided_evidence,
+            "strict_shape_eligible": spec.strict_shape_eligible,
+            "fallback": spec.fallback,
+            "provider_safety": extractor_provider_safety_trace_json(),
+        })
+    })
+}
+
+pub(crate) fn evidence_extractor_registry_contains(
+    source_action_ref: &str,
+    extractor_kind: &str,
+) -> bool {
+    explicit_evidence_extractor_spec(source_action_ref, extractor_kind).is_some()
+}
+
+fn explicit_evidence_extractor_spec(
+    source_action_ref: &str,
+    extractor_kind: &str,
+) -> Option<EvidenceExtractorSpec> {
+    let source_action_ref = normalize_source_action_ref(source_action_ref)?;
+    let kind = parse_evidence_extractor_kind(extractor_kind)?;
+    EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY
+        .iter()
+        .copied()
+        .find(|spec| {
+            spec.kind == kind
+                && spec
+                    .source_action_ref
+                    .is_some_and(|value| value == source_action_ref)
+        })
+}
+
+fn parse_evidence_extractor_kind(extractor_kind: &str) -> Option<EvidenceExtractorKind> {
+    match normalize_machine_token(extractor_kind).as_str() {
+        "structured_json" => Some(EvidenceExtractorKind::StructuredJson),
+        "text_legacy" => Some(EvidenceExtractorKind::TextLegacy),
+        _ => None,
+    }
+}
+
 pub(crate) fn observed_evidence_from_output(output: Option<&str>) -> Option<Value> {
     let output = output.map(str::trim).filter(|value| !value.is_empty())?;
+    let (collector, extractor) = collect_observed_evidence_from_output(output);
+    observed_evidence_from_collector(collector, extractor)
+}
+
+fn observed_evidence_from_step_output(step: &TaskJournalStepTrace) -> Option<Value> {
+    let output = step
+        .output_excerpt
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let fallback_extractor = match serde_json::from_str::<Value>(output) {
+        Ok(value) => {
+            let mut collector = ObservedEvidenceCollector::default();
+            collect_json_observed_evidence(&mut collector, "json_output", "", &value, 0);
+            let fallback_extractor = evidence_extractor_spec(
+                EvidenceObservationSource::StepOutput,
+                EvidenceExtractorKind::StructuredJson,
+            );
+            let extractor =
+                explicit_step_output_extractor_spec(step, output, fallback_extractor.kind)
+                    .unwrap_or(fallback_extractor);
+            return observed_evidence_from_collector(collector, extractor);
+        }
+        Err(_) => evidence_extractor_spec(
+            EvidenceObservationSource::StepOutput,
+            EvidenceExtractorKind::TextLegacy,
+        ),
+    };
+    let extractor = explicit_step_output_extractor_spec(step, output, fallback_extractor.kind)
+        .unwrap_or(fallback_extractor);
+    let mut collector = ObservedEvidenceCollector::default();
+    collect_text_observed_evidence_for_extractor(&mut collector, output, extractor);
+    observed_evidence_from_collector(collector, extractor)
+}
+
+fn collect_observed_evidence_from_output(
+    output: &str,
+) -> (ObservedEvidenceCollector, EvidenceExtractorSpec) {
     let mut collector = ObservedEvidenceCollector::default();
     let extractor = match serde_json::from_str::<Value>(output) {
         Ok(value) => {
@@ -635,6 +1022,13 @@ pub(crate) fn observed_evidence_from_output(output: Option<&str>) -> Option<Valu
             )
         }
     };
+    (collector, extractor)
+}
+
+fn observed_evidence_from_collector(
+    collector: ObservedEvidenceCollector,
+    extractor: EvidenceExtractorSpec,
+) -> Option<Value> {
     if collector.items.is_empty() {
         return None;
     }
@@ -649,6 +1043,149 @@ pub(crate) fn observed_evidence_from_output(output: Option<&str>) -> Option<Valu
         "truncated": item_count > collector.items.len(),
         "items": collector.items,
     }))
+}
+
+fn explicit_step_output_extractor_spec(
+    step: &TaskJournalStepTrace,
+    output: &str,
+    kind: EvidenceExtractorKind,
+) -> Option<EvidenceExtractorSpec> {
+    step_output_source_action_refs(step, output)
+        .into_iter()
+        .find_map(|source_action_ref| {
+            EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY
+                .iter()
+                .copied()
+                .find(|spec| {
+                    spec.kind == kind
+                        && spec
+                            .source_action_ref
+                            .is_some_and(|value| value == source_action_ref)
+                })
+        })
+        .or_else(|| matrix_admitted_external_extractor_spec(output, kind))
+}
+
+fn matrix_admitted_external_extractor_spec(
+    output: &str,
+    kind: EvidenceExtractorKind,
+) -> Option<EvidenceExtractorSpec> {
+    if kind != EvidenceExtractorKind::StructuredJson {
+        return None;
+    }
+    let value = serde_json::from_str::<Value>(output).ok()?;
+    let admission = value.get("_matrix_admission")?;
+    if !admission
+        .get("eligible")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let extractor_kind = admission
+        .get("extractor_kind")
+        .and_then(Value::as_str)
+        .map(normalize_machine_token)
+        .unwrap_or_else(|| "structured_json".to_string());
+    if extractor_kind != kind.as_str() {
+        return None;
+    }
+    Some(MATRIX_ADMITTED_EXTERNAL_STRUCTURED_JSON_EXTRACTOR)
+}
+
+fn step_output_source_action_refs(step: &TaskJournalStepTrace, output: &str) -> Vec<String> {
+    let mut refs = Vec::new();
+    let skill = normalize_machine_token(&step.skill).replace('-', "_");
+    if skill.is_empty() {
+        return refs;
+    }
+    if let Ok(value) = serde_json::from_str::<Value>(output) {
+        push_source_action_ref(&mut refs, &skill, Some(&value));
+        push_canonical_source_action_ref(&mut refs, &skill, value.clone());
+        if skill == "fs_basic" {
+            push_canonical_source_action_ref(&mut refs, "fs_search", value.clone());
+        }
+        if matches!(skill.as_str(), "fs_basic" | "config_basic" | "system_basic") {
+            push_canonical_source_action_ref(&mut refs, "system_basic", value);
+        }
+    }
+    push_source_action_ref(&mut refs, &skill, None);
+    refs
+}
+
+fn push_source_action_ref(refs: &mut Vec<String>, skill: &str, value: Option<&Value>) {
+    let source = match value
+        .and_then(|value| value.get("action"))
+        .and_then(Value::as_str)
+    {
+        Some(action) => format!(
+            "{skill}.{}",
+            normalize_machine_token(action).replace('-', "_")
+        ),
+        None => skill.to_string(),
+    };
+    if let Some(source) = normalize_source_action_ref(&source) {
+        push_unique_source_action_ref(refs, source);
+    }
+}
+
+fn push_canonical_source_action_ref(refs: &mut Vec<String>, skill: &str, value: Value) {
+    let Some(canonical) = crate::virtual_tools::canonicalize_legacy_tool_call(skill, value) else {
+        return;
+    };
+    let Some(source) = canonical_source_action_ref(&canonical.tool, &canonical.args) else {
+        return;
+    };
+    push_unique_source_action_ref(refs, source);
+}
+
+fn canonical_source_action_ref(skill: &str, args: &Value) -> Option<String> {
+    let skill = normalize_machine_token(skill).replace('-', "_");
+    if skill.is_empty() {
+        return None;
+    }
+    let action = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(normalize_machine_token)
+        .map(|value| value.replace('-', "_"))
+        .filter(|value| !value.is_empty());
+    normalize_source_action_ref(&match action {
+        Some(action) => format!("{skill}.{action}"),
+        None => skill,
+    })
+}
+
+fn normalize_source_action_ref(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let (skill, action) = raw
+        .split_once('.')
+        .map_or((raw, None), |(skill, action)| (skill, Some(action)));
+    let skill = normalize_machine_token(skill).replace('-', "_");
+    if skill.is_empty() {
+        return None;
+    }
+    let action = action
+        .map(normalize_machine_token)
+        .map(|value| value.replace('-', "_"))
+        .filter(|value| !value.is_empty());
+    Some(match action {
+        Some(action) => format!("{skill}.{action}"),
+        None => skill,
+    })
+}
+
+fn push_unique_source_action_ref(refs: &mut Vec<String>, source: String) {
+    if !refs.iter().any(|value| value == &source) {
+        refs.push(source);
+    }
+}
+
+fn normalize_machine_token(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
 }
 
 fn observed_evidence_from_error(error: Option<&str>) -> Option<Value> {
@@ -766,6 +1303,9 @@ fn collect_json_object_child(
     key: &str,
     child: &Value,
 ) {
+    if key == "_matrix_admission" {
+        return;
+    }
     let field = if prefix.is_empty() {
         key.to_string()
     } else {
@@ -849,6 +1389,22 @@ fn text_observed_evidence_item(output: &str) -> Value {
 
 fn collect_text_observed_evidence(collector: &mut ObservedEvidenceCollector, output: &str) {
     collector.push(text_observed_evidence_item(output));
+    collect_text_observed_evidence_fields(collector, output);
+}
+
+fn collect_text_observed_evidence_for_extractor(
+    collector: &mut ObservedEvidenceCollector,
+    output: &str,
+    extractor: EvidenceExtractorSpec,
+) {
+    collector.push(text_observed_evidence_item(output));
+    collect_text_observed_evidence_fields(collector, output);
+    if extractor.extractor_ref == "git_basic.text_legacy_v1" {
+        collect_git_text_observed_evidence_fields(collector, output);
+    }
+}
+
+fn collect_text_observed_evidence_fields(collector: &mut ObservedEvidenceCollector, output: &str) {
     if let Some(count) = text_count_evidence(output) {
         collector.push(json_observed_evidence_item(
             "text_output.extractor",
@@ -856,16 +1412,10 @@ fn collect_text_observed_evidence(collector: &mut ObservedEvidenceCollector, out
             &json!(count),
         ));
     }
-    if let Some(subject) = text_git_oneline_subject_evidence(output) {
-        collector.push(text_extracted_evidence_item("subject", &subject));
-    }
     if let Some(path) = text_path_evidence(output) {
         collector.push(text_extracted_evidence_item("path", &path));
     }
     collect_text_machine_key_value_evidence(collector, output);
-    if let Some(state) = text_git_state_evidence(output) {
-        collector.push(text_extracted_evidence_item("state", state));
-    }
     let lines = output
         .lines()
         .map(str::trim)
@@ -898,6 +1448,18 @@ fn collect_text_observed_evidence(collector: &mut ObservedEvidenceCollector, out
                 line,
             ));
         }
+    }
+}
+
+fn collect_git_text_observed_evidence_fields(
+    collector: &mut ObservedEvidenceCollector,
+    output: &str,
+) {
+    if let Some(subject) = text_git_oneline_subject_evidence(output) {
+        collector.push(text_extracted_evidence_item("subject", &subject));
+    }
+    if let Some(state) = text_git_state_evidence(output) {
+        collector.push(text_extracted_evidence_item("state", state));
     }
 }
 
@@ -1407,6 +1969,8 @@ pub(crate) struct TaskJournalEvidenceCoverage {
     pub(crate) evidence_expression: Option<Value>,
     pub(crate) observed_fields: BTreeSet<String>,
     pub(crate) observed_canonical: BTreeSet<String>,
+    pub(crate) observed_extractors: BTreeSet<String>,
+    pub(crate) observed_evidence_sources: BTreeMap<String, BTreeSet<String>>,
     pub(crate) missing_evidence: Vec<String>,
 }
 
@@ -1422,6 +1986,8 @@ impl TaskJournalEvidenceCoverage {
             "evidence_expression": self.evidence_expression.clone(),
             "observed_fields": self.observed_fields.iter().take(64).cloned().collect::<Vec<_>>(),
             "observed_canonical": self.observed_canonical.iter().take(64).cloned().collect::<Vec<_>>(),
+            "observed_extractors": self.observed_extractors.iter().take(64).cloned().collect::<Vec<_>>(),
+            "observed_evidence_sources": observed_evidence_sources_trace_json(&self.observed_evidence_sources),
             "missing_evidence": self.missing_evidence.clone(),
         })
     }
@@ -1433,8 +1999,13 @@ pub(crate) fn evidence_coverage_for_route(
 ) -> TaskJournalEvidenceCoverage {
     let required_evidence =
         crate::task_contract::required_evidence_fields_for_output_contract(&route.output_contract);
-    let (observed_fields, observed_field_leaf_counts, mut observed_canonical) =
-        observed_evidence_field_sets(journal);
+    let (
+        observed_fields,
+        observed_field_leaf_counts,
+        mut observed_canonical,
+        observed_extractors,
+        observed_evidence_sources,
+    ) = observed_evidence_field_sets(journal);
     augment_route_canonical_evidence(
         route,
         &observed_fields,
@@ -1455,8 +2026,27 @@ pub(crate) fn evidence_coverage_for_route(
             .map(|expression| expression.to_trace_json(&[])),
         observed_fields,
         observed_canonical,
+        observed_extractors,
+        observed_evidence_sources,
         missing_evidence,
     }
+}
+
+fn observed_evidence_sources_trace_json(
+    observed_evidence_sources: &BTreeMap<String, BTreeSet<String>>,
+) -> Value {
+    Value::Object(
+        observed_evidence_sources
+            .iter()
+            .take(64)
+            .map(|(field, extractors)| {
+                (
+                    field.clone(),
+                    json!(extractors.iter().take(16).cloned().collect::<Vec<_>>()),
+                )
+            })
+            .collect(),
+    )
 }
 
 fn missing_required_evidence(
@@ -1583,10 +2173,18 @@ fn task_outcome_summary_json(journal: &TaskJournal) -> Value {
 
 fn observed_evidence_field_sets(
     journal: &TaskJournal,
-) -> (BTreeSet<String>, BTreeMap<String, usize>, BTreeSet<String>) {
+) -> (
+    BTreeSet<String>,
+    BTreeMap<String, usize>,
+    BTreeSet<String>,
+    BTreeSet<String>,
+    BTreeMap<String, BTreeSet<String>>,
+) {
     let mut observed_fields = BTreeSet::new();
     let mut observed_field_leaf_counts = BTreeMap::new();
     let mut observed_canonical = BTreeSet::new();
+    let mut observed_extractors = BTreeSet::new();
+    let mut observed_evidence_sources = BTreeMap::<String, BTreeSet<String>>::new();
     for step in &journal.step_results {
         if !step_can_supply_contract_evidence(step, journal.route_result.as_ref()) {
             continue;
@@ -1594,6 +2192,13 @@ fn observed_evidence_field_sets(
         let Some(evidence) = observed_evidence_for_step_trace(step) else {
             continue;
         };
+        let extractor_ref = evidence
+            .pointer("/extractor/extractor_ref")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if let Some(extractor_ref) = extractor_ref.as_ref() {
+            observed_extractors.insert(extractor_ref.clone());
+        }
         let Some(items) = evidence.get("items").and_then(Value::as_array) else {
             continue;
         };
@@ -1609,7 +2214,20 @@ fn observed_evidence_field_sets(
                 .entry(normalized_field_leaf(&normalized).to_string())
                 .or_insert(0) += 1;
             observed_fields.insert(normalized.clone());
-            for canonical in canonical_evidence_fields_for_observed_item(&normalized, item) {
+            let canonical_fields = canonical_evidence_fields_for_observed_item(&normalized, item);
+            if let Some(extractor_ref) = extractor_ref.as_ref() {
+                observed_evidence_sources
+                    .entry(normalized.clone())
+                    .or_default()
+                    .insert(extractor_ref.clone());
+            }
+            for canonical in canonical_fields {
+                if let Some(extractor_ref) = extractor_ref.as_ref() {
+                    observed_evidence_sources
+                        .entry(canonical.clone())
+                        .or_default()
+                        .insert(extractor_ref.clone());
+                }
                 observed_canonical.insert(canonical);
             }
         }
@@ -1618,6 +2236,8 @@ fn observed_evidence_field_sets(
         observed_fields,
         observed_field_leaf_counts,
         observed_canonical,
+        observed_extractors,
+        observed_evidence_sources,
     )
 }
 
@@ -1686,6 +2306,14 @@ fn augment_route_canonical_evidence(
             }
             _ => {}
         }
+    }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+        && (observed_canonical.contains("status")
+            || observed_canonical.contains("command_output")
+            || observed_canonical.contains("content_excerpt")
+            || observed_fields.contains("text_excerpt"))
+    {
+        observed_canonical.insert("field_value".to_string());
     }
     if route.output_contract.semantic_kind == crate::OutputSemanticKind::SqliteDatabaseKindJudgment
         && (observed_canonical.contains("candidates")
@@ -3152,6 +3780,18 @@ mod tests {
             .pointer("/rounds/0/plan_result/steps/0/action_ref")
             .and_then(Value::as_str);
         assert_eq!(plan_action_ref, Some("process_basic"));
+        assert_eq!(
+            trace
+                .pointer("/rounds/0/plan_result/steps/0/raw_action_ref")
+                .and_then(Value::as_str),
+            Some("process_basic.ps")
+        );
+        assert_eq!(
+            trace
+                .pointer("/rounds/0/plan_result/steps/0/matrix_action_ref")
+                .and_then(Value::as_str),
+            Some("process_basic")
+        );
     }
 
     #[test]
@@ -3338,7 +3978,43 @@ mod tests {
             observed
                 .pointer("/extractor/extractor_ref")
                 .and_then(Value::as_str),
-            Some("step_output.structured_json_v1")
+            Some("config_basic.read_fields.structured_json_v1")
+        );
+        assert_eq!(
+            observed
+                .pointer("/extractor/source_action_ref")
+                .and_then(Value::as_str),
+            Some("config_basic.read_fields")
+        );
+        assert_eq!(
+            observed
+                .pointer("/extractor/strict_shape_eligible")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            observed
+                .pointer("/extractor/fallback")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            observed
+                .pointer("/extractor/provider_safety/provider_evidence_view")
+                .and_then(Value::as_str),
+            Some("provider_safe_redacted")
+        );
+        assert_eq!(
+            observed
+                .pointer("/extractor/provider_safety/raw_excerpt_policy")
+                .and_then(Value::as_str),
+            Some("no_full_raw_excerpt")
+        );
+        assert_eq!(
+            observed
+                .pointer("/extractor/provider_safety/sensitive_field_policy")
+                .and_then(Value::as_str),
+            Some("redact_sensitive_keys_and_secret_like_values")
         );
         assert_eq!(
             observed
@@ -3399,7 +4075,19 @@ mod tests {
             observed
                 .pointer("/extractor/extractor_ref")
                 .and_then(Value::as_str),
-            Some("step_output.text_legacy_v1")
+            Some("run_cmd.text_legacy_v1")
+        );
+        assert_eq!(
+            observed
+                .pointer("/extractor/source_action_ref")
+                .and_then(Value::as_str),
+            Some("run_cmd")
+        );
+        assert_eq!(
+            observed
+                .pointer("/extractor/fallback")
+                .and_then(Value::as_bool),
+            Some(false)
         );
         assert!(observed
             .get("items")
@@ -3412,6 +4100,107 @@ mod tests {
                         && item.get("hash").and_then(Value::as_str).is_some()
                 })
             }));
+    }
+
+    #[test]
+    fn explicit_extractor_registry_canonicalizes_virtual_tool_outputs() {
+        let mut journal = TaskJournal::for_task("task-explicit-extractor", "ask", "列出文件");
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "fs_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "action": "inventory_dir",
+                    "names": ["Cargo.toml"]
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let trace = journal.to_trace_json();
+        let extractor = trace
+            .pointer("/step_results/0/observed_evidence/extractor")
+            .expect("observed evidence extractor");
+        assert_eq!(
+            extractor.get("extractor_ref").and_then(Value::as_str),
+            Some("fs_basic.list_dir.structured_json_v1")
+        );
+        assert_eq!(
+            extractor.get("source_action_ref").and_then(Value::as_str),
+            Some("fs_basic.list_dir")
+        );
+        assert!(extractor
+            .get("provided_evidence")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("candidates"))));
+    }
+
+    #[test]
+    fn matrix_admitted_external_marker_enables_strict_structured_evidence() {
+        let mut journal =
+            TaskJournal::for_task("task-external-admission-evidence", "ask", "external count");
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "external_counter".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                json!({
+                    "action": "count",
+                    "text": "3",
+                    "extra": {
+                        "action": "count",
+                        "count": 3,
+                        "results": ["a", "b", "c"]
+                    },
+                    "_matrix_admission": {
+                        "schema_version": 1,
+                        "source": "skills_registry",
+                        "skill": "external_counter",
+                        "eligible": true,
+                        "extractor_kind": "structured_json",
+                        "required_extra_fields": ["extra.count"]
+                    }
+                })
+                .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let trace = journal.to_trace_json();
+        let observed = trace
+            .pointer("/step_results/0/observed_evidence")
+            .expect("observed evidence");
+        assert_eq!(
+            observed
+                .pointer("/extractor/extractor_ref")
+                .and_then(Value::as_str),
+            Some("matrix_admitted_external.structured_json_v1")
+        );
+        assert_eq!(
+            observed
+                .pointer("/extractor/strict_shape_eligible")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        let items = observed
+            .get("items")
+            .and_then(Value::as_array)
+            .expect("evidence items");
+        assert!(items.iter().any(|item| {
+            item.get("field").and_then(Value::as_str) == Some("extra.count")
+                && item.get("excerpt").and_then(Value::as_str) == Some("3")
+        }));
+        assert!(!items.iter().any(|item| {
+            item.get("field")
+                .and_then(Value::as_str)
+                .is_some_and(|field| field.starts_with("_matrix_admission"))
+        }));
     }
 
     #[test]
@@ -3465,10 +4254,30 @@ mod tests {
                     == Some("/home/guagua/rustclaw/tmp/bundle.zip")
         }));
 
-        let observed = observed_evidence_from_output(Some(
-            "exit=0\n09342a6a fix: expose nl execution and locator flows\n",
-        ))
-        .expect("git subject evidence should be present");
+        let mut git_journal =
+            TaskJournal::for_task("task-text-git-subject", "ask", "latest git subject");
+        git_journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "git_basic".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                "exit=0\n09342a6a fix: expose nl execution and locator flows\n".to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+        let observed = git_journal
+            .to_trace_json()
+            .pointer("/step_results/0/observed_evidence")
+            .cloned()
+            .expect("git subject evidence should be present");
+        assert_eq!(
+            observed
+                .pointer("/extractor/extractor_ref")
+                .and_then(Value::as_str),
+            Some("git_basic.text_legacy_v1")
+        );
         let items = observed
             .get("items")
             .and_then(Value::as_array)
@@ -3912,6 +4721,31 @@ mod tests {
     }
 
     #[test]
+    fn service_status_run_cmd_output_counts_as_field_value_evidence() {
+        let mut journal =
+            TaskJournal::for_task("task-service-status-run-cmd", "ask", "检查 clawd 服务状态");
+        let route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
+        journal.record_route_result(&route);
+        journal.push_step_result(&crate::executor::StepExecutionResult {
+            step_id: "step_1".to_string(),
+            skill: "run_cmd".to_string(),
+            status: crate::executor::StepExecutionStatus::Ok,
+            output: Some(
+                "154421 clawd /home/guagua/rustclaw/target/release/clawd --config /home/guagua/rustclaw/configs/config.toml\n"
+                    .to_string(),
+            ),
+            error: None,
+            started_at: 1,
+            finished_at: 2,
+        });
+
+        let coverage = evidence_coverage_for_route(&route, &journal);
+        assert!(coverage.is_complete(), "coverage: {coverage:?}");
+        assert!(coverage.observed_canonical.contains("field_value"));
+        assert!(coverage.observed_canonical.contains("command_output"));
+    }
+
+    #[test]
     fn git_status_text_counts_as_field_value_evidence() {
         let mut journal = TaskJournal::for_task("task-git-state", "ask", "检查仓库状态");
         let mut route = crate::RouteResult {
@@ -4271,7 +5105,9 @@ mod tests {
             step_id: "step_1".to_string(),
             skill: "fs_basic".to_string(),
             status: crate::executor::StepExecutionStatus::Ok,
-            output: Some(json!({"names": ["Cargo.toml", "README.md"]}).to_string()),
+            output: Some(
+                json!({"action": "list_dir", "names": ["Cargo.toml", "README.md"]}).to_string(),
+            ),
             error: None,
             started_at: 1,
             finished_at: 2,
@@ -4299,6 +5135,18 @@ mod tests {
             .get("observed_canonical")
             .and_then(Value::as_array)
             .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("candidates"))));
+        assert!(coverage
+            .get("observed_extractors")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items
+                .iter()
+                .any(|item| item.as_str() == Some("fs_basic.list_dir.structured_json_v1"))));
+        assert!(coverage
+            .pointer("/observed_evidence_sources/candidates")
+            .and_then(Value::as_array)
+            .is_some_and(|items| items
+                .iter()
+                .any(|item| item.as_str() == Some("fs_basic.list_dir.structured_json_v1"))));
         let summary = journal.to_summary_json();
         assert_eq!(
             summary

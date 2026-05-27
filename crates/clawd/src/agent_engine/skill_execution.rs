@@ -568,6 +568,103 @@ fn skill_extra_requests_user_input(extra: Option<&Value>) -> bool {
         .unwrap_or(false)
 }
 
+fn matrix_admitted_external_evidence_output(
+    state: &AppState,
+    normalized_skill: &str,
+    action_args: &Value,
+    out: &str,
+    structured_extra: Option<&Value>,
+) -> Option<String> {
+    let extra = structured_extra?;
+    let registry = state.get_skills_registry()?;
+    let canonical = registry.resolve_canonical(normalized_skill)?;
+    let entry = registry.get(canonical)?;
+    let admission = entry.matrix_admission.as_ref()?;
+    let requires_admission = entry.matrix_admission.is_some()
+        || entry.kind == claw_core::skill_registry::SkillKind::External
+        || entry
+            .external_bundle_dir
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty());
+    if !requires_admission || !admission.eligible {
+        return None;
+    }
+    let action = extra
+        .get("action")
+        .and_then(Value::as_str)
+        .or_else(|| action_args.get("action").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if !registry.matrix_admission_eligible(canonical, action) {
+        return None;
+    }
+    let extractor_kind = admission
+        .extractor_kind
+        .as_deref()
+        .map(normalize_machine_token)
+        .unwrap_or_else(|| "structured_json".to_string());
+    if extractor_kind != "structured_json" {
+        return None;
+    }
+    if !admission
+        .required_extra_fields
+        .iter()
+        .all(|field| admitted_extra_field_exists(extra, field))
+    {
+        return None;
+    }
+    let mut payload = serde_json::Map::new();
+    if let Some(action) = action {
+        payload.insert("action".to_string(), json!(action));
+    }
+    payload.insert("text".to_string(), json!(out));
+    payload.insert("extra".to_string(), extra.clone());
+    payload.insert(
+        "_matrix_admission".to_string(),
+        json!({
+            "schema_version": 1,
+            "source": "skills_registry",
+            "skill": canonical,
+            "eligible": true,
+            "extractor_kind": extractor_kind,
+            "declared_actions": &admission.declared_actions,
+            "evidence_sources": &admission.evidence_sources,
+            "required_extra_fields": &admission.required_extra_fields,
+            "admission_version": admission.admission_version.as_deref(),
+        }),
+    );
+    Some(Value::Object(payload).to_string())
+}
+
+fn admitted_extra_field_exists(extra: &Value, field: &str) -> bool {
+    let mut field = field.trim();
+    if field.is_empty() {
+        return false;
+    }
+    field = field.strip_prefix("extra.").unwrap_or(field);
+    field = field.strip_prefix("extra/").unwrap_or(field);
+    field = field.trim_matches('.');
+    if field.is_empty() || field == "extra" {
+        return true;
+    }
+    let mut current = extra;
+    for segment in field.split('.') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            return false;
+        }
+        let Some(next) = current.get(segment) else {
+            return false;
+        };
+        current = next;
+    }
+    !current.is_null()
+}
+
+fn normalize_machine_token(value: &str) -> String {
+    value.trim().to_ascii_lowercase().replace('-', "_")
+}
+
 fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
@@ -1288,9 +1385,21 @@ async fn handle_skill_step_success(
         step_execution.started_at,
         step_execution.finished_at
     );
+    let journal_step_execution = matrix_admitted_external_evidence_output(
+        state,
+        normalized_skill,
+        action_args,
+        out,
+        structured_extra,
+    )
+    .map(|evidence_output| crate::executor::StepExecutionResult {
+        output: Some(evidence_output),
+        ..step_execution.clone()
+    })
+    .unwrap_or_else(|| step_execution.clone());
     loop_state
         .executed_step_results
-        .push(step_execution.clone());
+        .push(journal_step_execution.clone());
     log_step_journal_summary(
         task,
         loop_state.round_no,
@@ -1301,7 +1410,7 @@ async fn handle_skill_step_success(
             .is_active()
             .then(|| loop_state.execution_recipe.phase_summary_line())
             .as_deref(),
-        step_execution,
+        &journal_step_execution,
     );
     // Raw skill output stays trace/evidence unless the skill explicitly marks it as a user-input prompt.
     let ended_with_user_visible_output =
@@ -1726,11 +1835,12 @@ mod tests {
     use std::sync::{Arc, RwLock};
 
     use super::{
-        build_auto_sudo_retry_args, contains_unresolved_runtime_template_arg,
-        contract_matrix_action_policy_error, contract_matrix_arg_policy_error,
-        handle_skill_step_failure, handle_skill_step_success, preflight_failure_metadata,
-        skill_extra_requests_user_input, structured_observation_path_argument_error,
-        unresolved_runtime_template_argument_error, AgentLoopGuardPolicy, LoopState,
+        admitted_extra_field_exists, build_auto_sudo_retry_args,
+        contains_unresolved_runtime_template_arg, contract_matrix_action_policy_error,
+        contract_matrix_arg_policy_error, handle_skill_step_failure, handle_skill_step_success,
+        preflight_failure_metadata, skill_extra_requests_user_input,
+        structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
+        AgentLoopGuardPolicy, LoopState,
     };
     use crate::{
         AgentRuntimeConfig, AppState, ClaimedTask, SkillViewsSnapshot, ToolsPolicy,
@@ -2220,6 +2330,24 @@ mod tests {
             &serde_json::json!({"needs_directory": true})
         )));
         assert!(!skill_extra_requests_user_input(None));
+    }
+
+    #[test]
+    fn admitted_extra_field_exists_checks_machine_field_paths() {
+        let extra = serde_json::json!({
+            "action": "count",
+            "count": 3,
+            "nested": {
+                "path": "/tmp/out.txt"
+            },
+            "missing": null
+        });
+
+        assert!(admitted_extra_field_exists(&extra, "extra.count"));
+        assert!(admitted_extra_field_exists(&extra, "extra.nested.path"));
+        assert!(admitted_extra_field_exists(&extra, "count"));
+        assert!(!admitted_extra_field_exists(&extra, "extra.missing"));
+        assert!(!admitted_extra_field_exists(&extra, "extra.nope"));
     }
 
     fn failed_step(

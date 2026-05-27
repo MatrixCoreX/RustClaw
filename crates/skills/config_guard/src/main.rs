@@ -1,3 +1,4 @@
+use std::io::ErrorKind;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
@@ -16,7 +17,49 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    extra: Option<Value>,
     error_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    platform: Option<String>,
+}
+
+#[derive(Debug)]
+struct SkillError {
+    kind: &'static str,
+    message: String,
+    extra: Option<Value>,
+}
+
+impl SkillError {
+    fn new(kind: &'static str, message: impl Into<String>, extra: Option<Value>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            extra,
+        }
+    }
+
+    fn io(operation: &'static str, path: &std::path::Path, err: io::Error) -> Self {
+        let kind = match err.kind() {
+            ErrorKind::NotFound => "not_found",
+            ErrorKind::PermissionDenied => "permission_denied",
+            ErrorKind::InvalidInput => "invalid_input",
+            ErrorKind::InvalidData => "invalid_data",
+            _ => "io_error",
+        };
+        let path_text = path.display().to_string();
+        Self::new(
+            kind,
+            format!("{operation} failed for {path_text}: {err}"),
+            Some(json!({
+                "error_kind": kind,
+                "operation": operation,
+                "path": path_text
+            })),
+        )
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -27,24 +70,36 @@ fn main() -> anyhow::Result<()> {
         let parsed: Result<Req, _> = serde_json::from_str(&line);
         let resp = match parsed {
             Ok(req) => match execute(req.args) {
-                Ok(text) => Resp {
+                Ok(extra) => Resp {
                     request_id: req.request_id,
                     status: "ok".to_string(),
-                    text,
+                    text: extra.to_string(),
+                    extra: Some(extra),
                     error_text: None,
+                    error_kind: None,
+                    platform: None,
                 },
                 Err(err) => Resp {
                     request_id: req.request_id,
                     status: "error".to_string(),
                     text: String::new(),
-                    error_text: Some(err),
+                    extra: err.extra,
+                    error_text: Some(err.message),
+                    error_kind: Some(err.kind.to_string()),
+                    platform: Some(std::env::consts::OS.to_string()),
                 },
             },
             Err(err) => Resp {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: Some(json!({
+                    "error_kind": "invalid_input",
+                    "operation": "parse_request"
+                })),
                 error_text: Some(format!("invalid input: {err}")),
+                error_kind: Some("invalid_input".to_string()),
+                platform: Some(std::env::consts::OS.to_string()),
             },
         };
         writeln!(stdout, "{}", serde_json::to_string(&resp)?)?;
@@ -53,16 +108,33 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn execute(args: Value) -> Result<String, String> {
-    let obj = args
-        .as_object()
-        .ok_or_else(|| "args must be object".to_string())?;
+fn execute(args: Value) -> Result<Value, SkillError> {
+    let obj = args.as_object().ok_or_else(|| {
+        SkillError::new(
+            "invalid_input",
+            "args must be object",
+            Some(json!({
+                "error_kind": "invalid_input",
+                "operation": "parse_args"
+            })),
+        )
+    })?;
     let root = workspace_root();
     let config_path = resolve_config_path(&root, obj);
 
     let raw = std::fs::read_to_string(&config_path)
-        .map_err(|err| format!("read config failed: {err}"))?;
-    let v: TomlValue = toml::from_str(&raw).map_err(|err| format!("parse toml failed: {err}"))?;
+        .map_err(|err| SkillError::io("read_config", &config_path, err))?;
+    let v: TomlValue = toml::from_str(&raw).map_err(|err| {
+        SkillError::new(
+            "invalid_data",
+            format!("parse_toml failed for {}: {err}", config_path.display()),
+            Some(json!({
+                "error_kind": "invalid_data",
+                "operation": "parse_toml",
+                "path": config_path.display().to_string()
+            })),
+        )
+    })?;
 
     let mut risks = Vec::new();
     if has_real_token(
@@ -108,11 +180,11 @@ fn execute(args: Value) -> Result<String, String> {
     }
 
     Ok(json!({
+        "action": "scan",
         "path": config_path.display().to_string(),
         "risk_count": risks.len(),
         "risks": risks
-    })
-    .to_string())
+    }))
 }
 
 fn has_real_token(v: Option<&str>) -> bool {
@@ -221,6 +293,39 @@ mod tests {
         let resolved = resolve_config_path(&root, obj.as_object().expect("object"));
 
         assert_eq!(resolved, default_path);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn execute_returns_structured_extra_fields() {
+        let root = temp_root("structured_extra");
+        let path = root.join("config.toml");
+        std::fs::write(&path, "[tools]\nallow_sudo = true\n").expect("write config");
+        let out = execute(json!({ "path": path.display().to_string() })).expect("execute");
+
+        assert_eq!(out.get("action").and_then(Value::as_str), Some("scan"));
+        assert_eq!(out.get("risk_count").and_then(Value::as_u64), Some(2));
+        assert!(out
+            .get("risks")
+            .and_then(Value::as_array)
+            .is_some_and(|risks| risks.iter().any(|risk| risk == "tools.allow_sudo=true")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn execute_missing_file_returns_structured_error_kind() {
+        let root = temp_root("missing_file_error");
+        let path = root.join("missing.toml");
+        let err = execute(json!({ "path": path.display().to_string() })).expect_err("error");
+
+        assert_eq!(err.kind, "not_found");
+        assert_eq!(
+            err.extra
+                .as_ref()
+                .and_then(|extra| extra.get("error_kind"))
+                .and_then(Value::as_str),
+            Some("not_found")
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }

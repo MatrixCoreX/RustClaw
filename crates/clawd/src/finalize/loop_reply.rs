@@ -1933,6 +1933,7 @@ fn loop_contract_observed_answer_satisfies_required_evidence(
 fn replace_delivery_with_loop_contract_observed_answer(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
     if loop_state
@@ -1973,6 +1974,21 @@ fn replace_delivery_with_loop_contract_observed_answer(
     }
     if !loop_contract_observed_answer_satisfies_required_evidence(loop_state, answer_kind) {
         return false;
+    }
+    if let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) {
+        if route_requires_matrix_deterministic_final_answer(route)
+            && !matrix_candidate_satisfies_final_shape(
+                task,
+                &route.resolved_intent,
+                loop_state,
+                agent_run_context,
+                Some(summary.clone()),
+                route,
+                &answer,
+            )
+        {
+            return false;
+        }
     }
     if loop_state
         .delivery_messages
@@ -2986,9 +3002,11 @@ fn prefer_observed_answer_for_exact_contract(
         return;
     }
     let Some((answer, summary)) =
-        direct_scalar_observed_answer(Some(state), loop_state, agent_run_context).or_else(|| {
-            direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
-        })
+        direct_scalar_observed_answer(Some(state), loop_state, agent_run_context)
+            .or_else(|| {
+                direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
+            })
+            .or_else(|| exact_contract_fallback_observed_answer(route, loop_state))
     else {
         return;
     };
@@ -3009,9 +3027,14 @@ fn prefer_observed_answer_for_exact_contract(
         *finalizer_summary = Some(summary);
         return;
     }
-    if delivery_messages.last().is_some_and(|message| {
-        should_keep_planned_delivery_over_observed_answer(route, message, answer)
-    }) {
+    let current_delivery_is_replaceable_status_synthesis = has_prior_step_error
+        && allow_prior_step_error_replacement
+        && current_delivery_is_publishable_synthesis;
+    if !current_delivery_is_replaceable_status_synthesis
+        && delivery_messages.last().is_some_and(|message| {
+            should_keep_planned_delivery_over_observed_answer(route, message, answer)
+        })
+    {
         info!(
             "delivery exact_contract_keep_planned_delivery task_id={} observed={}",
             task_id,
@@ -3035,6 +3058,172 @@ fn prefer_observed_answer_for_exact_contract(
     delivery_messages.push(answer.to_string());
     loop_state.last_user_visible_respond = Some(answer.to_string());
     *finalizer_summary = Some(summary);
+}
+
+fn exact_contract_fallback_observed_answer(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let body = latest_successful_observation_body(loop_state)?.trim();
+    if body.is_empty()
+        || crate::finalize::looks_like_planner_artifact(body)
+        || crate::finalize::looks_like_internal_trace_artifact(body)
+        || looks_like_raw_command_snapshot(body)
+    {
+        return None;
+    }
+    let candidate = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| exact_contract_answer_from_json(route, &value))
+        .or_else(|| single_line_observation_answer(route, body))?;
+    let candidate = match crate::output_contract_verifier::verify_output_contract(
+        &route.output_contract,
+        &candidate,
+        &route.resolved_intent,
+    ) {
+        crate::output_contract_verifier::OutputContractVerdict::Pass => candidate,
+        crate::output_contract_verifier::OutputContractVerdict::Reshape { reshaped, .. } => {
+            reshaped
+        }
+        crate::output_contract_verifier::OutputContractVerdict::Reject { .. } => {
+            if exact_fallback_candidate_is_machine_grounded(route, &candidate) {
+                candidate
+            } else {
+                return None;
+            }
+        }
+    };
+    Some((
+        candidate,
+        crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: 1,
+            ..Default::default()
+        },
+    ))
+}
+
+fn exact_fallback_candidate_is_machine_grounded(
+    route: &crate::RouteResult,
+    candidate: &str,
+) -> bool {
+    let candidate = candidate.trim();
+    if candidate.is_empty()
+        || crate::finalize::is_execution_summary_message(candidate)
+        || crate::finalize::looks_like_planner_artifact(candidate)
+        || crate::finalize::looks_like_internal_trace_artifact(candidate)
+        || looks_like_structured_machine_output(candidate)
+        || looks_like_raw_command_snapshot(candidate)
+    {
+        return false;
+    }
+    if matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar
+    ) {
+        let mut lines = candidate
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty());
+        return lines.next().is_some() && lines.next().is_none();
+    }
+    if route_path_locator_plain_act_allows_observed_listing(route) {
+        return candidate.lines().any(|line| !line.trim().is_empty());
+    }
+    matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ExistenceWithPath | crate::OutputSemanticKind::FilePaths
+    ) && candidate.lines().any(|line| !line.trim().is_empty())
+}
+
+fn exact_contract_answer_from_json(
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+) -> Option<String> {
+    if matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar
+    ) {
+        return scalar_answer_from_json(value);
+    }
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FilePaths | crate::OutputSemanticKind::ExistenceWithPath
+    ) || matches!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::Path
+    ) {
+        return path_answer_from_json(value);
+    }
+    None
+}
+
+fn scalar_answer_from_json(value: &serde_json::Value) -> Option<String> {
+    for key in ["value_text", "value", "count", "total"] {
+        let Some(child) = value.get(key) else {
+            continue;
+        };
+        if let Some(text) = child
+            .as_str()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            return Some(text.to_string());
+        }
+        if child.is_number() || child.is_boolean() {
+            return Some(child.to_string());
+        }
+    }
+    None
+}
+
+fn path_answer_from_json(value: &serde_json::Value) -> Option<String> {
+    for key in ["results", "paths", "names", "items"] {
+        if let Some(items) = value.get(key).and_then(|child| child.as_array()) {
+            let lines = items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            if !lines.is_empty() {
+                return Some(lines.join("\n"));
+            }
+        }
+    }
+    for key in ["path", "resolved_path", "file_path", "output_path"] {
+        if let Some(text) = value
+            .get(key)
+            .and_then(|child| child.as_str())
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        {
+            return Some(text.to_string());
+        }
+    }
+    None
+}
+
+fn single_line_observation_answer(route: &crate::RouteResult, body: &str) -> Option<String> {
+    let mut lines = body.lines().map(str::trim).filter(|line| !line.is_empty());
+    let first = lines.next()?;
+    if lines.next().is_some() {
+        return None;
+    }
+    if !matches!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar
+    ) {
+        return None;
+    }
+    Some(first.to_string())
 }
 
 fn planned_delivery_is_explicit_contractual_answer(
@@ -3355,20 +3544,30 @@ fn should_keep_planned_delivery_over_observed_answer(
     delivery: &str,
     observed: &str,
 ) -> bool {
+    if crate::finalize::is_execution_summary_message(delivery) {
+        return false;
+    }
+    let scalar_model_language_verdict = route.output_contract.response_shape
+        == crate::OutputResponseShape::Scalar
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath;
     if route_allows_model_language_final_answer(route)
+        && (!matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        ) || scalar_model_language_verdict)
         && planned_delivery_is_publishable_model_language_answer(delivery)
     {
         return true;
-    }
-    let planned_delivery_contains_more_than_observed =
-        delivery_has_planned_content_beyond_observed_answer(delivery, observed);
-    if !planned_delivery_contains_more_than_observed {
-        return false;
     }
     if matches!(
         route.output_contract.response_shape,
         crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
     ) {
+        return false;
+    }
+    let planned_delivery_contains_more_than_observed =
+        delivery_has_planned_content_beyond_observed_answer(delivery, observed);
+    if !planned_delivery_contains_more_than_observed {
         return false;
     }
     if !output_contract_requests_exact_delivery(route) {
@@ -3523,7 +3722,11 @@ fn matrix_observed_answer_candidate_for_shape(
             direct_scalar_observed_answer(Some(state), loop_state, agent_run_context)
         }
         crate::contract_matrix::FinalAnswerShapeClass::StrictList => route
-            .and_then(|route| matrix_strict_list_observed_answer(route, loop_state))
+            .and_then(|route| {
+                matrix_grouped_name_list_observed_answer(route, loop_state)
+                    .or_else(|| matrix_docker_text_list_observed_answer(route, loop_state))
+                    .or_else(|| matrix_strict_list_observed_answer(route, loop_state))
+            })
             .or_else(|| {
                 direct_structured_observed_answer_allowing_implicit_metadata_path_facts(
                     Some(state),
@@ -3553,6 +3756,7 @@ fn matrix_strict_list_observed_answer(
     if !matches!(
         route.output_contract.semantic_kind,
         crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::HiddenEntriesCheck
             | crate::OutputSemanticKind::FilePaths
             | crate::OutputSemanticKind::StructuredKeys
             | crate::OutputSemanticKind::SqliteTableNamesOnly
@@ -3580,13 +3784,217 @@ fn matrix_strict_list_observed_answer(
         let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
             continue;
         };
-        collect_matrix_strict_list_items(route, &value, &mut items);
+        if route.output_contract.semantic_kind == crate::OutputSemanticKind::HiddenEntriesCheck {
+            collect_matrix_hidden_entries(&value, &mut items);
+        } else {
+            collect_matrix_strict_list_items(route, &value, &mut items);
+        }
     }
     if items.is_empty() {
         return None;
     }
     let answer = items.into_values().collect::<Vec<_>>().join("\n");
     Some((answer, matrix_observed_shape_summary(loop_state)))
+}
+
+fn collect_matrix_hidden_entries(value: &serde_json::Value, items: &mut BTreeMap<String, String>) {
+    if let Some(entries) = value.get("entries").and_then(serde_json::Value::as_array) {
+        for entry in entries {
+            let Some(map) = entry.as_object() else {
+                continue;
+            };
+            let hidden = map
+                .get("hidden")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            if !hidden {
+                continue;
+            }
+            for key in ["name", "path"] {
+                if let Some(text) = map.get(key).and_then(serde_json::Value::as_str) {
+                    push_matrix_hidden_entry_item(text, items);
+                    break;
+                }
+            }
+        }
+    }
+    if let Some(names) = value.get("names").and_then(serde_json::Value::as_array) {
+        for name in names {
+            if let Some(text) = name.as_str() {
+                push_matrix_hidden_entry_item(text, items);
+            }
+        }
+    }
+    if let Some(names_by_kind) = value
+        .get("names_by_kind")
+        .and_then(serde_json::Value::as_object)
+    {
+        for child in names_by_kind.values() {
+            if let Some(array) = child.as_array() {
+                for name in array {
+                    if let Some(text) = name.as_str() {
+                        push_matrix_hidden_entry_item(text, items);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn push_matrix_hidden_entry_item(raw: &str, items: &mut BTreeMap<String, String>) {
+    let item = raw.trim().trim_matches('`').trim();
+    if item.is_empty() || item == "." || item == ".." {
+        return;
+    }
+    let display = std::path::Path::new(item)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(item);
+    if !display.starts_with('.') || matches!(display, "." | "..") {
+        return;
+    }
+    items
+        .entry(display.to_ascii_lowercase())
+        .or_insert_with(|| display.to_string());
+}
+
+fn matrix_grouped_name_list_observed_answer(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+        != Some(crate::contract_matrix::FinalAnswerShape::GroupedNameList)
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryEntryGroups
+    {
+        return None;
+    }
+    let mut dirs = BTreeMap::<String, String>::new();
+    let mut files = BTreeMap::<String, String>::new();
+    let mut other = BTreeMap::<String, String>::new();
+    for step in &loop_state.executed_step_results {
+        if !step.is_ok()
+            || matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think"
+            )
+        {
+            continue;
+        }
+        let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+            continue;
+        };
+        collect_matrix_grouped_name_items(route, &value, &mut dirs, &mut files, &mut other);
+    }
+    if dirs.is_empty() && files.is_empty() && other.is_empty() {
+        return None;
+    }
+    let mut lines = Vec::new();
+    push_matrix_grouped_name_lines("dirs", dirs, &mut lines);
+    push_matrix_grouped_name_lines("files", files, &mut lines);
+    push_matrix_grouped_name_lines("other", other, &mut lines);
+    Some((lines.join("\n"), matrix_observed_shape_summary(loop_state)))
+}
+
+fn matrix_docker_text_list_observed_answer(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if !matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::DockerImages | crate::OutputSemanticKind::DockerPs
+    ) {
+        return None;
+    }
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok() || !matches!(step.skill.as_str(), "docker_basic" | "run_cmd") {
+            continue;
+        }
+        let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+        else {
+            continue;
+        };
+        if looks_like_structured_machine_output(output)
+            || crate::finalize::looks_like_planner_artifact(output)
+            || crate::finalize::looks_like_internal_trace_artifact(output)
+        {
+            continue;
+        }
+        return Some((
+            output.to_string(),
+            matrix_observed_shape_summary(loop_state),
+        ));
+    }
+    None
+}
+
+fn collect_matrix_grouped_name_items(
+    route: &crate::RouteResult,
+    value: &serde_json::Value,
+    dirs: &mut BTreeMap<String, String>,
+    files: &mut BTreeMap<String, String>,
+    other: &mut BTreeMap<String, String>,
+) {
+    let Some(names_by_kind) = value
+        .get("names_by_kind")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return;
+    };
+    push_matrix_grouped_name_array(route, names_by_kind.get("dirs"), dirs);
+    push_matrix_grouped_name_array(route, names_by_kind.get("files"), files);
+    push_matrix_grouped_name_array(route, names_by_kind.get("other"), other);
+}
+
+fn push_matrix_grouped_name_array(
+    route: &crate::RouteResult,
+    value: Option<&serde_json::Value>,
+    items: &mut BTreeMap<String, String>,
+) {
+    let Some(array) = value.and_then(serde_json::Value::as_array) else {
+        return;
+    };
+    for item in array {
+        if let Some(text) = item.as_str() {
+            push_matrix_grouped_name_item(route, text, items);
+        }
+    }
+}
+
+fn push_matrix_grouped_name_item(
+    route: &crate::RouteResult,
+    raw: &str,
+    items: &mut BTreeMap<String, String>,
+) {
+    let Some(display) = matrix_list_display_item(route, raw) else {
+        return;
+    };
+    items.entry(display.to_ascii_lowercase()).or_insert(display);
+}
+
+fn push_matrix_grouped_name_lines(
+    label: &str,
+    items: BTreeMap<String, String>,
+    lines: &mut Vec<String>,
+) {
+    if items.is_empty() {
+        return;
+    }
+    lines.push(format!("{label}:"));
+    lines.extend(items.into_values().map(|item| format!("- {item}")));
 }
 
 fn collect_matrix_strict_list_items(
@@ -3919,6 +4327,31 @@ fn replace_delivery_with_matrix_observed_shape_answer(
         crate::truncate_for_log(&candidate)
     );
     true
+}
+
+fn deterministic_matrix_observed_shape_answer(
+    state: &AppState,
+    _task: &ClaimedTask,
+    _user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    if !route_requires_matrix_deterministic_final_answer(route) {
+        return None;
+    }
+    let shape_class = matrix_final_answer_shape_class(route)?;
+    let (candidate, summary) = matrix_observed_answer_candidate_for_shape(
+        state,
+        loop_state,
+        agent_run_context,
+        shape_class,
+    )?;
+    let candidate = candidate.trim().to_string();
+    if candidate.is_empty() {
+        return None;
+    }
+    Some((candidate, summary))
 }
 
 const EXECUTION_SUMMARY_MAX_STEPS: usize = 4;
@@ -7538,6 +7971,15 @@ async fn missing_delivery_after_observation_message(
     {
         return answer;
     }
+    if let Some((answer, _summary)) = deterministic_matrix_observed_shape_answer(
+        state,
+        task,
+        user_text,
+        loop_state,
+        agent_run_context,
+    ) {
+        return answer;
+    }
     let default_text = missing_delivery_after_observation_default_message(state, user_text);
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let contract = crate::fallback::UserResponseContract::tool_failure(
@@ -7578,19 +8020,16 @@ async fn observed_execution_without_publishable_delivery_reply(
 ) -> Option<AskReply> {
     let execution_summaries =
         build_execution_summary_messages(loop_state, agent_run_context, Some(user_text));
+    let status_summary = || deterministic_observed_execution_status_summary(loop_state);
     let deterministic_answer =
         deterministic_execution_failed_step_answer(state, user_text, loop_state, agent_run_context)
+            .map(|answer| (answer, status_summary()))
             .or_else(|| {
                 deterministic_observed_execution_status_answer(state, user_text, loop_state)
+                    .map(|answer| (answer, status_summary()))
             })
-            .or_else(|| {
-                direct_config_edit_observed_answer(state, user_text, loop_state)
-                    .map(|(answer, _summary)| answer)
-            })
-            .or_else(|| {
-                direct_rustclaw_config_risk_answer(state, user_text, loop_state)
-                    .map(|(answer, _summary)| answer)
-            })
+            .or_else(|| direct_config_edit_observed_answer(state, user_text, loop_state))
+            .or_else(|| direct_rustclaw_config_risk_answer(state, user_text, loop_state))
             .or_else(|| {
                 direct_quantity_comparison_from_compare_paths(
                     state,
@@ -7598,7 +8037,6 @@ async fn observed_execution_without_publishable_delivery_reply(
                     loop_state,
                     agent_run_context,
                 )
-                .map(|(answer, _summary)| answer)
             })
             .or_else(|| {
                 deterministic_structured_container_summary_answer(
@@ -7607,10 +8045,19 @@ async fn observed_execution_without_publishable_delivery_reply(
                     loop_state,
                     agent_run_context,
                 )
+                .map(|answer| (answer, status_summary()))
             })
             .or_else(|| {
                 direct_db_basic_observed_answer(state, user_text, loop_state, agent_run_context)
-                    .map(|(answer, _summary)| answer)
+            })
+            .or_else(|| {
+                deterministic_matrix_observed_shape_answer(
+                    state,
+                    task,
+                    user_text,
+                    loop_state,
+                    agent_run_context,
+                )
             })
             .or_else(|| {
                 deterministic_missing_observed_target_answer(
@@ -7619,6 +8066,7 @@ async fn observed_execution_without_publishable_delivery_reply(
                     loop_state,
                     agent_run_context,
                 )
+                .map(|answer| (answer, status_summary()))
             });
     let message = missing_delivery_after_observation_message(
         state,
@@ -7642,8 +8090,9 @@ async fn observed_execution_without_publishable_delivery_reply(
         crate::task_journal::delivery_payload_consistent(&message, &delivery_messages);
     let has_deterministic_answer = deterministic_answer.is_some();
     let finalizer_summary = finalizer_summary.or_else(|| {
-        has_deterministic_answer
-            .then(|| deterministic_observed_execution_status_summary(loop_state))
+        deterministic_answer
+            .as_ref()
+            .map(|(_, summary)| summary.clone())
     });
     let (final_status, should_fail_task) = observed_execution_without_publishable_delivery_outcome(
         has_deterministic_answer,
@@ -8168,6 +8617,7 @@ pub(crate) async fn finalize_loop_reply(
     let replaced_contract_answer = replace_delivery_with_loop_contract_observed_answer(
         task,
         &mut loop_state,
+        agent_run_context,
         &mut finalizer_summary,
     );
     let replaced_failed_step = if !replaced_contract_answer {
@@ -10673,6 +11123,149 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn observed_execution_without_delivery_uses_matrix_grouped_name_answer() {
+        let state = test_state();
+        let task = claimed_task("task-matrix-grouped-no-delivery");
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "workspace".to_string();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"inventory_dir","counts":{"dirs":2,"files":1,"total":3},"names_by_kind":{"files":["README.md"],"dirs":["configs","docs"],"other":[]},"path":"workspace"}"#,
+        ));
+
+        let reply = observed_execution_without_publishable_delivery_reply(
+            &state,
+            &task,
+            "list direct children grouped by kind",
+            &loop_state,
+            Some(&ctx),
+            None,
+            "no publishable final answer was produced",
+        )
+        .await
+        .expect("observed execution reply");
+
+        assert!(!reply.should_fail_task);
+        assert_eq!(reply.text, "dirs:\n- configs\n- docs\nfiles:\n- README.md");
+        assert_eq!(reply.messages, vec![reply.text.clone()]);
+        assert_eq!(
+            reply
+                .task_journal
+                .as_ref()
+                .and_then(|journal| journal.final_status),
+            Some(crate::task_journal::TaskJournalFinalStatus::Success)
+        );
+        assert_eq!(
+            reply
+                .task_journal
+                .as_ref()
+                .and_then(|journal| journal.finalizer_summary.as_ref())
+                .and_then(|summary| summary.format_ok),
+            Some(true)
+        );
+    }
+
+    #[tokio::test]
+    async fn observed_execution_without_delivery_uses_matrix_hidden_entries_answer() {
+        let state = test_state();
+        let task = claimed_task("task-matrix-hidden-no-delivery");
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"inventory_dir","counts":{"dirs":1,"files":2,"hidden":2,"total":3},"entries":[{"hidden":true,"kind":"dir","name":".git","path":".git"},{"hidden":true,"kind":"file","name":".gitignore","path":".gitignore"},{"hidden":false,"kind":"file","name":"README.md","path":"README.md"}],"include_hidden":true,"names":[".git",".gitignore","README.md"],"path":"."}"#,
+        ));
+
+        let reply = observed_execution_without_publishable_delivery_reply(
+            &state,
+            &task,
+            "check hidden entries",
+            &loop_state,
+            Some(&ctx),
+            None,
+            "no publishable final answer was produced",
+        )
+        .await
+        .expect("observed execution reply");
+
+        assert!(!reply.should_fail_task);
+        assert_eq!(reply.text, ".git\n.gitignore");
+        assert_eq!(reply.messages, vec![reply.text.clone()]);
+        assert_eq!(
+            reply
+                .task_journal
+                .as_ref()
+                .and_then(|journal| journal.final_status),
+            Some(crate::task_journal::TaskJournalFinalStatus::Success)
+        );
+    }
+
+    #[tokio::test]
+    async fn observed_execution_without_delivery_uses_docker_image_observation() {
+        let state = test_state();
+        let task = claimed_task("task-matrix-docker-images-no-delivery");
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::DockerImages;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "run_cmd",
+            "bash: line 1: docker: command not found\n",
+        ));
+
+        let reply = observed_execution_without_publishable_delivery_reply(
+            &state,
+            &task,
+            "list Docker images",
+            &loop_state,
+            Some(&ctx),
+            None,
+            "no publishable final answer was produced",
+        )
+        .await
+        .expect("observed execution reply");
+
+        assert!(!reply.should_fail_task);
+        assert_eq!(reply.text, "bash: line 1: docker: command not found");
+        assert_eq!(reply.messages, vec![reply.text.clone()]);
+        assert_eq!(
+            reply
+                .task_journal
+                .as_ref()
+                .and_then(|journal| journal.final_status),
+            Some(crate::task_journal::TaskJournalFinalStatus::Success)
+        );
+    }
+
     #[test]
     fn execution_summary_attaches_for_exact_observed_passthrough_delivery() {
         let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -11219,6 +11812,100 @@ mod tests {
         assert_eq!(answer, "alpha.md\nbeta.md");
         assert_eq!(summary.format_ok, Some(true));
         assert_eq!(summary.grounded_ok, Some(true));
+    }
+
+    #[test]
+    fn matrix_strict_list_shape_builds_hidden_entry_list_from_inventory() {
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::HiddenEntriesCheck;
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"inventory_dir","counts":{"dirs":1,"files":2,"hidden":2,"total":3},"entries":[{"hidden":true,"kind":"dir","name":".git","path":".git"},{"hidden":true,"kind":"file","name":".gitignore","path":".gitignore"},{"hidden":false,"kind":"file","name":"README.md","path":"README.md"}],"include_hidden":true,"names":[".git",".gitignore","README.md"],"path":"."}"#,
+        ));
+
+        let (answer, summary) = super::matrix_strict_list_observed_answer(&route, &loop_state)
+            .expect("matrix hidden entries answer");
+
+        assert_eq!(answer, ".git\n.gitignore");
+        assert_eq!(summary.format_ok, Some(true));
+        assert_eq!(summary.grounded_ok, Some(true));
+    }
+
+    #[test]
+    fn matrix_grouped_name_list_shape_builds_groups_from_names_by_kind() {
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "workspace".to_string();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"inventory_dir","counts":{"dirs":5,"files":2,"total":7},"names_by_kind":{"files":["README.md","package.json"],"dirs":["configs","data","docs","logs","tmp"],"other":[]},"path":"workspace"}"#,
+        ));
+
+        let (answer, summary) =
+            super::matrix_grouped_name_list_observed_answer(&route, &loop_state)
+                .expect("matrix grouped name answer");
+
+        assert_eq!(
+            answer,
+            "dirs:\n- configs\n- data\n- docs\n- logs\n- tmp\nfiles:\n- package.json\n- README.md"
+        );
+        assert_eq!(summary.format_ok, Some(true));
+        assert_eq!(summary.grounded_ok, Some(true));
+    }
+
+    #[test]
+    fn matrix_shape_guard_replaces_unstructured_grouped_name_list_with_observed_groups() {
+        let state = test_state();
+        let task = claimed_task("task-matrix-shape-guard-grouped-name-list");
+        let mut route = free_route_result();
+        route.output_contract.requires_content_evidence = true;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+        route.output_contract.locator_hint = "workspace".to_string();
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+        let ctx = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..Default::default()
+        };
+        let mut loop_state = crate::agent_engine::LoopState::new(2);
+        loop_state.has_tool_or_skill_output = true;
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"inventory_dir","counts":{"dirs":2,"files":1,"total":3},"names_by_kind":{"files":["README.md"],"dirs":["configs","docs"],"other":[]},"path":"workspace"}"#,
+        ));
+        let mut delivery = vec!["workspace 下面有 configs、docs 和 README.md。".to_string()];
+        let mut finalizer_summary = None;
+
+        assert!(super::replace_delivery_with_matrix_observed_shape_answer(
+            &state,
+            &task,
+            "list direct children grouped by kind",
+            &mut loop_state,
+            Some(&ctx),
+            &mut delivery,
+            &mut finalizer_summary,
+        ));
+
+        assert_eq!(
+            delivery,
+            vec!["dirs:\n- configs\n- docs\nfiles:\n- README.md"]
+        );
+        assert_eq!(
+            loop_state.last_user_visible_respond.as_deref(),
+            Some("dirs:\n- configs\n- docs\nfiles:\n- README.md")
+        );
+        assert!(finalizer_summary.is_some());
     }
 
     #[test]
@@ -12234,6 +12921,7 @@ mod tests {
         assert!(super::replace_delivery_with_loop_contract_observed_answer(
             &task,
             &mut loop_state,
+            None,
             &mut finalizer_summary,
         ));
 
@@ -12275,6 +12963,7 @@ mod tests {
         assert!(super::replace_delivery_with_loop_contract_observed_answer(
             &task,
             &mut loop_state,
+            None,
             &mut finalizer_summary,
         ));
 
@@ -12313,6 +13002,7 @@ mod tests {
         assert!(!super::replace_delivery_with_loop_contract_observed_answer(
             &task,
             &mut loop_state,
+            None,
             &mut finalizer_summary,
         ));
 
@@ -12344,12 +13034,51 @@ mod tests {
         assert!(!super::replace_delivery_with_loop_contract_observed_answer(
             &task,
             &mut loop_state,
+            None,
             &mut finalizer_summary,
         ));
 
         assert_eq!(
             loop_state.delivery_messages.last().map(String::as_str),
             Some("Step 1 `run_cmd` succeeded.")
+        );
+        assert!(finalizer_summary.is_none());
+    }
+
+    #[test]
+    fn loop_contract_observed_answer_requires_matrix_strict_extractor_when_route_is_available() {
+        let mut loop_state = crate::agent_engine::LoopState::new(3);
+        let mut route = scalar_route_result();
+        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+        route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarCount;
+        route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+        route.output_contract.locator_hint.clear();
+        loop_state.output_contract = Some(route.output_contract.clone());
+        loop_state.executed_step_results.push(ok_step_result(
+            "step_1",
+            "unregistered_skill",
+            "3\n",
+        ));
+        loop_state
+            .delivery_messages
+            .push("Step 1 `unregistered_skill` succeeded.".to_string());
+        let task = claimed_task("task-loop-contract-strict-extractor");
+        let agent_run_context = crate::agent_engine::AgentRunContext {
+            route_result: Some(route),
+            ..crate::agent_engine::AgentRunContext::default()
+        };
+        let mut finalizer_summary = None;
+
+        assert!(!super::replace_delivery_with_loop_contract_observed_answer(
+            &task,
+            &mut loop_state,
+            Some(&agent_run_context),
+            &mut finalizer_summary,
+        ));
+
+        assert_eq!(
+            loop_state.delivery_messages.last().map(String::as_str),
+            Some("Step 1 `unregistered_skill` succeeded.")
         );
         assert!(finalizer_summary.is_none());
     }
@@ -12377,6 +13106,7 @@ mod tests {
         assert!(!super::replace_delivery_with_loop_contract_observed_answer(
             &task,
             &mut loop_state,
+            None,
             &mut finalizer_summary,
         ));
         assert_eq!(loop_state.last_user_visible_respond, None);
