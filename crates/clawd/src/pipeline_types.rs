@@ -80,6 +80,7 @@ pub(crate) enum OutputSemanticKind {
     FilePaths,
     DirectoryPurposeSummary,
     ContentExcerptSummary,
+    ContentExcerptWithSummary,
     ContentPresenceCheck,
     ExcerptKindJudgment,
     RecentArtifactsJudgment,
@@ -96,11 +97,18 @@ pub(crate) enum OutputSemanticKind {
     GitRepositoryState,
     StructuredKeys,
     ConfigValidation,
+    ConfigMutation,
     ConfigRiskAssessment,
     SqliteTableListing,
     SqliteTableNamesOnly,
     SqliteDatabaseKindJudgment,
     SqliteSchemaVersion,
+    RssNewsFetch,
+    WebPageSummary,
+    WebSearchSummary,
+    WeatherQuery,
+    MarketQuote,
+    ImageUnderstanding,
     PackageManagerDetection,
     ArchiveList,
     ArchiveRead,
@@ -124,6 +132,7 @@ impl OutputSemanticKind {
         Self::FilePaths,
         Self::DirectoryPurposeSummary,
         Self::ContentExcerptSummary,
+        Self::ContentExcerptWithSummary,
         Self::ContentPresenceCheck,
         Self::ExcerptKindJudgment,
         Self::RecentArtifactsJudgment,
@@ -140,11 +149,18 @@ impl OutputSemanticKind {
         Self::GitRepositoryState,
         Self::StructuredKeys,
         Self::ConfigValidation,
+        Self::ConfigMutation,
         Self::ConfigRiskAssessment,
         Self::SqliteTableListing,
         Self::SqliteTableNamesOnly,
         Self::SqliteDatabaseKindJudgment,
         Self::SqliteSchemaVersion,
+        Self::RssNewsFetch,
+        Self::WebPageSummary,
+        Self::WebSearchSummary,
+        Self::WeatherQuery,
+        Self::MarketQuote,
+        Self::ImageUnderstanding,
         Self::PackageManagerDetection,
         Self::ArchiveList,
         Self::ArchiveRead,
@@ -168,6 +184,7 @@ impl OutputSemanticKind {
             Self::FilePaths => "file_paths",
             Self::DirectoryPurposeSummary => "directory_purpose_summary",
             Self::ContentExcerptSummary => "content_excerpt_summary",
+            Self::ContentExcerptWithSummary => "content_excerpt_with_summary",
             Self::ContentPresenceCheck => "content_presence_check",
             Self::ExcerptKindJudgment => "excerpt_kind_judgment",
             Self::RecentArtifactsJudgment => "recent_artifacts_judgment",
@@ -184,11 +201,18 @@ impl OutputSemanticKind {
             Self::GitRepositoryState => "git_repository_state",
             Self::StructuredKeys => "structured_keys",
             Self::ConfigValidation => "config_validation",
+            Self::ConfigMutation => "config_mutation",
             Self::ConfigRiskAssessment => "config_risk_assessment",
             Self::SqliteTableListing => "sqlite_table_listing",
             Self::SqliteTableNamesOnly => "sqlite_table_names_only",
             Self::SqliteDatabaseKindJudgment => "sqlite_database_kind_judgment",
             Self::SqliteSchemaVersion => "sqlite_schema_version",
+            Self::RssNewsFetch => "rss_news_fetch",
+            Self::WebPageSummary => "web_page_summary",
+            Self::WebSearchSummary => "web_search_summary",
+            Self::WeatherQuery => "weather_query",
+            Self::MarketQuote => "market_quote",
+            Self::ImageUnderstanding => "image_understanding",
             Self::PackageManagerDetection => "package_manager_detection",
             Self::ArchiveList => "archive_list",
             Self::ArchiveRead => "archive_read",
@@ -199,6 +223,13 @@ impl OutputSemanticKind {
             Self::DockerLogs => "docker_logs",
             Self::DockerContainerLifecycle => "docker_container_lifecycle",
         }
+    }
+
+    pub(crate) fn is_content_excerpt_summary(self) -> bool {
+        matches!(
+            self,
+            Self::ContentExcerptSummary | Self::ContentExcerptWithSummary
+        )
     }
 }
 
@@ -539,126 +570,5 @@ pub(crate) fn plan_step_from_agent_action(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        plan_step_from_agent_action, AgentAction, AskMode, FirstLayerDecision,
-        IntentOutputContract, PlanStep, ResumeBehavior, RiskCeiling, RouteResult, ScheduleKind,
-    };
-    use serde_json::json;
-
-    fn route_result_with_mode(ask_mode: AskMode) -> RouteResult {
-        RouteResult {
-            ask_mode,
-            resolved_intent: String::new(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: Some(1.0),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: RiskCeiling::Unknown,
-            resume_behavior: ResumeBehavior::None,
-            schedule_kind: ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: IntentOutputContract::default(),
-        }
-    }
-
-    #[test]
-    fn plan_step_to_agent_action_parses_synthesize_answer() {
-        let step = PlanStep {
-            step_id: "step_1".to_string(),
-            action_type: "synthesize_answer".to_string(),
-            skill: "synthesize_answer".to_string(),
-            args: json!({ "evidence_refs": ["last_output", "step_1"] }),
-            depends_on: vec![],
-            why: "synthesize".to_string(),
-        };
-
-        assert!(matches!(
-            step.to_agent_action(),
-            Some(AgentAction::SynthesizeAnswer { evidence_refs })
-                if evidence_refs == vec!["last_output".to_string(), "step_1".to_string()]
-        ));
-    }
-
-    #[test]
-    fn plan_step_from_agent_action_serializes_synthesize_answer() {
-        let action = AgentAction::SynthesizeAnswer {
-            evidence_refs: vec!["last_output".to_string()],
-        };
-        let step = plan_step_from_agent_action(
-            &action,
-            "step_2".to_string(),
-            vec!["step_1".to_string()],
-            "why".to_string(),
-        );
-
-        assert_eq!(step.action_type, "synthesize_answer");
-        assert_eq!(step.skill, "synthesize_answer");
-        assert_eq!(step.args, json!({ "evidence_refs": ["last_output"] }));
-        assert_eq!(step.depends_on, vec!["step_1".to_string()]);
-    }
-
-    #[test]
-    fn plan_step_round_trips_call_capability() {
-        let step = PlanStep {
-            step_id: "step_1".to_string(),
-            action_type: "call_capability".to_string(),
-            skill: "filesystem.list_entries".to_string(),
-            args: json!({ "path": "." }),
-            depends_on: vec![],
-            why: "list workspace".to_string(),
-        };
-
-        let action = step
-            .to_agent_action()
-            .expect("call_capability step should parse");
-        assert!(matches!(
-            action,
-            AgentAction::CallCapability { capability, args }
-                if capability == "filesystem.list_entries" && args == json!({ "path": "." })
-        ));
-
-        let serialized = plan_step_from_agent_action(
-            &AgentAction::CallCapability {
-                capability: "system.run_command".to_string(),
-                args: json!({ "command": "pwd" }),
-            },
-            "step_2".to_string(),
-            vec!["step_1".to_string()],
-            "run command".to_string(),
-        );
-        assert_eq!(serialized.action_type, "call_capability");
-        assert_eq!(serialized.skill, "system.run_command");
-        assert_eq!(serialized.args, json!({ "command": "pwd" }));
-    }
-
-    #[test]
-    fn route_result_gate_kind_uses_first_layer_decision() {
-        let route = route_result_with_mode(crate::AskMode::direct_answer());
-
-        assert_eq!(
-            route.first_layer_decision(),
-            FirstLayerDecision::DirectAnswer
-        );
-        assert!(route.is_chat_gate());
-        assert!(!route.is_execute_gate());
-    }
-
-    #[test]
-    fn route_result_set_first_layer_decision_updates_derived_label() {
-        let mut route = route_result_with_mode(crate::AskMode::direct_answer());
-
-        route.set_first_layer_decision(FirstLayerDecision::PlannerExecute);
-
-        assert_eq!(
-            route.first_layer_decision(),
-            FirstLayerDecision::PlannerExecute
-        );
-        assert_eq!(route.derived_route_label(), "Act");
-        assert!(route.is_execute_gate());
-    }
-}
+#[path = "pipeline_types_tests.rs"]
+mod tests;

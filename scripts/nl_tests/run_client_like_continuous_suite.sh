@@ -629,12 +629,20 @@ def capability_family_names(name: str) -> set[str]:
     families = {
         # Structured field/range reads and document parsing are now often planned
         # through system_basic/doc_parse rather than the old read_file wrapper.
-        "read_file": {"read_file", "system_basic", "doc_parse"},
+        "read_file": {"read_file", "system_basic", "doc_parse", "config_basic", "fs_basic"},
+        # File writes may be served by the structured filesystem tool.
+        "write_file": {"write_file", "fs_basic"},
+        # Directory creation may be served by the structured filesystem tool.
+        "make_dir": {"make_dir", "fs_basic"},
         # Directory inventory/listing may be served by the structured system tool.
-        "list_dir": {"list_dir", "system_basic"},
+        "list_dir": {"list_dir", "system_basic", "fs_basic"},
+        # Repository/file search now commonly uses fs_basic.find_entries.
+        "fs_search": {"fs_search", "fs_basic"},
+        # Read-only service status may be answered through process inventory.
+        "service_control": {"service_control", "process_basic", "health_check"},
         # RustClaw config guard is now exposed through config_edit.guard_config;
         # config_guard remains a compatibility label in older NL case tags.
-        "config_guard": {"config_guard", "config_edit"},
+        "config_guard": {"config_guard", "config_edit", "config_basic"},
     }
     return families.get(name, {name})
 
@@ -1513,6 +1521,9 @@ if [[ -n "${CASE_FILE_VALUE:-}" || -n "${CASE_JSONL_VALUE:-}" ]]; then
     case_external_chat_id="$EXTERNAL_CHAT_ID_VALUE"
     if [[ "$CASE_GROUP_ISOLATION" -eq 1 ]]; then
       case_external_chat_id="${EXTERNAL_CHAT_ID_VALUE}--${case_group_key}"
+    fi
+    if [[ "$case_tags" == *"skill:make_dir"* && "$case_name" == *"builtin_make_dir_smoke"* ]]; then
+      rmdir "${ROOT_DIR}/document/nl_skill_tmp" 2>/dev/null || true
     fi
     echo "[CASE ${case_index}] name=${case_name} group=${case_group_key} external_chat_id=${case_external_chat_id}"
     if ! submit_turn "$turn" "$case_prompt" "${RUN_DIR}/turn_${turn}_case_${case_index}.json" "${case_expect:-}" "${case_tags:-}" "$case_external_chat_id"; then

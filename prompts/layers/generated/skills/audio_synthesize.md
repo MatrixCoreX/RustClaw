@@ -15,7 +15,10 @@
 - Successful responses include machine-readable `extra` metadata such as `provider`, `model`, `voice`, `response_format`, `output_path`, and `outputs`.
 
 ## Config Entry Points (from interface)
-- No dedicated config entry points declared.
+- Main TTS config: `configs/audio.toml` -> `[audio_synthesize]`.
+- Shared provider fallback: `configs/config.toml` -> `[llm.<vendor>]`.
+- Current repo default: `default_vendor = "minimax"`, `default_model = "speech-2.8-turbo"`, `default_voice = "male-qn-qingse"`.
+- For ordinary synthesis requests, omit `vendor` and `model` unless the user explicitly chooses a provider/model; runtime config supplies the defaults.
 
 ## Actions (from interface)
 - No explicit action is required.
@@ -32,6 +35,7 @@
 | synthesize | `model` | no | string | impl default | Backend model selector. |
 
 Provider notes:
+- `minimax` is the current repo default for ordinary TTS requests; use the runtime default unless the user explicitly asks for another provider.
 - `mimo` uses `mimo-v2.5-tts` by default, with voices such as `mimo_default`, `Mia`, `Chloe`, `冰糖`, `茉莉`, `苏打`, and `白桦`.
 - Mimo native TTS currently returns chat-completions audio data; use `mp3`, `wav`, or `pcm16` according to the requested file/container format.
 - Qwen native TTS remains supported, but external account billing errors should surface as provider failures rather than being hidden.
@@ -45,11 +49,11 @@ Provider notes:
 ### Example 1
 Request:
 ```json
-{"request_id":"demo-1","args":{"text":"Hello from RustClaw","voice":"alloy","format":"mp3","output_path":"tmp/hello.mp3"}}
+{"request_id":"demo-1","args":{"text":"Hello from RustClaw","format":"mp3","output_path":"tmp/hello.mp3"}}
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"VOICE_FILE:tmp/hello.mp3","extra":{"provider":"openai","model":"gpt-4o-mini-tts","model_kind":"compat","voice":"alloy","response_format":"mp3","output_path":"tmp/hello.mp3","outputs":[{"type":"audio_file","path":"tmp/hello.mp3"}],"latency_ms":0},"error_text":null}
+{"request_id":"demo-1","status":"ok","text":"VOICE_FILE:tmp/hello.mp3","extra":{"provider":"minimax","model":"speech-2.8-turbo","model_kind":"native","voice":"male-qn-qingse","response_format":"mp3","output_path":"tmp/hello.mp3","outputs":[{"type":"audio_file","path":"tmp/hello.mp3"}],"latency_ms":0},"error_text":null}
 ```
 
 ## Output Contract
