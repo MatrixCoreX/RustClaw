@@ -2,10 +2,10 @@
 # Audio Synthesize / 语音合成（TTS）
 # =========================
 # Quick guide / 快速说明：
-# - current default: mimo + mimo-v2.5-tts + mimo_default
-#   / 当前默认：mimo + mimo-v2.5-tts + mimo_default
-# - recommended API key location: configs/config.toml -> [llm.mimo].api_key
-#   / 推荐把 key 填到 configs/config.toml 的 [llm.mimo].api_key
+# - current default: minimax + speech-2.8-turbo + male-qn-qingse
+#   / 当前默认：minimax + speech-2.8-turbo + male-qn-qingse
+# - recommended API key location: configs/config.toml -> [llm.minimax].api_key
+#   / 推荐把 key 填到 configs/config.toml 的 [llm.minimax].api_key
 # - if you want TTS to use its own separate key, uncomment
 #   [audio_synthesize.providers.qwen] below
 #   / 如果想让 TTS 单独用一套 key，再取消下面 [audio_synthesize.providers.qwen] 注释
@@ -25,7 +25,7 @@
 # request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
 [audio_synthesize]
 # Routing & mode / 路由与模式
-default_vendor = "mimo"
+default_vendor = "minimax"
 adapter_mode = "auto"
 allow_compat_adapters = true
 qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
@@ -41,9 +41,9 @@ qwen_native_base_url = "https://dashscope.aliyuncs.com/api/v1"
 # - request.voice > default_voice > vendor builtin default
 # - unsupported / mismatched voice names fall back to the selected vendor default
 # - current vendor defaults: OpenAI compat=`alloy`, Google=`Kore`, Qwen=`Cherry`, MiniMax=`male-qn-qingse`, Mimo=`mimo_default`
-default_model = "mimo-v2.5-tts"
-default_voice = "mimo_default"
-default_format = "wav"
+default_model = "speech-2.8-turbo"
+default_voice = "male-qn-qingse"
+default_format = "mp3"
 default_output_dir = "audio/download"
 
 # Vendor models / 按厂商模型
@@ -56,7 +56,7 @@ minimax_models = ["speech-2.8-turbo", "speech-2.8-hd", "speech-2.6-turbo", "spee
 mimo_models = ["mimo-v2.5-tts", "mimo-v2.5-tts-voiceclone", "mimo-v2.5-tts-voicedesign"]
 native_models = ["qwen3-tts-instruct-flash", "qwen3-tts-flash"]
 custom_models = []
-models = ["mimo-v2.5-tts", "qwen3-tts-instruct-flash", "qwen3-tts-flash"]
+models = ["speech-2.8-turbo", "speech-2.8-hd", "mimo-v2.5-tts", "qwen3-tts-instruct-flash", "qwen3-tts-flash"]
 
 # Runtime limits / 运行限制
 max_concurrency = 1
@@ -68,9 +68,9 @@ timeout_seconds = 60
 # 2. [llm.<vendor>] in configs/config.toml     <- shared fallback / 全局共享回退
 #
 # Current recommendation / 当前推荐：
-# - because TTS is now using mimo by default, fill one shared key in:
-#   configs/config.toml -> [llm.mimo].api_key
-#   / 由于当前默认 TTS 走 mimo，推荐只在 configs/config.toml -> [llm.mimo].api_key 填一次
+# - because TTS is now using minimax by default, fill one shared key in:
+#   configs/config.toml -> [llm.minimax].api_key
+#   / 由于当前默认 TTS 走 minimax，推荐只在 configs/config.toml -> [llm.minimax].api_key 填一次
 # - leave [audio_synthesize.providers.qwen] commented unless you need a dedicated TTS key
 #   / 如果不需要 TTS 单独 key，就不要取消 [audio_synthesize.providers.qwen] 注释
 #

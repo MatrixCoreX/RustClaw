@@ -177,6 +177,123 @@ fn resume_context_failed_step_texts<'a>(resume_ctx: &'a Value) -> Vec<&'a str> {
     texts
 }
 
+fn resume_context_failed_step_action(resume_ctx: &Value) -> Option<&str> {
+    resume_context_body(resume_ctx)
+        .get("failed_step")
+        .and_then(|step| step.get("action"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn resume_context_failed_step_skill(resume_ctx: &Value) -> Option<String> {
+    if let Some(error) = resume_context_failed_structured_skill_error(resume_ctx) {
+        return Some(error.skill);
+    }
+    let action = resume_context_failed_step_action(resume_ctx)?;
+    action
+        .strip_prefix("skill(")
+        .and_then(|value| value.strip_suffix(')'))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn resume_context_completed_message_json(message: &str) -> Option<Value> {
+    let trimmed = message.trim();
+    let json_start = trimmed.find('{')?;
+    serde_json::from_str::<Value>(&trimmed[json_start..]).ok()
+}
+
+fn resume_context_completed_structured_values(resume_ctx: &Value) -> Vec<Value> {
+    resume_context_body(resume_ctx)
+        .get("completed_messages")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str())
+        .filter_map(resume_context_completed_message_json)
+        .collect()
+}
+
+fn resume_context_path_batch_facts_are_missing_only(resume_ctx: &Value) -> bool {
+    let mut saw_path_batch = false;
+    let mut saw_missing = false;
+    let mut saw_existing = false;
+    for value in resume_context_completed_structured_values(resume_ctx) {
+        if value.get("action").and_then(|value| value.as_str()) != Some("path_batch_facts") {
+            continue;
+        }
+        saw_path_batch = true;
+        if let Some(facts) = value.get("facts").and_then(|value| value.as_array()) {
+            for fact in facts {
+                match fact.get("exists").and_then(|value| value.as_bool()) {
+                    Some(true) => saw_existing = true,
+                    Some(false) => {
+                        if fact
+                            .get("path")
+                            .and_then(|value| value.as_str())
+                            .is_some_and(|path| !path.trim().is_empty())
+                        {
+                            saw_missing = true;
+                        }
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+    saw_path_batch && saw_missing && !saw_existing
+}
+
+fn text_is_directory_lookup_failure(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.starts_with("read_dir failed")
+        || crate::skills::parse_structured_skill_error(trimmed)
+            .is_some_and(|structured| structured.error_text.trim().starts_with("read_dir failed"))
+}
+
+fn resume_context_has_directory_lookup_failure(resume_ctx: &Value) -> bool {
+    let body = resume_context_body(resume_ctx);
+    if body
+        .get("failed_step")
+        .and_then(|step| step.get("error"))
+        .and_then(|value| value.as_str())
+        .is_some_and(text_is_directory_lookup_failure)
+    {
+        return true;
+    }
+    body.get("failed_step")
+        .and_then(|step| step.get("structured_error"))
+        .and_then(|error| error.get("error_text"))
+        .and_then(|value| value.as_str())
+        .is_some_and(text_is_directory_lookup_failure)
+}
+
+fn resume_failure_is_unbound_path_lookup_clarify_result(
+    route_result: &crate::RouteResult,
+    resume_ctx: &Value,
+) -> bool {
+    route_result.output_contract.requires_content_evidence
+        && !route_has_file_delivery_contract(route_result)
+        && !resume_context_has_remaining_actions(resume_ctx)
+        && !matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+        && matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+                | crate::OutputSemanticKind::ScalarPathOnly
+                | crate::OutputSemanticKind::ExistenceWithPath
+                | crate::OutputSemanticKind::ExistenceWithPathSummary
+                | crate::OutputSemanticKind::FilePaths
+        )
+        && resume_context_failed_step_skill(resume_ctx).as_deref() == Some("fs_search")
+        && (resume_context_path_batch_facts_are_missing_only(resume_ctx)
+            || resume_context_has_directory_lookup_failure(resume_ctx))
+}
+
 fn resume_failure_is_missing_file_delivery_result(
     route_result: &crate::RouteResult,
     user_error: &str,
@@ -1059,6 +1176,64 @@ pub(crate) async fn finalize_ask_result(
                 let language_hint =
                     crate::language_policy::task_response_language_hint(state, task, prompt);
                 let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
+                if resume_failure_is_unbound_path_lookup_clarify_result(
+                    route_result,
+                    &resume_payload,
+                ) {
+                    journal.record_llm_calls_per_task(state.task_llm_call_count(&task.task_id));
+                    journal
+                        .record_llm_elapsed_ms_per_task(state.task_llm_elapsed_ms(&task.task_id));
+                    journal.record_llm_by_prompt(state.task_llm_by_prompt(&task.task_id));
+                    journal.record_final_answer(&user_error);
+                    crate::finalize::ensure_task_metrics(&mut journal, &user_error, &[]);
+                    journal
+                        .record_final_status(crate::task_journal::TaskJournalFinalStatus::Clarify);
+                    finalize_ask_success(
+                        state,
+                        task,
+                        payload,
+                        prompt,
+                        &user_error,
+                        &[],
+                        false,
+                        route_result.should_refresh_long_term_memory,
+                        &route_result.agent_display_name_hint,
+                        &mut journal,
+                    )
+                    .await?;
+                    crate::conversation_state::update_active_session_from_ask_outcome(
+                        state,
+                        task,
+                        Some(payload),
+                        prompt,
+                        route_result,
+                        turn_analysis,
+                        resolved_prompt_for_execution,
+                        &user_error,
+                        &[],
+                        true,
+                        fuzzy_locator_suggestions,
+                        &journal,
+                        clarify_fallback_source,
+                    );
+                    insert_unfinished_goal_memory(state, task, prompt, &user_error);
+                    let completed_transition = crate::log_ask_transition(
+                        state,
+                        &task.task_id,
+                        Some(crate::AskState::Finalizing),
+                        crate::AskState::Completed,
+                        "finalize_unbound_path_lookup_resume_clarify",
+                        None,
+                    );
+                    journal.transitions.push(completed_transition);
+                    info!(
+                        "task_journal_summary task_id={} kind=ask phase=resume_clarify reason=unbound_path_lookup {}",
+                        task.task_id,
+                        journal.to_log_json()
+                    );
+                    state.clear_task_llm_call_count(&task.task_id);
+                    return Ok(());
+                }
                 let qualified_resume_completion = if resume_failure_is_missing_file_delivery_result(
                     route_result,
                     &user_error,
@@ -1214,510 +1389,5 @@ pub(crate) async fn finalize_ask_result(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        assistant_memory_source_text, drop_execution_summaries_when_delivery_is_scalar,
-        journal_has_missing_file_search_evidence, non_failure_final_status,
-        should_reinsert_execution_summaries_for_delivery, should_use_answer_route_result,
-    };
-
-    use serde_json::json;
-
-    fn route_result(ask_mode: crate::AskMode) -> crate::RouteResult {
-        crate::RouteResult {
-            ask_mode,
-            resolved_intent: "test".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: Some(0.9),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract::default(),
-        }
-    }
-
-    // ensure_journal_task_metrics_* tests 已搬移到 finalize/journal.rs（Stage 3.1）。
-
-    #[test]
-    fn non_failure_final_status_preserves_clarify_semantics() {
-        assert_eq!(
-            non_failure_final_status(false),
-            crate::task_journal::TaskJournalFinalStatus::Success
-        );
-        assert_eq!(
-            non_failure_final_status(true),
-            crate::task_journal::TaskJournalFinalStatus::Clarify
-        );
-    }
-
-    #[test]
-    fn assistant_memory_source_text_filters_execution_summary() {
-        let messages = vec![
-            "**执行过程**\n1. 调用命令 `pwd`\n   输出：\n```text\n/tmp\n```".to_string(),
-            "最终答案".to_string(),
-        ];
-
-        assert_eq!(
-            assistant_memory_source_text("最终答案", &messages),
-            "最终答案"
-        );
-    }
-
-    #[test]
-    fn assistant_memory_source_text_drops_execution_summary_only_answers() {
-        let messages = vec![
-            "**执行过程**\n1. 调用技能 `rss_fetch`\n   输出：ok".to_string(),
-            "**执行过程**\n1. 调用技能 `rss_fetch`\n   输出：ok".to_string(),
-        ];
-
-        assert_eq!(
-            assistant_memory_source_text(
-                "**执行过程**\n1. 调用技能 `rss_fetch`\n   输出：ok",
-                &messages
-            ),
-            ""
-        );
-    }
-
-    #[test]
-    fn scalar_delivery_does_not_reinsert_execution_summary() {
-        let mut route = route_result(crate::AskMode::Act {
-            finalize: crate::ActFinalizeStyle::Plain,
-        });
-        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-
-        assert!(!should_reinsert_execution_summaries_for_delivery(
-            &route, "1.0.0"
-        ));
-    }
-
-    #[test]
-    fn scalar_delivery_drops_existing_execution_summary_messages() {
-        let mut route = route_result(crate::AskMode::Act {
-            finalize: crate::ActFinalizeStyle::Plain,
-        });
-        route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-        let mut messages = vec![
-            "**执行过程**\n1. 调用工具 `fs_basic`\n   输出：ok".to_string(),
-            "{\"workspace\":true}".to_string(),
-        ];
-
-        drop_execution_summaries_when_delivery_is_scalar(
-            &route,
-            "{\"workspace\":true}",
-            &mut messages,
-        );
-
-        assert_eq!(messages, vec!["{\"workspace\":true}".to_string()]);
-    }
-
-    #[test]
-    fn config_validation_delivery_drops_existing_execution_summary_messages() {
-        let mut route = route_result(crate::AskMode::Act {
-            finalize: crate::ActFinalizeStyle::ChatWrapped,
-        });
-        route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-        route.output_contract.semantic_kind = crate::OutputSemanticKind::ConfigValidation;
-        let mut messages = vec![
-            "**Execution**\n1. Called tool `config_basic`\n   Output: valid".to_string(),
-            "pass".to_string(),
-        ];
-
-        drop_execution_summaries_when_delivery_is_scalar(&route, "pass", &mut messages);
-
-        assert_eq!(messages, vec!["pass".to_string()]);
-    }
-
-    #[test]
-    fn free_delivery_keeps_execution_summary_available() {
-        let mut route = route_result(crate::AskMode::Act {
-            finalize: crate::ActFinalizeStyle::Plain,
-        });
-        route.output_contract.response_shape = crate::OutputResponseShape::Free;
-
-        assert!(should_reinsert_execution_summaries_for_delivery(
-            &route,
-            "配置检查通过。"
-        ));
-    }
-
-    #[test]
-    fn journal_missing_file_search_evidence_detects_zero_match_fs_search() {
-        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-        journal
-            .step_results
-            .push(crate::task_journal::TaskJournalStepTrace {
-                skill: "fs_search".to_string(),
-                output_excerpt: Some(
-                    json!({
-                        "action": "find_name",
-                        "count": 0,
-                        "results": [],
-                        "root": ""
-                    })
-                    .to_string(),
-                ),
-                ..Default::default()
-            });
-        assert!(journal_has_missing_file_search_evidence(Some(&journal)));
-    }
-
-    #[test]
-    fn journal_missing_file_search_evidence_detects_path_batch_facts() {
-        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-        journal
-            .step_results
-            .push(crate::task_journal::TaskJournalStepTrace {
-                skill: "system_basic".to_string(),
-                output_excerpt: Some(
-                    json!({
-                        "action": "path_batch_facts",
-                        "count": 1,
-                        "facts": [{
-                            "exists": false,
-                            "path": "/tmp/missing.txt",
-                            "error": "not found"
-                        }],
-                        "include_missing": true
-                    })
-                    .to_string(),
-                ),
-                ..Default::default()
-            });
-        assert!(journal_has_missing_file_search_evidence(Some(&journal)));
-    }
-
-    #[test]
-    fn journal_missing_file_search_evidence_detects_not_found_probe() {
-        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-        journal
-            .step_results
-            .push(crate::task_journal::TaskJournalStepTrace {
-                skill: "run_cmd".to_string(),
-                output_excerpt: Some("NOT_FOUND\n".to_string()),
-                ..Default::default()
-            });
-        assert!(journal_has_missing_file_search_evidence(Some(&journal)));
-    }
-
-    #[test]
-    fn answer_route_result_overrides_initial_chat_when_execution_trace_exists() {
-        let initial = route_result(crate::AskMode::direct_answer());
-        let answer_route = route_result(crate::AskMode::planner_execute_chat_wrapped());
-        let mut answer_journal =
-            crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-        answer_journal.record_plan_result(&crate::PlanResult {
-            plan_kind: crate::PlanKind::Single,
-            goal: "inspect project".to_string(),
-            planner_notes: String::new(),
-            raw_plan_text: String::new(),
-            missing_slots: Vec::new(),
-            needs_confirmation: false,
-            steps: Vec::new(),
-        });
-
-        assert!(should_use_answer_route_result(
-            &initial,
-            &answer_route,
-            &answer_journal
-        ));
-    }
-
-    #[test]
-    fn answer_route_result_does_not_override_chat_without_execution_trace() {
-        let initial = route_result(crate::AskMode::direct_answer());
-        let answer_route = route_result(crate::AskMode::planner_execute_chat_wrapped());
-        let answer_journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-
-        assert!(!should_use_answer_route_result(
-            &initial,
-            &answer_route,
-            &answer_journal
-        ));
-    }
-
-    #[test]
-    fn answer_route_result_overrides_initial_chat_for_clarify_journal() {
-        let initial = route_result(crate::AskMode::direct_answer());
-        let mut answer_route = route_result(crate::AskMode::clarify());
-        answer_route.needs_clarify = true;
-        answer_route.clarify_question = "Which file should I send?".to_string();
-        answer_route.wants_file_delivery = true;
-        answer_route.output_contract.delivery_required = true;
-        answer_route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-        let mut answer_journal =
-            crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-        answer_journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Clarify);
-
-        assert!(should_use_answer_route_result(
-            &initial,
-            &answer_route,
-            &answer_journal
-        ));
-    }
-
-    #[test]
-    fn journal_missing_file_search_evidence_detects_read_file_error_marker() {
-        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-        journal
-            .step_results
-            .push(crate::task_journal::TaskJournalStepTrace {
-                skill: "read_file".to_string(),
-                error_excerpt: Some("__RC_READ_FILE_NOT_FOUND__:/tmp/missing.txt".to_string()),
-                ..Default::default()
-            });
-        assert!(journal_has_missing_file_search_evidence(Some(&journal)));
-    }
-
-    #[test]
-    fn missing_file_delivery_reply_uses_structured_search_evidence() {
-        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-        journal
-            .step_results
-            .push(crate::task_journal::TaskJournalStepTrace {
-                skill: "fs_search".to_string(),
-                output_excerpt: Some(
-                    json!({
-                        "action": "find_name",
-                        "count": 0,
-                        "results": [],
-                        "root": ""
-                    })
-                    .to_string(),
-                ),
-                ..Default::default()
-            });
-        let answer = crate::AskReply::llm(
-            "文件 `definitely_missing_named_file_rustclaw_001.txt` 未找到。".to_string(),
-        )
-        .with_task_journal(journal);
-        let route = crate::RouteResult {
-            ask_mode: crate::AskMode::planner_execute_plain(),
-            resolved_intent: "send definitely_missing_named_file_rustclaw_001.txt".to_string(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: "explicit filename".to_string(),
-            route_confidence: Some(1.0),
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: true,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract::default(),
-        };
-        assert!(route.wants_file_delivery);
-        assert!(journal_has_missing_file_search_evidence(
-            answer.task_journal.as_ref()
-        ));
-    }
-
-    #[test]
-    fn missing_file_delivery_reply_uses_output_contract_file_token_even_without_wants_flag() {
-        let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
-        journal
-            .step_results
-            .push(crate::task_journal::TaskJournalStepTrace {
-                skill: "fs_search".to_string(),
-                output_excerpt: Some(
-                    json!({
-                        "action": "find_name",
-                        "count": 0,
-                        "results": [],
-                        "root": ""
-                    })
-                    .to_string(),
-                ),
-                ..Default::default()
-            });
-        let answer = crate::AskReply::llm(
-            "找不到文件 `definitely_missing_named_file_rustclaw_001.txt`。".to_string(),
-        )
-        .with_task_journal(journal);
-        let mut route = crate::RouteResult {
-            ask_mode: crate::AskMode::planner_execute_plain(),
-            resolved_intent: String::new(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract::default(),
-        };
-        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-        route.output_contract.delivery_required = true;
-
-        assert!(super::should_use_missing_file_delivery_reply(
-            &route, &answer
-        ));
-    }
-
-    #[test]
-    fn resume_failure_missing_file_delivery_is_success_result() {
-        let mut route = crate::RouteResult {
-            ask_mode: crate::AskMode::planner_execute_plain(),
-            resolved_intent: String::new(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract::default(),
-        };
-        route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-        route.output_contract.delivery_required = true;
-        let resume_ctx = json!({
-            "failed_step": {
-                "action": "skill(run_cmd)",
-                "error": "__RC_READ_FILE_NOT_FOUND__:/tmp/missing.txt"
-            },
-            "remaining_actions": []
-        });
-
-        assert!(super::resume_failure_is_missing_file_delivery_result(
-            &route,
-            "I couldn't send the requested file because it doesn't exist at the path `/tmp/missing.txt`.",
-            &resume_ctx
-        ));
-    }
-
-    #[test]
-    fn resume_failure_structured_service_status_is_success_result() {
-        let mut route = crate::RouteResult {
-            ask_mode: crate::AskMode::planner_execute_plain(),
-            resolved_intent: String::new(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract::default(),
-        };
-        route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
-        let resume_ctx = json!({
-            "failed_step": {
-                "action": "skill(service_control)",
-                "error": "no matching service found for the given target",
-                "structured_error": {
-                    "skill": "service_control",
-                    "error_kind": "not_found",
-                    "error_text": "no matching service found for the given target",
-                    "service_name": "definitely_missing_rustclaw_demo",
-                    "platform": "linux",
-                    "manager_type": "unknown"
-                }
-            },
-            "remaining_actions": []
-        });
-
-        assert!(super::resume_failure_is_structured_service_status_result(
-            &route,
-            &resume_ctx
-        ));
-
-        let messages = super::resume_context_execution_summary_messages(&resume_ctx, false);
-        assert_eq!(messages.len(), 1);
-        assert!(messages[0].contains("no matching service found"));
-        assert!(!messages[0].contains("__RC_SKILL_ERROR__"));
-    }
-
-    #[test]
-    fn resume_failure_execution_failed_step_is_success_answer_with_remaining_actions() {
-        let mut route = crate::RouteResult {
-            ask_mode: crate::AskMode::planner_execute_plain(),
-            resolved_intent: String::new(),
-            needs_clarify: false,
-            clarify_question: String::new(),
-            route_reason: String::new(),
-            route_confidence: None,
-            visible_skill_candidates: Vec::new(),
-            risk_ceiling: crate::RiskCeiling::Unknown,
-            resume_behavior: crate::ResumeBehavior::None,
-            schedule_kind: crate::ScheduleKind::None,
-            schedule_intent: None,
-            wants_file_delivery: false,
-            should_refresh_long_term_memory: false,
-            agent_display_name_hint: String::new(),
-            output_contract: crate::IntentOutputContract::default(),
-        };
-        route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
-        let resume_ctx = json!({
-            "failed_step": {
-                "action": "skill(run_cmd)",
-                "error": "command failed with exit code 1; stderr: cat: /definitely_missing_rustclaw_contract_case: No such file or directory (os error 2)",
-                "structured_error": {
-                    "skill": "run_cmd",
-                    "error_kind": "nonzero_exit",
-                    "error_text": "Command failed with exit code 1\nstderr:\ncat: /definitely_missing_rustclaw_contract_case: No such file or directory (os error 2)",
-                    "platform": "linux",
-                    "extra": {
-                        "command": "cat /definitely_missing_rustclaw_contract_case",
-                        "exit_code": 1,
-                        "stderr": "cat: /definitely_missing_rustclaw_contract_case: No such file or directory (os error 2)\n"
-                    }
-                }
-            },
-            "remaining_actions": [
-                {"type": "call_skill", "skill": "log_analyze"},
-                {"type": "synthesize_answer"}
-            ]
-        });
-
-        let answer = super::resume_failure_execution_failed_step_answer(&route, &resume_ctx, false)
-            .expect("execution-failed-step answer");
-
-        assert!(answer.contains("cat /definitely_missing_rustclaw_contract_case"));
-        assert!(answer.contains("退出码为 1"));
-        assert!(answer.contains("No such file or directory"));
-        assert!(!answer.contains("继续"));
-        assert!(!answer.contains("暂停"));
-    }
-
-    #[test]
-    fn resume_context_execution_summary_uses_failed_step() {
-        let resume_ctx = json!({
-            "failed_step": {
-                "action": "skill(run_cmd)",
-                "error": "ls: cannot access '/tmp/missing.txt': No such file or directory"
-            },
-            "remaining_actions": []
-        });
-
-        let messages = super::resume_context_execution_summary_messages(&resume_ctx, false);
-
-        assert_eq!(messages.len(), 1);
-        assert!(messages[0].contains("**执行过程**"));
-        assert!(messages[0].contains("skill(run_cmd)"));
-        assert!(messages[0].contains("No such file or directory"));
-    }
-}
+#[path = "task_tests.rs"]
+mod tests;
