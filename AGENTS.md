@@ -90,6 +90,8 @@ Skill binaries must use “single-line JSON stdin -> single-line JSON stdout”.
   Do not output multi-line content or non-JSON.
 - 失败必须返回 `status=error` 和可读 `error_text`。
   On failure, return `status=error` and a readable `error_text`.
+- `text/error_text` 可作为用户可见兜底，但运行时不得解析这些自然语言字段来决定路由、重试、成功判定或最终答案形态；需要程序判断时，在 `extra` 中提供稳定的 `error_code`、`message_key`、`status_code` 或结构化字段。
+  `text/error_text` may be user-visible fallbacks, but runtime must not parse those natural-language fields to decide routing, retry, success, or final answer shape; when program logic is needed, provide stable `error_code`, `message_key`, `status_code`, or structured fields in `extra`.
 - 不得阻塞不退出（遵循 `SKILL_TIMEOUT_SECONDS` 预期）。
   Do not hang indefinitely; respect `SKILL_TIMEOUT_SECONDS` expectations.
 - 基础 skill 的 `text/extra/error_text` 响应约定、推荐字段名与当前门禁范围，见 [docs/base_skill_response_contract.md](docs/base_skill_response_contract.md)。
@@ -175,8 +177,8 @@ For externally submitted skills (`external_skills/foo_bar`) handled by `extensio
 - 关闭技能后 / When a skill is disabled:
   - 二层提示词会显示 disabled 简化提示
     The second-layer prompt uses a disabled simplified hint
-  - 命中需求时应回复“技能未开启”
-    If user intent requires it, respond with “skill not enabled”
+  - 命中需求时应返回结构化禁用状态（如 `skill_disabled` / `capability_disabled`），再由 language policy、i18n 资源或模型按用户语言生成最终可见回复；不要在 runtime 写死“技能未开启”等固定自然语言文案。
+    If user intent requires a disabled skill, return a structured disabled status (such as `skill_disabled` / `capability_disabled`) and let language policy, i18n resources, or model synthesis generate the final user-visible reply in the user's language; do not hardcode fixed natural-language copy such as “skill not enabled” in runtime.
   - 运行时调用会被 `clawd` 拦截
     Runtime invocation is blocked by `clawd`
 
@@ -209,8 +211,14 @@ A skill is considered available only when “mapping complete + compile pass + r
   When adding or improving skill selection, prefer registry metadata, `INTERFACE.md`, generated prompts, or necessary vendor patches; Rust main-flow code should own protocol validation, resolver/verifier, safety policy, runner dispatch, and output contracts, not fixed natural-language cases.
 - 不允许在运行时新增针对用户自然语言的硬匹配，例如 `prompt.contains(...)`、按语言维护短语数组，或为了某个中文/英文/日文/韩文样例通过而加分支。需要理解语义时，先让 normalizer / planner 输出结构化 enum、action、contract、locator 或 field path，Rust 只消费这些机器字段。
   Do not add runtime hard matching against user natural language, such as `prompt.contains(...)`, language phrase arrays, or branches for one zh/en/ja/ko case. When semantics are needed, make the normalizer / planner emit structured enums, actions, contracts, locators, or field paths first; Rust should consume only those machine fields.
+- 不允许在 runtime、finalizer、verifier 或 execution adapter 中新增面向用户的固定自然语言回复模板（包括中英文双分支、按语言写死句子、为某个 NL 样例写死“正确答案”）。确定性路径只能输出真实观测值、机器字段、枚举/状态码、路径、数字、`message_key` 或结构化 evidence；需要自然语言表达时，让 finalizer/LLM/i18n 按用户语言生成。
+  Do not add user-facing fixed natural-language reply templates in runtime, finalizer, verifier, or execution adapters (including zh/en branches, language-specific sentence literals, or hardcoded “correct answers” for one NL sample). Deterministic paths may emit only observed values, machine fields, enums/status codes, paths, numbers, `message_key`, or structured evidence; when prose is needed, finalizer/LLM/i18n must render it in the user's language.
+- 允许解析和输出语言无关的机器 token：路径、URL、文件扩展名、JSON/schema 字段、action/skill/tool 名、exit code、错误码、协议固定字符串和 i18n `message_key`。这些 token 不得被当作最终自然语言回复模板，也不得用来替代 normalizer/planner 的语义理解。
+  Language-neutral machine tokens are allowed: paths, URLs, file extensions, JSON/schema fields, action/skill/tool names, exit codes, error codes, protocol constants, and i18n `message_key`s. These tokens must not become final natural-language reply templates or replace semantic understanding by the normalizer/planner.
 - 改动自然语言路由、fallback、finalizer 或 planner 边界后，必须运行 `python3 scripts/check_no_nl_hardmatch.py`，并把新增语义能力落到 schema / registry / `INTERFACE.md` / generated prompts，而不是落到主流程短语判断。
   After changing natural-language routing, fallback, finalizer, or planner boundaries, run `python3 scripts/check_no_nl_hardmatch.py`, and express new semantic capability in schema / registry / `INTERFACE.md` / generated prompts instead of main-flow phrase checks.
+- 改动最终回复、错误兜底或确定性直出路径后，必须人工检查 diff 中新增的生产代码字符串：测试夹具、prompt 示例和 i18n 文案可以存在自然语言；runtime/finalizer/verifier 的用户可见逻辑不能新增按语言硬编码的回复句子。
+  After changing final replies, error fallbacks, or deterministic direct-answer paths, manually inspect newly added production-code strings in the diff: tests, prompt examples, and i18n copy may contain natural language; runtime/finalizer/verifier user-visible logic must not add language-specific hardcoded reply sentences.
 - 先补协议与映射，再补提示词与 UI，最后跑编译。
   Implement protocol/mapping first, then prompts/UI, then compile checks.
 - 不改已有技能行为，除非需求明确要求。

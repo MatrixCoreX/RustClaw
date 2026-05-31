@@ -4,4 +4,6 @@
 # free-form instruction tail after a configured execute prefix.
 standalone_commands = [
   "pwd",
+  "whoami",
+  "hostname",
 ]

@@ -1,0 +1,2361 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
+
+use claw_core::config::{AgentConfig, ToolsConfig};
+use claw_core::skill_registry::SkillsRegistry;
+
+use serde_json::json;
+
+use super::{verify_plan, VerifyInput, VerifyIssueKind, VerifyMode};
+use crate::{
+    contract_matrix::FailureAttribution, AgentRuntimeConfig, AppState, ClaimedTask, PlanKind,
+    PlanResult, PlanStep, RouteResult, ScheduleKind, SkillViewsSnapshot, ToolsPolicy,
+};
+
+fn test_registry() -> SkillsRegistry {
+    let toml = r#"
+[[skills]]
+name = "read_file"
+enabled = true
+kind = "builtin"
+output_kind = "text"
+side_effect = false
+auto_invocable = true
+input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
+
+[[skills]]
+name = "run_cmd"
+enabled = true
+kind = "builtin"
+output_kind = "text"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", required = ["command"], properties = { command = { type = "string" } } }
+
+[[skills]]
+name = "list_dir"
+enabled = true
+kind = "builtin"
+output_kind = "text"
+side_effect = false
+auto_invocable = true
+input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
+
+[[skills]]
+name = "write_file"
+enabled = true
+kind = "builtin"
+output_kind = "text"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", required = ["path", "content"], properties = { path = { type = "string" }, content = { type = "string" } } }
+
+[[skills]]
+name = "make_dir"
+enabled = true
+kind = "builtin"
+output_kind = "text"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
+
+[[skills]]
+name = "remove_file"
+enabled = true
+kind = "builtin"
+output_kind = "text"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", required = ["path"], properties = { path = { type = "string" } } }
+
+[[skills]]
+name = "fs_basic"
+enabled = true
+kind = "builtin"
+planner_kind = "tool"
+output_kind = "text"
+side_effect = true
+auto_invocable = true
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string" }, path = { type = "string" }, paths = { type = "array", items = { type = "string" } } } }
+planner_capabilities = [
+  { name = "filesystem.stat_paths", action = "stat_paths", effect = "observe", required = ["path|paths"] },
+  { name = "filesystem.read_text_range", action = "read_text_range", effect = "observe", required = ["path"] },
+  { name = "filesystem.remove_path", action = "remove_path", effect = "mutate", required = ["path"], risk_level = "high" },
+]
+
+[[skills]]
+name = "primary_reader"
+enabled = true
+kind = "runner"
+output_kind = "text"
+group = "reader"
+primary_fallback_role = "primary"
+
+	[[skills]]
+	name = "fallback_reader"
+	enabled = true
+	kind = "runner"
+	output_kind = "text"
+	group = "reader"
+	primary_fallback_role = "fallback"
+
+	[[skills]]
+	name = "photo_organize"
+	enabled = true
+	kind = "runner"
+	output_kind = "text"
+	risk_level = "high"
+	auto_invocable = false
+	requires_confirmation = true
+	side_effect = true
+	confirmation_exempt_when = [
+	  { action = "prepare" },
+	  { action = "organize", mode = "plan" },
+	]
+	"#;
+    let path = std::env::temp_dir().join(format!(
+        "verifier_registry_{}_{}_{}.toml",
+        std::process::id(),
+        crate::now_ts_u64(),
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::write(&path, toml).expect("write registry");
+    let registry = SkillsRegistry::load_from_path(&path).expect("load registry");
+    let _ = std::fs::remove_file(path);
+    registry
+}
+
+fn test_state() -> AppState {
+    let registry = Arc::new(test_registry());
+    let skills_list = Arc::new(
+        [
+            "read_file",
+            "run_cmd",
+            "list_dir",
+            "write_file",
+            "make_dir",
+            "fs_basic",
+            "primary_reader",
+            "fallback_reader",
+            "photo_organize",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect::<HashSet<_>>(),
+    );
+    let agents_by_id = HashMap::from([(
+        crate::DEFAULT_AGENT_ID.to_string(),
+        AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
+    )]);
+    AppState {
+        core: crate::CoreServices {
+            agents_by_id: Arc::new(agents_by_id),
+            skill_views_snapshot: Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+                registry: Some(registry),
+                skills_list,
+            }))),
+            ..crate::CoreServices::test_default()
+        },
+        skill_rt: crate::SkillRuntime {
+            locator_scan_max_depth: 3,
+            locator_scan_max_files: 200,
+            tools_policy: Arc::new(
+                ToolsPolicy::from_config(&ToolsConfig::default()).expect("tools policy"),
+            ),
+            ..crate::SkillRuntime::test_default()
+        },
+        policy: crate::PolicyConfig::test_default(),
+        worker: crate::WorkerConfig::test_default(),
+        metrics: crate::TaskMetricsRegistry::default(),
+        channels: crate::ChannelConfig::default(),
+        reload_ctx: crate::ReloadContext::default(),
+        ask_states: crate::AskStateRegistry::default(),
+    }
+}
+
+fn test_task() -> ClaimedTask {
+    ClaimedTask {
+        task_id: "task-verify".to_string(),
+        user_id: 1,
+        chat_id: 2,
+        user_key: None,
+        channel: "telegram".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    }
+}
+
+fn route_result(needs_clarify: bool) -> RouteResult {
+    route_result_with_risk(needs_clarify, crate::RiskCeiling::Unknown)
+}
+
+fn route_result_with_semantic(semantic_kind: crate::OutputSemanticKind) -> RouteResult {
+    let mut route = route_result(false);
+    route.output_contract = crate::IntentOutputContract {
+        semantic_kind,
+        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+        ..Default::default()
+    };
+    route
+}
+
+fn route_result_with_risk(needs_clarify: bool, risk_ceiling: crate::RiskCeiling) -> RouteResult {
+    RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent: "test".to_string(),
+        needs_clarify,
+        route_reason: "test".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: vec!["read_file".to_string()],
+        risk_ceiling,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract::default(),
+    }
+}
+
+fn plan_result(steps: Vec<PlanStep>) -> PlanResult {
+    PlanResult {
+        goal: "test".to_string(),
+        missing_slots: Vec::new(),
+        needs_confirmation: false,
+        steps,
+        planner_notes: String::new(),
+        plan_kind: PlanKind::Single,
+        raw_plan_text: String::new(),
+    }
+}
+
+#[test]
+fn observe_mode_keeps_route_clarify_as_shadow_only() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(true)),
+            request_text: None,
+            context_bundle_summary: Some("need more info"),
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "read_file".to_string(),
+                args: json!({ "path": "README.md" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert!(result.approved);
+    assert!(result.blocked_reason.is_none());
+    assert!(matches!(
+        result.issues.first().map(|issue| issue.kind),
+        Some(VerifyIssueKind::RouteClarifyRequired)
+    ));
+    assert!(result.shadow_blocked_reason.is_some());
+}
+
+#[test]
+fn observe_mode_rewrites_unresolved_template_args_to_response() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(true)),
+            request_text: Some("帮我转成表格"),
+            context_bundle_summary: Some("needs concrete JSON array"),
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "read_file".to_string(),
+                args: json!({ "path": "{{last_output}}" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert!(result.approved);
+    assert!(result.shadow_blocked_reason.is_some());
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::RouteClarifyRequired)));
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::UnresolvedTemplateArg)));
+    assert_eq!(result.rewritten_steps.len(), 1);
+    assert_eq!(result.rewritten_steps[0].action_type, "respond");
+    assert!(result.rewritten_steps[0]
+        .args
+        .get("content")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .contains("具体内容"));
+}
+
+#[test]
+fn observe_mode_rewrites_unresolved_call_capability_to_response() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("帮我查一下"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_capability".to_string(),
+                skill: "unknown.example".to_string(),
+                args: json!({}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+
+    assert!(result.approved);
+    assert!(result.shadow_blocked_reason.is_some());
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::CapabilityUnavailable)));
+    assert_eq!(result.rewritten_steps.len(), 1);
+    assert_eq!(result.rewritten_steps[0].action_type, "respond");
+    assert!(result.rewritten_steps[0]
+        .args
+        .get("content")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .contains("unknown.example"));
+}
+
+#[test]
+fn enforce_mode_blocks_unresolved_call_capability() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_capability".to_string(),
+                skill: "unknown.example".to_string(),
+                args: json!({}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved);
+    assert!(result.blocked_reason.is_some());
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::CapabilityUnavailable)));
+}
+
+#[test]
+fn observe_mode_allows_prior_output_template_in_later_args() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(true)),
+            request_text: Some(
+                "查看 logs 目录，把里面的日志文件名整理到 logs_inventory.txt，然后把文件发给我。",
+            ),
+            context_bundle_summary: Some("auto_locator_path=/home/guagua/rustclaw/logs"),
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "step_1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "list_dir".to_string(),
+                    args: json!({ "path": "/home/guagua/rustclaw/logs" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "step_2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "write_file".to_string(),
+                    args: json!({
+                        "path": "/home/guagua/rustclaw/logs_inventory.txt",
+                        "content": "{{last_output}}"
+                    }),
+                    depends_on: vec!["step_1".to_string()],
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+
+    assert!(result.approved);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::UnresolvedTemplateArg)));
+    assert!(result.rewritten_steps.is_empty());
+}
+
+#[test]
+fn enforce_mode_blocks_missing_required_arg() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "read_file".to_string(),
+                args: json!({}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(!result.approved);
+    assert!(matches!(
+        result.issues.first().map(|issue| issue.kind),
+        Some(VerifyIssueKind::MissingRequiredArg)
+    ));
+    assert!(result
+        .blocked_reason
+        .as_deref()
+        .unwrap_or_default()
+        .contains("missing required arg"));
+}
+
+#[test]
+fn enforce_mode_blocks_action_scoped_required_arg() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({"action": "read_text_range"}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(!result.approved);
+    assert!(result.issues.iter().any(|issue| matches!(
+        issue.kind,
+        VerifyIssueKind::MissingRequiredArg
+    ) && issue.detail.contains("`path`")));
+}
+
+#[test]
+fn enforce_mode_accepts_action_scoped_alternative_arg() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({"action": "stat_paths", "path": "README.md"}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::MissingRequiredArg)));
+}
+
+#[test]
+fn enforce_mode_blocks_mutation_above_low_risk_ceiling() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "write_file".to_string(),
+                args: json!({"path": "out.txt", "content": "hello"}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(!result.approved);
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::RiskBudgetExceeded)));
+}
+
+#[test]
+fn observe_mode_records_contract_action_rejection_for_structured_route() {
+    let state = test_state();
+    let task = test_task();
+    let route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({"command": "ls"}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::ObserveOnly,
+    );
+
+    assert!(result.approved);
+    assert!(result.issues.iter().any(|issue| {
+        matches!(issue.kind, VerifyIssueKind::ContractActionRejected)
+            && issue.kind.failure_attribution() == FailureAttribution::ContractGap
+    }));
+    assert!(result
+        .shadow_blocked_reason
+        .as_deref()
+        .is_some_and(|reason| reason.contains("rejected by contract")));
+}
+
+#[test]
+fn verifier_issue_failure_attribution_groups_contract_policy_kinds() {
+    assert_eq!(
+        VerifyIssueKind::ContractActionRejected.failure_attribution(),
+        FailureAttribution::ContractGap
+    );
+    assert_eq!(
+        VerifyIssueKind::ContractMissing.failure_attribution(),
+        FailureAttribution::ContractGap
+    );
+    assert_eq!(
+        VerifyIssueKind::ContractPolicyViolation.failure_attribution(),
+        FailureAttribution::ContractGap
+    );
+    assert_eq!(
+        VerifyIssueKind::ContractPreferredActionAvailable.failure_attribution(),
+        FailureAttribution::ContractGap
+    );
+    assert_eq!(
+        VerifyIssueKind::MissingRequiredArg.failure_attribution(),
+        FailureAttribution::ModelError
+    );
+    assert_eq!(
+        VerifyIssueKind::CapabilityUnavailable.failure_attribution(),
+        FailureAttribution::ToolGap
+    );
+    assert_eq!(
+        VerifyIssueKind::RiskBudgetExceeded.failure_attribution(),
+        FailureAttribution::PermissionDenied
+    );
+}
+
+#[test]
+fn observe_mode_records_preferred_contract_action_without_blocking() {
+    let state = test_state();
+    let task = test_task();
+    let route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({"action": "find_entries", "path": "."}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(result.issues.iter().any(|issue| matches!(
+        issue.kind,
+        VerifyIssueKind::ContractPreferredActionAvailable
+    )));
+    assert!(result.blocked_reason.is_none());
+}
+
+#[test]
+fn enforce_mode_blocks_skill_switch_disabled_even_when_contract_allows_action() {
+    let mut state = test_state();
+    let registry = state
+        .get_skills_registry()
+        .expect("test registry should be installed");
+    state.core.skill_views_snapshot = Arc::new(RwLock::new(Arc::new(SkillViewsSnapshot {
+        registry: Some(registry),
+        skills_list: Arc::new(
+            ["read_file", "run_cmd", "list_dir"]
+                .into_iter()
+                .map(str::to_string)
+                .collect::<HashSet<_>>(),
+        ),
+    })));
+    let task = test_task();
+    let route = route_result_with_semantic(crate::OutputSemanticKind::FileNames);
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({"action": "list_dir", "path": "."}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved, "issues: {:?}", result.issues);
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::SkillNotVisible)));
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ContractActionRejected)));
+    assert!(result
+        .blocked_reason
+        .as_deref()
+        .is_some_and(|reason| reason.contains("not in planner visible skills")));
+}
+
+#[test]
+fn enforce_mode_allows_low_risk_action_under_low_risk_ceiling() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result_with_risk(false, crate::RiskCeiling::Low)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({"action": "stat_paths", "paths": ["README.md"]}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::RiskBudgetExceeded)));
+}
+
+#[test]
+fn enforce_mode_blocks_skill_not_visible() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "totally_fake_skill".to_string(),
+                args: json!({}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(!result.approved);
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| { matches!(issue.kind, VerifyIssueKind::SkillNotVisible) }));
+}
+
+#[test]
+fn enforce_mode_blocks_primary_fallback_conflict() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "primary_reader".to_string(),
+                    args: json!({}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "fallback_reader".to_string(),
+                    args: json!({}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(!result.approved);
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| { matches!(issue.kind, VerifyIssueKind::PrimaryFallbackConflict) }));
+}
+
+#[test]
+fn verifier_allows_repeated_steps_from_same_primary_group_skill() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "primary_reader".to_string(),
+                    args: json!({}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "primary_reader".to_string(),
+                    args: json!({}),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result
+        .issues
+        .iter()
+        .all(|issue| { !matches!(issue.kind, VerifyIssueKind::PrimaryFallbackConflict) }));
+}
+
+#[test]
+fn resume_execute_route_skips_confirmation_requirement() {
+    let state = test_state();
+    let task = test_task();
+    let mut resumed_route = route_result(false);
+    resumed_route.resume_behavior = crate::ResumeBehavior::ResumeExecute;
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&resumed_route),
+            request_text: None,
+            context_bundle_summary: Some("resume"),
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({ "command": "pwd" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(result.approved);
+    assert!(!result.needs_confirmation);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+}
+
+#[test]
+fn confirmation_exempt_invocation_skips_confirmation_requirement() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: Some("photo preview"),
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "photo_organize".to_string(),
+                args: json!({ "action": "organize", "mode": "plan" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(result.approved);
+    assert!(!result.needs_confirmation);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+}
+
+#[test]
+fn safe_make_dir_missing_path_defaults_under_workspace_without_confirmation() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("帮我创建一个文件夹"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "make_dir".to_string(),
+                args: json!({}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved);
+    assert!(!result.needs_confirmation);
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::DefaultCreationTargetApplied)));
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::MissingRequiredArg)));
+    let path = result.approved_steps[0]
+        .args
+        .get("path")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    assert!(path.starts_with(state.skill_rt.workspace_root.to_string_lossy().as_ref()));
+    assert!(path.contains("rustclaw-created-dir-taskveri"));
+}
+
+#[test]
+fn safe_write_file_relative_path_anchors_under_workspace_without_confirmation() {
+    let state = test_state();
+    let task = test_task();
+    let filename = format!("rustclaw-autonomy-{}.txt", uuid::Uuid::new_v4());
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("把结果写到文件"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "write_file".to_string(),
+                args: json!({ "path": filename, "content": "ok" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved);
+    assert!(!result.needs_confirmation);
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::DefaultCreationTargetApplied)));
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+    let path = result.approved_steps[0]
+        .args
+        .get("path")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    assert!(path.starts_with(state.skill_rt.workspace_root.to_string_lossy().as_ref()));
+    assert!(path.ends_with(".txt"));
+}
+
+#[test]
+fn dangerous_remove_file_missing_path_blocks_without_default_target() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("delete it"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "remove_file".to_string(),
+                args: json!({}),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::DefaultCreationTargetApplied)));
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::MissingRequiredArg)));
+}
+
+#[test]
+fn dangerous_fs_basic_remove_path_missing_path_blocks_without_default_target() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("remove that path"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_tool".to_string(),
+                skill: "fs_basic".to_string(),
+                args: json!({ "action": "remove_path" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(!result.approved);
+    assert!(!result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::DefaultCreationTargetApplied)));
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::MissingRequiredArg)));
+}
+
+#[test]
+fn destructive_run_cmd_requires_confirmation_without_resume() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("remove temp files"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({ "command": "rm -rf /tmp/rustclaw-verifier-test" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+
+    assert!(result.approved);
+    assert!(result.needs_confirmation);
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+}
+
+#[test]
+fn non_exempt_invocation_still_requires_confirmation() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: Some("photo move"),
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "photo_organize".to_string(),
+                args: json!({ "action": "organize", "mode": "move" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(result.approved);
+    assert!(result.needs_confirmation);
+    assert!(result
+        .issues
+        .iter()
+        .any(|issue| matches!(issue.kind, VerifyIssueKind::ConfirmationRequired)));
+}
+
+#[test]
+fn ops_recipe_requires_inspect_before_mutate() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({ "command": "systemctl restart sing-box" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    inspect_first: true,
+                    validation_required: true,
+                    max_repairs: 2,
+                    ..Default::default()
+                },
+            ),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(!result.approved);
+    assert!(result.issues.iter().any(|issue| {
+        matches!(
+            issue.kind,
+            VerifyIssueKind::RecipeInspectBeforeMutateRequired
+        )
+    }));
+}
+
+#[test]
+fn ops_recipe_requires_validation_after_mutate() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "read_file".to_string(),
+                    args: json!({ "path": "configs/config.toml" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({ "command": "systemctl restart sing-box" }),
+                    depends_on: vec!["s1".to_string()],
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    inspect_first: true,
+                    validation_required: true,
+                    max_repairs: 2,
+                    ..Default::default()
+                },
+            ),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(!result.approved);
+    assert!(result.issues.iter().any(|issue| {
+        matches!(
+            issue.kind,
+            VerifyIssueKind::RecipeValidationAfterMutateRequired
+        )
+    }));
+}
+
+#[test]
+fn code_change_recipe_requires_profile_specific_verification() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("修复当前仓库里的 clawd 入口逻辑，并验证编译或测试通过。"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "read_file".to_string(),
+                    args: json!({ "path": "crates/clawd/src/main.rs" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "write_file".to_string(),
+                    args: json!({ "path": "crates/clawd/src/main.rs", "content": "fn main() {}\n" }),
+                    depends_on: vec!["s1".to_string()],
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s3".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "read_file".to_string(),
+                    args: json!({ "path": "crates/clawd/src/main.rs" }),
+                    depends_on: vec!["s2".to_string()],
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                    target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+                    inspect_first: true,
+                    validation_required: true,
+                    max_repairs: 2,
+                },
+            ),
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(!result.approved);
+    let issue = result
+        .issues
+        .iter()
+        .find(|issue| {
+            matches!(
+                issue.kind,
+                VerifyIssueKind::RecipeValidationAfterMutateRequired
+            )
+        })
+        .expect("expected code_change validation issue");
+    assert!(issue
+        .detail
+        .contains("code_change requires compile/test/build or runtime verification"));
+}
+
+#[test]
+fn code_change_recipe_accepts_structured_cargo_check_verification() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("修复当前仓库里的 clawd 入口逻辑，并验证编译通过。"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s0".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "read_file".to_string(),
+                    args: json!({ "path": "crates/clawd/src/main.rs" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "write_file".to_string(),
+                    args: json!({ "path": "crates/clawd/src/main.rs", "content": "fn main() {}\n" }),
+                    depends_on: vec!["s0".to_string()],
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({
+                        "command": "cargo check -p clawd",
+                        "_clawd_validation": {
+                            "profile": "code_change",
+                            "validator_type": "build",
+                            "validated_target": "clawd"
+                        }
+                    }),
+                    depends_on: vec!["s1".to_string()],
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                    target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+                    inspect_first: true,
+                    validation_required: true,
+                    max_repairs: 2,
+                },
+            ),
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert!(result.issues.iter().all(|issue| {
+        !matches!(
+            issue.kind,
+            VerifyIssueKind::RecipeValidationAfterMutateRequired
+                | VerifyIssueKind::RecipeInspectBeforeMutateRequired
+        )
+    }));
+}
+
+#[test]
+fn code_change_recipe_rejects_unstructured_cargo_check_verification() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("修复当前仓库里的 clawd 入口逻辑，并验证编译通过。"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s0".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "read_file".to_string(),
+                    args: json!({ "path": "crates/clawd/src/main.rs" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "write_file".to_string(),
+                    args: json!({ "path": "crates/clawd/src/main.rs", "content": "fn main() {}\n" }),
+                    depends_on: vec!["s0".to_string()],
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({ "command": "cargo check -p clawd" }),
+                    depends_on: vec!["s1".to_string()],
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                    target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+                    inspect_first: true,
+                    validation_required: true,
+                    max_repairs: 2,
+                },
+            ),
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert!(result.issues.iter().any(|issue| matches!(
+        issue.kind,
+        VerifyIssueKind::RecipeValidationAfterMutateRequired
+    )));
+}
+
+#[test]
+fn code_change_recipe_accepts_structured_custom_validation_step() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("修复当前仓库里的脚本，并运行自定义检查脚本验证通过。"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s0".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "read_file".to_string(),
+                    args: json!({ "path": "scripts/check.sh" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "write_file".to_string(),
+                    args: json!({ "path": "scripts/check.sh", "content": "#!/usr/bin/env bash\nexit 0\n" }),
+                    depends_on: vec!["s0".to_string()],
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({
+                        "command": "bash scripts/check.sh",
+                        "_clawd_validation": {
+                            "profile": "code_change",
+                            "validator_type": "custom",
+                            "validated_target": "scripts/check.sh"
+                        }
+                    }),
+                    depends_on: vec!["s1".to_string()],
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                    target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+                    inspect_first: true,
+                    validation_required: true,
+                    max_repairs: 2,
+                },
+            ),
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert!(result.issues.iter().all(|issue| {
+        !matches!(
+            issue.kind,
+            VerifyIssueKind::RecipeValidationAfterMutateRequired
+                | VerifyIssueKind::RecipeInspectBeforeMutateRequired
+        )
+    }));
+}
+
+#[test]
+fn current_repo_scope_rejects_external_target_plan() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("修复当前仓库里的 clawd 入口逻辑，不要动仓库外项目。"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "write_file".to_string(),
+                args: json!({ "path": "/opt/other-project/main.rs", "content": "fn main() {}\n" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                    target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::CurrentRepo,
+                    inspect_first: false,
+                    validation_required: false,
+                    max_repairs: 2,
+                },
+            ),
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert!(result.issues.iter().any(|issue| {
+        matches!(issue.kind, VerifyIssueKind::RecipeTargetScopeRequired)
+            && issue
+                .detail
+                .contains("current_repo scope must stay inside the current workspace")
+    }));
+}
+
+#[test]
+fn external_workspace_scope_requires_explicit_external_target_plan() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("去当前仓库外的另一个项目修问题。"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "write_file".to_string(),
+                args: json!({ "path": "crates/clawd/src/main.rs", "content": "fn main() {}\n" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                    target_scope:
+                        crate::execution_recipe::ExecutionRecipeTargetScope::ExternalWorkspace,
+                    inspect_first: false,
+                    validation_required: false,
+                    max_repairs: 2,
+                },
+            ),
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert!(result.issues.iter().any(|issue| {
+        matches!(issue.kind, VerifyIssueKind::RecipeTargetScopeRequired)
+            && issue
+                .detail
+                .contains("external_workspace scope requires an explicit external path")
+    }));
+}
+
+#[test]
+fn greenfield_scope_requires_creation_plan() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("从零做一个新脚本并验证。"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({ "command": "cargo check -p clawd" }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                    target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::Greenfield,
+                    inspect_first: false,
+                    validation_required: false,
+                    max_repairs: 2,
+                },
+            ),
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert!(result.issues.iter().any(|issue| {
+        matches!(issue.kind, VerifyIssueKind::RecipeTargetScopeRequired)
+            && issue
+                .detail
+                .contains("greenfield scope requires creating a new file")
+    }));
+}
+
+#[test]
+fn external_workspace_scope_accepts_explicit_external_path_plan() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("去另一个目录修问题，并验证通过。"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "read_file".to_string(),
+                    args: json!({ "path": "/opt/other-project/src/main.rs" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "write_file".to_string(),
+                    args: json!({ "path": "/opt/other-project/src/main.rs", "content": "fn main() {}\n" }),
+                    depends_on: vec!["s1".to_string()],
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s3".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({
+                        "command": "cd /opt/other-project && cargo check",
+                        "_clawd_validation": {
+                            "profile": "code_change",
+                            "validator_type": "build",
+                            "validated_target": "/opt/other-project"
+                        }
+                    }),
+                    depends_on: vec!["s2".to_string()],
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                    target_scope:
+                        crate::execution_recipe::ExecutionRecipeTargetScope::ExternalWorkspace,
+                    inspect_first: true,
+                    validation_required: true,
+                    max_repairs: 2,
+                },
+            ),
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert!(result.issues.iter().all(|issue| {
+        !matches!(
+            issue.kind,
+            VerifyIssueKind::RecipeTargetScopeRequired
+                | VerifyIssueKind::RecipeValidationAfterMutateRequired
+                | VerifyIssueKind::RecipeInspectBeforeMutateRequired
+        )
+    }));
+}
+
+#[test]
+fn external_workspace_scope_persisted_target_allows_followup_validation_plan() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("继续修外部工作区里的项目，并验证通过。"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({
+                    "command": "cargo check",
+                    "_clawd_validation": {
+                        "profile": "code_change",
+                        "validator_type": "build",
+                        "validated_target": "external_workspace"
+                    }
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState {
+                kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                target_scope:
+                    crate::execution_recipe::ExecutionRecipeTargetScope::ExternalWorkspace,
+                phase: crate::execution_recipe::ExecutionRecipePhase::Validate,
+                inspect_first: true,
+                validation_required: true,
+                max_repairs: 2,
+                saw_inspect: true,
+                saw_mutation: true,
+                saw_external_target: true,
+                ..Default::default()
+            },
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert!(result.issues.iter().all(|issue| {
+        !matches!(
+            issue.kind,
+            VerifyIssueKind::RecipeTargetScopeRequired
+                | VerifyIssueKind::RecipeValidationAfterMutateRequired
+                | VerifyIssueKind::RecipeInspectBeforeMutateRequired
+        )
+    }));
+}
+
+#[test]
+fn greenfield_scope_persisted_creation_allows_followup_validation_plan() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: Some("继续验证刚创建的新项目。"),
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({
+                    "command": "cargo check -p clawd",
+                    "_clawd_validation": {
+                        "profile": "code_change",
+                        "validator_type": "build",
+                        "validated_target": "greenfield_project"
+                    }
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState {
+                kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                profile: crate::execution_recipe::ExecutionRecipeProfile::CodeChange,
+                target_scope: crate::execution_recipe::ExecutionRecipeTargetScope::Greenfield,
+                phase: crate::execution_recipe::ExecutionRecipePhase::Validate,
+                inspect_first: true,
+                validation_required: true,
+                max_repairs: 2,
+                saw_inspect: true,
+                saw_mutation: true,
+                saw_greenfield_creation: true,
+                ..Default::default()
+            },
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert!(result.issues.iter().all(|issue| {
+        !matches!(
+            issue.kind,
+            VerifyIssueKind::RecipeTargetScopeRequired
+                | VerifyIssueKind::RecipeValidationAfterMutateRequired
+                | VerifyIssueKind::RecipeInspectBeforeMutateRequired
+        )
+    }));
+}
+
+#[test]
+fn ops_recipe_rewrites_combined_run_cmd_into_apply_then_validate() {
+    let state = test_state();
+    let task = test_task();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route_result(false)),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({
+                    "command": "cd /tmp/demo && nohup python3 -m http.server 51179 --bind 127.0.0.1 > /dev/null 2>&1 & sleep 2 && curl -s http://127.0.0.1:51179/ | grep -q 'ops-demo-ok' && echo 'VALIDATION_PASSED' || echo 'VALIDATION_FAILED'"
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    inspect_first: false,
+                    validation_required: true,
+                    max_repairs: 2,
+                    ..Default::default()
+                },
+            ),
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert_eq!(result.rewritten_steps.len(), 2);
+    assert_eq!(result.rewritten_steps[0].step_id, "s1");
+    assert_eq!(result.rewritten_steps[1].step_id, "s1__validate");
+    assert_eq!(
+            result.rewritten_steps[0].args.get("command").and_then(|v| v.as_str()),
+            Some(
+                "cd /tmp/demo && nohup python3 -m http.server 51179 --bind 127.0.0.1 > /dev/null 2>&1 &"
+            )
+        );
+    assert_eq!(
+            result.rewritten_steps[1].args.get("command").and_then(|v| v.as_str()),
+            Some(
+                "sleep 2 && curl -s http://127.0.0.1:51179/ | grep -q 'ops-demo-ok' && echo 'VALIDATION_PASSED' || echo 'VALIDATION_FAILED'"
+            )
+        );
+    assert_eq!(result.rewritten_steps[1].depends_on, vec!["s1".to_string()]);
+    assert!(result.rewritten_steps[0]
+        .args
+        .get("timeout_seconds")
+        .is_none());
+    assert!(result.rewritten_steps[1]
+        .args
+        .get("timeout_seconds")
+        .is_none());
+}
+
+#[test]
+fn ops_recipe_split_does_not_infer_success_marker_from_request_text() {
+    let state = test_state();
+    let task = test_task();
+    let mut route = route_result(false);
+    route.resolved_intent =
+        "start local http service and verify homepage contains ops-demo-ok".to_string();
+    let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route),
+                request_text: Some(
+                    "Start a static HTTP server in the background, then use curl to verify that the homepage contains ops-demo-ok; when validation passes, explicitly output VALIDATION_PASSED and finish immediately.",
+                ),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({
+                        "command": "cd /tmp/demo && nohup python3 -m http.server 51179 --bind 127.0.0.1 > /dev/null 2>&1 & sleep 2 && curl -s http://127.0.0.1:51179/"
+                    }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                    crate::execution_recipe::ExecutionRecipeSpec {
+                        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                        inspect_first: false,
+                        validation_required: true,
+                        max_repairs: 2,
+                    ..Default::default()
+                    },
+                ),
+            },
+            VerifyMode::ObserveOnly,
+        );
+    assert_eq!(result.rewritten_steps.len(), 2);
+    assert_eq!(
+        result.rewritten_steps[1]
+            .args
+            .get("command")
+            .and_then(|value| value.as_str()),
+        Some("sleep 2 && curl -s http://127.0.0.1:51179/")
+    );
+}
+
+#[test]
+fn ops_recipe_does_not_infer_http_expect_contains_marker_from_route_text() {
+    let state = test_state();
+    let task = test_task();
+    let mut route = route_result(false);
+    route.resolved_intent =
+        "verify local http service homepage contains ops-repair-ok and repair if needed"
+            .to_string();
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "http_basic".to_string(),
+                args: json!({
+                    "action": "get",
+                    "url": "http://127.0.0.1:51179/"
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                crate::execution_recipe::ExecutionRecipeSpec {
+                    kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                    inspect_first: true,
+                    validation_required: true,
+                    max_repairs: 2,
+                    ..Default::default()
+                },
+            ),
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert!(result.rewritten_steps.is_empty());
+    assert_eq!(result.approved_steps.len(), 1);
+    assert!(result.approved_steps[0]
+        .args
+        .get("expect_contains")
+        .is_none());
+}
+
+#[test]
+fn ops_recipe_does_not_infer_http_expect_contains_marker_from_request_text() {
+    let state = test_state();
+    let task = test_task();
+    let route = route_result(false);
+    let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route),
+                request_text: Some(
+                    "First verify whether the local static HTTP service serves a homepage containing ops-repair-ok. If verification fails, repair it and verify again until it passes.",
+                ),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![PlanStep {
+                    step_id: "s1".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "http_basic".to_string(),
+                    args: json!({
+                        "action": "get",
+                        "url": "http://127.0.0.1:51179/"
+                    }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                }]),
+                execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+                    crate::execution_recipe::ExecutionRecipeSpec {
+                        kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+                        inspect_first: true,
+                        validation_required: true,
+                        max_repairs: 2,
+                    ..Default::default()
+                    },
+                ),
+            },
+            VerifyMode::ObserveOnly,
+        );
+    assert!(result.rewritten_steps.is_empty());
+    assert_eq!(result.approved_steps.len(), 1);
+    assert!(result.approved_steps[0]
+        .args
+        .get("expect_contains")
+        .is_none());
+}
+
+#[test]
+fn ops_recipe_repair_round_plan_stays_valid_after_failed_http_preflight() {
+    let state = test_state();
+    let task = test_task();
+    let mut route = route_result(false);
+    route.resolved_intent =
+        "verify local http service homepage contains ops-repair-ok and repair if needed"
+            .to_string();
+    route.resume_behavior = crate::ResumeBehavior::ResumeExecute;
+    let initial_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+        crate::execution_recipe::ExecutionRecipeSpec {
+            kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+            inspect_first: true,
+            validation_required: true,
+            max_repairs: 2,
+            ..Default::default()
+        },
+    );
+    let inspect_result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s1".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "http_basic".to_string(),
+                args: json!({
+                    "action": "get",
+                    "url": "http://127.0.0.1:51179/",
+                    "expect_contains": "ops-repair-ok"
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: initial_recipe,
+        },
+        VerifyMode::ObserveOnly,
+    );
+    let inspect_step = &inspect_result.approved_steps[0];
+    let raw_effect = crate::execution_recipe::classify_skill_action_effect(
+        &state,
+        &inspect_step.skill,
+        &inspect_step.args,
+    );
+    let effective_effect =
+        crate::execution_recipe::effective_action_effect_for_recipe(initial_recipe, raw_effect);
+    let validation = crate::execution_recipe::assess_validation_output(
+        &state,
+        &inspect_step.skill,
+        &inspect_step.args,
+        "status=200\nops-repair-bad\n",
+    );
+    assert!(matches!(
+        validation,
+        crate::execution_recipe::ValidationObservation::Failed(_)
+    ));
+    assert!(effective_effect.observes);
+    assert!(!effective_effect.validates);
+
+    let mut repair_recipe = initial_recipe;
+    crate::execution_recipe::apply_action_effect_failure(&mut repair_recipe, effective_effect);
+    assert_eq!(
+        crate::execution_recipe::stop_signal_for_validation_failure(&repair_recipe),
+        "recoverable_failure_continue_round"
+    );
+    assert!(repair_recipe.saw_inspect);
+    assert_eq!(
+        repair_recipe.phase,
+        crate::execution_recipe::ExecutionRecipePhase::Apply
+    );
+
+    let repair_result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "read_file".to_string(),
+                    args: json!({ "path": "document/nl_ops_http_demo/index.html" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s3".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({
+                        "command": "printf 'ops-repair-ok\\n' > document/nl_ops_http_demo/index.html"
+                    }),
+                    depends_on: vec!["s2".to_string()],
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s4".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({
+                        "command": "curl -s http://127.0.0.1:51179/ | grep -q 'ops-repair-ok' && echo 'VALIDATION_PASSED' || echo 'VALIDATION_FAILED'"
+                    }),
+                    depends_on: vec!["s3".to_string()],
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: repair_recipe,
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(repair_result.approved, "issues: {:?}", repair_result.issues);
+    assert!(repair_result.blocked_reason.is_none());
+    assert_eq!(repair_result.approved_steps.len(), 3);
+    assert!(repair_result.rewritten_steps.is_empty());
+    assert_eq!(
+            repair_result.approved_steps[2]
+                .args
+                .get("command")
+                .and_then(|value| value.as_str()),
+            Some(
+                "curl -s http://127.0.0.1:51179/ | grep -q 'ops-repair-ok' && echo 'VALIDATION_PASSED' || echo 'VALIDATION_FAILED'"
+            )
+        );
+}
+
+#[test]
+fn ops_recipe_service_repair_round_plan_stays_valid_after_failed_status_preflight() {
+    let state = test_state();
+    let task = test_task();
+    let mut route = route_result(false);
+    route.resolved_intent = "repair sing-box and verify the service is running".to_string();
+    route.resume_behavior = crate::ResumeBehavior::ResumeExecute;
+    let initial_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+        crate::execution_recipe::ExecutionRecipeSpec {
+            kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+            inspect_first: true,
+            validation_required: true,
+            max_repairs: 2,
+            ..Default::default()
+        },
+    );
+    let inspect_step = PlanStep {
+        step_id: "s1".to_string(),
+        action_type: "call_skill".to_string(),
+        skill: "run_cmd".to_string(),
+        args: json!({ "command": "systemctl status sing-box" }),
+        depends_on: Vec::new(),
+        why: String::new(),
+    };
+    let inspect_result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![inspect_step.clone()]),
+            execution_recipe: initial_recipe,
+        },
+        VerifyMode::ObserveOnly,
+    );
+    assert!(inspect_result.approved);
+    assert_eq!(inspect_result.approved_steps.len(), 1);
+    assert_eq!(
+        inspect_result.approved_steps[0].step_id,
+        inspect_step.step_id
+    );
+    assert_eq!(inspect_result.approved_steps[0].skill, inspect_step.skill);
+    assert_eq!(
+        inspect_result.approved_steps[0]
+            .args
+            .get("command")
+            .and_then(|value| value.as_str()),
+        Some("systemctl status sing-box")
+    );
+
+    let raw_effect = crate::execution_recipe::classify_skill_action_effect(
+        &state,
+        "run_cmd",
+        &json!({ "command": "systemctl status sing-box" }),
+    );
+    let effective_effect =
+        crate::execution_recipe::effective_action_effect_for_recipe(initial_recipe, raw_effect);
+    let validation = crate::execution_recipe::assess_validation_output(
+        &state,
+        "run_cmd",
+        &json!({ "command": "systemctl status sing-box" }),
+        "inactive (dead)\n",
+    );
+    assert!(matches!(
+        validation,
+        crate::execution_recipe::ValidationObservation::Failed(_)
+    ));
+    assert!(effective_effect.observes);
+    assert!(!effective_effect.validates);
+
+    let mut repair_recipe = initial_recipe;
+    crate::execution_recipe::apply_action_effect_failure(&mut repair_recipe, effective_effect);
+    assert_eq!(
+        crate::execution_recipe::stop_signal_for_validation_failure(&repair_recipe),
+        "recoverable_failure_continue_round"
+    );
+    assert!(repair_recipe.saw_inspect);
+    assert_eq!(
+        repair_recipe.phase,
+        crate::execution_recipe::ExecutionRecipePhase::Apply
+    );
+
+    let repair_result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![
+                PlanStep {
+                    step_id: "s2".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({ "command": "systemctl restart sing-box" }),
+                    depends_on: Vec::new(),
+                    why: String::new(),
+                },
+                PlanStep {
+                    step_id: "s3".to_string(),
+                    action_type: "call_skill".to_string(),
+                    skill: "run_cmd".to_string(),
+                    args: json!({ "command": "systemctl is-active sing-box" }),
+                    depends_on: vec!["s2".to_string()],
+                    why: String::new(),
+                },
+            ]),
+            execution_recipe: repair_recipe,
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(repair_result.approved, "issues: {:?}", repair_result.issues);
+    assert!(repair_result.blocked_reason.is_none());
+    assert_eq!(repair_result.approved_steps.len(), 2);
+    assert!(repair_result.rewritten_steps.is_empty());
+    assert_eq!(
+        repair_result.approved_steps[1]
+            .args
+            .get("command")
+            .and_then(|value| value.as_str()),
+        Some("systemctl is-active sing-box")
+    );
+}
+
+#[test]
+fn ops_recipe_repair_round_rewrites_combined_run_cmd_plan() {
+    let state = test_state();
+    let task = test_task();
+    let mut route = route_result(false);
+    route.resolved_intent =
+        "repair local demo file and verify it contains ops-repair-ok".to_string();
+    route.resume_behavior = crate::ResumeBehavior::ResumeExecute;
+    let mut repair_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+        crate::execution_recipe::ExecutionRecipeSpec {
+            kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+            inspect_first: true,
+            validation_required: true,
+            max_repairs: 2,
+            ..Default::default()
+        },
+    );
+    repair_recipe.saw_inspect = true;
+    repair_recipe.phase = crate::execution_recipe::ExecutionRecipePhase::Apply;
+
+    let result = verify_plan(
+        &state,
+        &task,
+        VerifyInput {
+            route_result: Some(&route),
+            request_text: None,
+            context_bundle_summary: None,
+            plan_result: &plan_result(vec![PlanStep {
+                step_id: "s2".to_string(),
+                action_type: "call_skill".to_string(),
+                skill: "run_cmd".to_string(),
+                args: json!({
+                    "command": "printf 'ops-repair-ok\\n' > document/nl_ops_http_demo/index.html & sleep 1 && grep -q 'ops-repair-ok' document/nl_ops_http_demo/index.html && echo 'VALIDATION_PASSED' || echo 'VALIDATION_FAILED'"
+                }),
+                depends_on: Vec::new(),
+                why: String::new(),
+            }]),
+            execution_recipe: repair_recipe,
+        },
+        VerifyMode::Enforce,
+    );
+    assert!(result.approved, "issues: {:?}", result.issues);
+    assert!(result.blocked_reason.is_none());
+    assert_eq!(result.rewritten_steps.len(), 2);
+    assert_eq!(result.rewritten_steps[0].step_id, "s2");
+    assert_eq!(result.rewritten_steps[1].step_id, "s2__validate");
+    assert_eq!(
+        result.rewritten_steps[0]
+            .args
+            .get("command")
+            .and_then(|value| value.as_str()),
+        Some("printf 'ops-repair-ok\\n' > document/nl_ops_http_demo/index.html &")
+    );
+    assert_eq!(
+            result.rewritten_steps[1]
+                .args
+                .get("command")
+                .and_then(|value| value.as_str()),
+            Some(
+                "sleep 1 && grep -q 'ops-repair-ok' document/nl_ops_http_demo/index.html && echo 'VALIDATION_PASSED' || echo 'VALIDATION_FAILED'"
+            )
+        );
+    assert_eq!(result.rewritten_steps[1].depends_on, vec!["s2".to_string()]);
+}
+
+#[test]
+fn ops_recipe_apply_phase_skips_leading_validation_before_mutation() {
+    let state = test_state();
+    let task = test_task();
+    let mut route = route_result(false);
+    route.resolved_intent =
+        "验证首页包含 ops-repair-ok，失败就修复 document/nl_ops_http_demo/index.html 后重试"
+            .to_string();
+    let mut apply_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
+        crate::execution_recipe::ExecutionRecipeSpec {
+            kind: crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop,
+            inspect_first: true,
+            validation_required: true,
+            max_repairs: 2,
+            ..Default::default()
+        },
+    );
+    apply_recipe.saw_inspect = true;
+    apply_recipe.phase = crate::execution_recipe::ExecutionRecipePhase::Apply;
+    let result = verify_plan(
+            &state,
+            &task,
+            VerifyInput {
+                route_result: Some(&route),
+                request_text: Some(
+                    "先验证首页是否包含 ops-repair-ok，如果失败就修复 document/nl_ops_http_demo/index.html，然后再次验证直到通过。",
+                ),
+                context_bundle_summary: None,
+                plan_result: &plan_result(vec![
+                    PlanStep {
+                        step_id: "s1".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "http_basic".to_string(),
+                        args: json!({ "action": "get", "url": "http://127.0.0.1:51179/" }),
+                        depends_on: Vec::new(),
+                        why: String::new(),
+                    },
+                    PlanStep {
+                        step_id: "s2".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "read_file".to_string(),
+                        args: json!({ "path": "document/nl_ops_http_demo/index.html" }),
+                        depends_on: vec!["s1".to_string()],
+                        why: String::new(),
+                    },
+                    PlanStep {
+                        step_id: "s3".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "write_file".to_string(),
+                        args: json!({
+                            "path": "document/nl_ops_http_demo/index.html",
+                            "content": "ops-repair-ok\n"
+                        }),
+                        depends_on: vec!["s2".to_string()],
+                        why: String::new(),
+                    },
+                    PlanStep {
+                        step_id: "s4".to_string(),
+                        action_type: "call_skill".to_string(),
+                        skill: "http_basic".to_string(),
+                        args: json!({ "action": "get", "url": "http://127.0.0.1:51179/" }),
+                        depends_on: vec!["s3".to_string()],
+                        why: String::new(),
+                    },
+                ]),
+                execution_recipe: apply_recipe,
+            },
+            VerifyMode::ObserveOnly,
+        );
+    assert_eq!(result.rewritten_steps.len(), 3);
+    assert_eq!(result.rewritten_steps[0].step_id, "s2");
+    assert_eq!(result.rewritten_steps[1].step_id, "s3");
+    assert_eq!(result.rewritten_steps[2].step_id, "s4");
+}

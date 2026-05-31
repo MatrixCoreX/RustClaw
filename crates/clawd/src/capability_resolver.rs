@@ -51,30 +51,54 @@ fn resolve_static_capability_action_for_state(
 ) -> Option<AgentAction> {
     let Some((skill, action)) = (match normalized {
         "fs_basic" => Some(("fs_basic", None)),
-        "filesystem.list_entries" | "filesystem.list_dir" => Some(("fs_basic", Some("list_dir"))),
-        "filesystem.count_entries" => Some(("fs_basic", Some("count_entries"))),
-        "filesystem.read_text_range" | "filesystem.read_text" | "filesystem.read_file" => {
-            Some(("fs_basic", Some("read_text_range")))
+        "filesystem.list_entries" | "filesystem.list_dir" | "fs_basic.list_dir" => {
+            Some(("fs_basic", Some("list_dir")))
         }
-        "filesystem.stat_paths" | "filesystem.stat_path" => Some(("fs_basic", Some("stat_paths"))),
-        "filesystem.find_entries" | "filesystem.find_files" | "filesystem.find_paths" => {
-            Some(("fs_basic", Some("find_entries")))
+        "filesystem.count_entries" | "fs_basic.count_entries" => {
+            Some(("fs_basic", Some("count_entries")))
         }
-        "filesystem.grep_text" | "filesystem.search_text" => Some(("fs_basic", Some("grep_text"))),
-        "filesystem.compare_paths" => Some(("fs_basic", Some("compare_paths"))),
-        "filesystem.write_file" | "filesystem.write_text" => Some(("fs_basic", Some("write_text"))),
-        "filesystem.append_text" | "filesystem.append_file" => {
+        "filesystem.read_text_range"
+        | "filesystem.read_text"
+        | "filesystem.read_file"
+        | "fs_basic.read_text_range"
+        | "fs_basic.read_range"
+        | "fs_basic.read_file" => Some(("fs_basic", Some("read_text_range"))),
+        "filesystem.stat_paths" | "filesystem.stat_path" | "fs_basic.stat_paths" => {
+            Some(("fs_basic", Some("stat_paths")))
+        }
+        "filesystem.find_entries"
+        | "filesystem.find_files"
+        | "filesystem.find_paths"
+        | "fs_basic.find_entries" => Some(("fs_basic", Some("find_entries"))),
+        "filesystem.grep_text" | "filesystem.search_text" | "fs_basic.grep_text" => {
+            Some(("fs_basic", Some("grep_text")))
+        }
+        "filesystem.compare_paths" | "fs_basic.compare_paths" => {
+            Some(("fs_basic", Some("compare_paths")))
+        }
+        "filesystem.write_file" | "filesystem.write_text" | "fs_basic.write_text" => {
+            Some(("fs_basic", Some("write_text")))
+        }
+        "filesystem.append_text" | "filesystem.append_file" | "fs_basic.append_text" => {
             Some(("fs_basic", Some("append_text")))
         }
-        "filesystem.make_dir" | "filesystem.create_dir" => Some(("fs_basic", Some("make_dir"))),
-        "filesystem.remove_path" | "filesystem.delete_path" => {
+        "filesystem.make_dir" | "filesystem.create_dir" | "fs_basic.make_dir" => {
+            Some(("fs_basic", Some("make_dir")))
+        }
+        "filesystem.remove_path" | "filesystem.delete_path" | "fs_basic.remove_path" => {
             Some(("fs_basic", Some("remove_path")))
         }
-        "config.read_field" => Some(("config_basic", Some("read_field"))),
-        "config.read_fields" => Some(("config_basic", Some("read_fields"))),
-        "config.list_keys" => Some(("config_basic", Some("list_keys"))),
-        "config.validate" => Some(("config_basic", Some("validate"))),
-        "config.guard_rustclaw_config" => Some(("config_basic", Some("guard_rustclaw_config"))),
+        "config.read_field" | "config_basic.read_field" => {
+            Some(("config_basic", Some("read_field")))
+        }
+        "config.read_fields" | "config_basic.read_fields" => {
+            Some(("config_basic", Some("read_fields")))
+        }
+        "config.list_keys" | "config_basic.list_keys" => Some(("config_basic", Some("list_keys"))),
+        "config.validate" | "config_basic.validate" => Some(("config_basic", Some("validate"))),
+        "config.guard_rustclaw_config" | "config_basic.guard_rustclaw_config" => {
+            Some(("config_basic", Some("guard_rustclaw_config")))
+        }
         "config.plan_change" | "config.plan_config_change" => {
             Some(("config_edit", Some("plan_config_change")))
         }
@@ -88,6 +112,11 @@ fn resolve_static_capability_action_for_state(
         }
         "config.read_back" => Some(("config_edit", Some("read_back"))),
         "config_basic" => Some(("config_basic", None)),
+        "system_basic.read_range" | "system_basic.read_text_range" => {
+            Some(("system_basic", Some("read_range")))
+        }
+        "system_basic.extract_field" => Some(("system_basic", Some("extract_field"))),
+        "system_basic.extract_fields" => Some(("system_basic", Some("extract_fields"))),
         "config.restart_if_requested" => Some(("config_edit", Some("restart_if_requested"))),
         "transform" | "transform.transform_data" | "data.transform" | "data.transform_records" => {
             Some(("transform", Some("transform_data")))
@@ -263,126 +292,5 @@ fn normalize_run_command_args(args: Value) -> Value {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn resolves_filesystem_list_entries_to_fs_basic() {
-        let action = resolve_static_capability_action(
-            &normalize_capability_name("filesystem.list_entries"),
-            json!({
-                "path": ".",
-                "names_only": true
-            }),
-        )
-        .expect("capability should resolve");
-        match action {
-            AgentAction::CallTool { tool, args } => {
-                assert_eq!(tool, "fs_basic");
-                assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
-                assert_eq!(args.get("path").and_then(Value::as_str), Some("."));
-            }
-            other => panic!("unexpected action: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn resolves_bare_fs_basic_capability_to_fs_basic_tool() {
-        let action = resolve_static_capability_action(
-            &normalize_capability_name("fs_basic"),
-            json!({"action": "list_dir", "path": "."}),
-        )
-        .expect("bare fs_basic capability should resolve");
-        match action {
-            AgentAction::CallTool { tool, args } => {
-                assert_eq!(tool, "fs_basic");
-                assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
-                assert_eq!(args.get("path").and_then(Value::as_str), Some("."));
-            }
-            other => panic!("unexpected action: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn resolves_system_run_command_to_run_cmd_skill() {
-        let action = resolve_static_capability_action(
-            &normalize_capability_name("system.run_command"),
-            json!({"cmd": "pwd"}),
-        )
-        .expect("capability should resolve");
-        match action {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "run_cmd");
-                assert_eq!(args.get("command").and_then(Value::as_str), Some("pwd"));
-            }
-            other => panic!("unexpected action: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn resolves_transform_capability_to_transform_skill() {
-        let action = resolve_static_capability_action(
-            &normalize_capability_name("transform"),
-            json!({"data":[{"score": 1}], "ops":[{"op":"sort","by":"score"}]}),
-        )
-        .expect("capability should resolve");
-        match action {
-            AgentAction::CallSkill { skill, args } => {
-                assert_eq!(skill, "transform");
-                assert_eq!(
-                    args.get("action").and_then(Value::as_str),
-                    Some("transform_data")
-                );
-            }
-            other => panic!("unexpected action: {other:?}"),
-        }
-    }
-
-    fn resolve_static_capability_action(normalized: &str, args: Value) -> Option<AgentAction> {
-        match normalized {
-            "fs_basic" => Some(AgentAction::CallTool {
-                tool: "fs_basic".to_string(),
-                args,
-            }),
-            "filesystem.list_entries" | "filesystem.list_dir" => Some(AgentAction::CallTool {
-                tool: "fs_basic".to_string(),
-                args: with_action(args, "list_dir"),
-            }),
-            "transform" | "transform.transform_data" | "data.transform" => {
-                Some(AgentAction::CallSkill {
-                    skill: "transform".to_string(),
-                    args: with_action(args, "transform_data"),
-                })
-            }
-            "system.run_command" | "system.run_cmd" => Some(AgentAction::CallSkill {
-                skill: "run_cmd".to_string(),
-                args: normalize_run_command_args(args),
-            }),
-            _ => None,
-        }
-    }
-
-    #[test]
-    fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
-        let mut candidates = vec![
-            ResolverCandidate {
-                skill: "run_cmd".to_string(),
-                action: None,
-                planner_kind: PlannerCapabilityKind::Tool,
-                preferred: true,
-                risk_level: SkillRiskLevel::High,
-            },
-            ResolverCandidate {
-                skill: "fs_basic".to_string(),
-                action: Some("list_dir".to_string()),
-                planner_kind: PlannerCapabilityKind::Tool,
-                preferred: true,
-                risk_level: SkillRiskLevel::Low,
-            },
-        ];
-        candidates.sort_by_key(resolver_candidate_rank);
-        assert_eq!(candidates[0].skill, "fs_basic");
-    }
-}
+#[path = "capability_resolver_tests.rs"]
+mod tests;
