@@ -1282,46 +1282,5 @@ async fn send_whatsapp_text(state: &AppState, wa_id: &str, text: &str) -> anyhow
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{extract_bind_key_candidate, is_unbound_allowed_command};
-
-    #[test]
-    fn unbound_plain_text_requires_binding_prompt() {
-        assert!(!is_unbound_allowed_command("hello"));
-        assert_eq!(extract_bind_key_candidate("hello", false), None);
-    }
-
-    #[test]
-    fn unbound_key_command_keeps_binding_flow_available() {
-        assert_eq!(
-            extract_bind_key_candidate("/key rk_live_123", false).as_deref(),
-            Some("rk_live_123")
-        );
-    }
-
-    #[test]
-    fn unbound_start_and_help_are_allowed_without_task_submission() {
-        assert!(is_unbound_allowed_command("/start"));
-        assert!(is_unbound_allowed_command("/help"));
-    }
-
-    #[test]
-    fn waiting_key_state_accepts_plain_key_reply() {
-        assert_eq!(
-            extract_bind_key_candidate("rk_live_abc", true).as_deref(),
-            Some("rk_live_abc")
-        );
-    }
-
-    #[test]
-    fn waiting_key_state_does_not_treat_business_commands_as_key() {
-        assert_eq!(extract_bind_key_candidate("/run weather {}", true), None);
-        assert_eq!(extract_bind_key_candidate("/crypto btc", true), None);
-    }
-
-    #[test]
-    fn unbound_media_like_empty_text_requires_binding_prompt() {
-        assert!(!is_unbound_allowed_command(""));
-        assert_eq!(extract_bind_key_candidate("", false), None);
-    }
-}
+#[path = "main_tests.rs"]
+mod tests;

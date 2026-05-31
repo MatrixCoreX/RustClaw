@@ -242,6 +242,13 @@ output_kind = "text"
 supported_os = ["linux", "macos"]
 optional_bins = ["hostname", "sysctl"]
 platform_notes = ["Linux uses /proc for detailed runtime probes; macOS uses sysctl where available."]
+planner_capabilities = [
+  { name = "system.runtime_status", action = "runtime_status", effect = "observe", optional = ["kind"], risk_level = "low", preferred = true },
+  { name = "system.inventory_dir", action = "inventory_dir", effect = "observe", optional = ["path", "files_only", "dirs_only", "include_hidden", "names_only", "sort_by", "ext_filter", "max_entries"], risk_level = "low", preferred = true },
+  { name = "system.tree_summary", action = "tree_summary", effect = "observe", optional = ["path", "include_hidden", "max_depth", "max_children_per_dir", "max_nodes"], risk_level = "low", preferred = true },
+  { name = "system.read_range", action = "read_range", effect = "observe", required = ["path"], optional = ["mode", "n", "start_line", "end_line"], risk_level = "low", preferred = true },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["info", "runtime_status", "inventory_dir", "count_inventory", "workspace_glance", "tree_summary", "dir_compare", "extract_field", "extract_fields", "structured_keys", "validate_structured", "find_path", "read_range", "compare_paths", "path_batch_facts", "diagnose_runtime"] }, kind = { type = "string" }, query = { type = "string" }, field = { type = "string" }, path = { type = "string" }, paths = { type = "array" }, field_path = { type = "string" }, field_paths = { type = "array" } } }
 
 [[skills]]
 name = "http_basic"
@@ -256,6 +263,10 @@ output_kind = "text"
 capabilities = ["net"]
 supported_os = ["linux", "macos"]
 platform_notes = ["Uses Rust HTTP client; no external command dependency."]
+planner_capabilities = [
+  { name = "http.get", action = "get", effect = "observe", required = ["url"], optional = ["headers", "timeout_seconds", "expect_status", "expect_success", "expect_contains", "accept_non_success"], risk_level = "low", preferred = true },
+  { name = "http.post_json", action = "post_json", effect = "external", required = ["url"], optional = ["headers", "body", "timeout_seconds", "expect_status", "expect_success", "expect_contains", "accept_non_success"], risk_level = "medium" },
+]
 
 [[skills]]
 name = "git_basic"

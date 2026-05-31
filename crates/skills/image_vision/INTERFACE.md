@@ -11,6 +11,7 @@
 
 ## Actions
 - `describe`
+- `analyze` (compatibility alias for `describe`)
 - `extract`
 - `compare`
 - `screenshot_summary`
@@ -18,7 +19,7 @@
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| all | `action` | yes | string | - | Must be one of supported actions. |
+| all | `action` | yes | string | - | Must be one of supported actions; `analyze` is normalized to `describe`. |
 | all | `images` | yes | array | - | Image inputs: objects with `path`, `url`, or `base64`, or string shorthand. |
 | all | `instruction` / `query` / `text` | no | string | - | Optional user instruction or question to guide the image analysis. |
 | all | `response_language` | no | string | - | Preferred language tag or name for the **final** user-visible text (e.g. `zh-CN`, `English`). |

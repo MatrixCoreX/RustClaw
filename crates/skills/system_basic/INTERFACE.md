@@ -20,6 +20,7 @@
 
 ## Actions
 - `info`
+- `runtime_status`
 - `inventory_dir`
 - `count_inventory`
 - `workspace_glance`
@@ -38,7 +39,8 @@
 ## Parameter Contract
 | Action | Param | Required | Type | Default | Description |
 |---|---|---|---|---|---|
-| `info` | none | no | - | - | Return host/runtime introspection as JSON: hostname, timestamps, uptime, process RSS, pid, cwd, workspace root, executable path, OS and arch. |
+| `info` | none | no | - | - | Return host/runtime introspection as JSON: hostname, current_user, timestamps, uptime, process RSS, pid, cwd, workspace root, executable path, OS and arch. |
+| `runtime_status` | `kind` | no | string | - | Runtime scalar to return. Supported: `current_user`, `host_name`, `current_working_directory`. Aliases such as `whoami`, `hostname`, and `pwd` are normalized. |
 | `inventory_dir` | `path` | no | string(path) | `.` | Target directory inside workspace. |
 | `inventory_dir` | `files_only` | no | bool | `false` | Keep only files. |
 | `inventory_dir` | `dirs_only` | no | bool | `false` | Keep only directories. |
@@ -115,7 +117,9 @@
 ## Structured Evidence Contract
 - Matrix admission status: built-in structured evidence only; strict filesystem/config/runtime evidence must come from `extra` fields.
 - `info` success `extra` fields:
-  - `hostname`, `pid`, `cwd`, `workspace_root`, `os`, `arch`, timestamps, uptime, RSS, and executable path; evidence roles `field_value`, `count`, and `path`.
+  - `hostname`, `current_user`, `pid`, `cwd`, `workspace_root`, `os`, `arch`, timestamps, uptime, RSS, and executable path; evidence roles `field_value`, `count`, and `path`.
+- `runtime_status` success `extra` fields:
+  - `action`, `kind`, `value`, `field_value`, and `command_output`; evidence roles `field_value` and `command_output`.
 - `inventory_dir` success `extra` fields:
   - `action`, `path`, `resolved_path`, `names`, `entries`, `counts`, and truncation/cap metadata; evidence roles `path`, `entries`, `results`, and `count`.
 - `count_inventory` success `extra` fields:
@@ -149,7 +153,17 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"{\"hostname\":\"host\",\"pid\":1234,\"cwd\":\"/workspace\",\"workspace_root\":\"/workspace\",\"os\":\"linux\",\"arch\":\"x86_64\"}","extra":{"hostname":"host","pid":1234,"cwd":"/workspace","workspace_root":"/workspace","os":"linux","arch":"x86_64"},"error_text":null}
+{"request_id":"demo-1","status":"ok","text":"{\"hostname\":\"host\",\"current_user\":\"runner\",\"pid\":1234,\"cwd\":\"/workspace\",\"workspace_root\":\"/workspace\",\"os\":\"linux\",\"arch\":\"x86_64\"}","extra":{"hostname":"host","current_user":"runner","pid":1234,"cwd":"/workspace","workspace_root":"/workspace","os":"linux","arch":"x86_64"},"error_text":null}
+```
+
+Runtime scalar example:
+
+```json
+{"request_id":"demo-1b","args":{"action":"runtime_status","kind":"current_user"}}
+```
+
+```json
+{"request_id":"demo-1b","status":"ok","text":"{\"action\":\"runtime_status\",\"kind\":\"current_user\",\"value\":\"runner\",\"field_value\":\"runner\",\"command_output\":\"runner\"}","extra":{"action":"runtime_status","kind":"current_user","value":"runner","field_value":"runner","command_output":"runner"},"error_text":null}
 ```
 
 ### Example 2

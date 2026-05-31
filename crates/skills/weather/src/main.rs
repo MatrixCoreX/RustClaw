@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use toml::Value as TomlValue;
@@ -13,6 +13,7 @@ const GEOCODE_URL: &str = "https://geocoding-api.open-meteo.com/v1/search";
 const FORECAST_URL: &str = "https://api.open-meteo.com/v1/forecast";
 /// Open-Meteo 免费接口预报天数上限；超出时在 `extra` 中标注并钳制为此值。
 const MAX_FORECAST_DAYS: u32 = 16;
+const HTTP_RETRY_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -389,6 +390,24 @@ fn wmo_weather_desc(cat: &TextCatalog, code: u32) -> String {
         .unwrap_or_else(|| tr(cat, "weather.wmo._"))
 }
 
+fn send_get_with_retry(client: &Client, url: &str) -> Result<Response, reqwest::Error> {
+    let mut last_err = None;
+    for attempt in 0..HTTP_RETRY_ATTEMPTS {
+        match client.get(url).send() {
+            Ok(res) => return Ok(res),
+            Err(err) => {
+                last_err = Some(err);
+                if attempt + 1 < HTTP_RETRY_ATTEMPTS {
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        250 * (attempt as u64 + 1),
+                    ));
+                }
+            }
+        }
+    }
+    Err(last_err.expect("retry attempts always records the last error"))
+}
+
 fn fetch_current_weather(
     client: &Client,
     lat: f64,
@@ -400,7 +419,7 @@ fn fetch_current_weather(
         "{}?latitude={}&longitude={}&current_weather=true",
         FORECAST_URL, lat, lon
     );
-    let res = client.get(&url).send().map_err(|e| {
+    let res = send_get_with_retry(client, &url).map_err(|e| {
         tr_with(
             cat,
             "weather.err.request_failed",
@@ -460,7 +479,7 @@ fn fetch_daily_forecast(
         "{}?latitude={}&longitude={}&daily=weathercode,temperature_2m_max,temperature_2m_min&forecast_days={}&timezone=auto",
         FORECAST_URL, lat, lon, days
     );
-    let res = client.get(&url).send().map_err(|e| {
+    let res = send_get_with_retry(client, &url).map_err(|e| {
         tr_with(
             cat,
             "weather.err.forecast_request_failed",
@@ -532,7 +551,7 @@ fn geocode(query: &str, cat: &TextCatalog) -> Result<(f64, f64, String), String>
         GEOCODE_URL,
         urlencoding::encode(query)
     );
-    let res = client.get(&url).send().map_err(|e| {
+    let res = send_get_with_retry(&client, &url).map_err(|e| {
         tr_with(
             cat,
             "weather.err.request_failed",

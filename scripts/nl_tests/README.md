@@ -77,6 +77,9 @@ Client-like continuous regression:
   `python3 scripts/nl_tests/evaluate_client_like_run.py scripts/nl_suite_logs/client_like_continuous/<run_id> --expectations /tmp/rustclaw-contract-nl.expectations.jsonl`
 - Regenerate the safe aggregate case file:
   `python3 scripts/nl_tests/build_client_like_case_aggregate.py`
+  By default this writes 2,000 executable rows, padding from the existing safe
+  aggregate prompts with unique case names when fewer source rows are available.
+  Use `--target-rows 0` only when you need the unpadded source aggregate.
 - Check the aggregate is up to date without rewriting it:
   `python3 scripts/nl_tests/build_client_like_case_aggregate.py --check`
 - Run a small slice through the real client-like path:

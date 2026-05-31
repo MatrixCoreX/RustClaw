@@ -24,17 +24,21 @@ from pathlib import Path
 
 CANONICAL_SUITES = {
     "act",
+    "ask",
     "chat",
     "chat_act",
     "compound",
+    "capability_boundary_regression",
     "continuous",
     "crypto",
     "dynamic_guard",
     "failure",
     "file",
+    "fs_config_basic",
     "manual",
     "mixed",
     "regression",
+    "schedule",
 }
 
 AUTH_CONTEXT_VALUES = {"user", "admin"}
@@ -79,7 +83,7 @@ class CaseRow:
             [
                 sanitize_field(self.suite),
                 sanitize_field(self.name),
-                sanitize_field(self.tags),
+                sanitize_tags(self.tags),
                 self.prompt.replace("\t", " ").strip(),
             ]
         )
@@ -93,6 +97,13 @@ def sanitize_field(value: str) -> str:
     value = re.sub(r"\s+", "_", value)
     value = re.sub(r"[^A-Za-z0-9_.:-]+", "_", value)
     return value.strip("_") or "case"
+
+
+def sanitize_tags(value: str) -> str:
+    value = value.strip().replace("\t", " ")
+    value = re.sub(r"\s+", "_", value)
+    value = value.replace("|", "_")
+    return value or "client_like,aggregate"
 
 
 def should_skip_prompt(prompt: str, include_risky: bool) -> bool:
@@ -342,6 +353,39 @@ def canonical_prompt_key(prompt: str) -> str:
     return re.sub(r"\s+", " ", prompt).strip()
 
 
+def repeated_case_name(name: str, repeat_index: int) -> str:
+    suffix = f"_repeat{repeat_index:02d}"
+    match = re.search(r"(_turn[0-9]+)$", name)
+    if match:
+        return sanitize_field(f"{name[: match.start()]}{suffix}{match.group(1)}")
+    return sanitize_field(f"{name}{suffix}")
+
+
+def extend_rows_to_target(rows: list[CaseRow], target_rows: int) -> tuple[list[CaseRow], int]:
+    if target_rows <= 0 or len(rows) >= target_rows:
+        return rows, 0
+    if not rows:
+        raise ValueError("cannot extend an empty aggregate to a target row count")
+
+    extended = list(rows)
+    extra_index = 0
+    while len(extended) < target_rows:
+        row = rows[extra_index % len(rows)]
+        repeat_index = (extra_index // len(rows)) + 2
+        extended.append(
+            CaseRow(
+                suite=row.suite,
+                name=repeated_case_name(row.name, repeat_index),
+                tags=row.tags,
+                prompt=row.prompt,
+                expect=row.expect,
+                source=row.source,
+            )
+        )
+        extra_index += 1
+    return extended, len(extended) - len(rows)
+
+
 def render_aggregate(out_path: Path, rows: list[CaseRow], stats: dict[str, int], include_risky: bool) -> str:
     lines = [
         "# Generated client-like continuous NL aggregate.",
@@ -352,6 +396,7 @@ def render_aggregate(out_path: Path, rows: list[CaseRow], stats: dict[str, int],
         f"# include_risky={include_risky}",
         "# stats="
         + " ".join(f"{key}={value}" for key, value in sorted(stats.items())),
+        "# target_rows=0 means no row-count padding.",
         "# Format: suite|name|tags|prompt|expect=optional substring",
         "",
     ]
@@ -401,6 +446,15 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--target-rows",
+        type=int,
+        default=2000,
+        help=(
+            "Pad the aggregate to this many executable rows by replaying existing "
+            "case prompts with unique case names. Use 0 to disable padding."
+        ),
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="Exit non-zero if the aggregate file is missing or not up to date.",
@@ -415,6 +469,9 @@ def main() -> int:
         include_temp=args.include_temp,
         preserve_expects=args.preserve_expects,
     )
+    rows, padded_rows = extend_rows_to_target(rows, args.target_rows)
+    stats["rows_padded"] = padded_rows
+    stats["rows_output"] = len(rows)
     if args.check:
         expected = render_aggregate(out_path, rows, stats, include_risky=args.include_risky)
         actual = out_path.read_text(encoding="utf-8") if out_path.exists() else ""

@@ -16,7 +16,9 @@
 - **Deprecated sources**: Default fetch uses only active sources. Sources that consecutively fail (e.g. `deprecate_after_failures = 3` in config) are moved into `[rss.deprecated]` and no longer fetched; success on a source resets its failure count. Deprecated sources are not used for `latest`/`news` unless restored in config.
 
 ## Config Entry Points (from interface)
-- No dedicated config entry points declared.
+- Main RSS config: `configs/rss.toml`.
+- Category source lists: `configs/rss.toml` -> `[rss.categories.<name>]`.
+- Defaults: `rss.default_category`, `rss.default_limit`, and `rss.timeout_seconds`.
 
 ## Actions (from interface)
 - `fetch` — direct RSS/Atom URL(s) only; requires `url` or `feed_url` or `feed_urls`.

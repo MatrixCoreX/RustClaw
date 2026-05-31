@@ -43,7 +43,7 @@ locale = "en-US"
 # §7.2 fallback matrix: split the legacy "super fallback" by trigger source so the user can tell
 # "where I got stuck" and "how you can help". The legacy key above is kept for historical-DB
 # compare-side compatibility only (write side no longer uses it).
-"clawd.msg.fallback.llm_unavailable" = "The model is temporarily unavailable (auth failure / network / circuit breaker). Please retry later, or switch to an available model."
+"clawd.msg.fallback.llm_unavailable" = "I could not reach the model service for this turn. Please retry, or switch to another available model."
 "clawd.msg.fallback.empty_response" = "The model returned an empty answer this time. Please describe the goal more concretely and I'll try again."
 "clawd.msg.fallback.intent_unresolved" = "I couldn't tell what this message wants me to do. Please add a target or context — for example, which file to look at, or which action to perform."
 "clawd.msg.fallback.planner_failed" = "I couldn't break the request into executable steps. Please rephrase as \"do Y by using X\", or be more specific."

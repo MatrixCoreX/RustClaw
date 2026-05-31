@@ -310,6 +310,14 @@ retryable = true
 supported_os = ["linux", "macos"]
 optional_bins = ["hostname", "sysctl"]
 platform_notes = ["Linux uses /proc for detailed runtime probes; macOS uses sysctl where available."]
+planner_capabilities = [
+  { name = "system.info", action = "info", effect = "observe", risk_level = "low" },
+  { name = "system.runtime_status", action = "runtime_status", effect = "observe", optional = ["kind"], risk_level = "low", preferred = true },
+  { name = "system.inventory_dir", action = "inventory_dir", effect = "observe", optional = ["path", "files_only", "dirs_only", "include_hidden", "names_only", "sort_by", "ext_filter", "max_entries"], risk_level = "low", preferred = true },
+  { name = "system.tree_summary", action = "tree_summary", effect = "observe", optional = ["path", "include_hidden", "max_depth", "max_children_per_dir", "max_nodes"], risk_level = "low", preferred = true },
+  { name = "system.read_range", action = "read_range", effect = "observe", required = ["path"], optional = ["mode", "n", "start_line", "end_line"], risk_level = "low", preferred = true },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["info", "runtime_status", "inventory_dir", "count_inventory", "workspace_glance", "tree_summary", "dir_compare", "extract_field", "extract_fields", "structured_keys", "validate_structured", "find_path", "read_range", "compare_paths", "path_batch_facts", "diagnose_runtime"] }, kind = { type = "string" }, query = { type = "string" }, field = { type = "string" }, path = { type = "string" }, paths = { type = "array" }, field_path = { type = "string" }, field_paths = { type = "array" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
@@ -325,6 +333,10 @@ output_kind = "text"
 capabilities = ["net"]
 supported_os = ["linux", "macos"]
 platform_notes = ["Uses Rust HTTP client; no external command dependency."]
+planner_capabilities = [
+  { name = "http.get", action = "get", effect = "observe", required = ["url"], optional = ["headers", "timeout_seconds", "expect_status", "expect_success", "expect_contains", "accept_non_success"], risk_level = "low", preferred = true },
+  { name = "http.post_json", action = "post_json", effect = "external", required = ["url"], optional = ["headers", "body", "timeout_seconds", "expect_status", "expect_success", "expect_contains", "accept_non_success"], risk_level = "medium" },
+]
 input_schema = { type = "object", properties = { action = { type = "string" }, url = { type = "string" }, method = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
@@ -500,9 +512,21 @@ kind = "runner"
 planner_kind = "skill"
 group = "news/web"
 aliases = ["rss", "rss_reader", "rss_fetcher", "news", "news_fetcher"]
+description = "Fetch configured RSS/Atom category feeds or explicit feed URLs and return normalized latest news items."
+semantic_tags = ["rss_news_fetch", "latest_news", "feed_fetch", "external_news"]
+capabilities = ["net"]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
 timeout_seconds = 30
 prompt_file = "prompts/skills/rss_fetch.md"
 output_kind = "text"
+planner_capabilities = [
+  { name = "rss.latest_news", action = "latest", effect = "observe", optional = ["category", "limit", "timeout_seconds"], risk_level = "low", preferred = true },
+  { name = "rss.fetch_feed", action = "fetch", effect = "observe", required = ["url|feed_url|feed_urls"], optional = ["limit", "timeout_seconds"], risk_level = "low" },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["latest", "fetch"] }, category = { type = "string" }, url = { type = "string" }, feed_url = { type = "string" }, feed_urls = { type = "array", items = { type = "string" } }, limit = { type = "integer" }, timeout_seconds = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "image_vision"
@@ -514,6 +538,8 @@ aliases = ["vision", "image_vision_skill", "vision_image", "image-analyze"]
 timeout_seconds = 90
 prompt_file = "prompts/skills/image_vision.md"
 output_kind = "image"
+description = "Planner-facing image understanding skill for describing, extracting from, comparing, and summarizing images or screenshots from URL/path/base64 inputs."
+semantic_tags = ["image_understanding", "image_description", "image_extract", "image_compare", "screenshot_summary"]
 # §P4.1 / §P4.4 E1.d：image_vision 调远端多模态 vendor 读图返回描述，
 # 不写盘 → 只声明 llm + net + secrets。命名遵守 <用途>_<vendor>_api_key
 # 规范，保持与 image_edit / image_generation / chat 四套 LLM 配置完全独立。
@@ -524,6 +550,19 @@ capabilities = [
     "llm",
     "net",
 ]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+retryable = true
+planner_capabilities = [
+  { name = "image_vision.describe", action = "describe", effect = "observe", required = ["images|image"], optional = ["instruction", "query", "text", "response_language", "language", "detail_level"], risk_level = "low", preferred = true },
+  { name = "image_vision.analyze", action = "analyze", effect = "observe", required = ["images|image"], optional = ["instruction", "query", "text", "response_language", "language", "detail_level"], risk_level = "low" },
+  { name = "image_vision.extract", action = "extract", effect = "observe", required = ["images|image"], optional = ["instruction", "query", "text", "response_language", "language", "schema"], risk_level = "low" },
+  { name = "image_vision.compare", action = "compare", effect = "observe", required = ["images|image"], optional = ["instruction", "query", "text", "response_language", "language", "detail_level"], risk_level = "low" },
+  { name = "image_vision.screenshot_summary", action = "screenshot_summary", effect = "observe", required = ["images|image"], optional = ["instruction", "query", "text", "response_language", "language", "detail_level"], risk_level = "low" },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["describe", "analyze", "extract", "compare", "screenshot_summary"] }, images = { type = "array", items = { anyOf = [ { type = "string" }, { type = "object", properties = { path = { type = "string" }, url = { type = "string" }, base64 = { type = "string" } } } ] } }, image = { type = "string" }, instruction = { type = "string" }, query = { type = "string" }, text = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, detail_level = { type = "string" }, schema = { type = "object" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "image_generate"
@@ -600,6 +639,10 @@ aliases = []
 timeout_seconds = 90
 prompt_file = "prompts/skills/audio_synthesize.md"
 output_kind = "text"
+capabilities = ["llm", "net", "fs.write"]
+side_effect = true
+input_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, output_path = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, voice = { type = "string" }, format = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "health_check"
@@ -619,6 +662,10 @@ retryable = true
 supported_os = ["linux", "macos"]
 optional_bins = ["pgrep", "ps", "uname", "df", "brew", "sysctl", "vm_stat"]
 platform_notes = ["Linux reads /proc for uptime/load/memory; macOS uses sysctl/vm_stat where available."]
+planner_capabilities = [
+  { name = "health_check", action = "check", effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true },
+  { name = "system.health_check", action = "check", effect = "observe", optional = ["log_dir"], risk_level = "low", preferred = true },
+]
 input_schema = { type = "object", properties = { action = { type = "string" }, service = { type = "string" }, target = { type = "string" } } }
 output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
@@ -697,6 +744,18 @@ aliases = ["coin", "coins", "crypto_trade", "market_data", "crypto_market"]
 timeout_seconds = 60
 prompt_file = "prompts/skills/crypto.md"
 output_kind = "text"
+description = "Query crypto market quotes, prices, book tickers, candles, indicators, on-chain facts, and private exchange order/account workflows."
+semantic_tags = ["market_quote", "crypto_quote", "crypto_price", "asset_quote"]
+capabilities = ["net"]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+planner_capabilities = [
+  { name = "crypto.quote", action = "quote", effect = "observe", required = ["symbol"], optional = ["exchange", "locale", "lang", "timeout_seconds"], risk_level = "low", preferred = true },
+  { name = "crypto.multi_quote", action = "multi_quote", effect = "observe", required = ["symbols|symbol"], optional = ["exchange", "locale", "lang", "timeout_seconds"], risk_level = "low" },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["quote", "price", "multi_quote", "get_price", "get_multi_price", "get_book_ticker", "book_ticker", "candles", "indicator", "price_alert_check", "onchain", "trade_preview", "trade_submit", "order_status", "cancel_order", "cancel_all_orders", "open_orders", "trade_history", "positions"] }, symbol = { type = "string" }, symbols = { type = "array", items = { type = "string" } }, exchange = { type = "string" }, locale = { type = "string" }, lang = { type = "string" }, timeout_seconds = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "stock"
@@ -708,7 +767,17 @@ aliases = ["a_stock", "stock_quote", "股票"]
 timeout_seconds = 15
 prompt_file = "prompts/skills/stock.md"
 output_kind = "text"
-capabilities = ["llm"]
+description = "Query A-share stock quotes by code or configured company name/alias and return current market data."
+semantic_tags = ["market_quote", "stock_quote", "a_share_quote", "asset_quote"]
+capabilities = ["net", "llm"]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+planner_capabilities = [
+  { name = "stock.quote", action = "quote", effect = "observe", required = ["symbol|code|name"], risk_level = "low", preferred = true },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["quote", "query"] }, symbol = { type = "string" }, code = { type = "string" }, name = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "weather"
@@ -720,6 +789,17 @@ aliases = ["天气", "weather_query", "查天气"]
 timeout_seconds = 15
 prompt_file = "prompts/skills/weather.md"
 output_kind = "text"
+description = "Query current weather or daily forecasts for a concrete city/place or coordinates through Open-Meteo."
+semantic_tags = ["weather_query", "current_weather", "weather_forecast", "external_weather"]
+capabilities = ["net"]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
+planner_capabilities = [
+  { name = "weather.current", action = "query", effect = "observe", required = ["city|location|place|q|latitude+longitude"], optional = ["days", "forecast_days", "locale", "lang"], risk_level = "low", preferred = true },
+]
+input_schema = { type = "object", properties = { action = { type = "string", enum = ["query"] }, city = { type = "string" }, location = { type = "string" }, place = { type = "string" }, q = { type = "string" }, latitude = { type = "number" }, longitude = { type = "number" }, days = { type = "integer" }, forecast_days = { type = "integer" }, locale = { type = "string" }, lang = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "map_merchant"
@@ -804,9 +884,20 @@ aliases = ["search_extract", "web_search", "web_extract"]
 timeout_seconds = 25
 prompt_file = "prompts/skills/web_search_extract.md"
 output_kind = "text"
+description = "Search the web and return normalized result metadata, snippets, citations, and extract-ready URLs for downstream browser extraction."
+semantic_tags = ["web_search_summary", "search_results", "external_web_search", "url_discovery"]
 capabilities = ["net"]
+risk_level = "low"
+auto_invocable = true
+side_effect = false
 supported_os = ["linux", "macos"]
 platform_notes = ["Search backend requires network and backend/API configuration."]
+planner_capabilities = [
+  { name = "web.search_results", action = "search_extract", effect = "observe", required = ["query"], optional = ["top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "include_snippet"], risk_level = "low", preferred = true },
+  { name = "web.search", action = "search", effect = "observe", required = ["query"], optional = ["top_k", "lang", "time_range", "domains_allow", "domains_deny", "backend", "include_snippet"], risk_level = "low" },
+]
+input_schema = { type = "object", required = ["action", "query"], properties = { action = { type = "string", enum = ["search", "search_extract"] }, query = { type = "string" }, top_k = { type = "integer" }, lang = { type = "string" }, time_range = { type = "string" }, domains_allow = { type = "array", items = { type = "string" } }, domains_deny = { type = "array", items = { type = "string" } }, backend = { type = "string" }, include_snippet = { type = "boolean" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "kb"
@@ -829,12 +920,23 @@ aliases = ["browser_fetch", "page_extract", "browser_search"]
 timeout_seconds = 45
 prompt_file = "prompts/skills/browser_web.md"
 output_kind = "text"
+description = "Open and extract explicit web pages through a headless browser, including page title, readable text, content excerpts, citations, and capture artifacts."
+semantic_tags = ["web_page_summary", "web_content_extract", "browser_page_extract", "url_content_summary"]
 capabilities = ["net", "fs.write"]
+risk_level = "low"
+auto_invocable = true
 side_effect = true
 supported_os = ["linux", "macos"]
 required_bins = ["node"]
 optional_bins = ["chromium", "google-chrome", "playwright"]
 platform_notes = ["Uses Node.js helper and headless Chromium; Linux sandbox probing is skipped on macOS."]
+planner_capabilities = [
+  { name = "browser.open_extract", action = "open_extract", effect = "observe", required = ["url|urls"], optional = ["max_pages", "wait_until", "save_screenshot", "content_mode", "max_text_chars", "min_content_chars"], risk_level = "low", preferred = true },
+  { name = "browser.search_page", action = "search_page", effect = "observe", required = ["query"], optional = ["max_results"], risk_level = "low" },
+  { name = "browser.search_extract", action = "search_extract", effect = "observe", required = ["query"], optional = ["max_results", "max_pages", "content_mode", "max_text_chars"], risk_level = "low" },
+]
+input_schema = { type = "object", required = ["action"], properties = { action = { type = "string", enum = ["open_extract", "search_page", "search_extract"] }, url = { type = "string" }, urls = { type = "array", items = { type = "string" } }, query = { type = "string" }, max_pages = { type = "integer" }, max_results = { type = "integer" }, wait_until = { type = "string" }, save_screenshot = { type = "boolean" }, screenshot_dir = { type = "string" }, content_mode = { type = "string" }, max_text_chars = { type = "integer" }, min_content_chars = { type = "integer" }, fail_fast = { type = "boolean" }, wait_map_path = { type = "string" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 [[skills]]
 name = "photo_organize"
 enabled = true

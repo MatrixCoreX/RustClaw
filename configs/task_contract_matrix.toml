@@ -29,17 +29,22 @@ max_excerpt_chars = 240
 name = "generic_path_content"
 semantic_kind = "none"
 requires_content_evidence = true
+delivery_required = false
 locator_kinds = ["path", "current_workspace", "filename"]
 policy_mode = "enforce"
 evidence_scope = "current_task"
 freshness = "current_task"
 artifact_kind = "text"
 channel_visibility = "user_visible"
-allowed_actions = ["fs_basic.read_text_range", "doc_parse"]
+allowed_actions = ["fs_basic.read_text_range", "fs_basic.list_dir", "fs_basic.find_entries", "doc_parse", "system_basic.tree_summary", "config_basic.read_field", "config_basic.read_fields"]
 forbidden_actions = ["run_cmd"]
 required_evidence = ["content_excerpt", "path"]
 final_answer_shape = "summary_with_evidence"
 failure_policy = "retry_with_alternatives"
+
+[generic_profiles.evidence_expression]
+all_of = ["path"]
+any_of = ["content_excerpt", "candidates", "field_value"]
 
 [[generic_profiles]]
 name = "generic_delivery"
@@ -50,10 +55,13 @@ evidence_scope = "current_task"
 freshness = "current_task"
 artifact_kind = "file"
 channel_visibility = "user_visible"
-allowed_actions = ["fs_basic.write_text"]
+allowed_actions = ["fs_basic.write_text", "fs_basic.stat_paths", "fs_basic.find_entries", "fs_basic.list_dir"]
 required_evidence = ["path"]
 final_answer_shape = "delivery_token_or_path"
 failure_policy = "retry_with_alternatives"
+
+[generic_profiles.evidence_expression]
+any_of = ["path", "count", "candidates"]
 
 [contracts.none]
 semantic_kind = "none"
@@ -78,20 +86,23 @@ semantic_kind = "raw_command_output"
 operation = "run"
 target_object = "system"
 delivery_shape = "raw"
-allowed_actions = ["run_cmd"]
-preferred_actions = ["run_cmd"]
+allowed_actions = ["run_cmd", "http_basic", "process_basic", "system_basic.runtime_status", "system_basic.info", "fs_basic.read_text_range"]
+preferred_actions = ["system_basic.runtime_status", "system_basic.info", "http_basic", "process_basic", "run_cmd"]
 forbidden_actions = []
 required_evidence = ["command_output"]
 final_answer_shape = "raw_output_or_short_summary"
 failure_policy = "retry_with_alternatives"
+
+[contracts.raw_command_output.evidence_expression]
+any_of = ["command_output", "field_value", "content_excerpt"]
 
 [contracts.service_status]
 semantic_kind = "service_status"
 operation = "inspect"
 target_object = "service"
 delivery_shape = "summary"
-allowed_actions = ["health_check", "process_basic", "service_control", "run_cmd"]
-preferred_actions = ["health_check", "process_basic"]
+allowed_actions = ["health_check", "process_basic", "http_basic", "service_control", "system_basic.info", "system_basic.runtime_status", "run_cmd"]
+preferred_actions = ["health_check", "process_basic", "http_basic", "system_basic.info"]
 forbidden_actions = []
 required_evidence = ["field_value"]
 final_answer_shape = "status_with_source"
@@ -135,7 +146,7 @@ semantic_kind = "directory_entry_groups"
 operation = "list"
 target_object = "directory"
 delivery_shape = "list"
-allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries"]
+allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.read_text_range"]
 preferred_actions = ["fs_basic.list_dir"]
 required_evidence = ["candidates"]
 final_answer_shape = "grouped_name_list"
@@ -157,21 +168,92 @@ semantic_kind = "directory_purpose_summary"
 operation = "summarize"
 target_object = "directory"
 delivery_shape = "summary"
-allowed_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "fs_basic.find_entries"]
-preferred_actions = ["fs_basic.list_dir"]
+allowed_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "fs_basic.find_entries", "fs_basic.stat_paths", "system_basic.tree_summary", "config_basic.read_field", "config_basic.read_fields", "log_analyze"]
+preferred_actions = ["fs_basic.list_dir", "fs_basic.stat_paths", "fs_basic.read_text_range", "system_basic.tree_summary", "config_basic.read_field", "config_basic.read_fields"]
 required_evidence = ["candidates"]
 final_answer_shape = "summary_grounded_in_listing"
 failure_policy = "retry_with_alternatives"
+
+[contracts.directory_purpose_summary.evidence_expression]
+any_of = ["candidates", "content_excerpt"]
 
 [contracts.content_excerpt_summary]
 semantic_kind = "content_excerpt_summary"
 operation = "summarize"
 target_object = "path"
 delivery_shape = "summary"
-allowed_actions = ["fs_basic.read_text_range", "doc_parse", "archive_basic.read"]
+allowed_actions = ["fs_basic.read_text_range", "doc_parse", "archive_basic.read", "log_analyze", "browser_web.open_extract"]
 preferred_actions = ["fs_basic.read_text_range"]
 required_evidence = ["content_excerpt"]
 final_answer_shape = "summary_grounded_in_excerpt"
+failure_policy = "retry_with_alternatives"
+
+[contracts.web_page_summary]
+semantic_kind = "web_page_summary"
+operation = "summarize"
+target_object = "web"
+delivery_shape = "summary"
+locator_kinds = ["url"]
+allowed_actions = ["browser_web.open_extract", "http_basic"]
+preferred_actions = ["browser_web.open_extract"]
+required_evidence = ["content_excerpt"]
+final_answer_shape = "summary_grounded_in_excerpt"
+failure_policy = "retry_with_alternatives"
+
+[contracts.web_search_summary]
+semantic_kind = "web_search_summary"
+operation = "summarize"
+target_object = "web"
+delivery_shape = "summary"
+allowed_actions = ["web_search_extract.search_extract", "web_search_extract.search", "browser_web.open_extract"]
+preferred_actions = ["web_search_extract.search_extract"]
+required_evidence = ["candidates"]
+final_answer_shape = "summary_grounded_in_listing"
+failure_policy = "retry_with_alternatives"
+
+[contracts.weather_query]
+semantic_kind = "weather_query"
+operation = "summarize"
+target_object = "web"
+delivery_shape = "summary"
+allowed_actions = ["weather.query", "weather"]
+preferred_actions = ["weather", "weather.query"]
+required_evidence = ["content_excerpt"]
+final_answer_shape = "summary_grounded_in_excerpt"
+failure_policy = "retry_with_alternatives"
+
+[contracts.market_quote]
+semantic_kind = "market_quote"
+operation = "summarize"
+target_object = "web"
+delivery_shape = "summary"
+allowed_actions = ["stock", "stock.quote", "crypto", "crypto.quote", "crypto.multi_quote"]
+preferred_actions = ["stock", "stock.quote", "crypto", "crypto.quote"]
+required_evidence = ["content_excerpt"]
+final_answer_shape = "summary_grounded_in_excerpt"
+failure_policy = "retry_with_alternatives"
+
+[contracts.image_understanding]
+semantic_kind = "image_understanding"
+operation = "summarize"
+target_object = "web"
+delivery_shape = "summary"
+locator_kinds = ["url"]
+allowed_actions = ["image_vision", "image_vision.describe", "image_vision.analyze", "image_vision.extract", "image_vision.compare", "image_vision.screenshot_summary"]
+preferred_actions = ["image_vision.describe", "image_vision"]
+required_evidence = ["content_excerpt"]
+final_answer_shape = "summary_grounded_in_excerpt"
+failure_policy = "retry_with_alternatives"
+
+[contracts.content_excerpt_with_summary]
+semantic_kind = "content_excerpt_with_summary"
+operation = "summarize"
+target_object = "path"
+delivery_shape = "excerpt_with_summary"
+allowed_actions = ["fs_basic.read_text_range", "doc_parse", "archive_basic.read", "log_analyze", "browser_web.open_extract"]
+preferred_actions = ["fs_basic.read_text_range"]
+required_evidence = ["content_excerpt"]
+final_answer_shape = "excerpt_plus_summary"
 failure_policy = "retry_with_alternatives"
 
 [contracts.content_presence_check]
@@ -193,7 +275,7 @@ semantic_kind = "excerpt_kind_judgment"
 operation = "summarize"
 target_object = "path"
 delivery_shape = "summary"
-allowed_actions = ["fs_basic.read_text_range", "doc_parse", "archive_basic.read"]
+allowed_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "doc_parse", "archive_basic.read"]
 preferred_actions = ["fs_basic.read_text_range"]
 required_evidence = ["content_excerpt"]
 final_answer_shape = "judgment_with_excerpt_basis"
@@ -204,8 +286,8 @@ semantic_kind = "recent_artifacts_judgment"
 operation = "summarize"
 target_object = "directory"
 delivery_shape = "summary"
-allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.stat_paths"]
-preferred_actions = ["fs_basic.list_dir", "fs_basic.stat_paths"]
+allowed_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "fs_basic.find_entries", "fs_basic.stat_paths"]
+preferred_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "fs_basic.stat_paths"]
 required_evidence = ["candidates", "field_value"]
 final_answer_shape = "recent_artifact_judgment"
 failure_policy = "retry_with_alternatives"
@@ -215,11 +297,14 @@ semantic_kind = "workspace_project_summary"
 operation = "summarize"
 target_object = "directory"
 delivery_shape = "summary"
-allowed_actions = ["fs_basic.read_text_range"]
-preferred_actions = ["fs_basic.read_text_range"]
-required_evidence = ["content_excerpt"]
+allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.stat_paths", "fs_basic.read_text_range", "system_basic.tree_summary"]
+preferred_actions = ["fs_basic.list_dir", "system_basic.tree_summary", "fs_basic.read_text_range"]
+required_evidence = ["candidates", "content_excerpt"]
 final_answer_shape = "project_summary_grounded_in_files"
 failure_policy = "retry_with_alternatives"
+
+[contracts.workspace_project_summary.evidence_expression]
+any_of = ["candidates", "content_excerpt", "field_value"]
 
 [contracts.scalar_count]
 semantic_kind = "scalar_count"
@@ -242,8 +327,8 @@ semantic_kind = "quantity_comparison"
 operation = "validate"
 target_object = "unknown"
 delivery_shape = "raw"
-allowed_actions = ["fs_basic.compare_paths", "fs_basic.stat_paths", "run_cmd"]
-preferred_actions = ["fs_basic.compare_paths"]
+allowed_actions = ["fs_basic.compare_paths", "fs_basic.stat_paths", "fs_basic.count_entries", "fs_basic.list_dir", "fs_basic.read_text_range", "config_basic.read_fields", "run_cmd"]
+preferred_actions = ["fs_basic.compare_paths", "fs_basic.stat_paths", "fs_basic.list_dir", "fs_basic.read_text_range"]
 required_evidence = ["field_value", "size_bytes"]
 final_answer_shape = "comparison_verdict"
 failure_policy = "retry_with_alternatives"
@@ -265,7 +350,7 @@ operation = "write"
 target_object = "path"
 delivery_shape = "file"
 artifact_kind = "file"
-allowed_actions = ["fs_basic.write_text", "transform"]
+allowed_actions = ["fs_basic.make_dir", "fs_basic.write_text", "fs_basic.stat_paths", "fs_basic.find_entries", "fs_basic.list_dir", "fs_basic.read_text_range", "doc_parse", "transform", "audio_synthesize"]
 preferred_actions = ["fs_basic.write_text"]
 required_evidence = ["path"]
 final_answer_shape = "delivery_token_or_path"
@@ -314,8 +399,8 @@ semantic_kind = "recent_scalar_equality_check"
 operation = "validate"
 target_object = "unknown"
 delivery_shape = "raw"
-allowed_actions = ["fs_basic.stat_paths", "git_basic", "run_cmd"]
-preferred_actions = ["fs_basic.stat_paths", "git_basic", "run_cmd"]
+allowed_actions = ["fs_basic.stat_paths", "fs_basic.grep_text", "fs_basic.read_text_range", "config_basic.read_field", "config_basic.read_fields", "git_basic", "run_cmd"]
+preferred_actions = ["config_basic.read_fields", "config_basic.read_field", "fs_basic.grep_text", "fs_basic.stat_paths", "git_basic", "run_cmd"]
 required_evidence = ["field_value"]
 final_answer_shape = "scalar_equality_verdict"
 failure_policy = "retry_with_alternatives"
@@ -355,7 +440,7 @@ semantic_kind = "structured_keys"
 operation = "inspect"
 target_object = "config_key"
 delivery_shape = "summary"
-allowed_actions = ["config_basic.list_keys", "config_basic.read_fields"]
+allowed_actions = ["config_basic.list_keys", "config_basic.read_field", "config_basic.read_fields"]
 preferred_actions = ["config_basic.list_keys"]
 required_evidence = ["field_value"]
 final_answer_shape = "key_list_or_key_summary"
@@ -371,6 +456,21 @@ preferred_actions = ["config_basic.validate"]
 required_evidence = ["valid"]
 final_answer_shape = "validation_verdict"
 failure_policy = "retry_with_alternatives"
+
+[contracts.config_mutation]
+semantic_kind = "config_mutation"
+operation = "modify"
+target_object = "config_key"
+delivery_shape = "summary"
+allowed_actions = ["config_edit.plan_config_change", "config_edit.apply_config_change", "config_edit.validate_config", "config_edit.guard_config", "config_edit.read_back", "config_edit.restart_if_requested", "config_basic.read_field"]
+preferred_actions = ["config_edit.plan_config_change", "config_edit.apply_config_change", "config_edit.validate_config", "config_edit.read_back"]
+required_evidence = ["field_value", "path", "valid"]
+final_answer_shape = "summary_with_evidence"
+failure_policy = "retry_with_alternatives"
+
+[contracts.config_mutation.evidence_expression]
+all_of = ["path", "valid"]
+any_of = ["field_value"]
 
 [contracts.config_risk_assessment]
 semantic_kind = "config_risk_assessment"
@@ -425,6 +525,17 @@ allowed_actions = ["db_basic", "run_cmd"]
 preferred_actions = ["db_basic"]
 required_evidence = ["field_value"]
 final_answer_shape = "schema_version"
+failure_policy = "retry_with_alternatives"
+
+[contracts.rss_news_fetch]
+semantic_kind = "rss_news_fetch"
+operation = "inspect"
+target_object = "web"
+delivery_shape = "summary"
+allowed_actions = ["rss_fetch"]
+preferred_actions = ["rss_fetch"]
+required_evidence = []
+final_answer_shape = "free"
 failure_policy = "retry_with_alternatives"
 
 [contracts.package_manager_detection]
