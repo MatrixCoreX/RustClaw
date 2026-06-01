@@ -1215,7 +1215,53 @@ fn direct_answer_gate_can_skip_for_self_contained_payload(
         && !surface.has_delivery_token_reference()
 }
 
+fn normalized_workspace_identity_token(text: &str) -> String {
+    text.chars()
+        .filter_map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                Some(ch.to_ascii_lowercase())
+            } else if ('\u{4e00}'..='\u{9fff}').contains(&ch) {
+                Some(ch)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn workspace_identity_tokens(state: &AppState) -> Vec<String> {
+    let Some(root_name) = state
+        .skill_rt
+        .workspace_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    else {
+        return Vec::new();
+    };
+    let token = normalized_workspace_identity_token(root_name);
+    if token.chars().count() < 4 {
+        return Vec::new();
+    }
+    vec![token]
+}
+
+fn current_request_mentions_workspace_identity(
+    state: &AppState,
+    current_user_request: &str,
+) -> bool {
+    let request = normalized_workspace_identity_token(current_user_request);
+    if request.is_empty() {
+        return false;
+    }
+    workspace_identity_tokens(state)
+        .into_iter()
+        .any(|token| request.contains(&token))
+}
+
 fn direct_answer_gate_can_skip_for_pure_chat_draft(
+    state: &AppState,
     current_user_request: &str,
     route: Option<&crate::RouteResult>,
 ) -> bool {
@@ -1233,6 +1279,9 @@ fn direct_answer_gate_can_skip_for_pure_chat_draft(
         || route.output_contract.requires_content_evidence
         || !direct_answer_gate_contract_is_pure_chat(&route.output_contract)
     {
+        return false;
+    }
+    if current_request_mentions_workspace_identity(state, current_user_request) {
         return false;
     }
     let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
@@ -4724,6 +4773,7 @@ pub(crate) async fn execute_ask_routed(
                         .as_ref()
                         .and_then(|ctx| ctx.route_result.as_ref()),
                 ) || direct_answer_gate_can_skip_for_pure_chat_draft(
+                    state,
                     &current_turn_user_request,
                     agent_run_context
                         .as_ref()
