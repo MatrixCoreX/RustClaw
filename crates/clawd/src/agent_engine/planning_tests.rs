@@ -12463,6 +12463,120 @@ fn structured_keys_contract_keeps_explicit_structured_field_read() {
 }
 
 #[test]
+fn generic_scalar_structured_file_plan_rewrites_to_read_field_without_repair_marker() {
+    let root = TempDirGuard::new("generic_scalar_structured_field_rewrite");
+    let package_path = root.path.join("package.json");
+    fs::write(
+        &package_path,
+        r#"{"dependencies":{"@xdevplatform/xurl":"^1.0.3"}}"#,
+    )
+    .expect("write root package");
+    let ui_dir = root.path.join("UI");
+    fs::create_dir_all(&ui_dir).expect("create ui dir");
+    fs::write(ui_dir.join("package.json"), r#"{"name":"react-example"}"#)
+        .expect("write ui package");
+    let package_path = package_path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = "package.json".to_string();
+    route.output_contract.delivery_required = false;
+    route.route_reason = "llm_semantic_contract_repair:malformed_contract_semantic_repair_needed; scalar_locator_requires_evidence".to_string();
+    route.resolved_intent = "读取当前工作区 package.json 文件并提取 name 字段的标量值".to_string();
+
+    let mut state = test_state_with_enabled_skills(&["fs_basic", "config_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": package_path.clone(),
+                "mode": "head",
+                "n": 120,
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "package.json 里的 name 到底是什么，只给值",
+        Some(&package_path),
+        actions,
+    );
+
+    let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(package_path.as_str())
+    );
+    assert_eq!(args.get("field_path").and_then(Value::as_str), Some("name"));
+}
+
+#[test]
+fn generic_scalar_structured_field_read_stays_bound_to_auto_locator() {
+    let root = TempDirGuard::new("generic_scalar_structured_field_auto_locator");
+    let package_path = root.path.join("package.json");
+    fs::write(
+        &package_path,
+        r#"{"dependencies":{"@xdevplatform/xurl":"^1.0.3"}}"#,
+    )
+    .expect("write root package");
+    let ui_dir = root.path.join("UI");
+    fs::create_dir_all(&ui_dir).expect("create ui dir");
+    let ui_package_path = ui_dir.join("package.json");
+    fs::write(&ui_package_path, r#"{"name":"react-example"}"#).expect("write ui package");
+    let package_path = package_path.display().to_string();
+    let ui_package_path = ui_package_path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "package.json".to_string();
+    route.output_contract.delivery_required = false;
+    route.resolved_intent = "读取当前工作区 package.json 文件并提取 name 字段的标量值".to_string();
+
+    let mut state = test_state_with_enabled_skills(&["fs_basic", "config_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    let actions = vec![AgentAction::CallTool {
+        tool: "config_basic".to_string(),
+        args: json!({
+            "action": "read_field",
+            "path": ui_package_path,
+            "field_path": "name",
+        }),
+    }];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "package.json 里的 name 到底是什么，只给值",
+        Some(&package_path),
+        actions,
+    );
+
+    let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(package_path.as_str())
+    );
+    assert_eq!(args.get("field_path").and_then(Value::as_str), Some("name"));
+}
+
+#[test]
 fn file_names_route_accepts_structured_key_listing_for_structured_document() {
     let root = TempDirGuard::new("file_names_structured_keys_plan");
     let package_path = root.path.join("package.json");
