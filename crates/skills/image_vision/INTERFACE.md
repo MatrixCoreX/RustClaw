@@ -29,10 +29,10 @@
 
 ## Config Entry Points
 - Default vision provider/model: `configs/image.toml` -> `[image_vision].default_vendor` / `default_model`.
-- Current default: `mimo` + `mimo-v2.5`.
-- Recommended shared key: `configs/config.toml` -> `[llm.mimo].api_key`, or environment `MIMO_API_KEY`.
-- Optional dedicated image-vision key: `configs/image.toml` -> `[image_vision.providers.mimo].api_key`, or environment `IMAGE_VISION_MIMO_API_KEY`.
-- Mimo supports remote image URLs and local/base64 images through the OpenAI-compatible `image_url` message part.
+- Current default: `minimax` + MiniMax MCP image understanding, with `MiniMax-M2.7` as the OpenAI-compatible fallback label.
+- Recommended shared key: `configs/config.toml` -> `[llm.minimax].api_key`, or environment `MINIMAX_API_KEY`.
+- Optional dedicated image-vision key: `configs/image.toml` -> `[image_vision.providers.minimax].api_key`, or environment `IMAGE_VISION_MINIMAX_API_KEY`.
+- MiniMax image understanding uses the `pi-minimax-mcp` / `minimax-coding-plan-mcp` path when available, then falls back to OpenAI-compatible chat completion.
 
 ### Language behavior (skill-side only)
 1. **Host vs skill (target language):**
