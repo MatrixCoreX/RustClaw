@@ -915,7 +915,7 @@ fn call_edit(
             )?;
             Ok((model, "compat"))
         }
-        VendorKind::Grok | VendorKind::DeepSeek | VendorKind::MiniMax => {
+        VendorKind::Grok | VendorKind::DeepSeek => {
             if mode == AdapterMode::Native {
                 return Err(format!(
                     "{vendor_name} native image edit adapter is not available"
@@ -950,6 +950,27 @@ fn call_edit(
                 output_path,
             )?;
             Ok((model, "compat"))
+        }
+        VendorKind::MiniMax => {
+            let model = requested_model.unwrap_or(&vcfg.model).to_string();
+            let client = Client::builder()
+                .timeout(Duration::from_secs(
+                    timeout_seconds.max(vcfg.timeout_seconds.unwrap_or(30)),
+                ))
+                .build()
+                .map_err(|err| format!("build {vendor_name} client failed: {err}"))?;
+            minimax_reference_edit(
+                &client,
+                vcfg,
+                &model,
+                instruction,
+                image,
+                size,
+                quality,
+                n,
+                output_path,
+            )?;
+            Ok((model, "native_reference"))
         }
         VendorKind::Qwen => {
             let model = requested_model.unwrap_or(&vcfg.model).to_string();
@@ -1477,6 +1498,138 @@ fn openai_compatible_edit(
         "{vendor_name} response contains no image payload: {}",
         truncate(&v.to_string(), 400)
     ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn minimax_reference_edit(
+    client: &Client,
+    cfg: &VendorConfig,
+    model: &str,
+    instruction: &str,
+    image: &ImageSource,
+    size: &str,
+    quality: Option<&str>,
+    n: u64,
+    output_path: &Path,
+) -> Result<(), String> {
+    let ImageSource::Url(image_url) = image else {
+        return Err(
+            "minimax reference edit requires image.url; local path/base64 input is not supported by this adapter"
+                .to_string(),
+        );
+    };
+    let image_url = image_url.trim();
+    if image_url.is_empty() {
+        return Err("minimax reference edit requires non-empty image.url".to_string());
+    }
+    let mut prompt = format!(
+        "Use the reference image as the source. Preserve the main subject and composition, then apply this edit: {instruction}"
+    );
+    if let Some(q) = quality.map(str::trim).filter(|value| !value.is_empty()) {
+        prompt.push_str(&format!("\nQuality hint: {q}"));
+    }
+    let url = format!("{}/image_generation", trim_trailing_slash(&cfg.base_url));
+    let body = json!({
+        "model": model,
+        "prompt": prompt,
+        "response_format": "url",
+        "n": n.max(1),
+        "prompt_optimizer": true,
+        "aspect_ratio": size_to_minimax_aspect_ratio(size),
+        "subject_reference": [
+            {
+                "type": "character",
+                "image_file": image_url
+            }
+        ]
+    });
+    let resp = client
+        .post(url)
+        .bearer_auth(&cfg.api_key)
+        .json(&body)
+        .send()
+        .map_err(|err| format!("minimax request failed: {err}"))?;
+    let status = resp.status().as_u16();
+    let raw = resp
+        .text()
+        .map_err(|err| format!("read minimax response failed: {err}"))?;
+    let v: Value = serde_json::from_str(&raw).map_err(|err| {
+        format!(
+            "parse minimax response failed: {err}; body={}",
+            truncate(&raw, 400)
+        )
+    })?;
+    if status >= 300 {
+        return Err(format!(
+            "minimax error status={status}: {}",
+            truncate(&v.to_string(), 400)
+        ));
+    }
+    if let Some(url) = minimax_response_image_url(&v) {
+        let bytes = client
+            .get(url)
+            .send()
+            .map_err(|err| format!("download edited image failed: {err}"))?
+            .bytes()
+            .map_err(|err| format!("read edited image bytes failed: {err}"))?;
+        ensure_parent_dir(output_path)?;
+        std::fs::write(output_path, &bytes).map_err(|err| format!("write output failed: {err}"))?;
+        return Ok(());
+    }
+    if let Some(b64) = minimax_response_image_base64(&v) {
+        let bytes = STANDARD
+            .decode(b64)
+            .map_err(|err| format!("decode minimax image base64 failed: {err}"))?;
+        ensure_parent_dir(output_path)?;
+        std::fs::write(output_path, bytes).map_err(|err| format!("write output failed: {err}"))?;
+        return Ok(());
+    }
+    Err(format!(
+        "minimax response contains no image payload: {}",
+        truncate(&v.to_string(), 400)
+    ))
+}
+
+fn minimax_response_image_url(v: &Value) -> Option<&str> {
+    v.get("data")
+        .and_then(|d| d.get("image_urls"))
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first())
+        .and_then(Value::as_str)
+        .or_else(|| {
+            v.get("data")
+                .and_then(|d| d.get("image_url"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| {
+            v.get("data")
+                .and_then(|d| d.get("images"))
+                .and_then(Value::as_array)
+                .and_then(|arr| arr.first())
+                .and_then(|item| item.get("url"))
+                .and_then(Value::as_str)
+        })
+}
+
+fn minimax_response_image_base64(v: &Value) -> Option<&str> {
+    v.get("data")
+        .and_then(|d| d.get("image_base64"))
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first())
+        .and_then(Value::as_str)
+        .or_else(|| {
+            v.get("data")
+                .and_then(|d| d.get("image_base64"))
+                .and_then(Value::as_str)
+        })
+        .or_else(|| {
+            v.get("data")
+                .and_then(|d| d.get("images"))
+                .and_then(Value::as_array)
+                .and_then(|arr| arr.first())
+                .and_then(|item| item.get("b64_json").or_else(|| item.get("base64")))
+                .and_then(Value::as_str)
+        })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2213,6 +2366,32 @@ fn image_extension_from_mime(mime: &str) -> &'static str {
 
 fn trim_trailing_slash(v: &str) -> String {
     v.trim_end_matches('/').to_string()
+}
+
+fn size_to_minimax_aspect_ratio(size: &str) -> String {
+    let normalized = size.trim().replace('X', "x");
+    let parts = normalized.split('x').collect::<Vec<_>>();
+    if parts.len() == 2 {
+        if let (Ok(w), Ok(h)) = (
+            parts[0].trim().parse::<u64>(),
+            parts[1].trim().parse::<u64>(),
+        ) {
+            if w > 0 && h > 0 {
+                let g = gcd_u64(w, h);
+                return format!("{}:{}", w / g, h / g);
+            }
+        }
+    }
+    "1:1".to_string()
+}
+
+fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        let t = a % b;
+        a = b;
+        b = t;
+    }
+    a.max(1)
 }
 
 fn truncate(s: &str, max: usize) -> String {

@@ -62,7 +62,7 @@ fn rss_news_fetch_allows_rss_fetch_without_locator() {
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "rss_fetch.latest");
     assert_eq!(policy.contract_match, "rss_news_fetch");
-    assert!(policy.required_evidence.is_empty());
+    assert_eq!(policy.required_evidence, vec!["field_value"]);
 }
 
 #[test]
@@ -1301,6 +1301,54 @@ fn generated_file_delivery_allows_audio_synthesis_file_output() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "audio_synthesize");
+    assert_eq!(policy.contract_match, "generated_file_delivery");
+}
+
+#[test]
+fn generated_file_delivery_allows_image_generation_file_output() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+            delivery_required: true,
+            delivery_intent: OutputDeliveryIntent::FileSingle,
+            response_shape: OutputResponseShape::FileToken,
+            ..IntentOutputContract::default()
+        }),
+        "image_generate",
+        &serde_json::json!({
+            "prompt": "minimal RustClaw smoke test card",
+            "output_path": "document/skill_generate_smoke.png"
+        }),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "image_generate");
+    assert_eq!(policy.contract_match, "generated_file_delivery");
+}
+
+#[test]
+fn generated_file_delivery_allows_image_edit_file_output() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+            delivery_required: true,
+            delivery_intent: OutputDeliveryIntent::FileSingle,
+            response_shape: OutputResponseShape::FileToken,
+            ..IntentOutputContract::default()
+        }),
+        "image_edit",
+        &serde_json::json!({
+            "action": "restyle",
+            "instruction": "pixel art style",
+            "image": {"url": "https://example.test/source.png"},
+            "output_path": "document/rust_icon_pixel.png"
+        }),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "image_edit.restyle");
     assert_eq!(policy.contract_match, "generated_file_delivery");
 }
 
