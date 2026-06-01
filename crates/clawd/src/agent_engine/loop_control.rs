@@ -964,12 +964,10 @@ fn try_recover_content_excerpt_summary_answer_verifier_gap(
     route_result: Option<&crate::RouteResult>,
     reply: &mut AskReply,
 ) -> bool {
-    if !route_result.is_some_and(|route| {
-        route
-            .output_contract
-            .semantic_kind
-            .is_content_excerpt_summary()
-    }) {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if !route_allows_synthesis_recovery(route) {
         return false;
     }
     let Some(verifier) = reply
@@ -980,6 +978,16 @@ fn try_recover_content_excerpt_summary_answer_verifier_gap(
         return false;
     };
     if !verifier.high_confidence_retry_gap() {
+        return false;
+    }
+    if !verifier.missing_evidence_fields.iter().any(|field| {
+        field == "content_excerpt" || field == "any_of(command_output|content_excerpt|field_value)"
+    }) {
+        return false;
+    }
+    if !reply.task_journal.as_ref().is_some_and(|journal| {
+        crate::task_journal::evidence_coverage_for_route(route, journal).is_complete()
+    }) {
         return false;
     }
     let Some(answer) = reply
@@ -1002,6 +1010,9 @@ fn try_recover_content_excerpt_summary_answer_verifier_gap(
         })
         .map(str::trim)
         .filter(|text| !text.is_empty())
+        .filter(|text| !crate::finalize::looks_like_planner_artifact(text))
+        .filter(|text| !crate::finalize::looks_like_internal_trace_artifact(text))
+        .filter(|text| !crate::finalize::is_execution_summary_message(text))
         .map(ToString::to_string)
     else {
         return false;
@@ -1019,6 +1030,18 @@ fn try_recover_content_excerpt_summary_answer_verifier_gap(
     reply.is_llm_reply = false;
     info!("answer_verifier_retry_exhausted_recovered_with_content_excerpt_summary_synthesis");
     true
+}
+
+fn route_allows_synthesis_recovery(route: &crate::RouteResult) -> bool {
+    if route
+        .output_contract
+        .semantic_kind
+        .is_content_excerpt_summary()
+        || route.output_contract.semantic_kind == crate::OutputSemanticKind::WorkspaceProjectSummary
+    {
+        return true;
+    }
+    false
 }
 
 fn try_recover_generic_path_content_read_range_answer_verifier_gap(

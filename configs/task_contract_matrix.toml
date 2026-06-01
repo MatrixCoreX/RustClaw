@@ -312,14 +312,15 @@ semantic_kind = "workspace_project_summary"
 operation = "summarize"
 target_object = "directory"
 delivery_shape = "summary"
-allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.stat_paths", "fs_basic.read_text_range", "system_basic.tree_summary"]
-preferred_actions = ["fs_basic.list_dir", "system_basic.tree_summary", "fs_basic.read_text_range"]
-required_evidence = ["candidates", "content_excerpt"]
+allowed_actions = ["fs_basic.read_text_range", "git_basic.log", "system_basic.tree_summary"]
+preferred_actions = ["fs_basic.read_text_range", "system_basic.tree_summary"]
+required_evidence = ["content_excerpt"]
 final_answer_shape = "project_summary_grounded_in_files"
 failure_policy = "retry_with_alternatives"
 
 [contracts.workspace_project_summary.evidence_expression]
-any_of = ["candidates", "content_excerpt", "field_value"]
+all_of = ["content_excerpt"]
+any_of = ["content_excerpt", "field_value"]
 
 [contracts.scalar_count]
 semantic_kind = "scalar_count"

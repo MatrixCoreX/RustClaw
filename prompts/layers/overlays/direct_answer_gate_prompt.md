@@ -35,7 +35,8 @@ Hard rules:
 12. If the user requests only a plan for a concrete configuration/code/file change, and the target plus intended change are already known, choose `planner_execute`. Runtime planning capabilities can produce an observed plan without applying the mutation; chat-only prose must not invent changed fields, guards, restart requirements, or effects.
 13. If the request supplies inline structured records such as a JSON array and asks to transform them (sort, filter, project, group, aggregate, deduplicate, or render as JSON/markdown table/CSV), choose `planner_execute` so the structured transform skill can perform the operation. Do not approve a direct chat answer that manually computes the table when a runtime skill should own the transform.
 14. If the user asks what package manager is detected, available, installed, or most likely used on the current machine, choose `planner_execute`. The package manager must be observed through the runtime; do not answer from prior chat context or general OS assumptions.
-15. For project/product-specific operational writing, choose `planner_execute` when the requested answer is a setup guide, deployment note, channel setup/integration note, onboarding note, troubleshooting runbook, or similar instruction for the named/current project. Prior answer candidates, memory snippets, or plausible product knowledge are not runtime evidence. Keep `delivery_required=false`, use `locator_kind="current_workspace"`, and require content evidence unless the user explicitly asks for a generic template or explicitly forbids local inspection.
+15. For project/product-specific operational writing, choose `planner_execute` when the requested answer is a setup guide, deployment note, channel setup/integration note, onboarding note, troubleshooting runbook, or similar instruction for the named/current project. This is not a generic creative draft merely because the requested output is prose. Prior answer candidates, memory snippets, or plausible product knowledge are not runtime evidence. Keep `delivery_required=false`, use `locator_kind="current_workspace"`, and require content evidence unless the user explicitly asks for a generic template or explicitly forbids local inspection.
+16. Text drafting is not file creation or file delivery. If the user asks to write, draft, compose, or prepare a note/guide/article/checklist for chat consumption, keep `delivery_required=false` and `delivery_intent="none"` unless the request explicitly asks to save/create/update a file, name a target path, or deliver the result as an attachment/artifact.
 
 Canonical output contract:
 - For `direct_answer`: keep `requires_content_evidence=false`, `delivery_required=false`, `locator_kind="none"`, `delivery_intent="none"`.
@@ -46,6 +47,7 @@ Canonical output contract:
 - For archive member content requests, use `semantic_kind="archive_read"` when the user wants the content of one member inside a concrete archive; set `locator_hint` to `<archive_path> | <member_path>` where the member path is relative inside the archive.
 - For current workspace/project/repository synthesis, use `locator_kind="current_workspace"` and `semantic_kind="workspace_project_summary"` when appropriate.
 - For project-specific setup/deployment/channel integration/onboarding writing, use `locator_kind="current_workspace"`, `semantic_kind="workspace_project_summary"` or the closest supported grounded-summary semantic kind, `requires_content_evidence=true`, and `response_shape` matching the requested prose shape.
+- For project-specific prose drafts, do not set file delivery fields merely because the task uses writing verbs. The final artifact is user-visible text unless the user explicitly asks for a saved file/path or attachment delivery.
 - For structured config mutations, use `semantic_kind="config_mutation"` with `requires_content_evidence=true`; syntax/parsing validity checks remain `semantic_kind="config_validation"`, and risk/audit/security guard assessments use `semantic_kind="config_risk_assessment"`.
 - For existing-file delivery, including a file selected from a directory/listing by ordinal or order, use `decision="planner_execute"`, `response_shape="file_token"`, `delivery_required=true`, `delivery_intent="file_single"`, and `requires_content_evidence=true`. The planner/finalizer must deliver `FILE:<path>`, not a bare filename, a prose description, or pasted content.
 - If the user semantically wants to receive, hand off, or deliver an existing local file/artifact while also saying not to paste/show the body, do not reinterpret that as path-only metadata. Keep the file delivery contract and let execution return `FILE:<path>`. Judge this across languages and colloquial registers, not by fixed trigger words.
@@ -136,6 +138,7 @@ Existing selected file delivery:
 - “只聊天/不要读取/不要执行/不要使用工具”这类约束本身不是执行意图；如果交付物能用纯讨论完成，选择 `direct_answer`。
 - 当前项目、当前仓库、这里的代码、配置、文件、目录、系统状态等事实型请求，应选择 `planner_execute`，不要让 chat 编造。
 - 当前项目/产品的搭建、部署、渠道接入、渠道配置、绑定、排障或新手说明属于项目特定操作说明；除非用户明确要通用模板或明确禁止本地检查，应选择 `planner_execute` 并要求当前 workspace 证据，不要根据记忆或 normalizer 的候选草稿直接回答。
+- “写一段/起草/整理说明/写 note”默认是聊天内文案交付，不等于创建文件；只有用户明确要求保存到文件、修改某路径、生成附件或交付文件本体时，才设置文件交付。
 - 当前机器名、当前用户、当前工作目录、端口、磁盘、进程、服务等动态本机状态，要重新观察；不要从记忆或 normalizer 的 `answer_candidate` 直接回答。
 - 缺少必要对象时用 `clarify`，不要猜路径或名字。
 - 如果中文语义是在要文件本体，例如发送/交付一个已存在文件或目录列表里选中的文件，输出合同应是 `file_token`，不能只返回文件名。
@@ -146,6 +149,7 @@ Existing selected file delivery:
 ### en
 - Imperative tone alone is not execution intent. Grounding requirements decide the route.
 - For current workspace/repository/project claims, prefer `planner_execute` unless the user explicitly asks for a non-observational discussion.
+- Writing or drafting a note for chat output is not a filesystem write. Use file delivery only when the user explicitly asks for a saved file/path/document or attachment.
 - Current hostname, current user, current working directory, ports, disk, processes, and service state are dynamic runtime facts. Re-observe them instead of trusting memory or a prior answer candidate.
 - If the semantic goal is to receive the existing file itself, use file-token delivery rather than filename-only text.
 - For "previous / second previous / last / next" references to executed files or actions, use the recent executed target sequence. A path mentioned inside a previous file's content is not itself the previous file target.
