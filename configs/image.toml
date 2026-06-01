@@ -166,18 +166,18 @@ timeout_seconds = 120
 # request.model > default_model > <vendor>_models[0] > models[0] > llm.<vendor>.model
 [image_vision]
 # Routing & mode / 路由与模式
-default_vendor = "mimo"
+default_vendor = "minimax"
 adapter_mode = "compat" # Vision currently recommended to stay in compat / vision 当前建议保持 compat
 
 # Default model / 默认模型
-default_model = "mimo-v2.5"
+default_model = "MiniMax-M2.7"
 
 # Vendor models / 按厂商模型
 openai_models = ["gpt-4o-mini", "gpt-4o"]
 google_models = ["gemini-2.5-flash", "gemini-2.5-pro"]
 anthropic_models = ["claude-sonnet-4-6"]
 qwen_models = ["qwen-vl-max", "qwen-vl-plus"]
-minimax_models = ["MiniMax-Text-01"]
+minimax_models = ["MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5"]
 mimo_models = ["mimo-v2.5", "mimo-v2-omni"]
 models = ["mimo-v2.5", "mimo-v2-omni", "qwen-vl-max", "qwen-vl-plus"]
 
@@ -190,8 +190,9 @@ timeout_seconds = 90
 
 # Optional dedicated provider override / 可选独立 provider 覆盖
 # Recommended / 推荐：
-# - image_vision: Mimo `mimo-v2.5` for current default chat/vision alignment
-#   / 图片理解当前默认使用 Mimo `mimo-v2.5`，与主模型切换保持一致
+# - image_vision: MiniMax MCP image understanding with `MiniMax-M2.7` as the
+#   compat fallback label / 图片理解当前优先使用 MiniMax MCP，`MiniMax-M2.7`
+#   作为兼容回退标签
 # [image_vision.providers.google]
 # base_url = "https://generativelanguage.googleapis.com/v1beta"
 # api_key = "REPLACE_ME_GOOGLE_API_KEY"
@@ -200,7 +201,7 @@ timeout_seconds = 90
 [image_vision.providers.minimax]
 base_url = "https://api.minimaxi.com/v1"
 api_key = ""
-model = "MiniMax-Text-01"
+model = "MiniMax-M2.7"
 timeout_seconds = 90
 # [image_vision.providers.mimo]
 # base_url = "https://token-plan-sgp.xiaomimimo.com/v1"
