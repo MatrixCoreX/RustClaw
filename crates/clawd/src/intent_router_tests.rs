@@ -6657,6 +6657,45 @@ fn scalar_structured_keys_contract_repairs_to_field_value_contract() {
 }
 
 #[test]
+fn current_workspace_scalar_structured_keys_contract_repairs_to_field_value_contract() {
+    let req = "package.json 里的 name 到底是什么，只给值";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        locator_hint: "package.json".to_string(),
+        semantic_kind: OutputSemanticKind::StructuredKeys,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        req,
+        &surface,
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root"),
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(
+        reason,
+        Some("structured_keys_scalar_response_requires_field_value")
+    );
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+    assert_eq!(contract.locator_hint, "package.json");
+}
+
+#[test]
 fn planner_locator_contract_repair_requires_evidence_for_sparse_contract() {
     let req = "Read configs/config.toml and output the selected_vendor field and value";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
