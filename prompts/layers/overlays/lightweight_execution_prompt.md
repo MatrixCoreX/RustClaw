@@ -81,7 +81,7 @@ Execution preferences:
 - For ordinary repository text artifacts such as source files, prompt markdown, generated skill docs, README fragments, config-adjacent docs, or small text files, prefer `fs_basic` with `action="read_text_range"` first, then synthesize from that bounded text.
 - When the request includes inline structured records and asks for sort/filter/project/group/aggregate or JSON/markdown-table/CSV rendering, prefer the most specific enabled structured-data transform skill whose interface covers that operation. For `transform`, use `action="transform_data"` and encode operations in `ops` (for example sort as `{"op":"sort","by":"score","order":"desc"}`), not top-level `sort_by`. Pass the literal records as skill args; do not direct-answer the transformed table when that skill is available.
 - For current-machine package manager detection or `semantic_kind=package_manager_detection`, call `package_manager` with `action="detect"` before answering. Do not answer from chat memory or OS assumptions.
-- For bounded setup/deployment/onboarding evidence from root docs, use a dedicated document/content skill when its interface covers semantic parsing or section summarization; otherwise use `fs_basic` with `action="read_text_range"`, `mode="head"`, and a bounded `n` large enough to include setup sections without reading the whole repo.
+- For bounded setup/deployment/channel setup/onboarding evidence from root docs, use a dedicated document/content skill when its interface covers semantic parsing or section summarization; otherwise use `fs_basic` with `action="read_text_range"`, `mode="head"`, and a bounded `n` large enough to include setup sections without reading the whole repo.
 - For structured local field extraction, prefer `config_basic` with `action="read_field"`.
 - For structured local config mutation, prefer `config_edit` with `action="plan_config_change"` before `action="apply_config_change"`; after applying, validate and read back the edited field with `config_edit.read_back`. Do not rewrite a whole config file with `fs_basic.write_text` when `config_edit` can represent the field change.
 - For structured arrays of objects, `config_basic.read_field` accepts normal dot/bracket selectors and may also resolve `<item-name>.<field>` by finding the unique object whose `name`, `id`, or `key` equals `<item-name>`.
@@ -115,7 +115,7 @@ Terminal-step rule:
   2) `{"type":"synthesize_answer","evidence_refs":[...]}`
   3) `{"type":"respond","content":"{{last_output}}"}`
 - Do not use a chat skill just to rewrite local evidence into prose.
-- For setup/deployment/onboarding deliverables, do not let fallback synthesize from only a directory listing. Include the doc-read step in the same plan whenever concrete setup wording is requested.
+- For setup/deployment/channel setup/onboarding deliverables, do not let fallback synthesize from only a directory listing. Include the doc-read step in the same plan whenever concrete setup wording is requested.
 - Runtime no longer injects fixed documentation reads for workspace text answers. If this lightweight path is used for current-workspace wording that needs content evidence, select the bounded evidence read inside the plan before synthesis.
 
 Output-shape guard:

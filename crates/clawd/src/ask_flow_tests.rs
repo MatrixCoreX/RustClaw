@@ -1187,32 +1187,55 @@ fn direct_answer_gate_keeps_self_contained_scalar_candidate_direct() {
 
 #[test]
 fn direct_answer_gate_can_skip_pure_chat_draft_without_locator() {
+    let state = crate::AppState::test_default_with_fixture_provider();
     let mut route = chat_route_for_gate();
     route.resolved_intent =
-        "撰写关于 RustClaw 的长文\nanswer_candidate: ## RustClaw\n一段未验证的写作草稿。"
-            .to_string();
+        "撰写关于团队协作的长文\nanswer_candidate: ## 团队协作\n一段通用写作草稿。".to_string();
 
     assert!(direct_answer_gate_can_skip_for_pure_chat_draft(
-        "帮我写一篇关于 RustClaw 的长文",
+        &state,
+        "帮我写一篇关于团队协作的长文",
         Some(&route)
     ));
     assert_eq!(
         direct_answer_chat_user_request(
             &route.resolved_intent,
-            "帮我写一篇关于 RustClaw 的长文",
+            "帮我写一篇关于团队协作的长文",
             false,
         ),
-        "撰写关于 RustClaw 的长文"
+        "撰写关于团队协作的长文"
     );
 }
 
 #[test]
+fn direct_answer_gate_does_not_skip_current_workspace_identity_draft() {
+    let root = TempDirGuard::new("gate_workspace_identity_draft");
+    let workspace = root.path.join("rustclaw");
+    std::fs::create_dir_all(&workspace).expect("workspace dir");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = workspace.clone();
+    state.skill_rt.default_locator_search_dir = workspace;
+    let mut route = chat_route_for_gate();
+    route.resolved_intent =
+        "撰写关于 RustClaw 的长文\nanswer_candidate: ## RustClaw\n一段未验证的写作草稿。"
+            .to_string();
+
+    assert!(!direct_answer_gate_can_skip_for_pure_chat_draft(
+        &state,
+        "帮我写一篇关于 RustClaw 的长文",
+        Some(&route)
+    ));
+}
+
+#[test]
 fn direct_answer_gate_keeps_locator_draft_under_gate() {
+    let state = crate::AppState::test_default_with_fixture_provider();
     let mut route = chat_route_for_gate();
     route.resolved_intent =
         "撰写关于配置文件的长文\nanswer_candidate: ## 配置文件\n一段未验证的写作草稿。".to_string();
 
     assert!(!direct_answer_gate_can_skip_for_pure_chat_draft(
+        &state,
         "帮我写一篇关于 configs/config.toml 的长文",
         Some(&route)
     ));
