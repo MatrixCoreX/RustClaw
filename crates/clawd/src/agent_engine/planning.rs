@@ -8899,6 +8899,11 @@ fn normalize_planned_actions_with_original_and_context(
         actions,
     );
     let actions = canonicalize_legacy_file_config_capabilities(actions);
+    let actions = rewrite_single_target_structured_field_read_to_auto_locator(
+        route_result,
+        auto_locator_path,
+        actions,
+    );
     mark_non_mutating_run_cmd_sequences_continue_on_error(state, actions)
 }
 
@@ -9065,6 +9070,11 @@ fn normalize_legacy_compatibility_actions(
     let actions = rewrite_archive_pack_plan_to_archive_basic(
         route_result,
         skip_legacy_semantic_rewrites,
+        actions,
+    );
+    let actions = rewrite_single_target_structured_field_read_to_auto_locator(
+        route_result,
+        auto_locator_path,
         actions,
     );
     let actions =
@@ -10542,7 +10552,9 @@ fn route_locator_structured_config_path(route: &RouteResult) -> Option<String> {
     }
     matches!(
         route.output_contract.locator_kind,
-        crate::OutputLocatorKind::Path | crate::OutputLocatorKind::Filename
+        crate::OutputLocatorKind::Path
+            | crate::OutputLocatorKind::Filename
+            | crate::OutputLocatorKind::CurrentWorkspace
     )
     .then(|| hint.to_string())
 }
@@ -10853,6 +10865,17 @@ fn route_allows_structured_field_token_fallback(route: &RouteResult) -> bool {
         )
     {
         return false;
+    }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+        && !route.output_contract.locator_hint.trim().is_empty()
+    {
+        return true;
     }
     [
         "single_path_field_extraction_semantic_kind_none_is_valid",
@@ -17176,6 +17199,12 @@ enum SingleFileReadActionKind {
     SystemBasicReadRange,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SingleStructuredFieldReadActionKind {
+    ConfigBasic,
+    SystemBasic,
+}
+
 fn single_file_read_action(
     actions: &[AgentAction],
 ) -> Option<(usize, SingleFileReadActionKind, String)> {
@@ -17221,6 +17250,104 @@ fn single_file_read_action(
         }
     }
     candidate
+}
+
+fn single_structured_field_read_action(
+    actions: &[AgentAction],
+) -> Option<(usize, SingleStructuredFieldReadActionKind, String)> {
+    let mut candidate: Option<(usize, SingleStructuredFieldReadActionKind, String)> = None;
+    for (idx, action) in actions.iter().enumerate() {
+        match action {
+            AgentAction::Think { .. }
+            | AgentAction::Respond { .. }
+            | AgentAction::SynthesizeAnswer { .. } => {}
+            AgentAction::CallSkill { skill, args }
+            | AgentAction::CallTool { tool: skill, args } => {
+                let action_name = args
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .unwrap_or_default();
+                let kind = if skill.eq_ignore_ascii_case("config_basic")
+                    && matches!(action_name, "read_field" | "read_fields")
+                {
+                    SingleStructuredFieldReadActionKind::ConfigBasic
+                } else if skill.eq_ignore_ascii_case("system_basic")
+                    && matches!(action_name, "extract_field" | "extract_fields")
+                {
+                    SingleStructuredFieldReadActionKind::SystemBasic
+                } else {
+                    return None;
+                };
+                let Some(path) = args.get("path").and_then(Value::as_str) else {
+                    return None;
+                };
+                if candidate.is_some() {
+                    return None;
+                }
+                candidate = Some((idx, kind, path.trim().to_string()));
+            }
+            AgentAction::CallCapability { .. } => return None,
+        }
+    }
+    candidate
+}
+
+fn rewrite_single_target_structured_field_read_to_auto_locator(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route_result) = route_result else {
+        return actions;
+    };
+    if route_result.needs_clarify
+        || route_result.output_contract.delivery_required
+        || !route_result.output_contract.requires_content_evidence
+        || !matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
+        )
+    {
+        return actions;
+    }
+    let Some(auto_locator_path) = auto_locator_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && path_has_structured_document_extension(value))
+    else {
+        return actions;
+    };
+    let auto_locator = std::path::Path::new(auto_locator_path);
+    if !auto_locator.is_file() {
+        return actions;
+    }
+    let Some((idx, kind, current_path)) = single_structured_field_read_action(&actions) else {
+        return actions;
+    };
+    if same_existing_or_display_path(std::path::Path::new(&current_path), auto_locator) {
+        return actions;
+    }
+
+    let mut rewritten = actions;
+    let Some(action) = rewritten.get_mut(idx) else {
+        return rewritten;
+    };
+    match action {
+        AgentAction::CallSkill { args, .. } | AgentAction::CallTool { args, .. } => {
+            if let Some(obj) = args.as_object_mut() {
+                obj.insert(
+                    "path".to_string(),
+                    Value::String(auto_locator_path.to_string()),
+                );
+            }
+        }
+        _ => return rewritten,
+    }
+    info!(
+        "plan_rewrite_single_target_structured_field_read_to_auto_locator idx={} kind={:?} from={} to={}",
+        idx, kind, current_path, auto_locator_path
+    );
+    rewritten
 }
 
 fn rewrite_single_target_file_read_to_auto_locator(

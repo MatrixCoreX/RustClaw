@@ -1247,7 +1247,9 @@ fn apply_current_turn_structural_contract_repair(
         && !output_contract.delivery_required
         && matches!(
             output_contract.locator_kind,
-            OutputLocatorKind::Path | OutputLocatorKind::Filename
+            OutputLocatorKind::Path
+                | OutputLocatorKind::Filename
+                | OutputLocatorKind::CurrentWorkspace
         )
     {
         output_contract.semantic_kind = OutputSemanticKind::None;
