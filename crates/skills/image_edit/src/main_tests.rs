@@ -112,6 +112,34 @@ fn extract_qwen_choice_image_url() {
 }
 
 #[test]
+fn minimax_response_extracts_image_payloads() {
+    let with_url = json!({
+        "data": {
+            "image_urls": ["https://example.com/out.png"]
+        }
+    });
+    assert_eq!(
+        minimax_response_image_url(&with_url),
+        Some("https://example.com/out.png")
+    );
+
+    let with_b64 = json!({
+        "data": {
+            "images": [{
+                "base64": "abc"
+            }]
+        }
+    });
+    assert_eq!(minimax_response_image_base64(&with_b64), Some("abc"));
+}
+
+#[test]
+fn minimax_aspect_ratio_uses_size_ratio() {
+    assert_eq!(size_to_minimax_aspect_ratio("1024x1024"), "1:1");
+    assert_eq!(size_to_minimax_aspect_ratio("1024x768"), "4:3");
+}
+
+#[test]
 fn parse_llm_selected_index_accepts_schema_valid_json() {
     assert_eq!(parse_llm_selected_index(r#"{"selected_index":2}"#), Some(2));
     assert_eq!(

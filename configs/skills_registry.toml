@@ -595,6 +595,8 @@ capabilities = [
 # §P4.2 shape 一致性：fs.write 隐含写盘副作用，显式标 side_effect=true
 # 让 risk 路由 / finalize 决策都能拿到正确信号。
 side_effect = true
+input_schema = { type = "object", required = ["prompt"], properties = { prompt = { type = "string" }, size = { type = "string" }, style = { type = "string" }, quality = { type = "string" }, n = { type = "integer" }, output_path = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, timeout_seconds = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "image_edit"
@@ -617,6 +619,8 @@ capabilities = [
 ]
 # §P4.2 shape consistency R3：fs.write 隐含写盘副作用 → 必须 side_effect=true。
 side_effect = true
+input_schema = { type = "object", required = ["instruction"], properties = { action = { type = "string", enum = ["edit", "outpaint", "restyle", "add_remove"] }, instruction = { type = "string" }, image = { anyOf = [ { type = "string" }, { type = "object", properties = { path = { type = "string" }, url = { type = "string" }, base64 = { type = "string" } } } ] }, images = { type = "array", items = { anyOf = [ { type = "string" }, { type = "object", properties = { path = { type = "string" }, url = { type = "string" }, base64 = { type = "string" } } } ] } }, mask = { anyOf = [ { type = "string" }, { type = "object" } ] }, size = { type = "string" }, quality = { type = "string" }, n = { type = "integer" }, output_path = { type = "string" }, response_language = { type = "string" }, language = { type = "string" }, vendor = { type = "string" }, model = { type = "string" }, timeout_seconds = { type = "integer" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" }, extra = { type = "object" } } }
 
 [[skills]]
 name = "audio_transcribe"
