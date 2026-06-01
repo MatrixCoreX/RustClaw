@@ -3915,6 +3915,140 @@ fn state_patch_has_semantic_update(state_patch: Option<&Value>) -> bool {
     !map.is_empty() && map.values().any(is_meaningful_state_patch)
 }
 
+fn collect_state_patch_replacement_from_values(value: Option<&Value>, out: &mut BTreeSet<String>) {
+    match value {
+        Some(Value::Array(items)) => {
+            for item in items {
+                collect_state_patch_replacement_from_values(Some(item), out);
+            }
+        }
+        Some(Value::Object(map)) => {
+            if let Some(from) = map
+                .get("from")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                out.insert(from.to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
+fn state_patch_replacement_from_literals(map: &serde_json::Map<String, Value>) -> BTreeSet<String> {
+    let mut literals = BTreeSet::new();
+    for key in ["replacement_pairs", "active_task_replacement_pairs"] {
+        collect_state_patch_replacement_from_values(map.get(key), &mut literals);
+    }
+    if let Some(constraints) = map.get("visible_constraints").and_then(Value::as_object) {
+        collect_state_patch_replacement_from_values(
+            constraints.get("replacement_pairs"),
+            &mut literals,
+        );
+    }
+    literals
+}
+
+fn remove_required_literals_that_match_replacements(
+    value: Option<&mut Value>,
+    replacement_from_literals: &BTreeSet<String>,
+    removed: &mut BTreeSet<String>,
+) -> bool {
+    let Some(Value::Array(items)) = value else {
+        return false;
+    };
+    let before = items.len();
+    items.retain(|item| {
+        let Some(text) = item
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return true;
+        };
+        if replacement_from_literals.contains(text) {
+            removed.insert(text.to_string());
+            false
+        } else {
+            true
+        }
+    });
+    before != items.len()
+}
+
+fn append_forbidden_visible_literals(
+    map: &mut serde_json::Map<String, Value>,
+    removed: &BTreeSet<String>,
+) {
+    if removed.is_empty() {
+        return;
+    }
+    let entry = map
+        .entry("forbidden_visible_literals".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if !entry.is_array() {
+        *entry = Value::Array(Vec::new());
+    }
+    let items = entry.as_array_mut().expect("array after repair");
+    let mut existing = items
+        .iter()
+        .filter_map(Value::as_str)
+        .map(|value| value.trim().to_string())
+        .collect::<BTreeSet<_>>();
+    for value in removed {
+        if existing.insert(value.clone()) {
+            items.push(Value::String(value.clone()));
+        }
+    }
+}
+
+fn repair_state_patch_replacement_literal_conflicts(
+    state_patch: &mut Option<Value>,
+) -> Option<&'static str> {
+    let Some(Value::Object(map)) = state_patch.as_mut() else {
+        return None;
+    };
+    let replacement_from_literals = state_patch_replacement_from_literals(map);
+    if replacement_from_literals.is_empty() {
+        return None;
+    }
+
+    let mut removed = BTreeSet::new();
+    let mut changed = false;
+    for key in [
+        "required_content_literals",
+        "active_task_required_content_literals",
+    ] {
+        changed |= remove_required_literals_that_match_replacements(
+            map.get_mut(key),
+            &replacement_from_literals,
+            &mut removed,
+        );
+    }
+    if let Some(constraints) = map
+        .get_mut("visible_constraints")
+        .and_then(Value::as_object_mut)
+    {
+        for key in [
+            "required_content_literals",
+            "active_task_required_content_literals",
+        ] {
+            changed |= remove_required_literals_that_match_replacements(
+                constraints.get_mut(key),
+                &replacement_from_literals,
+                &mut removed,
+            );
+        }
+    }
+    if !changed {
+        return None;
+    }
+
+    append_forbidden_visible_literals(map, &removed);
+    Some("state_patch_replacement_literal_conflict_repair")
+}
+
 fn prompt_has_concrete_locator_for_patch_repair(
     surface: &crate::intent::surface_signals::PromptSurfaceSignals,
 ) -> bool {
@@ -9557,6 +9691,8 @@ pub(crate) async fn run_intent_normalizer(
             );
         }
         let mut state_patch = out.state_patch.clone().filter(is_meaningful_state_patch);
+        let state_patch_replacement_literal_conflict_repair =
+            repair_state_patch_replacement_literal_conflicts(&mut state_patch);
         let answer_candidate_path_repair = apply_answer_candidate_path_evidence_repair(
             &mut output_contract,
             &out.answer_candidate,
@@ -9730,6 +9866,14 @@ pub(crate) async fn run_intent_normalizer(
             );
         }
         if let Some(repair_reason) = structural_contract_repair {
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
+        }
+        if let Some(repair_reason) = state_patch_replacement_literal_conflict_repair {
             if reason.trim().is_empty() {
                 reason = repair_reason.to_string();
             } else if !reason.contains(repair_reason) {

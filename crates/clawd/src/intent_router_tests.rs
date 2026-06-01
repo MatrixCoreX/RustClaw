@@ -10752,6 +10752,41 @@ fn active_task_correction_without_policy_reuses_current_output() {
 }
 
 #[test]
+fn replacement_pairs_remove_conflicting_required_old_literals() {
+    let mut state_patch = Some(serde_json::json!({
+        "replacement_pairs": [
+            {"from": "1. Verify installation and PATH", "to": "1. Check PATH and installation"},
+            {"from": "2. Check file ownership and permissions", "to": "2. Check ownership and permissions"}
+        ],
+        "required_content_literals": [
+            "1. Verify installation and PATH",
+            "2. Check file ownership and permissions",
+            "3. Install missing packages"
+        ],
+        "forbidden_visible_literals": []
+    }));
+
+    let reason = super::repair_state_patch_replacement_literal_conflicts(&mut state_patch);
+    let patch = state_patch.expect("patch");
+
+    assert_eq!(
+        reason,
+        Some("state_patch_replacement_literal_conflict_repair")
+    );
+    assert_eq!(
+        patch["required_content_literals"],
+        serde_json::json!(["3. Install missing packages"])
+    );
+    assert_eq!(
+        patch["forbidden_visible_literals"],
+        serde_json::json!([
+            "1. Verify installation and PATH",
+            "2. Check file ownership and permissions"
+        ])
+    );
+}
+
+#[test]
 fn observed_context_summary_followup_clears_synthesis_contract() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
