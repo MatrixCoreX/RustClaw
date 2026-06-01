@@ -2294,6 +2294,7 @@ fn semantic_kind_can_execute_without_locator(kind: crate::OutputSemanticKind) ->
             | crate::OutputSemanticKind::WeatherQuery
             | crate::OutputSemanticKind::MarketQuote
             | crate::OutputSemanticKind::ImageUnderstanding
+            | crate::OutputSemanticKind::PublishingPreview
             | crate::OutputSemanticKind::PackageManagerDetection
             | crate::OutputSemanticKind::DockerPs
             | crate::OutputSemanticKind::DockerImages

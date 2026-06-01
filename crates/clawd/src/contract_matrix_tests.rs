@@ -1546,6 +1546,27 @@ fn image_understanding_allows_image_vision_analyze_alias() {
 }
 
 #[test]
+fn publishing_preview_allows_x_preview_without_locator() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::PublishingPreview,
+            requires_content_evidence: true,
+            response_shape: OutputResponseShape::OneSentence,
+            locator_kind: OutputLocatorKind::None,
+            ..IntentOutputContract::default()
+        }),
+        "x",
+        &serde_json::json!({"action":"preview","text":"RustClaw release notes","dry_run":true}),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "x.preview");
+    assert_eq!(policy.contract_match, "publishing_preview");
+    assert_eq!(policy.required_evidence, vec!["field_value"]);
+}
+
+#[test]
 fn content_excerpt_with_summary_contract_has_parsed_final_shape() {
     let output_contract = IntentOutputContract {
         semantic_kind: OutputSemanticKind::ContentExcerptWithSummary,

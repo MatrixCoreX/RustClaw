@@ -98,6 +98,7 @@
             "weather_query",
             "market_quote",
             "image_understanding",
+            "publishing_preview",
             "content_excerpt_with_summary",
             "content_presence_check",
             "excerpt_kind_judgment",
