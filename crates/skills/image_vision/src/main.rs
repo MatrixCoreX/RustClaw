@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -337,6 +338,7 @@ fn execute(
                     text,
                     timeout_seconds,
                 );
+                let text = strip_think_blocks(&text).trim().to_string();
                 let mut extra = json!({
                     "provider": vendor_name(vendor),
                     "model": model,
@@ -1135,11 +1137,19 @@ fn maybe_rewrite_image_vision_text_for_target_language(
         ) {
             let t = out.trim();
             if !t.is_empty() {
-                return t.to_string();
+                return strip_think_blocks(t).trim().to_string();
             }
         }
     }
     vision_output
+}
+
+fn strip_think_blocks(text: &str) -> String {
+    static THINK_RE: OnceLock<Regex> = OnceLock::new();
+    THINK_RE
+        .get_or_init(|| Regex::new(r"(?is)<think>.*?</think>").expect("think regex compiles"))
+        .replace_all(text, "")
+        .to_string()
 }
 
 fn action_instruction(
@@ -1385,6 +1395,9 @@ fn call_vendor_vision(
                 ))
                 .build()
                 .map_err(|err| format!("build minimax client failed: {err}"))?;
+            if let Ok(text) = minimax_mcp_vision(&vcfg, prompt, images, timeout_seconds) {
+                return Ok((text, model, "mcp"));
+            }
             let text = minimax_vision(&client, &vcfg, &model, prompt, images, max_input_bytes)?;
             Ok((text, model, "compat"))
         }
@@ -1504,6 +1517,126 @@ fn minimax_vision(
         "minimax response missing text: {}",
         provider_error_excerpt(&v, 400)
     ))
+}
+
+fn minimax_mcp_vision(
+    cfg: &VendorConfig,
+    prompt: &str,
+    images: &[ImageSource],
+    timeout_seconds: u64,
+) -> Result<String, String> {
+    if images.len() != 1 {
+        return Err("minimax mcp image understanding supports one image per call".to_string());
+    }
+    let (image_arg, cleanup_path) = image_source_for_minimax_mcp(&images[0])?;
+    let mut cmd = Command::new("npx");
+    cmd.arg("-y")
+        .arg("@jayjanii/pi-minimax-mcp")
+        .arg("understand")
+        .arg(&image_arg)
+        .arg("--prompt")
+        .arg(prompt)
+        .env("MINIMAX_API_KEY", &cfg.api_key)
+        .env("MINIMAX_API_HOST", minimax_mcp_api_host(&cfg.base_url))
+        .env(
+            "MINIMAX_MCP_STARTUP_TIMEOUT_MS",
+            std::env::var("MINIMAX_MCP_STARTUP_TIMEOUT_MS").unwrap_or_else(|_| "60000".to_string()),
+        )
+        .env(
+            "MINIMAX_MCP_TIMEOUT_MS",
+            std::env::var("MINIMAX_MCP_TIMEOUT_MS")
+                .unwrap_or_else(|_| (timeout_seconds.max(60) * 1000).to_string()),
+        );
+    if let Some(path) = path_with_local_uvx() {
+        cmd.env("PATH", path);
+    }
+    if std::env::var_os("MINIMAX_MCP_UV_PATH").is_none() {
+        if let Some(uvx) = default_uvx_path() {
+            cmd.env("MINIMAX_MCP_UV_PATH", uvx);
+        }
+    }
+    let output = cmd
+        .output()
+        .map_err(|err| format!("minimax mcp launch failed: {err}"));
+    if let Some(path) = cleanup_path {
+        let _ = std::fs::remove_file(path);
+    }
+    let output = output?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if output.status.success() && !stdout.is_empty() {
+        return Ok(stdout);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(format!(
+        "minimax mcp failed status={}: {}{}",
+        output
+            .status
+            .code()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "signal".to_string()),
+        redact_sensitive_inline(&truncate(&stderr, 600)),
+        if stdout.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " stdout={}",
+                redact_sensitive_inline(&truncate(&stdout, 300))
+            )
+        }
+    ))
+}
+
+fn image_source_for_minimax_mcp(image: &ImageSource) -> Result<(String, Option<PathBuf>), String> {
+    match image {
+        ImageSource::Url(s) => Ok((s.to_string(), None)),
+        ImageSource::Path(p) => Ok((p.to_string_lossy().to_string(), None)),
+        ImageSource::Base64(s) => {
+            let path = std::env::temp_dir().join(format!(
+                "rustclaw-image-vision-{}-{}.png",
+                std::process::id(),
+                monotonic_millis()
+            ));
+            let data = STANDARD
+                .decode(strip_base64_data_url(s))
+                .map_err(|err| format!("decode base64 image failed: {err}"))?;
+            std::fs::write(&path, data).map_err(|err| format!("write temp image failed: {err}"))?;
+            Ok((path.to_string_lossy().to_string(), Some(path)))
+        }
+    }
+}
+
+fn minimax_mcp_api_host(base_url: &str) -> String {
+    let trimmed = trim_trailing_slash(base_url);
+    trimmed
+        .strip_suffix("/v1")
+        .unwrap_or(trimmed.as_str())
+        .to_string()
+}
+
+fn path_with_local_uvx() -> Option<String> {
+    let current = std::env::var("PATH").unwrap_or_default();
+    let home = std::env::var("HOME").ok()?;
+    let local_bin = format!("{home}/.local/bin");
+    if current.split(':').any(|part| part == local_bin) {
+        Some(current)
+    } else if Path::new(&local_bin).is_dir() {
+        Some(format!("{local_bin}:{current}"))
+    } else {
+        Some(current)
+    }
+}
+
+fn default_uvx_path() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let uvx = Path::new(&home).join(".local/bin/uvx");
+    uvx.exists().then(|| uvx.to_string_lossy().to_string())
+}
+
+fn monotonic_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|v| v.as_millis())
+        .unwrap_or(0)
 }
 
 fn mimo_vision(
