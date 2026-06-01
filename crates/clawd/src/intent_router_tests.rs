@@ -10700,6 +10700,58 @@ fn active_text_correction_clears_stale_workspace_evidence_contract() {
 }
 
 #[test]
+fn active_task_correction_without_policy_reuses_current_output() {
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: Some(crate::conversation_state::ConversationState {
+            last_primary_task_prompt: Some(
+                "Write one deployment note that mentions Python 3.10".to_string(),
+            ),
+            last_primary_task_output: Some(
+                "Verify Python 3.10 is installed before deployment.".to_string(),
+            ),
+            ..crate::conversation_state::ConversationState::default()
+        }),
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    let mut turn_type = Some(TurnType::TaskCorrect);
+    let mut target_task_policy = None;
+    let mut decision = FirstLayerDecision::DirectAnswer;
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+    let mut needs_clarify = false;
+    let mut wants_file_delivery = false;
+    let mut answer_candidate = String::new();
+    let mut contract = IntentOutputContract::default();
+
+    let reason = super::apply_active_text_followup_route_repair(
+        "Correction: it should be Python 3.11, not 3.10",
+        Some(&snapshot),
+        &mut turn_type,
+        &mut target_task_policy,
+        false,
+        &mut decision,
+        &mut finalize_style,
+        &mut needs_clarify,
+        super::ScheduleKind::None,
+        false,
+        &mut wants_file_delivery,
+        &mut contract,
+        Some(&serde_json::json!({"replace": {"from": "3.10", "to": "3.11"}})),
+        false,
+        false,
+        &mut answer_candidate,
+    );
+
+    assert_eq!(reason, Some("active_text_followup_route_repair"));
+    assert_eq!(turn_type, Some(TurnType::TaskCorrect));
+    assert_eq!(target_task_policy, Some(TargetTaskPolicy::ReuseActive));
+    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+    assert!(!needs_clarify);
+    assert!(!contract.requires_content_evidence);
+}
+
+#[test]
 fn observed_context_summary_followup_clears_synthesis_contract() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {

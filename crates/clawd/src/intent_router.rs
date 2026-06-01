@@ -4273,6 +4273,18 @@ fn apply_active_text_followup_route_repair(
             Some(TargetTaskPolicy::ReuseActive | TargetTaskPolicy::ReplaceActive)
         )
     );
+    let model_marked_active_task_mutation_without_policy = matches!(
+        (*turn_type, *target_task_policy),
+        (
+            Some(
+                TurnType::TaskAppend
+                    | TurnType::TaskCorrect
+                    | TurnType::TaskReplace
+                    | TurnType::TaskScopeUpdate
+            ),
+            None
+        )
+    );
     let stale_contextual_evidence = output_contract.requires_content_evidence
         && matches!(
             output_contract.locator_kind,
@@ -4286,7 +4298,11 @@ fn apply_active_text_followup_route_repair(
     }
     let stale_scalar_candidate = semantic_active_text_candidate_repair;
 
-    if !(model_already_bound_active_task || stale_contextual_evidence || stale_scalar_candidate) {
+    if !(model_already_bound_active_task
+        || model_marked_active_task_mutation_without_policy
+        || stale_contextual_evidence
+        || stale_scalar_candidate)
+    {
         return None;
     }
 
