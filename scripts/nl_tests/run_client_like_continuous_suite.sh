@@ -1553,6 +1553,32 @@ else
 fi
 
 python3 "${ROOT_DIR}/scripts/nl_tests/tag_run_outcomes.py" "$RUN_DIR"
+if [[ "$QUALITY_GUARD" -eq 1 ]]; then
+  python3 - "$RUN_DIR/attribution.jsonl" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+bad = []
+if path.exists():
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            if row.get("attribution") == "verifier_should_retry_not_applied":
+                bad.append(row)
+if bad:
+    print(
+        "QUALITY_GUARD_FAIL verifier_should_retry_not_applied="
+        f"{len(bad)} first={bad[0].get('file')} reason={bad[0].get('reason')}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
+fi
 print_prompt_budget_report "$RUN_DIR"
 print_llm_metrics_report "$RUN_DIR"
 
