@@ -9482,6 +9482,45 @@ fn scalar_path_directory_locator_search_uses_structural_name_target() {
 }
 
 #[test]
+fn scalar_path_directory_locator_search_resolves_unique_entry_token_without_phrase_matching() {
+    let root = TempDirGuard::new("scalar_auto_locator_search_unique_token");
+    fs::write(root.path.join("ABCD.txt"), "hello").expect("write target");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = root_path.clone();
+    route.output_contract.delivery_required = false;
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+
+    let plan = scalar_path_directory_locator_search_deterministic_plan_result(
+        "find a named item inside the resolved directory",
+        Some(&route),
+        &loop_state,
+        Some(&root_path),
+        &format!("Inside {root_path}, find abcd and return only the path"),
+    )
+    .expect("unique existing token should define the directory-scoped lookup target");
+
+    match &plan.steps[0].to_agent_action() {
+        Some(AgentAction::CallTool { tool, args }) => {
+            assert_eq!(tool, "fs_basic");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("find_entries")
+            );
+            assert_eq!(args.get("pattern").and_then(Value::as_str), Some("abcd"));
+        }
+        other => panic!("expected fs_basic find_entries action, got {other:?}"),
+    }
+}
+
+#[test]
 fn scalar_path_auto_locator_directory_builds_observation_plan() {
     let root = TempDirGuard::new("scalar_auto_locator_dir");
     let root_path = root.path.display().to_string();
