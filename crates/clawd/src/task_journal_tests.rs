@@ -1767,15 +1767,7 @@ fn x_preview_output_counts_as_field_value_evidence() {
         step_id: "step_1".to_string(),
         skill: "x".to_string(),
         status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            serde_json::json!({
-                "status": "ok",
-                "text": "Preview: RustClaw release notes",
-                "extra": {"action": "preview", "dry_run": true},
-                "error_text": null
-            })
-            .to_string(),
-        ),
+        output: Some("x skill dry_run=1, preview post: RustClaw release notes".to_string()),
         error: None,
         started_at: 1,
         finished_at: 2,
@@ -1786,7 +1778,7 @@ fn x_preview_output_counts_as_field_value_evidence() {
     assert!(coverage.observed_canonical.contains("field_value"));
     assert!(coverage
         .observed_extractors
-        .contains("x.structured_json_v1"));
+        .contains("x.text_legacy_v1"));
 }
 
 #[test]

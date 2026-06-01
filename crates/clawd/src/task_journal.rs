@@ -2551,6 +2551,13 @@ fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::PublishingPreview
+        && (observed_canonical.contains("command_output")
+            || observed_canonical.contains("content_excerpt")
+            || observed_fields.contains("text_excerpt"))
+    {
+        observed_canonical.insert("field_value".to_string());
+    }
     if route.output_contract.semantic_kind == crate::OutputSemanticKind::SqliteDatabaseKindJudgment
         && (observed_canonical.contains("candidates")
             || observed_fields.contains("rows")
