@@ -1201,6 +1201,7 @@ fn apply_current_turn_structural_contract_repair(
 
     if output_contract.semantic_kind == OutputSemanticKind::ScalarPathOnly
         && req_surface.has_structured_target_refinement()
+        && !surface_has_directory_scoped_filename_lookup(req, req_surface, workspace_root)
     {
         output_contract.semantic_kind = OutputSemanticKind::None;
         output_contract.requires_content_evidence = true;
@@ -1359,6 +1360,32 @@ fn structured_config_keys_contract_from_surface(
             },
         )
     })
+}
+
+fn surface_has_directory_scoped_filename_lookup(
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
+) -> bool {
+    if req_surface.filename_candidates.is_empty() {
+        return false;
+    }
+    crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(req)
+        .into_iter()
+        .filter(|locator| matches!(locator.locator_kind, OutputLocatorKind::Path))
+        .any(|locator| {
+            let raw = locator.locator_hint.trim();
+            if raw.is_empty() {
+                return false;
+            }
+            let path = Path::new(raw);
+            let path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                workspace_root.join(path)
+            };
+            path.is_dir()
+        })
 }
 
 fn config_mutation_contract_from_surface(
@@ -5039,6 +5066,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("For directory/file inventory with name or extension filtering, set requires_content_evidence=true and locator_kind=\"current_workspace\" or \"path\". Use semantic_kind=\"file_names\" only when the final answer is an exact file or mixed entry names-only list. Use semantic_kind=\"directory_names\" when the final answer is exact folder/directory names only. Use semantic_kind=\"directory_entry_groups\" when the final answer must separate the same directory's files and directories into groups. Use semantic_kind=\"file_paths\" when the final answer must be file paths, especially repository/workspace-wide extension searches or representative file path lists. If the same request also asks for explanation, purpose, judgment, comparison, or a brief conclusion, do not use an exact names/paths contract; use directory_purpose_summary when it asks what entries are for / more like, otherwise keep semantic_kind=\"none\" and preserve the combined listing+synthesis requirement in resolved_user_intent/reason. If a nuance has no enum, keep response_shape=\"free\" or semantic_kind=\"none\" instead of inventing enum values.".to_string());
     parts.push("For bounded or ordered direct child inventory of a directory/workspace, including modification-time or recency ordering, keep the route executable with response_shape=\"strict\", requires_content_evidence=true, delivery_required=false, and semantic_kind=\"directory_entry_groups\" unless the final answer is restricted to files-only or directories-only. Preserve the ordering/count requirement in resolved_user_intent; do not downgrade such requests to semantic_kind=\"none\" or a generic tree/workspace overview.".to_string());
     parts.push("Use decision=\"planner_execute\" when the request inspects local/system/workspace state, whether the final answer is direct raw/scalar/list output or a narrative synthesis. For current-directory or workspace-location scalar answers, set output_contract.response_shape=\"scalar\" and output_contract.semantic_kind=\"scalar_path_only\" from the request meaning, not from local phrase-classifier hints.".to_string());
+    parts.push("For directory-scoped locator search where the user wants the resolved entry path itself, use response_shape=\"scalar\", semantic_kind=\"scalar_path_only\", requires_content_evidence=true, delivery_required=false, and bind the concrete directory as locator context while preserving the target entry name/stem in resolved_user_intent.".to_string());
     parts.push("For recall questions, use exact values from RECENT/MEMORY. If found, put the value in answer_candidate and resolved_user_intent, set needs_clarify=false, and set decision=\"direct_answer\". Never invent recall-specific decisions. A request for a summary, recap, explanation, conclusion, judgment, or what something verifies/means is not a recall question; keep that deliverable in resolved_user_intent and leave answer_candidate empty unless the current request also explicitly asks for an exact scalar.".to_string());
     parts.push("For requests that depend on prior context, copy the relevant RECENT/MEMORY facts into resolved_user_intent so the next stage has enough context.".to_string());
     parts.push("Use ALIASES only for temporary references already defined in this session. When the current message mentions one, resolve it in resolved_user_intent and locator fields when relevant.".to_string());

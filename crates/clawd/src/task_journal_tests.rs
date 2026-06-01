@@ -1776,9 +1776,7 @@ fn x_preview_output_counts_as_field_value_evidence() {
     let coverage = evidence_coverage_for_route(&route, &journal);
     assert!(coverage.is_complete(), "coverage: {coverage:?}");
     assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage
-        .observed_extractors
-        .contains("x.text_legacy_v1"));
+    assert!(coverage.observed_extractors.contains("x.text_legacy_v1"));
 }
 
 #[test]

@@ -3488,7 +3488,10 @@ fn scalar_path_directory_locator_search_observation_plan(
     if !Path::new(&root).is_dir() {
         return None;
     }
-    let target = single_name_target_for_directory_locator(route, current_user_text)?;
+    let target =
+        single_name_target_for_directory_locator(route, current_user_text).or_else(|| {
+            single_existing_name_target_for_directory_locator(&root, route, current_user_text)
+        })?;
     Some(vec![AgentAction::CallTool {
         tool: "fs_basic".to_string(),
         args: serde_json::json!({
@@ -4790,7 +4793,7 @@ fn single_quoted_search_name_target(text: &str) -> Option<String> {
     (candidates.len() == 1).then(|| candidates.remove(0))
 }
 
-fn single_identifier_search_name_target_outside_locators(text: &str) -> Option<String> {
+fn search_name_targets_outside_locators(text: &str) -> Vec<String> {
     let mut remaining = text.to_string();
     for locator in
         crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(text)
@@ -4806,7 +4809,76 @@ fn single_identifier_search_name_target_outside_locators(text: &str) -> Option<S
     {
         push_unique_search_name_candidate(&mut candidates, token);
     }
+    candidates
+}
+
+fn single_identifier_search_name_target_outside_locators(text: &str) -> Option<String> {
+    let mut candidates = search_name_targets_outside_locators(text);
     (candidates.len() == 1).then(|| candidates.remove(0))
+}
+
+fn single_existing_name_target_for_directory_locator(
+    root: &str,
+    route: &RouteResult,
+    current_user_text: &str,
+) -> Option<String> {
+    let mut matching_tokens = Vec::new();
+    for text in [current_user_text, route.resolved_intent.as_str()] {
+        for token in search_name_targets_outside_locators(text) {
+            if directory_has_unique_entry_for_search_name(root, &token)
+                && !matching_tokens
+                    .iter()
+                    .any(|existing: &String| existing.eq_ignore_ascii_case(&token))
+            {
+                matching_tokens.push(token);
+            }
+        }
+    }
+    (matching_tokens.len() == 1).then(|| matching_tokens.remove(0))
+}
+
+fn directory_has_unique_entry_for_search_name(root: &str, token: &str) -> bool {
+    let root = Path::new(root);
+    if !root.is_dir() {
+        return false;
+    }
+    let token = token.to_ascii_lowercase();
+    if token.len() < 2 {
+        return false;
+    }
+    let mut stack = vec![root.to_path_buf()];
+    let mut visits = 0usize;
+    let mut matches = 0usize;
+    while let Some(dir) = stack.pop() {
+        visits = visits.saturating_add(1);
+        if visits > 10_000 || matches > 1 {
+            return false;
+        }
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            let name = name.to_ascii_lowercase();
+            let stem = path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .map(|value| value.to_ascii_lowercase());
+            if name == token || stem.as_deref() == Some(token.as_str()) {
+                matches = matches.saturating_add(1);
+                if matches > 1 {
+                    return false;
+                }
+            }
+            if path.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+    matches == 1
 }
 
 fn single_name_target_for_directory_locator(

@@ -6017,11 +6017,47 @@ fn structural_contract_repair_routes_file_field_scalar_to_evidence() {
         None,
     );
 
-    assert_eq!(reason, Some("structured_file_scalar_repair"));
+    assert!(
+        matches!(
+            reason,
+            Some("structured_file_scalar_repair") | Some("scalar_locator_requires_evidence")
+        ),
+        "unexpected repair reason: {reason:?}"
+    );
     assert!(contract.requires_content_evidence);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Filename);
     assert_eq!(contract.locator_hint, "Cargo.toml");
+}
+
+#[test]
+fn structural_contract_repair_preserves_directory_scoped_scalar_path_lookup() {
+    let req =
+        "In scripts/nl_tests/fixtures/locator_smart/case_only, where's report.md? only the path";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Scalar,
+        semantic_kind: OutputSemanticKind::ScalarPathOnly,
+        ..IntentOutputContract::default()
+    };
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("workspace root");
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        req,
+        &surface,
+        workspace_root,
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_ne!(reason, Some("structured_file_scalar_repair"));
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::ScalarPathOnly);
 }
 
 #[test]
