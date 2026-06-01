@@ -851,6 +851,9 @@ fn parse_gate_semantic_kind(raw: &str) -> crate::OutputSemanticKind {
         | "image_extract"
         | "image_compare"
         | "screenshot_summary" => crate::OutputSemanticKind::ImageUnderstanding,
+        "publishing_preview" | "social_post_preview" | "channel_draft_preview" => {
+            crate::OutputSemanticKind::PublishingPreview
+        }
         "package_manager_detection" | "package_manager_detect" | "package_detect_manager" => {
             crate::OutputSemanticKind::PackageManagerDetection
         }
@@ -2108,7 +2111,8 @@ fn direct_answer_gate_contract_allows_locatorless_execution(
         | crate::OutputSemanticKind::DockerContainerLifecycle
         | crate::OutputSemanticKind::WeatherQuery
         | crate::OutputSemanticKind::MarketQuote
-        | crate::OutputSemanticKind::ImageUnderstanding => true,
+        | crate::OutputSemanticKind::ImageUnderstanding
+        | crate::OutputSemanticKind::PublishingPreview => true,
         _ => false,
     }
 }

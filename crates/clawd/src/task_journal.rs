@@ -908,6 +908,7 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         "rss_fetch.structured_json_v1",
         &["candidates", "content_excerpt", "field_value"],
     ),
+    step_json_extractor("x", "x.structured_json_v1", &["field_value"]),
     step_json_extractor(
         "image_generate",
         "image_generate.structured_json_v1",
@@ -1052,6 +1053,11 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         "write_file",
         "write_file.text_legacy_v1",
         &["legacy_machine_tokens", "path"],
+    ),
+    step_text_extractor(
+        "x",
+        "x.text_legacy_v1",
+        &["field_value", "legacy_machine_tokens"],
     ),
     EvidenceExtractorSpec {
         observation_source: EvidenceObservationSource::StepOutput,
