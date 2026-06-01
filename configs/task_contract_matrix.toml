@@ -245,6 +245,21 @@ required_evidence = ["content_excerpt"]
 final_answer_shape = "summary_grounded_in_excerpt"
 failure_policy = "retry_with_alternatives"
 
+[contracts.publishing_preview]
+semantic_kind = "publishing_preview"
+operation = "inspect"
+target_object = "web"
+delivery_shape = "summary"
+allowed_actions = ["x"]
+preferred_actions = ["x"]
+required_evidence = ["field_value"]
+final_answer_shape = "raw_output_or_short_summary"
+failure_policy = "retry_with_alternatives"
+
+[[contracts.publishing_preview.observation_extractors]]
+source = "x"
+extractor_kind = "text_legacy"
+
 [contracts.content_excerpt_with_summary]
 semantic_kind = "content_excerpt_with_summary"
 operation = "summarize"

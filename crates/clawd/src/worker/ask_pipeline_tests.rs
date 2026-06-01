@@ -1331,6 +1331,31 @@ fn locatorless_image_understanding_can_execute_without_session_anchor() {
 }
 
 #[test]
+fn locatorless_publishing_preview_can_execute_without_session_anchor() {
+    let state = test_state_with_root(make_temp_root("locatorless_publishing_preview"));
+    let mut route = executable_filename_route();
+    route.resolved_intent = "Draft a channel post preview and do not publish it.".to_string();
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::PublishingPreview;
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(!locatorless_observation_route_should_force_clarify(
+        &state,
+        "draft a channel post preview without publishing",
+        &route,
+        None,
+        &snapshot,
+    ));
+}
+
+#[test]
 fn locatorless_scalar_raw_runtime_observation_can_plan_without_state_patch() {
     let state = test_state_with_root(make_temp_root("locatorless_runtime_scalar_raw"));
     let mut route = executable_filename_route();

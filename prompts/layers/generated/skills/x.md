@@ -20,6 +20,8 @@
 
 ## Actions (from interface)
 - No action field is required.
+- Optional action hints `preview`, `draft`, or `post` should be treated as draft/preview unless `send=true` and `dry_run=false`.
+- Optional action hint `publish` is allowed only with `send=true` and `dry_run=false`.
 - Behavior is controlled by `send` / `dry_run` flags on a post payload.
 
 ## Parameter Contract (from interface)
