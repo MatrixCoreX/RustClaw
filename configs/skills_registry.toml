@@ -291,6 +291,18 @@ aliases = []
 timeout_seconds = 30
 prompt_file = "prompts/skills/x.md"
 output_kind = "text"
+description = "Draft or publish social posts through X/Twitter-like channel tooling. Preview/dry-run requests should call this skill with dry_run=true instead of answering as ordinary chat text."
+semantic_tags = ["publishing", "social_post", "draft_preview", "dry_run", "external_channel"]
+risk_level = "high"
+auto_invocable = true
+side_effect = true
+retryable = true
+planner_capabilities = [
+  { name = "x.draft_preview", action = "preview", effect = "observe", required = ["text"], optional = ["dry_run", "send"], risk_level = "low", preferred = true },
+  { name = "x.publish", action = "publish", effect = "external", required = ["text", "send"], optional = ["dry_run"], risk_level = "high" },
+]
+input_schema = { type = "object", required = ["text"], properties = { action = { type = "string", enum = ["post", "draft", "preview", "publish"] }, text = { type = "string" }, dry_run = { type = "boolean" }, send = { type = "boolean" }, confirm_send = { type = "boolean" } } }
+output_schema = { type = "object", required = ["text"], properties = { text = { type = "string" } } }
 
 [[skills]]
 name = "system_basic"

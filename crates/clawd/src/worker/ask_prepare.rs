@@ -564,6 +564,7 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
         "weather_query" => Some(crate::OutputSemanticKind::WeatherQuery),
         "market_quote" => Some(crate::OutputSemanticKind::MarketQuote),
         "image_understanding" => Some(crate::OutputSemanticKind::ImageUnderstanding),
+        "publishing_preview" => Some(crate::OutputSemanticKind::PublishingPreview),
         "archive_list" => Some(crate::OutputSemanticKind::ArchiveList),
         "archive_read" => Some(crate::OutputSemanticKind::ArchiveRead),
         "archive_pack" => Some(crate::OutputSemanticKind::ArchivePack),

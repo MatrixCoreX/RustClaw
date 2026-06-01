@@ -1757,6 +1757,39 @@ fn image_vision_output_counts_as_content_excerpt_evidence() {
 }
 
 #[test]
+fn x_preview_output_counts_as_field_value_evidence() {
+    let mut journal = TaskJournal::for_task("task-publishing-preview", "ask", "预览发布文案");
+    let mut route = route_for_semantic(crate::OutputSemanticKind::PublishingPreview);
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    journal.record_route_result(&route);
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "x".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            serde_json::json!({
+                "status": "ok",
+                "text": "Preview: RustClaw release notes",
+                "extra": {"action": "preview", "dry_run": true},
+                "error_text": null
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let coverage = evidence_coverage_for_route(&route, &journal);
+    assert!(coverage.is_complete(), "coverage: {coverage:?}");
+    assert!(coverage.observed_canonical.contains("field_value"));
+    assert!(coverage
+        .observed_extractors
+        .contains("x.structured_json_v1"));
+}
+
+#[test]
 fn scalar_path_only_results_array_counts_as_field_value_evidence() {
     let mut journal = TaskJournal::for_task("task-scalar-path", "ask", "找到路径");
     let route = route_for_semantic(crate::OutputSemanticKind::ScalarPathOnly);

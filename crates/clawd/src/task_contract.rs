@@ -361,6 +361,7 @@ fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
         | OutputSemanticKind::WeatherQuery
         | OutputSemanticKind::MarketQuote
         | OutputSemanticKind::ImageUnderstanding => return TaskTargetObject::Web,
+        OutputSemanticKind::PublishingPreview => return TaskTargetObject::Web,
         OutputSemanticKind::PackageManagerDetection => return TaskTargetObject::System,
         _ => {}
     }
@@ -406,6 +407,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::DockerContainerLifecycle => TaskOperation::Modify,
         OutputSemanticKind::ServiceStatus
         | OutputSemanticKind::PackageManagerDetection
+        | OutputSemanticKind::PublishingPreview
         | OutputSemanticKind::HiddenEntriesCheck
         | OutputSemanticKind::ContentPresenceCheck
         | OutputSemanticKind::ScalarPathOnly
@@ -543,6 +545,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         }
         OutputSemanticKind::ServiceStatus
         | OutputSemanticKind::RssNewsFetch
+        | OutputSemanticKind::PublishingPreview
         | OutputSemanticKind::PackageManagerDetection
         | OutputSemanticKind::StructuredKeys
         | OutputSemanticKind::SqliteDatabaseKindJudgment
