@@ -1687,35 +1687,51 @@ fn recent_artifacts_judgment_allows_bounded_content_evidence() {
 }
 
 #[test]
-fn workspace_project_summary_allows_directory_inventory_evidence() {
-    for (capability, args, expected_action) in [
-        (
-            "fs_basic",
-            serde_json::json!({"action":"list_dir","path":"/workspace","names_only":true}),
-            "fs_basic.list_dir",
-        ),
-        (
-            "system_basic",
-            serde_json::json!({"action":"tree_summary","path":"/workspace","max_depth":1}),
-            "system_basic.tree_summary",
-        ),
-    ] {
-        let policy = action_policy_for_output_contract(
-            Some(&IntentOutputContract {
-                semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
-                requires_content_evidence: true,
-                locator_kind: OutputLocatorKind::CurrentWorkspace,
-                ..IntentOutputContract::default()
-            }),
-            capability,
-            &args,
-        )
-        .expect("policy decision");
+fn workspace_project_summary_requires_bounded_content_after_tree_discovery() {
+    let tree_policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            ..IntentOutputContract::default()
+        }),
+        "system_basic",
+        &serde_json::json!({"action":"tree_summary","path":"/workspace","max_depth":1}),
+    )
+    .expect("policy decision");
+    assert!(tree_policy.is_allowed(), "{tree_policy:?}");
+    assert_eq!(tree_policy.action_key, "system_basic.tree_summary");
+    assert_eq!(tree_policy.contract_match, "workspace_project_summary");
 
-        assert!(policy.is_allowed(), "{policy:?}");
-        assert_eq!(policy.action_key, expected_action);
-        assert_eq!(policy.contract_match, "workspace_project_summary");
-    }
+    let read_policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            ..IntentOutputContract::default()
+        }),
+        "fs_basic",
+        &serde_json::json!({"action":"read_text_range","path":"README.md","mode":"head","n":80}),
+    )
+    .expect("policy decision");
+    assert!(read_policy.is_allowed(), "{read_policy:?}");
+    assert_eq!(read_policy.action_key, "fs_basic.read_text_range");
+    assert_eq!(read_policy.contract_match, "workspace_project_summary");
+
+    let list_policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            ..IntentOutputContract::default()
+        }),
+        "fs_basic",
+        &serde_json::json!({"action":"list_dir","path":"/workspace","names_only":true}),
+    )
+    .expect("policy decision");
+    assert!(!list_policy.is_allowed(), "{list_policy:?}");
+    assert_eq!(list_policy.action_key, "fs_basic.list_dir");
+    assert_eq!(list_policy.contract_match, "workspace_project_summary");
 }
 
 #[test]
