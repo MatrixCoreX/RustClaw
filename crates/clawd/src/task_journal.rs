@@ -899,6 +899,26 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
     ),
     step_json_extractor("transform", "transform.structured_json_v1", &["path"]),
     step_json_extractor(
+        "audio_synthesize",
+        "audio_synthesize.structured_json_v1",
+        &["field_value", "path"],
+    ),
+    step_json_extractor(
+        "rss_fetch",
+        "rss_fetch.structured_json_v1",
+        &["candidates", "content_excerpt", "field_value"],
+    ),
+    step_json_extractor(
+        "image_generate",
+        "image_generate.structured_json_v1",
+        &["field_value", "path"],
+    ),
+    step_json_extractor(
+        "image_edit",
+        "image_edit.structured_json_v1",
+        &["field_value", "path"],
+    ),
+    step_json_extractor(
         "archive_basic",
         "archive_basic.structured_json_v1",
         &["candidates", "content_excerpt", "count", "path"],
