@@ -1276,6 +1276,10 @@ fn direct_answer_gate_can_skip_for_pure_chat_draft(
             .is_none_or(|confidence| confidence < 0.80)
         || route.wants_file_delivery
         || !matches!(route.schedule_kind, crate::ScheduleKind::None)
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar
+        )
         || route.output_contract.requires_content_evidence
         || !direct_answer_gate_contract_is_pure_chat(&route.output_contract)
     {

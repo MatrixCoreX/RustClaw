@@ -1208,6 +1208,20 @@ fn direct_answer_gate_can_skip_pure_chat_draft_without_locator() {
 }
 
 #[test]
+fn direct_answer_gate_does_not_skip_scalar_answer_candidate() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut route = chat_route_for_gate();
+    route.resolved_intent = "输出当前用户名\nanswer_candidate: admin".to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+
+    assert!(!direct_answer_gate_can_skip_for_pure_chat_draft(
+        &state,
+        "只输出当前用户名，不要解释",
+        Some(&route)
+    ));
+}
+
+#[test]
 fn direct_answer_gate_does_not_skip_current_workspace_identity_draft() {
     let root = TempDirGuard::new("gate_workspace_identity_draft");
     let workspace = root.path.join("rustclaw");

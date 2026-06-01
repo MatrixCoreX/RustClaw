@@ -537,7 +537,11 @@ pub(super) async fn run_agent_with_loop(
             {
                 return Ok(reply);
             }
-            if try_recover_structured_search_answer_verifier_gap(user_text, &mut reply) {
+            if try_recover_structured_search_answer_verifier_gap(
+                route_result,
+                user_text,
+                &mut reply,
+            ) {
                 return Ok(reply);
             }
             if try_recover_generic_path_content_read_range_answer_verifier_gap(
@@ -911,9 +915,13 @@ fn try_recover_structured_count_answer_verifier_gap(
 }
 
 fn try_recover_structured_search_answer_verifier_gap(
+    route_result: Option<&crate::RouteResult>,
     user_text: &str,
     reply: &mut AskReply,
 ) -> bool {
+    if !route_allows_structured_search_recovery(route_result) {
+        return false;
+    }
     let Some(verifier) = reply
         .task_journal
         .as_ref()
@@ -958,6 +966,18 @@ fn try_recover_structured_search_answer_verifier_gap(
         finding.action, finding.count
     );
     true
+}
+
+fn route_allows_structured_search_recovery(route_result: Option<&crate::RouteResult>) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::FilePaths
+    )
 }
 
 fn try_recover_content_excerpt_summary_answer_verifier_gap(
