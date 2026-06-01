@@ -619,6 +619,13 @@ fn content_excerpt_summary_verifier_exhaustion_recovers_with_synthesis_output() 
     });
     journal
         .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_0",
+            "fs_basic",
+            r#"{"action":"read_range","path":"README.md","excerpt":"1|# RustClaw\n2|Observed excerpt for summary."}"#,
+        ));
+    journal
+        .step_results
         .push(crate::task_journal::TaskJournalStepTrace {
             step_id: "step_1".to_string(),
             skill: "synthesize_answer".to_string(),
@@ -657,6 +664,95 @@ fn content_excerpt_summary_verifier_exhaustion_recovers_with_synthesis_output() 
         Some(crate::task_journal::TaskJournalFinalStatus::Success)
     );
     assert!(journal.answer_verifier_summary.is_none());
+}
+
+#[test]
+fn workspace_project_summary_verifier_exhaustion_recovers_with_synthesis_output() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-workspace", "ask", "prompt");
+    journal.record_route_result(&route);
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["content_excerpt".to_string()],
+        answer_incomplete_reason: "retry exhausted after an exploratory miss".to_string(),
+        should_retry: true,
+        retry_instruction: "answer from the already observed README excerpt".to_string(),
+        confidence: 0.95,
+    });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","path":"README.md","excerpt":"15|- multi-channel entry points: Telegram, WeChat, Feishu, Lark, WhatsApp Cloud, WhatsApp Web, browser UI, and optional `webd`"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "synthesize_answer",
+            "RustClaw supports multi-channel entry via Telegram, WeChat, Feishu, Lark, WhatsApp Cloud, WhatsApp Web, browser UI, and optional `webd`. Concrete channel setup depends on the chosen channel's documented setup path.",
+        ));
+    let mut reply =
+        AskReply::non_llm("failed exploratory answer".to_string()).with_task_journal(journal);
+
+    assert!(try_recover_content_excerpt_summary_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
+
+    assert!(!reply.should_fail_task);
+    assert!(reply.text.contains("multi-channel entry"));
+    assert_eq!(reply.messages, vec![reply.text.clone()]);
+    let journal = reply.task_journal.as_ref().expect("journal");
+    assert_eq!(
+        journal.final_status,
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+    assert!(journal.answer_verifier_summary.is_none());
+}
+
+#[test]
+fn workspace_project_summary_verifier_exhaustion_does_not_recover_unsupported_claims() {
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-workspace", "ask", "prompt");
+    journal.record_route_result(&route);
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["unsupported_claims".to_string()],
+        answer_incomplete_reason: "answer adds setup steps not supported by observed excerpts"
+            .to_string(),
+        should_retry: true,
+        retry_instruction: "rewrite from observed channel surfaces only".to_string(),
+        confidence: 0.95,
+    });
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","path":"README.md","excerpt":"15|- multi-channel entry points: Telegram, WeChat, Feishu, Lark, WhatsApp Cloud, WhatsApp Web, browser UI, and optional `webd`"}"#,
+        ));
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_2",
+            "synthesize_answer",
+            "Unsupported setup steps should not be recovered.",
+        ));
+    let mut reply =
+        AskReply::non_llm("failed exploratory answer".to_string()).with_task_journal(journal);
+
+    assert!(!try_recover_content_excerpt_summary_answer_verifier_gap(
+        Some(&route),
+        &mut reply
+    ));
 }
 
 #[test]
