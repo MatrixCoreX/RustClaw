@@ -10413,7 +10413,7 @@ fn scope_refinement_repair_does_not_override_explicit_locator() {
     );
 
     assert_eq!(reason, None);
-    assert_eq!(turn_type, Some(TurnType::TaskRequest));
+    assert_eq!(turn_type, Some(TurnType::TaskCorrect));
     assert_eq!(target_task_policy, Some(TargetTaskPolicy::Standalone));
     assert_eq!(decision, FirstLayerDecision::Clarify);
     assert!(needs_clarify);
@@ -11242,6 +11242,56 @@ fn active_task_output_refinement_clarify_is_resolved() {
         &IntentOutputContract::default(),
         None,
     ));
+}
+
+#[test]
+fn active_reuse_task_request_clarify_is_repaired_to_current_output_refinement() {
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: Some(crate::conversation_state::ConversationState {
+            last_primary_task_prompt: Some("Summarize this repository".to_string()),
+            last_primary_task_output: Some(
+                "RustClaw has a browser UI for non-technical users.".to_string(),
+            ),
+            ..crate::conversation_state::ConversationState::default()
+        }),
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    let mut turn_type = Some(TurnType::TaskRequest);
+    let mut target_task_policy = Some(TargetTaskPolicy::ReuseActive);
+    let mut decision = FirstLayerDecision::Clarify;
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+    let mut needs_clarify = true;
+    let mut wants_file_delivery = false;
+    let mut answer_candidate = String::new();
+    let mut contract = IntentOutputContract::default();
+
+    let reason = super::apply_active_text_followup_route_repair(
+        "Output a two-row markdown table",
+        Some(&snapshot),
+        &mut turn_type,
+        &mut target_task_policy,
+        false,
+        &mut decision,
+        &mut finalize_style,
+        &mut needs_clarify,
+        super::ScheduleKind::None,
+        false,
+        &mut wants_file_delivery,
+        &mut contract,
+        None,
+        false,
+        false,
+        &mut answer_candidate,
+    );
+
+    assert_eq!(reason, Some("active_text_followup_route_repair"));
+    assert_eq!(turn_type, Some(TurnType::TaskCorrect));
+    assert_eq!(target_task_policy, Some(TargetTaskPolicy::ReuseActive));
+    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+    assert!(!needs_clarify);
+    assert!(!contract.requires_content_evidence);
 }
 
 #[test]
