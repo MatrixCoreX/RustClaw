@@ -52,6 +52,26 @@ fn parse_action_normalizes_analyze_alias_to_describe() {
 }
 
 #[test]
+fn minimax_mcp_api_host_strips_openai_compat_suffix() {
+    assert_eq!(
+        minimax_mcp_api_host("https://api.minimaxi.com/v1"),
+        "https://api.minimaxi.com"
+    );
+    assert_eq!(
+        minimax_mcp_api_host("https://api.minimaxi.com"),
+        "https://api.minimaxi.com"
+    );
+}
+
+#[test]
+fn strip_think_blocks_removes_model_reasoning() {
+    assert_eq!(
+        strip_think_blocks("<think>hidden</think>\n可见内容").trim(),
+        "可见内容"
+    );
+}
+
+#[test]
 fn provider_error_excerpt_redacts_secret_like_values() {
     let fake_openai_key = ["sk", "proj", "secret123456789"].join("-");
     let fake_plain_key = ["plain", "secret", "token"].join("-");

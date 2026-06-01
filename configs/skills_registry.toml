@@ -543,8 +543,8 @@ semantic_tags = ["image_understanding", "image_description", "image_extract", "i
 # §P4.1 / §P4.4 E1.d：image_vision 调远端多模态 vendor 读图返回描述，
 # 不写盘 → 只声明 llm + net + secrets。命名遵守 <用途>_<vendor>_api_key
 # 规范，保持与 image_edit / image_generation / chat 四套 LLM 配置完全独立。
-# 当前默认 default_vendor=mimo（见 configs/image.toml [image_vision]），默认复用
-# 主 LLM provider 注入的 OPENAI_* / MIMO_API_KEY；启用独立 vendor 段时再同步追加
+# 当前默认 default_vendor=minimax（见 configs/image.toml [image_vision]），默认复用
+# 主 LLM provider 注入的 MINIMAX_API_KEY；启用独立 vendor 段时再同步追加
 # secrets.image_vision_<vendor>_api_key。
 capabilities = [
     "llm",
