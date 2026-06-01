@@ -4264,7 +4264,8 @@ fn apply_active_text_followup_route_repair(
         (*turn_type, *target_task_policy),
         (
             Some(
-                TurnType::TaskAppend
+                TurnType::TaskRequest
+                    | TurnType::TaskAppend
                     | TurnType::TaskCorrect
                     | TurnType::TaskReplace
                     | TurnType::TaskScopeUpdate
