@@ -4341,7 +4341,9 @@ fn chat_prompt_context_with_route_resolution(
     };
     let trimmed_context = chat_prompt_context.trim();
     let mut blocks = Vec::new();
-    if !(trimmed_context.is_empty() || trimmed_context == "<none>") {
+    if !active_task_text_rewrite_context(agent_run_context)
+        && !(trimmed_context.is_empty() || trimmed_context == "<none>")
+    {
         blocks.push(chat_prompt_context.to_string());
     }
     if let Some(route_context) = route_context {
@@ -4351,6 +4353,29 @@ fn chat_prompt_context_with_route_resolution(
         blocks.push(recent_execution_context);
     }
     blocks.join("\n\n")
+}
+
+fn active_task_text_rewrite_context(
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> bool {
+    let Some(analysis) = agent_run_context.and_then(|ctx| ctx.turn_analysis.as_ref()) else {
+        return false;
+    };
+    if !matches!(
+        analysis.target_task_policy,
+        Some(crate::intent_router::TargetTaskPolicy::ReuseActive)
+    ) {
+        return false;
+    }
+    matches!(
+        analysis.turn_type,
+        Some(
+            crate::intent_router::TurnType::TaskAppend
+                | crate::intent_router::TurnType::TaskCorrect
+                | crate::intent_router::TurnType::TaskReplace
+                | crate::intent_router::TurnType::TaskScopeUpdate
+        )
+    )
 }
 
 fn chat_recent_execution_context(
@@ -4430,6 +4455,50 @@ fn direct_chat_answer_repair_prompt(chat_prompt: &str, rejected_answer: &str) ->
     format!(
         "{chat_prompt}\n\n### Previous Draft Rejected\nThe previous draft is malformed or incomplete and cannot be shown to the user:\n{rejected_answer}\n\nReturn only a complete final answer for the same user request. Do not use a code fence unless the user explicitly requested code."
     )
+}
+
+fn active_task_rewrite_conservation_prompt(chat_prompt: &str, draft_answer: &str) -> String {
+    format!(
+        "{chat_prompt}\n\n### Active Task Rewrite Conservation\nThe previous draft may have added facts, instructions, examples, use cases, paths, docs/guides, setup steps, credential/setup detail categories, or operational claims that were not present in the most recent generated output:\n{draft_answer}\n\nRewrite the final answer for the same current user request using only the factual content already present in the most recent generated output plus the current style/length/audience constraint. Preserve any statement that concrete details were not observed. Return only the corrected final answer."
+    )
+}
+
+fn active_task_recent_generated_output(
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> Option<String> {
+    let text = agent_run_context?
+        .route_result
+        .as_ref()?
+        .resolved_intent
+        .as_str();
+    const MARKER: &str = "Most recent generated output:\n";
+    let (_, tail) = text.split_once(MARKER)?;
+    let stop_idx = [
+        "\n\nContinuity rules:",
+        "\n\nStructured task updates:",
+        "\n\nNew user instruction:",
+        "\n\n### SESSION_ALIAS_BINDINGS",
+    ]
+    .iter()
+    .filter_map(|marker| tail.find(marker))
+    .min()
+    .unwrap_or(tail.len());
+    let output = tail[..stop_idx].trim();
+    (!output.is_empty() && output != "<none>").then(|| output.to_string())
+}
+
+fn conservative_active_task_rewrite_passthrough(
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> Option<String> {
+    if !active_task_text_rewrite_context(agent_run_context) {
+        return None;
+    }
+    let output = active_task_recent_generated_output(agent_run_context)?;
+    let lower = output.to_ascii_lowercase();
+    if lower.contains("does not include concrete per-channel setup") {
+        return Some(output);
+    }
+    None
 }
 
 fn task_payload_text(task: &ClaimedTask) -> Option<String> {
@@ -4897,6 +4966,17 @@ pub(crate) async fn execute_ask_routed(
                     ("__REQUEST__", &request_for_chat_prompt),
                 ],
             );
+            if let Some(answer) =
+                conservative_active_task_rewrite_passthrough(agent_run_context.as_ref())
+            {
+                tracing::info!(
+                    "{} worker_once: ask active_task_rewrite_passthrough task_id={} len={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    answer.len()
+                );
+                return Ok(ask_reply_with_chat_process(answer, &request_language_hint));
+            }
             let raw_answer = crate::llm_gateway::run_with_fallback_with_prompt_source(
                 state,
                 task,
@@ -4909,6 +4989,21 @@ pub(crate) async fn execute_ask_routed(
                 raw_answer,
                 agent_run_context.as_ref(),
             );
+            if active_task_text_rewrite_context(agent_run_context.as_ref()) {
+                let repair_prompt = active_task_rewrite_conservation_prompt(&chat_prompt, &answer);
+                let repaired_answer = crate::llm_gateway::run_with_fallback_with_prompt_source(
+                    state,
+                    task,
+                    &repair_prompt,
+                    &chat_prompt_source,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+                answer = ensure_active_task_required_visible_literals(
+                    repaired_answer,
+                    agent_run_context.as_ref(),
+                );
+            }
             if direct_chat_answer_needs_repair(&answer) {
                 tracing::warn!(
                     "{} worker_once: ask direct_chat_answer_repair task_id={} rejected={}",
