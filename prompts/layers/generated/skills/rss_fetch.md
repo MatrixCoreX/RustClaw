@@ -9,6 +9,7 @@
 
 ## Capability Summary (from interface)
 - `rss_fetch` reads RSS/Atom feeds and returns normalized news items.
+- Successful responses include user-visible `text` plus machine-readable `extra` evidence. Runtime quality checks consume `extra.field_value` / `extra.items`; do not require downstream code to parse localized `text`.
 - **Category guardrails (planner / agent)**: For `latest` and `news`, `category` must be a **table key** under `[rss.categories]` in `configs/rss.toml` at runtime (deployment-specific). **Do not invent** category strings. If user intent does not map clearly to one configured category, use **`general`** (or `rss.default_category` when set). Open `configs/rss.toml` for the authoritative list of keys; example keys in the default config include `general`, `crypto`, `tech`, `web3`, `aggregator`, `china`, `business`, `international`—the file always wins if this list drifts.
 - **`fetch`** is **direct-feed only**: one or more explicit `http(s)` URLs. It does **not** fall back to category/config sources.
 - **`latest`** and **`news`** use **category mode**: all **active** sources for the category (from config) are fetched by default. Same merge/dedupe/sort behavior; `news` is an alias of `latest` (default category for `news` when omitted follows config / `general` as documented below).
@@ -66,7 +67,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"sources_ok=3 sources_failed=0 items=5\n1) ...\n2) ...","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"sources_ok=3 sources_failed=0 items=5\n1) ...\n2) ...","extra":{"schema_version":1,"action":"latest","category":"crypto","mode":"category","sources_ok":3,"sources_failed":0,"item_count":5,"field_value":{"sources_ok":3,"sources_failed":0,"items":5,"titles":["..."]},"items":[{"title":"...","link":"https://example.com/news","source_host":"example.com","layer":"feed","topic":"macro_market"}]},"error_text":null}
 ```
 
 ### Example 2 (direct fetch)
@@ -76,7 +77,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-2","status":"ok","text":"...","error_text":null}
+{"request_id":"demo-2","status":"ok","text":"...","extra":{"schema_version":1,"action":"fetch","mode":"direct","source_count":1,"item_count":10,"field_value":{"source_count":1,"item_count":10,"titles":["..."]},"items":[{"title":"...","link":"https://example.com/item","source_host":"example.com","layer":"feed","topic":"other"}]},"error_text":null}
 ```
 
 ## Output Contract

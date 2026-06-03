@@ -615,6 +615,9 @@ fn normalize_direct_answer_gate_semantic_kind(raw: &str) -> &'static str {
             "raw_command_output"
         }
         "raw_command_output" => "raw_command_output",
+        "command_output_summary" | "command_result_summary" | "command_output_synthesis" => {
+            "command_output_summary"
+        }
         "service_status"
         | "service_state"
         | "service_running_status"
@@ -693,6 +696,10 @@ fn normalize_direct_answer_gate_semantic_kind(raw: &str) -> &'static str {
         "new_file_delivery" | "created_file_delivery" | "write_then_send_file" => {
             "generated_file_delivery"
         }
+        "filesystem_mutation"
+        | "fs_mutation_result"
+        | "file_mutation_result"
+        | "path_mutation_result" => "filesystem_mutation_result",
         "scalar_path_only" => "scalar_path_only",
         "existence_with_path" | "exists_with_path" => "existence_with_path",
         "existence_with_path_summary" => "existence_with_path_summary",
@@ -1063,6 +1070,27 @@ fn infer_contract_repair_judge_apply(map: &serde_json::Map<String, Value>) -> bo
             .is_some_and(|raw| normalize_direct_answer_gate_delivery_intent(raw) != "none")
 }
 
+fn canonicalize_contract_repair_judge_confidence(value: Option<Value>) -> (Value, bool) {
+    match value {
+        Some(Value::Number(number)) => (Value::Number(number), false),
+        Some(Value::String(raw)) => {
+            let trimmed = raw.trim();
+            if let Ok(parsed) = trimmed.parse::<f64>() {
+                let clamped = parsed.clamp(0.0, 1.0);
+                return (json!(clamped), true);
+            }
+            let canonical = match normalize_schema_token_for_gate(trimmed).as_str() {
+                "very_high" | "high" => 0.9,
+                "medium" | "moderate" => 0.7,
+                "low" => 0.4,
+                _ => 0.0,
+            };
+            (json!(canonical), true)
+        }
+        Some(_) | None => (json!(0.0), true),
+    }
+}
+
 fn canonicalize_contract_repair_judge_object(
     mut map: serde_json::Map<String, Value>,
 ) -> (Value, bool) {
@@ -1083,6 +1111,11 @@ fn canonicalize_contract_repair_judge_object(
     ];
     map.retain(|key, _| allowed_keys.contains(&key.as_str()));
     let mut normalized = map.len() != original_len;
+
+    let (confidence, confidence_normalized) =
+        canonicalize_contract_repair_judge_confidence(map.remove("confidence"));
+    normalized |= confidence_normalized;
+    map.insert("confidence".to_string(), confidence);
 
     if let Some(output_contract) = map.remove("output_contract") {
         let (output_contract, contract_normalized) =

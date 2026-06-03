@@ -85,6 +85,7 @@
           "enum": [
             "none",
             "raw_command_output",
+            "command_output_summary",
             "service_status",
             "hidden_entries_check",
             "file_names",
@@ -108,15 +109,19 @@
             "quantity_comparison",
             "execution_failed_step",
             "generated_file_delivery",
+            "filesystem_mutation_result",
             "scalar_path_only",
+            "file_basename",
             "existence_with_path",
             "existence_with_path_summary",
             "recent_scalar_equality_check",
             "git_commit_subject",
+            "git_repository_state",
             "structured_keys",
             "config_validation",
             "config_mutation",
             "config_risk_assessment",
+            "package_manager_detection",
             "sqlite_table_listing",
             "sqlite_table_names_only",
             "sqlite_database_kind_judgment",
@@ -210,7 +215,7 @@
     },
     "state_patch": {
       "type": ["object", "null"],
-      "description": "Optional structured runtime/session patch to preserve when repairing malformed normalizer output. For active-task corrections, may include required_content_literals, forbidden_visible_literals, and replacement_pairs [{\"from\":\"old literal\",\"to\":\"new literal\"}] as exact current-turn content literals; output-control wording belongs in the intent/output contract, not required_content_literals."
+      "description": "Optional structured runtime/session patch to preserve when repairing malformed normalizer output. May include ordered_entry_ref ({\"index\":N,\"index_base\":1} or {\"relative_offset\":K}) for active ordered-entry selection. For active-task corrections, may include required_content_literals, forbidden_visible_literals, and replacement_pairs [{\"from\":\"old literal\",\"to\":\"new literal\"}] as exact current-turn content literals; output-control wording belongs in the intent/output contract, not required_content_literals."
     }
   }
 }

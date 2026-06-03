@@ -90,6 +90,9 @@ fn synthesize_route_allows_direct_fallback(agent_run_context: Option<&AgentRunCo
 }
 
 fn output_has_count_inventory_total(output: &str) -> bool {
+    let output = crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(
+        output.trim(),
+    );
     let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
         return false;
     };
@@ -113,11 +116,29 @@ fn quantity_comparison_has_multiple_count_observations(loop_state: &LoopState) -
         >= 2
 }
 
+fn synthesize_direct_fallback_blocked_by_multi_count_quantity_comparison(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    agent_run_context
+        .and_then(|context| context.route_result.as_ref())
+        .is_some_and(|route| {
+            route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+                && quantity_comparison_has_multiple_count_observations(loop_state)
+        })
+}
+
 fn synthesize_direct_observed_fallback_answer(
     state: &AppState,
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
 ) -> Option<String> {
+    if synthesize_direct_fallback_blocked_by_multi_count_quantity_comparison(
+        loop_state,
+        agent_run_context,
+    ) {
+        return None;
+    }
     crate::agent_engine::observed_output::extract_direct_answer_from_generic_output_i18n(
         loop_state,
         state,
@@ -144,9 +165,13 @@ fn synthesize_contract_matrix_direct_observed_fallback_answer(
     if route.output_contract.semantic_kind == crate::OutputSemanticKind::ConfigMutation {
         return None;
     }
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
-        && quantity_comparison_has_multiple_count_observations(loop_state)
-    {
+    if crate::agent_engine::observed_output::route_disallows_direct_observation_passthrough(route) {
+        return None;
+    }
+    if synthesize_direct_fallback_blocked_by_multi_count_quantity_comparison(
+        loop_state,
+        agent_run_context,
+    ) {
         return None;
     }
     if synthesize_direct_fallback_would_passthrough_multiline_read_range(
@@ -369,10 +394,28 @@ fn deterministic_observed_execution_status_answer(
         let step_no = idx + 1;
         let skill = step.skill.trim();
         if step.is_ok() {
+            let output = step
+                .output
+                .as_deref()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(|text| {
+                    crate::truncate_for_agent_trace(
+                        &crate::visible_text::sanitize_user_visible_text(text).replace('\n', " "),
+                    )
+                });
             if prefer_english {
-                parts.push(format!("Step {step_no} `{skill}` succeeded."));
+                if let Some(output) = output {
+                    parts.push(format!("Step {step_no} `{skill}` succeeded: {output}."));
+                } else {
+                    parts.push(format!("Step {step_no} `{skill}` succeeded."));
+                }
             } else {
-                parts.push(format!("第 {step_no} 步 `{skill}` 成功。"));
+                if let Some(output) = output {
+                    parts.push(format!("第 {step_no} 步 `{skill}` 成功：{output}。"));
+                } else {
+                    parts.push(format!("第 {step_no} 步 `{skill}` 成功。"));
+                }
             }
             continue;
         }
@@ -576,6 +619,32 @@ fn strip_internal_execution_args(args: &mut Value) {
     }
 }
 
+fn strip_unsupported_planner_metadata_args(
+    state: &AppState,
+    canonical_skill: &str,
+    args: &mut Value,
+) -> Vec<String> {
+    let Some(obj) = args.as_object_mut() else {
+        return Vec::new();
+    };
+    let Some(manifest) = state.skill_manifest(canonical_skill) else {
+        return Vec::new();
+    };
+    let Some(schema) = manifest.input_schema else {
+        return Vec::new();
+    };
+    let Some(properties) = schema.get("properties").and_then(|v| v.as_object()) else {
+        return Vec::new();
+    };
+    let mut removed = Vec::new();
+    for key in ["confirm", "confirmation", "requires_confirmation"] {
+        if !properties.contains_key(key) && obj.remove(key).is_some() {
+            removed.push(key.to_string());
+        }
+    }
+    removed
+}
+
 pub(super) fn classify_skill_failure_recovery(
     state: &AppState,
     actions: &[AgentAction],
@@ -586,6 +655,9 @@ pub(super) fn classify_skill_failure_recovery(
     err: &str,
 ) -> Option<&'static str> {
     if structured_read_permission_denial_is_terminal(normalized_skill, err) {
+        return Some("recoverable_failure_finalize");
+    }
+    if crate::skills::is_crypto_account_access_error(normalized_skill, err) {
         return Some("recoverable_failure_finalize");
     }
     if crate::skills::is_recoverable_skill_error(normalized_skill, err) {
@@ -1257,6 +1329,19 @@ pub(super) async fn handle_call_tool_action(
     );
     let recovery_args = resolved_args.clone();
     strip_internal_execution_args(&mut resolved_args);
+    let removed_metadata =
+        strip_unsupported_planner_metadata_args(state, &normalized_skill, &mut resolved_args);
+    if !removed_metadata.is_empty() {
+        info!(
+            "executor_args_rewrite task_id={} round={} step={} type=planner_metadata_strip skill={} removed={:?} args={}",
+            task.task_id,
+            loop_state.round_no,
+            step_in_round,
+            normalized_skill,
+            removed_metadata,
+            crate::truncate_for_log(&resolved_args.to_string())
+        );
+    }
     loop_state.tool_calls_total += 1;
     let args_summary = build_safe_skill_args_summary(&resolved_args, PROGRESS_ARGS_SUMMARY_MAX_LEN);
     let skill_outcome = execute_prepared_skill_action(
@@ -1366,6 +1451,19 @@ pub(super) async fn handle_call_skill_action(
     );
     let recovery_args = resolved_args.clone();
     strip_internal_execution_args(&mut resolved_args);
+    let removed_metadata =
+        strip_unsupported_planner_metadata_args(state, &normalized_skill, &mut resolved_args);
+    if !removed_metadata.is_empty() {
+        info!(
+            "executor_args_rewrite task_id={} round={} step={} type=planner_metadata_strip skill={} removed={:?} args={}",
+            task.task_id,
+            loop_state.round_no,
+            step_in_round,
+            normalized_skill,
+            removed_metadata,
+            crate::truncate_for_log(&resolved_args.to_string())
+        );
+    }
     let read_file_requested_path = read_file_requested_path(&normalized_skill, &resolved_args);
     let write_file_effective_path =
         write_file_effective_path(state, &normalized_skill, &resolved_args);

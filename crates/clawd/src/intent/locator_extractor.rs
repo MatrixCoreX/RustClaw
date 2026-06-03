@@ -125,12 +125,6 @@ pub(crate) fn extract_explicit_locator_candidates_for_fallback(
             if trimmed.is_empty() {
                 return None;
             }
-            let lower = trimmed.to_ascii_lowercase();
-            if (lower.starts_with("http://") || lower.starts_with("https://"))
-                && crate::worker::has_explicit_path_or_url_locator_hint(&trimmed)
-            {
-                return Some(trimmed);
-            }
             let candidate = trimmed
                 .split(|ch: char| {
                     matches!(

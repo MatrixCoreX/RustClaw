@@ -1113,8 +1113,33 @@ fn generic_profile_matches_untyped_path_content_contract() {
         .and_then(Value::as_array)
         .is_some_and(|items| {
             let values = items.iter().filter_map(Value::as_str).collect::<Vec<_>>();
-            values.contains(&"content_excerpt") && values.contains(&"candidates")
+            values.contains(&"content_excerpt")
+                && values.contains(&"candidates")
+                && values.contains(&"count")
         }));
+}
+
+#[test]
+fn generic_path_content_allows_count_entries_observation() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::None,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            response_shape: OutputResponseShape::OneSentence,
+            ..IntentOutputContract::default()
+        }),
+        "system_basic",
+        &serde_json::json!({
+            "action": "count_inventory",
+            "path": "crates"
+        }),
+    )
+    .expect("action policy");
+
+    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(policy.action_key, "fs_basic.count_entries");
+    assert_eq!(policy.contract_match, "generic_path_content");
 }
 
 #[test]
@@ -1220,6 +1245,27 @@ fn generated_file_delivery_allows_parent_directory_creation() {
 }
 
 #[test]
+fn filesystem_mutation_result_allows_directory_creation_status() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::FilesystemMutationResult,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "document/nl_skill_tmp".to_string(),
+            ..IntentOutputContract::default()
+        }),
+        "fs_basic",
+        &serde_json::json!({"action":"make_dir","path":"document/nl_skill_tmp"}),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "fs_basic.make_dir");
+    assert_eq!(policy.contract_match, "filesystem_mutation_result");
+    assert_eq!(policy.final_answer_shape, "lifecycle_result");
+}
+
+#[test]
 fn generated_file_delivery_allows_existing_file_path_facts() {
     let policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
@@ -1278,6 +1324,29 @@ fn generated_file_delivery_allows_directory_inventory_for_existing_selection() {
 
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "fs_basic.list_dir");
+    assert_eq!(policy.contract_match, "generated_file_delivery");
+}
+
+#[test]
+fn generated_file_delivery_allows_runtime_command_observation() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+            delivery_required: true,
+            delivery_intent: OutputDeliveryIntent::FileSingle,
+            response_shape: OutputResponseShape::FileToken,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            locator_hint: "pwd_report.txt".to_string(),
+            ..IntentOutputContract::default()
+        }),
+        "run_cmd",
+        &serde_json::json!({"command":"pwd > pwd_report.txt && cat pwd_report.txt"}),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "run_cmd");
     assert_eq!(policy.contract_match, "generated_file_delivery");
 }
 
@@ -1370,6 +1439,139 @@ fn content_excerpt_summary_allows_log_analyze_for_log_paths() {
     assert!(policy.is_allowed(), "{policy:?}");
     assert_eq!(policy.action_key, "log_analyze.analyze");
     assert_eq!(policy.contract_match, "content_excerpt_summary");
+}
+
+#[test]
+fn content_excerpt_summary_allows_structured_field_evidence() {
+    for (action, expected_action_key) in [
+        (
+            serde_json::json!({
+                "action": "read_field",
+                "path": "package.json",
+                "field_path": "name"
+            }),
+            "config_basic.read_field",
+        ),
+        (
+            serde_json::json!({
+                "action": "read_fields",
+                "path": "Cargo.toml",
+                "field_paths": ["package.name", "workspace.package.version"]
+            }),
+            "config_basic.read_fields",
+        ),
+    ] {
+        let policy = action_policy_for_output_contract(
+            Some(&IntentOutputContract {
+                semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+                requires_content_evidence: true,
+                locator_kind: OutputLocatorKind::Path,
+                locator_hint: "package.json".to_string(),
+                response_shape: OutputResponseShape::Scalar,
+                ..IntentOutputContract::default()
+            }),
+            "config_basic",
+            &action,
+        )
+        .expect("policy decision");
+
+        assert!(policy.is_allowed(), "{policy:?}");
+        assert_eq!(policy.action_key, expected_action_key);
+        assert_eq!(policy.contract_match, "content_excerpt_summary");
+    }
+}
+
+#[test]
+fn filesystem_mutation_result_allows_archive_pack_path_evidence() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::FilesystemMutationResult,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "tmp/nl_archive_case_en.zip".to_string(),
+            response_shape: OutputResponseShape::OneSentence,
+            ..IntentOutputContract::default()
+        }),
+        "archive_basic",
+        &serde_json::json!({
+            "action": "pack",
+            "source": "scripts/skill_calls",
+            "archive": "tmp/nl_archive_case_en.zip",
+            "format": "zip"
+        }),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "archive_basic.pack");
+    assert_eq!(policy.contract_match, "filesystem_mutation_result");
+}
+
+#[test]
+fn filesystem_mutation_result_allows_kb_ingest_path_evidence() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::FilesystemMutationResult,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::CurrentWorkspace,
+            locator_hint: "README.md".to_string(),
+            response_shape: OutputResponseShape::OneSentence,
+            ..IntentOutputContract::default()
+        }),
+        "kb",
+        &serde_json::json!({
+            "action": "ingest",
+            "namespace": "demo_docs_nl",
+            "paths": ["/home/guagua/rustclaw/README.md"]
+        }),
+    )
+    .expect("policy decision");
+
+    assert!(policy.is_allowed(), "{policy:?}");
+    assert_eq!(policy.action_key, "kb.ingest");
+    assert_eq!(policy.contract_match, "filesystem_mutation_result");
+}
+
+#[test]
+fn content_excerpt_summary_allows_supplemental_directory_inventory() {
+    let contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::ContentExcerptSummary,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "UI/package.json".to_string(),
+        response_shape: OutputResponseShape::OneSentence,
+        ..IntentOutputContract::default()
+    };
+
+    let list_policy = action_policy_for_output_contract(
+        Some(&contract),
+        "fs_basic",
+        &serde_json::json!({"action":"list_dir","path":".","names_only":true}),
+    )
+    .expect("list policy");
+    assert!(list_policy.is_allowed(), "{list_policy:?}");
+    assert_eq!(list_policy.action_key, "fs_basic.list_dir");
+    assert_eq!(list_policy.contract_match, "content_excerpt_summary");
+
+    let find_policy = action_policy_for_output_contract(
+        Some(&contract),
+        "fs_basic",
+        &serde_json::json!({"action":"find_entries","root":".","pattern":"package.json"}),
+    )
+    .expect("find policy");
+    assert!(find_policy.is_allowed(), "{find_policy:?}");
+    assert_eq!(find_policy.action_key, "fs_basic.find_entries");
+    assert_eq!(find_policy.contract_match, "content_excerpt_summary");
+
+    let count_policy = action_policy_for_output_contract(
+        Some(&contract),
+        "fs_basic",
+        &serde_json::json!({"action":"count_entries","path":"crates"}),
+    )
+    .expect("count policy");
+    assert!(count_policy.is_allowed(), "{count_policy:?}");
+    assert_eq!(count_policy.action_key, "fs_basic.count_entries");
+    assert_eq!(count_policy.contract_match, "content_excerpt_summary");
 }
 
 #[test]
@@ -1586,12 +1788,60 @@ fn content_excerpt_with_summary_contract_has_parsed_final_shape() {
 }
 
 #[test]
+fn content_excerpt_with_summary_allows_supplemental_directory_listing() {
+    let contract = IntentOutputContract {
+        semantic_kind: OutputSemanticKind::ContentExcerptWithSummary,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md"
+            .to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let list_policy = action_policy_for_output_contract(
+        Some(&contract),
+        "fs_basic",
+        &serde_json::json!({"action":"list_dir","path":"scripts/nl_tests/fixtures/device_local/docs","names_only":true}),
+    )
+    .expect("list policy");
+    assert!(list_policy.is_allowed(), "{list_policy:?}");
+    assert_eq!(list_policy.action_key, "fs_basic.list_dir");
+    assert_eq!(list_policy.contract_match, "content_excerpt_with_summary");
+
+    let read_policy = action_policy_for_output_contract(
+        Some(&contract),
+        "fs_basic",
+        &serde_json::json!({"action":"read_text_range","path":"scripts/nl_tests/fixtures/device_local/docs/release_checklist.md","mode":"head","n":20}),
+    )
+    .expect("read policy");
+    assert!(read_policy.is_allowed(), "{read_policy:?}");
+    assert_eq!(read_policy.action_key, "fs_basic.read_text_range");
+    assert_eq!(read_policy.contract_match, "content_excerpt_with_summary");
+}
+
+#[test]
 fn excerpt_kind_judgment_allows_directory_listing_context() {
     for (capability, args, expected_action) in [
         (
             "fs_basic",
             serde_json::json!({"action":"list_dir","path":"docs","names_only":true}),
             "fs_basic.list_dir",
+        ),
+        (
+            "fs_basic",
+            serde_json::json!({"action":"count_entries","path":"crates"}),
+            "fs_basic.count_entries",
+        ),
+        (
+            "fs_basic",
+            serde_json::json!({"action":"find_entries","root":"crates","pattern":"skills"}),
+            "fs_basic.find_entries",
+        ),
+        (
+            "fs_basic",
+            serde_json::json!({"action":"stat_paths","paths":["crates","crates/skills"]}),
+            "fs_basic.stat_paths",
         ),
         (
             "system_basic",
@@ -1687,7 +1937,7 @@ fn recent_artifacts_judgment_allows_bounded_content_evidence() {
 }
 
 #[test]
-fn workspace_project_summary_requires_bounded_content_after_tree_discovery() {
+fn workspace_project_summary_allows_structure_and_bounded_content_evidence() {
     let tree_policy = action_policy_for_output_contract(
         Some(&IntentOutputContract {
             semantic_kind: OutputSemanticKind::WorkspaceProjectSummary,
@@ -1729,7 +1979,7 @@ fn workspace_project_summary_requires_bounded_content_after_tree_discovery() {
         &serde_json::json!({"action":"list_dir","path":"/workspace","names_only":true}),
     )
     .expect("policy decision");
-    assert!(!list_policy.is_allowed(), "{list_policy:?}");
+    assert!(list_policy.is_allowed(), "{list_policy:?}");
     assert_eq!(list_policy.action_key, "fs_basic.list_dir");
     assert_eq!(list_policy.contract_match, "workspace_project_summary");
 }
@@ -1839,6 +2089,26 @@ fn action_policy_allows_http_observation_for_raw_command_output_contract() {
 }
 
 #[test]
+fn command_output_summary_contract_allows_run_cmd_and_model_language() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::CommandOutputSummary,
+            requires_content_evidence: true,
+            ..IntentOutputContract::default()
+        }),
+        "run_cmd",
+        &serde_json::json!({"command": "pwd"}),
+    )
+    .expect("policy decision");
+
+    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(policy.action_key, "run_cmd");
+    assert_eq!(policy.contract_match, "command_output_summary");
+    assert_eq!(policy.required_evidence, vec!["command_output"]);
+    assert!(policy.final_answer_shape_kind.allows_model_language());
+}
+
+#[test]
 fn action_policy_allows_safe_file_read_equivalent_for_raw_command_output_contract() {
     let contract = IntentOutputContract {
         semantic_kind: OutputSemanticKind::RawCommandOutput,
@@ -1902,6 +2172,50 @@ fn action_policy_allows_runtime_equivalent_for_virtual_config_validation() {
     assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
     assert_eq!(policy.action_key, "config_basic.validate");
     assert_eq!(policy.contract_match, "config_validation");
+}
+
+#[test]
+fn command_output_summary_allows_structured_config_validation_observation() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::CommandOutputSummary,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::Path,
+            locator_hint: "configs/config.toml".to_string(),
+            ..IntentOutputContract::default()
+        }),
+        "config_basic",
+        &serde_json::json!({
+            "action": "validate",
+            "path": "configs/config.toml",
+        }),
+    )
+    .expect("policy decision");
+
+    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(policy.action_key, "config_basic.validate");
+    assert_eq!(policy.contract_match, "command_output_summary");
+}
+
+#[test]
+fn service_status_allows_task_control_list_observation() {
+    let policy = action_policy_for_output_contract(
+        Some(&IntentOutputContract {
+            semantic_kind: OutputSemanticKind::ServiceStatus,
+            requires_content_evidence: true,
+            locator_kind: OutputLocatorKind::None,
+            ..IntentOutputContract::default()
+        }),
+        "task_control",
+        &serde_json::json!({
+            "action": "list",
+        }),
+    )
+    .expect("policy decision");
+
+    assert_eq!(policy.decision, ActionPolicyDecision::Allowed);
+    assert_eq!(policy.action_key, "task_control.list");
+    assert_eq!(policy.contract_match, "service_status");
 }
 
 #[test]
@@ -2199,6 +2513,18 @@ fn legacy_virtual_tool_canonicalizations_are_covered_by_matrix_action_policy() {
         ),
         (
             OutputSemanticKind::ContentPresenceCheck,
+            "fs_search",
+            json!({"action":"grep_text", "root":".", "query":"FirstLayerDecision"}),
+            "fs_basic.grep_text",
+        ),
+        (
+            OutputSemanticKind::FilePaths,
+            "fs_search",
+            json!({"action":"grep_text", "root":".", "query":"FirstLayerDecision"}),
+            "fs_basic.grep_text",
+        ),
+        (
+            OutputSemanticKind::FileNames,
             "fs_search",
             json!({"action":"grep_text", "root":".", "query":"FirstLayerDecision"}),
             "fs_basic.grep_text",

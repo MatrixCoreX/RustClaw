@@ -1,11 +1,11 @@
 use super::{
-    collect_whitelisted_env_pairs, extract_task_request_text, is_missing_target_skill_error,
-    is_recoverable_skill_error, normalize_skill_error_for_user, parse_policy_block_error,
-    parse_structured_skill_error, policy_block_default_text, policy_block_error,
-    request_reply_language, skill_runner_env_strict_enabled, structured_skill_error_from_parts,
-    task_allows_path_outside_workspace, task_allows_sudo, task_request_locale_tag,
-    RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX, READ_FILE_NOT_FOUND_PREFIX,
-    SKILL_RUNNER_ENV_WHITELIST, STRUCTURED_SKILL_ERROR_PREFIX,
+    collect_whitelisted_env_pairs, extract_task_request_text, is_crypto_account_access_error,
+    is_missing_target_skill_error, is_recoverable_skill_error, normalize_skill_error_for_user,
+    parse_policy_block_error, parse_structured_skill_error, policy_block_default_text,
+    policy_block_error, request_reply_language, skill_runner_env_strict_enabled,
+    structured_skill_error_from_parts, task_allows_path_outside_workspace, task_allows_sudo,
+    task_request_locale_tag, RequestReplyLanguage, CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX,
+    READ_FILE_NOT_FOUND_PREFIX, SKILL_RUNNER_ENV_WHITELIST, STRUCTURED_SKILL_ERROR_PREFIX,
 };
 use crate::{
     runtime::state::ClaimedTask, AgentRuntimeConfig, AppState, CommandIntentRuntime,
@@ -647,10 +647,38 @@ fn crypto_account_access_errors_are_recoverable() {
     let err = format!("{CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX}{payload}");
 
     assert!(is_recoverable_skill_error("crypto", &err));
+    assert!(is_crypto_account_access_error("crypto", &err));
     assert!(is_recoverable_skill_error("CRYPTO", &err));
     let normalized = normalize_skill_error_for_user("crypto", &err);
     assert!(normalized.contains("crypto account access failed on binance"));
     assert!(normalized.contains("Invalid API-key"));
+}
+
+#[test]
+fn wrapped_crypto_account_access_errors_are_recoverable() {
+    let marker = format!(
+        "{CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX}{}",
+        json!({
+            "exchange": "binance",
+            "detail": "binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"
+        })
+    );
+    let err = format!(
+        "{STRUCTURED_SKILL_ERROR_PREFIX}{}",
+        json!({
+            "skill": "crypto",
+            "error_kind": "unknown",
+            "error_text": marker,
+            "extra": null
+        })
+    );
+
+    assert!(is_recoverable_skill_error("crypto", &err));
+    assert!(is_crypto_account_access_error("crypto", &err));
+    let normalized = normalize_skill_error_for_user("crypto", &err);
+    assert!(normalized.contains("crypto account access failed on binance"));
+    assert!(normalized.contains("Invalid API-key"));
+    assert!(!normalized.contains(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX));
 }
 
 #[test]

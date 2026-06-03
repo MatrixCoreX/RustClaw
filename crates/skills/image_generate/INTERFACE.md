@@ -27,12 +27,18 @@
 | generate | `model` | no | string | impl default | Backend model selector. |
 | generate | `timeout_seconds` | no | integer | impl/config default | Per-request timeout, clamped by implementation. |
 
+## Config Entry Points
+- `configs/image.toml` -> `[image_generation]` controls provider routing, model defaults, output limits, and `local_fallback_enabled`.
+- `IMAGE_GENERATION_LOCAL_FALLBACK=1|true|on|yes` overrides `local_fallback_enabled` for explicit smoke/NL-test continuity when all configured providers fail.
+- Provider credentials use dedicated environment variables such as `IMAGE_GENERATION_MINIMAX_API_KEY`; do not reuse chat/model API key names for image generation.
+
 ## Success `extra` (`status=ok`)
 - `provider`: resolved backend provider name
 - `model`: resolved model name
 - `model_kind`: adapter/runtime mode chosen by implementation
 - `latency_ms`: reserved latency field
 - `outputs`: machine-readable output summary, currently `[{\"type\":\"image_file\",\"path\":\"...\"}]`
+- `fallback`: present only when an explicit local fallback produced the file after provider generation failed.
 
 ## Error Contract
 - Missing or empty `prompt`.

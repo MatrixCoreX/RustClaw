@@ -45,11 +45,11 @@ pub(crate) fn resolve_clarify_followup_with_surface(
     }
     if let Some(frame_hit) = active_followup_frame.and_then(|frame| {
         crate::followup_frame::synthesize_locator_reply_resolved_intent(frame, prompt).map(
-            |resolved_intent| crate::clarify_followup::ClarifyLocatorReplyRewrite {
+            |(resolved_intent, reason)| crate::clarify_followup::ClarifyLocatorReplyRewrite {
                 resolved_intent,
                 prior_user_text: frame.source_request.clone(),
                 current_user_text: prompt.trim().to_string(),
-                reason: crate::clarify_followup::ClarifyRewriteReason::ClarifyLocatorReply,
+                reason,
             },
         )
     }) {

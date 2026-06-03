@@ -14,7 +14,9 @@
 - Successful responses include machine-readable `extra` metadata such as `provider`, `model`, `model_kind`, and `outputs`.
 
 ## Config Entry Points (from interface)
-- No dedicated config entry points declared.
+- `configs/image.toml` -> `[image_generation]` controls provider routing, model defaults, output limits, and `local_fallback_enabled`.
+- `IMAGE_GENERATION_LOCAL_FALLBACK=1|true|on|yes` overrides `local_fallback_enabled` for explicit smoke/NL-test continuity when all configured providers fail.
+- Provider credentials use dedicated environment variables such as `IMAGE_GENERATION_MINIMAX_API_KEY`; do not reuse chat/model API key names for image generation.
 
 ## Actions (from interface)
 - No `action` field is required.

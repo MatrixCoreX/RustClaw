@@ -41,6 +41,14 @@ fn route_expects_terminal_user_answer(route_result: &RouteResult) -> bool {
     )
 }
 
+fn route_requires_direct_candidate_for_observed_stop(route_result: &RouteResult) -> bool {
+    route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+        && crate::contract_matrix::final_answer_shape_for_output_contract(
+            &route_result.output_contract,
+        )
+        .is_some_and(|shape| shape.allows_model_language())
+}
+
 fn has_discussion_followup_action(actions: &[AgentAction]) -> bool {
     actions.iter().any(|action| match action {
         AgentAction::Respond { .. } | AgentAction::SynthesizeAnswer { .. } => true,
@@ -245,7 +253,11 @@ fn should_stop_for_observed_finalize(
     let can_stop = has_executable_observation_or_action(actions)
         && !has_discussion_followup_action(actions)
         && route_expects_terminal_user_answer(route_result)
-        && super::observed_output::has_observed_answer_candidates(loop_state);
+        && if route_requires_direct_candidate_for_observed_stop(route_result) {
+            has_direct_observed_answer
+        } else {
+            super::observed_output::has_observed_answer_candidates(loop_state)
+        };
     can_stop
         && required_success_marker.is_none_or(|marker| {
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
@@ -444,9 +456,22 @@ pub(super) async fn run_agent_with_loop(
     loop_state.execution_recipe = crate::execution_recipe::ExecutionRecipeRuntimeState::from_spec(
         initial_execution_recipe_spec(goal, user_text, agent_run_context),
     );
-    let policy = base_policy.adjusted_for_recipe(loop_state.execution_recipe);
+    let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let budget_profile =
+        AgentLoopGuardPolicy::budget_profile_for_context(loop_state.execution_recipe, route_result);
+    let policy = base_policy.adjusted_for_context(loop_state.execution_recipe, route_result);
     loop_state.max_rounds = policy.max_rounds.max(1);
     base_policy.apply_recipe_runtime_overrides(&mut loop_state.execution_recipe);
+    info!(
+        "loop_budget_profile task_id={} profile={} max_rounds={} max_steps={} max_tool_calls={} no_progress_limit={} repeat_action_limit={}",
+        task.task_id,
+        budget_profile.as_str(),
+        policy.max_rounds,
+        policy.max_steps,
+        policy.max_tool_calls,
+        policy.no_progress_limit,
+        policy.repeat_action_limit
+    );
     let mut round = 1usize;
     let mut answer_verifier_retry_count = 0usize;
     loop {
@@ -1102,79 +1127,8 @@ fn try_recover_generic_path_content_read_range_answer_verifier_gap(
     {
         return false;
     }
-    let Some(answer) = reply
-        .task_journal
-        .as_ref()
-        .and_then(latest_read_range_content_evidence_answer)
-    else {
-        return false;
-    };
-    let messages = vec![answer.clone()];
-    if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-    }
-    reply.text = answer;
-    reply.messages = messages;
-    reply.should_fail_task = false;
-    reply.error_text = None;
-    reply.is_llm_reply = false;
-    info!("answer_verifier_retry_exhausted_recovered_with_generic_path_content_read_range");
-    true
-}
-
-fn latest_read_range_content_evidence_answer(
-    journal: &crate::task_journal::TaskJournal,
-) -> Option<String> {
-    journal
-        .step_results
-        .iter()
-        .rev()
-        .filter(|step| {
-            matches!(step.skill.as_str(), "fs_basic" | "system_basic")
-                && step.status == crate::executor::StepExecutionStatus::Ok
-        })
-        .find_map(|step| read_range_content_evidence_answer(step.output_excerpt.as_deref()?))
-}
-
-fn read_range_content_evidence_answer(output: &str) -> Option<String> {
-    let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
-    if !matches!(
-        value.get("action").and_then(|value| value.as_str()),
-        Some("read_range" | "read_text_range")
-    ) {
-        return None;
-    }
-    let _path = value
-        .get("resolved_path")
-        .or_else(|| value.get("path"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|path| !path.is_empty())?;
-    let excerpt = value
-        .get("excerpt")
-        .and_then(|value| value.as_str())
-        .map(sanitize_read_range_content_excerpt)
-        .filter(|excerpt| !excerpt.trim().is_empty())?;
-    Some(excerpt)
-}
-
-fn sanitize_read_range_content_excerpt(excerpt: &str) -> String {
-    excerpt
-        .lines()
-        .map(str::trim_end)
-        .map(|line| {
-            line.split_once('|')
-                .filter(|(prefix, _)| {
-                    !prefix.is_empty() && prefix.chars().all(|ch| ch.is_ascii_digit())
-                })
-                .map(|(_, rest)| rest.trim_start())
-                .unwrap_or(line)
-        })
-        .map(crate::visible_text::sanitize_user_visible_text)
-        .collect::<Vec<_>>()
-        .join("\n")
+    info!("answer_verifier_retry_exhausted_no_generic_path_content_raw_recovery");
+    false
 }
 
 fn structured_search_verifier_requests_full_candidates(

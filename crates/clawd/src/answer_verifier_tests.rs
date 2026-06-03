@@ -3,8 +3,9 @@ use std::collections::BTreeSet;
 use serde_json::json;
 
 use super::{
-    execution_evidence_prompt_block, local_missing_evidence_verifier_gap,
-    observed_scalar_values_from_evidence_map, observed_scalar_values_from_evidence_map_for_route,
+    execution_evidence_prompt_block, local_compound_listing_answer_verifier_gap,
+    local_missing_evidence_verifier_gap, observed_scalar_values_from_evidence_map,
+    observed_scalar_values_from_evidence_map_for_route,
     observed_single_path_values_from_evidence_map, observed_strict_list_items_from_evidence_map,
     observed_strict_list_items_from_evidence_map_for_route, observed_table_cells_from_evidence_map,
     should_verify_answer, structural_satisfaction_can_skip_verifier,
@@ -115,6 +116,15 @@ fn answer_verifier_schema_drift() {
         crate::prompt_utils::PromptSchemaId::AnswerVerifier,
     )
     .expect("schema-conformant answer verifier payload must deserialize");
+}
+
+#[test]
+fn answer_verifier_prompt_preserves_compound_deliverables_on_retry() {
+    const PROMPT_RAW: &str =
+        include_str!("../../../prompts/layers/overlays/answer_verifier_prompt.md");
+    assert!(PROMPT_RAW.contains("preserve the already required deliverable"));
+    assert!(PROMPT_RAW.contains("combined final answer"));
+    assert!(PROMPT_RAW.contains("include the observed listed items and the synthesis"));
 }
 
 #[test]
@@ -243,6 +253,63 @@ fn execution_evidence_prompt_excludes_prior_synthesis_candidates() {
 }
 
 #[test]
+fn execution_evidence_prompt_includes_error_step_observed_evidence() {
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-provider-safe-error-observation",
+        "ask",
+        "run commands and summarize success and failure",
+    );
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "run_cmd".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some("/home/guagua/rustclaw\n".to_string()),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    let err = format!(
+        "__RC_SKILL_ERROR__:{}",
+        json!({
+            "skill": "run_cmd",
+            "error_kind": "nonzero_exit",
+            "error_text": "Command failed with exit code 127",
+            "platform": "linux",
+            "extra": {
+                "command": "definitely_missing_command_rustclaw_english_67890",
+                "exit_code": 127,
+                "exit_category": "command_not_found",
+                "stderr": "bash: line 1: definitely_missing_command_rustclaw_english_67890: command not found\n",
+                "output_truncated": false
+            }
+        })
+    );
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "run_cmd".to_string(),
+        status: crate::executor::StepExecutionStatus::Error,
+        output: None,
+        error: Some(err),
+        started_at: 3,
+        finished_at: 4,
+    });
+
+    let block = execution_evidence_prompt_block(&journal);
+
+    assert!(block.contains(r#""step_id": "step_2""#), "block: {block}");
+    assert!(block.contains(r#""status": "error""#), "block: {block}");
+    assert!(
+        block.contains(r#""field": "command_output""#),
+        "block: {block}"
+    );
+    assert!(block.contains(r#""field": "exit_code""#), "block: {block}");
+    assert!(
+        !block.contains("definitely_missing_command_rustclaw_english_67890"),
+        "block: {block}"
+    );
+}
+
+#[test]
 fn execution_evidence_prompt_includes_compact_numeric_evidence() {
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-provider-safe-size", "ask", "size?");
@@ -340,6 +407,547 @@ fn local_missing_evidence_gap_skips_when_required_fields_are_observed() {
 }
 
 #[test]
+fn local_missing_evidence_gap_skips_structured_not_found_terminal_finalizer() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "definitely_missing_dir_rustclaw_xyz/".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-local-gap-not-found", "ask", "list");
+    journal.record_route_result(&route);
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Error,
+        output: None,
+        error: Some(crate::skills::structured_skill_error_from_parts(
+            "fs_basic",
+            "not_found",
+            "target not found",
+            Some("linux"),
+            Some(json!({
+                "operation": "list_dir",
+                "path": "definitely_missing_dir_rustclaw_xyz/"
+            })),
+        )),
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+
+    assert!(local_missing_evidence_verifier_gap(&route, &journal).is_none());
+}
+
+#[test]
+fn should_verify_answer_skips_permission_denied_terminal_finalizer() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/etc/shadow".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-terminal-permission", "ask", "read");
+    journal.record_route_result(&route);
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "system_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Error,
+        output: None,
+        error: Some(crate::skills::structured_skill_error_from_parts(
+            "system_basic",
+            "permission_denied",
+            "read operation failed",
+            Some("linux"),
+            Some(json!({
+                "operation": "read_file",
+                "path": "/etc/shadow"
+            })),
+        )),
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+    journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+
+    assert!(!should_verify_answer(
+        &route,
+        &journal,
+        "message_key=content_permission_denied path=/etc/shadow"
+    ));
+}
+
+#[test]
+fn local_missing_evidence_gap_skips_crypto_account_access_terminal_finalizer() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::MarketQuote;
+    route.output_contract.requires_content_evidence = true;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-local-gap-crypto", "ask", "positions");
+    journal.record_route_result(&route);
+    let marker = r#"__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:{"exchange":"binance","detail":"binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"}"#;
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "crypto".to_string(),
+        status: crate::executor::StepExecutionStatus::Error,
+        output: None,
+        error: Some(format!(
+            "__RC_SKILL_ERROR__:{}",
+            serde_json::json!({
+                "skill": "crypto",
+                "error_kind": "unknown",
+                "error_text": marker,
+                "extra": null
+            })
+        )),
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+
+    assert!(local_missing_evidence_verifier_gap(&route, &journal).is_none());
+}
+
+#[test]
+fn local_missing_evidence_gap_keeps_gap_for_non_missing_terminal_error() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FileNames;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "maybe_dir/".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-local-gap-error", "ask", "list");
+    journal.record_route_result(&route);
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Error,
+        output: None,
+        error: Some(crate::skills::structured_skill_error_from_parts(
+            "fs_basic",
+            "invalid_args",
+            "invalid list arguments",
+            Some("linux"),
+            Some(json!({
+                "operation": "list_dir",
+                "path": "maybe_dir/"
+            })),
+        )),
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+
+    let gap = local_missing_evidence_verifier_gap(&route, &journal).expect("gap should remain");
+
+    assert_eq!(gap.missing_evidence_fields, vec!["candidates"]);
+}
+
+#[test]
+fn local_compound_listing_gap_rejects_answer_that_drops_observed_names() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-compound-list", "ask", "prompt");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "inventory_dir",
+                "names": ["archive", "release_checklist.md", "service_notes.md"]
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "read_range",
+                "excerpt": "1|# Release Checklist\n3|1. Verify configuration loads correctly."
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 2,
+        finished_at: 3,
+    });
+
+    let gap = local_compound_listing_answer_verifier_gap(
+        &route,
+        &journal,
+        "release_checklist.md is an operator checklist.",
+    )
+    .expect("compound listing gap");
+
+    assert_eq!(gap.missing_evidence_fields, vec!["candidates"]);
+    assert!(gap.answer_incomplete_reason.contains("archive"));
+    assert!(gap.should_retry);
+}
+
+#[test]
+fn local_compound_listing_gap_accepts_answer_with_observed_names() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.requires_content_evidence = true;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-compound-list-ok", "ask", "prompt");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "inventory_dir",
+                "names": ["archive", "release_checklist.md", "service_notes.md"]
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "read_range",
+                "excerpt": "1|# Release Checklist\n3|1. Verify configuration loads correctly."
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 2,
+        finished_at: 3,
+    });
+
+    assert!(local_compound_listing_answer_verifier_gap(
+        &route,
+        &journal,
+        "archive, release_checklist.md, and service_notes.md are listed, and release_checklist.md is an operator checklist."
+    )
+    .is_none());
+}
+
+#[test]
+fn local_compound_listing_gap_applies_to_directory_purpose_summary() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent = "list 3 entries and summarize purpose".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-dir-purpose-gap", "ask", "prompt");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "inventory_dir",
+                "names": ["alpha.md", "beta.json", "notes.txt"]
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "read_range",
+                "excerpt": "1|# Alpha\n2|setup notes"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 2,
+        finished_at: 3,
+    });
+
+    let gap = local_compound_listing_answer_verifier_gap(
+        &route,
+        &journal,
+        "alpha.md and notes.txt look documentation-oriented.",
+    )
+    .expect("directory purpose summary should require observed listing items");
+
+    assert_eq!(gap.missing_evidence_fields, vec!["candidates"]);
+    assert!(gap.answer_incomplete_reason.contains("beta.json"));
+}
+
+#[test]
+fn directory_purpose_summary_structurally_satisfies_listing_content_answer() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent = "list 3 entries and summarize purpose".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-dir-purpose-ok", "ask", "prompt");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "inventory_dir",
+                "names": ["alpha.md", "beta.json", "notes.txt"]
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "read_range",
+                "path": "document/alpha.md",
+                "excerpt": "1|# Alpha\n2|setup notes"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 2,
+        finished_at: 3,
+    });
+
+    assert!(structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        "alpha.md, beta.json, and notes.txt are listed; based on the observed excerpt, this looks documentation-oriented."
+    ));
+    assert!(!structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        "alpha.md and notes.txt are listed; based on the observed excerpt, this looks documentation-oriented."
+    ));
+}
+
+#[test]
+fn compound_listing_gap_respects_requested_numeric_limit() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent = "list 2 entries and summarize purpose".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-dir-purpose-limit", "ask", "prompt");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "inventory_dir",
+                "names": ["alpha.md", "beta.json", "notes.txt"]
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "read_range",
+                "excerpt": "1|# Alpha\n2|setup notes"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 2,
+        finished_at: 3,
+    });
+
+    let answer =
+        "alpha.md and beta.json are listed; based on the observed excerpt, this looks documented.";
+
+    assert!(local_compound_listing_answer_verifier_gap(&route, &journal, answer).is_none());
+    assert!(structurally_satisfies_answer_contract(
+        &route, &journal, answer
+    ));
+}
+
+#[test]
+fn unbounded_directory_purpose_summary_does_not_require_all_listing_names() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent =
+        "summarize workspace organization from top-level directories".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-dir-purpose-unbounded", "ask", "prompt");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "inventory_dir",
+                "names": ["UI", "configs", "crates", "scripts", "target"]
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "read_range",
+                "path": "README.md",
+                "excerpt": "1|# RustClaw\n2|local Rust agent runtime"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 2,
+        finished_at: 3,
+    });
+
+    let answer =
+        "RustClaw is organized around a Rust core in crates, with UI, configs, and scripts around it.";
+
+    assert!(local_compound_listing_answer_verifier_gap(&route, &journal, answer).is_none());
+    assert!(structurally_satisfies_answer_contract(
+        &route, &journal, answer
+    ));
+}
+
+#[test]
+fn workspace_project_summary_inventory_names_can_skip_llm_verifier() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::WorkspaceProjectSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.resolved_intent =
+        "summarize current workspace organization from top-level directories".to_string();
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-workspace-summary-inventory",
+        "ask",
+        "prompt",
+    );
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "list_dir",
+                "entries": [
+                    {"name": "UI", "kind": "dir"},
+                    {"name": "configs", "kind": "dir"},
+                    {"name": "crates", "kind": "dir"},
+                    {"name": "scripts", "kind": "dir"}
+                ]
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "read_range",
+                "path": "README.md",
+                "excerpt": "1|# RustClaw\n2|local agent runtime"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 2,
+        finished_at: 3,
+    });
+
+    let answer =
+        "RustClaw keeps the runtime under crates, the browser console in UI, and helper automation in scripts.";
+
+    assert!(structurally_satisfies_answer_contract(
+        &route, &journal, answer
+    ));
+    assert!(structural_satisfaction_can_skip_verifier(
+        &route, &journal, answer
+    ));
+    assert!(!structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        "This workspace has a clear project layout."
+    ));
+}
+
+#[test]
 fn structural_satisfaction_does_not_skip_missing_contract_evidence() {
     let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
     route.output_contract.semantic_kind = crate::OutputSemanticKind::ExistenceWithPath;
@@ -376,6 +984,126 @@ fn structural_satisfaction_does_not_skip_missing_contract_evidence() {
         &route,
         &journal,
         "/tmp/a.txt exists"
+    ));
+}
+
+#[test]
+fn structural_satisfaction_skips_verifier_for_health_check_diagnostic_fields() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_chat_wrapped());
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.output_contract.requires_content_evidence = true;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-health-check-structural",
+        "ask",
+        "health check",
+    );
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "health_check".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "clawd_process_count": 1,
+                    "clawd_health_port_open": true,
+                    "telegramd_process_count": 0,
+                    "clawd_log": {"exists": true, "keyword_error_count": 43},
+                    "telegramd_log": {"exists": true, "keyword_error_count": 1},
+                    "system_health": {
+                        "os_family": "linux",
+                        "service_manager": "systemd",
+                        "cpu_count": 8,
+                        "load_avg_1m": 7.65,
+                        "load_avg_5m": 6.1,
+                        "load_avg_15m": 3.37,
+                        "memory_available_bytes": 8403259392u64,
+                        "memory_total_bytes": 15937286144u64,
+                        "disk_root_available_bytes": 14794739712u64,
+                        "disk_root_total_bytes": 156546629632u64,
+                        "warnings": ["disk_root_low"]
+                    }
+                },
+                "text": "{}"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    let answer = concat!(
+        "health_check.summary: clawd.status=running; clawd_process_count=1; ",
+        "clawd_health_port_open=true; telegramd_process_count=0; ",
+        "clawd_log.exists=true; clawd_log.keyword_error_count=43; ",
+        "telegramd_log.exists=true; telegramd_log.keyword_error_count=1; ",
+        "system_health.os_family=linux; system_health.service_manager=systemd; ",
+        "system_health.cpu_count=8; system_health.load_avg_1m=7.65; ",
+        "system_health.load_avg_5m=6.1; system_health.load_avg_15m=3.37; ",
+        "system_health.memory_available_bytes=8403259392; ",
+        "system_health.memory_total_bytes=15937286144; ",
+        "system_health.disk_root_available_bytes=14794739712; ",
+        "system_health.disk_root_total_bytes=156546629632; ",
+        "system_health.warnings=disk_root_low."
+    );
+
+    assert!(structurally_satisfies_answer_contract(
+        &route, &journal, answer
+    ));
+    assert!(structural_satisfaction_can_skip_verifier(
+        &route, &journal, answer
+    ));
+    assert!(!structurally_satisfies_answer_contract(
+        &route,
+        &journal,
+        "health_check.summary: clawd.status=running; clawd_process_count=1."
+    ));
+}
+
+#[test]
+fn structural_satisfaction_skips_verifier_for_deterministic_finalizer_summary() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-finalizer-summary-skip", "ask", "list");
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "inventory_dir",
+                "names_by_kind": {
+                    "dirs": ["configs"],
+                    "files": ["README.md"],
+                    "other": []
+                },
+                "counts": {"dirs": 1, "files": 1, "total": 2}
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.finalizer_summary = Some(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        completion_ok: Some(true),
+        grounded_ok: Some(true),
+        format_ok: Some(true),
+        needs_clarify: Some(false),
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+
+    assert!(structural_satisfaction_can_skip_verifier(
+        &route,
+        &journal,
+        "dirs:\n- configs\nfiles:\n- README.md"
     ));
 }
 
@@ -1150,6 +1878,68 @@ fn matrix_scalar_shape_ignores_read_text_structured_fields() {
     );
     assert!(!structurally_satisfies_answer_contract(
         &route, &journal, "running"
+    ));
+}
+
+#[test]
+fn service_status_port_answer_uses_complete_successful_socket_observation() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-service-ports",
+        "ask",
+        "inspect listening ports",
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_ports",
+            "process_basic",
+            "exit=0\nState  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess\nLISTEN 0 4096 127.0.0.53%lo:53 0.0.0.0:*\nLISTEN 0 4096 0.0.0.0:8787 0.0.0.0:* users:((\"clawd\",pid=1,fd=3))\nLISTEN 0 4096 0.0.0.0:22 0.0.0.0:*\nLISTEN 0 4096 0.0.0.0:80 0.0.0.0:*\nLISTEN 0 4096 127.0.0.1:7897 0.0.0.0:*\nLISTEN 0 4096 127.0.0.54:53 0.0.0.0:*\nLISTEN 0 4096 127.0.0.1:33331 0.0.0.0:* users:((\"clash-verge\",pid=2,fd=4))\nLISTEN 0 4096 127.0.0.1:631 0.0.0.0:*\nLISTEN 0 4096 [::]:22 [::]:*\nLISTEN 0 4096 [::]:80 [::]:*\nLISTEN 0 4096 [::1]:631 [::]:*",
+        ));
+    let candidate = "\
+| Port | Bind | Note |
+| --- | --- | --- |
+| 22 | 0.0.0.0:22 / [::]:22 | ssh |
+| 80 | 0.0.0.0:80 / [::]:80 | web |
+| 8787 | 0.0.0.0:8787 | clawd |
+| 53 | 127.0.0.53:53 / 127.0.0.54:53 | local dns |
+| 631 | 127.0.0.1:631 / [::1]:631 | local print |
+| 7897 | 127.0.0.1:7897 | local proxy |
+| 33331 | 127.0.0.1:33331 | local app |";
+
+    assert!(structurally_satisfies_answer_contract(
+        &route, &journal, candidate
+    ));
+}
+
+#[test]
+fn service_status_port_answer_rejects_unobserved_candidate_port() {
+    let mut route = route_with_mode(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Free;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    let mut journal = crate::task_journal::TaskJournal::for_task(
+        "task-service-ports-unobserved",
+        "ask",
+        "inspect listening ports",
+    );
+    journal
+        .step_results
+        .push(crate::task_journal::TaskJournalStepTrace::ok(
+            "step_ports",
+            "process_basic",
+            "port.count=2\nport[0].number=22\nport[0].local=0.0.0.0:22\nport[1].number=80\nport[1].local=0.0.0.0:80",
+        ));
+    let candidate = "\
+| Port | Bind |
+| --- | --- |
+| 22 | 0.0.0.0:22 |
+| 80 | 0.0.0.0:80 |
+| 443 | 0.0.0.0:443 |";
+
+    assert!(!structurally_satisfies_answer_contract(
+        &route, &journal, candidate
     ));
 }
 

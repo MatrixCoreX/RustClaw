@@ -10,6 +10,7 @@ use crate::{repo, AgentAction, AppState, ClaimedTask};
 pub(super) struct LoopRecipeOverrides {
     pub(super) max_steps: Option<usize>,
     pub(super) max_rounds: Option<usize>,
+    pub(super) max_tool_calls: Option<usize>,
     pub(super) repeat_action_limit: Option<usize>,
     pub(super) no_progress_limit: Option<usize>,
     pub(super) max_repairs: Option<usize>,
@@ -17,40 +18,127 @@ pub(super) struct LoopRecipeOverrides {
     pub(super) run_cmd_validation_timeout_seconds: Option<u64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LoopBudgetProfile {
+    General,
+    FastRead,
+    GroundedSummary,
+    MultiStepWorkspace,
+    OpsClosedLoop,
+}
+
+impl LoopBudgetProfile {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::General => "general",
+            Self::FastRead => "fast_read",
+            Self::GroundedSummary => "grounded_summary",
+            Self::MultiStepWorkspace => "multi_step_workspace",
+            Self::OpsClosedLoop => "ops_closed_loop",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct AgentLoopGuardPolicy {
     pub(super) max_steps: usize,
     pub(super) max_rounds: usize,
+    pub(super) max_tool_calls: usize,
     pub(super) recoverable_failure_extra_rounds: usize,
     pub(super) repeat_action_limit: usize,
     pub(super) no_progress_limit: usize,
     pub(super) multi_round_enabled: bool,
     pub(super) answer_verifier_retry_limit: usize,
+    pub(super) fast_read: LoopRecipeOverrides,
+    pub(super) grounded_summary: LoopRecipeOverrides,
+    pub(super) multi_step_workspace: LoopRecipeOverrides,
     pub(super) ops_closed_loop: LoopRecipeOverrides,
 }
 
 impl AgentLoopGuardPolicy {
-    fn overrides_for_recipe(
-        &self,
+    pub(super) fn budget_profile_for_context(
         recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
-    ) -> LoopRecipeOverrides {
-        match recipe.kind {
-            crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop => self.ops_closed_loop,
-            crate::execution_recipe::ExecutionRecipeKind::None => LoopRecipeOverrides::default(),
+        route_result: Option<&crate::RouteResult>,
+    ) -> LoopBudgetProfile {
+        if matches!(
+            recipe.kind,
+            crate::execution_recipe::ExecutionRecipeKind::OpsClosedLoop
+        ) {
+            return LoopBudgetProfile::OpsClosedLoop;
+        }
+
+        let Some(route) = route_result else {
+            return LoopBudgetProfile::General;
+        };
+        let contract = crate::TaskContract::from_route_result(route);
+        if !matches!(
+            contract.intent_kind,
+            crate::task_contract::TaskIntentKind::PlannerExecute
+        ) {
+            return LoopBudgetProfile::FastRead;
+        }
+        if route.output_contract.delivery_required
+            || route.wants_file_delivery
+            || matches!(
+                contract.operation,
+                crate::task_contract::TaskOperation::Write
+                    | crate::task_contract::TaskOperation::Modify
+                    | crate::task_contract::TaskOperation::Configure
+            )
+        {
+            return LoopBudgetProfile::MultiStepWorkspace;
+        }
+        if matches!(
+            contract.target_object,
+            crate::task_contract::TaskTargetObject::Directory
+        ) && matches!(
+            contract.operation,
+            crate::task_contract::TaskOperation::Summarize
+        ) {
+            return LoopBudgetProfile::MultiStepWorkspace;
+        }
+        if contract.required_evidence_fields.len() >= 2
+            || (contract.evidence_required
+                && matches!(
+                    contract.operation,
+                    crate::task_contract::TaskOperation::Summarize
+                        | crate::task_contract::TaskOperation::Validate
+                        | crate::task_contract::TaskOperation::Run
+                        | crate::task_contract::TaskOperation::List
+                ))
+        {
+            return LoopBudgetProfile::GroundedSummary;
+        }
+
+        LoopBudgetProfile::FastRead
+    }
+
+    fn overrides_for_profile(&self, profile: LoopBudgetProfile) -> LoopRecipeOverrides {
+        match profile {
+            LoopBudgetProfile::FastRead => self.fast_read,
+            LoopBudgetProfile::GroundedSummary => self.grounded_summary,
+            LoopBudgetProfile::MultiStepWorkspace => self.multi_step_workspace,
+            LoopBudgetProfile::OpsClosedLoop => self.ops_closed_loop,
+            LoopBudgetProfile::General => LoopRecipeOverrides::default(),
         }
     }
 
-    pub(super) fn adjusted_for_recipe(
+    pub(super) fn adjusted_for_context(
         &self,
         recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
+        route_result: Option<&crate::RouteResult>,
     ) -> Self {
-        let overrides = self.overrides_for_recipe(recipe);
+        let profile = Self::budget_profile_for_context(recipe, route_result);
+        let overrides = self.overrides_for_profile(profile);
         let mut policy = self.clone();
         if let Some(max_steps) = overrides.max_steps {
             policy.max_steps = max_steps;
         }
         if let Some(max_rounds) = overrides.max_rounds {
             policy.max_rounds = max_rounds;
+        }
+        if let Some(max_tool_calls) = overrides.max_tool_calls {
+            policy.max_tool_calls = max_tool_calls;
         }
         if let Some(repeat_action_limit) = overrides.repeat_action_limit {
             policy.repeat_action_limit = repeat_action_limit;
@@ -65,7 +153,7 @@ impl AgentLoopGuardPolicy {
         &self,
         recipe: &mut crate::execution_recipe::ExecutionRecipeRuntimeState,
     ) {
-        let overrides = self.overrides_for_recipe(*recipe);
+        let overrides = self.overrides_for_profile(Self::budget_profile_for_context(*recipe, None));
         if let Some(max_repairs) = overrides.max_repairs {
             recipe.max_repairs = max_repairs;
         }
@@ -76,7 +164,7 @@ impl AgentLoopGuardPolicy {
         recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
         action_effect: crate::execution_recipe::ActionEffect,
     ) -> Option<u64> {
-        let overrides = self.overrides_for_recipe(recipe);
+        let overrides = self.overrides_for_profile(Self::budget_profile_for_context(recipe, None));
         if action_effect.validates {
             overrides
                 .run_cmd_validation_timeout_seconds
@@ -155,6 +243,39 @@ fn parse_bool_from_toml(root: &TomlValue, path: &[&str], fallback: bool) -> bool
     cursor.as_bool().unwrap_or(fallback)
 }
 
+fn parse_loop_recipe_overrides(root: &TomlValue, path: &[&str]) -> LoopRecipeOverrides {
+    let mut max_steps_path = path.to_vec();
+    max_steps_path.push("max_steps");
+    let mut max_rounds_path = path.to_vec();
+    max_rounds_path.push("max_rounds");
+    let mut max_tool_calls_path = path.to_vec();
+    max_tool_calls_path.push("max_tool_calls");
+    let mut repeat_action_limit_path = path.to_vec();
+    repeat_action_limit_path.push("repeat_action_limit");
+    let mut no_progress_limit_path = path.to_vec();
+    no_progress_limit_path.push("no_progress_limit");
+    let mut max_repairs_path = path.to_vec();
+    max_repairs_path.push("max_repairs");
+    let mut run_cmd_timeout_path = path.to_vec();
+    run_cmd_timeout_path.push("run_cmd_timeout_seconds");
+    let mut run_cmd_validation_timeout_path = path.to_vec();
+    run_cmd_validation_timeout_path.push("run_cmd_validation_timeout_seconds");
+
+    LoopRecipeOverrides {
+        max_steps: parse_optional_usize_from_toml(root, &max_steps_path),
+        max_rounds: parse_optional_usize_from_toml(root, &max_rounds_path),
+        max_tool_calls: parse_optional_usize_from_toml(root, &max_tool_calls_path),
+        repeat_action_limit: parse_optional_usize_from_toml(root, &repeat_action_limit_path),
+        no_progress_limit: parse_optional_usize_from_toml(root, &no_progress_limit_path),
+        max_repairs: parse_optional_usize_from_toml(root, &max_repairs_path),
+        run_cmd_timeout_seconds: parse_optional_u64_from_toml(root, &run_cmd_timeout_path),
+        run_cmd_validation_timeout_seconds: parse_optional_u64_from_toml(
+            root,
+            &run_cmd_validation_timeout_path,
+        ),
+    }
+}
+
 pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPolicy {
     let path = state
         .skill_rt
@@ -171,6 +292,11 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
             crate::AGENT_MAX_STEPS,
         ),
         max_rounds: parse_usize_from_toml(&parsed, &["agent", "loop_guard", "max_rounds"], 2),
+        max_tool_calls: parse_usize_from_toml(
+            &parsed,
+            &["agent", "loop_guard", "max_tool_calls"],
+            12,
+        ),
         recoverable_failure_extra_rounds: parse_usize_allow_zero_from_toml(
             &parsed,
             &["agent", "loop_guard", "recoverable_failure_extra_rounds"],
@@ -196,56 +322,27 @@ pub(super) fn load_agent_loop_guard_policy(state: &AppState) -> AgentLoopGuardPo
             &["agent", "loop_guard", "answer_verifier_retry_limit"],
             2,
         ),
-        ops_closed_loop: LoopRecipeOverrides {
-            max_steps: parse_optional_usize_from_toml(
-                &parsed,
-                &["agent", "loop_guard", "ops_closed_loop", "max_steps"],
-            ),
-            max_rounds: parse_optional_usize_from_toml(
-                &parsed,
-                &["agent", "loop_guard", "ops_closed_loop", "max_rounds"],
-            ),
-            repeat_action_limit: parse_optional_usize_from_toml(
-                &parsed,
-                &[
-                    "agent",
-                    "loop_guard",
-                    "ops_closed_loop",
-                    "repeat_action_limit",
-                ],
-            ),
-            no_progress_limit: parse_optional_usize_from_toml(
-                &parsed,
-                &[
-                    "agent",
-                    "loop_guard",
-                    "ops_closed_loop",
-                    "no_progress_limit",
-                ],
-            ),
-            max_repairs: parse_optional_usize_from_toml(
-                &parsed,
-                &["agent", "loop_guard", "ops_closed_loop", "max_repairs"],
-            ),
-            run_cmd_timeout_seconds: parse_optional_u64_from_toml(
-                &parsed,
-                &[
-                    "agent",
-                    "loop_guard",
-                    "ops_closed_loop",
-                    "run_cmd_timeout_seconds",
-                ],
-            ),
-            run_cmd_validation_timeout_seconds: parse_optional_u64_from_toml(
-                &parsed,
-                &[
-                    "agent",
-                    "loop_guard",
-                    "ops_closed_loop",
-                    "run_cmd_validation_timeout_seconds",
-                ],
-            ),
-        },
+        fast_read: parse_loop_recipe_overrides(
+            &parsed,
+            &["agent", "loop_guard", "budget_profiles", "fast_read"],
+        ),
+        grounded_summary: parse_loop_recipe_overrides(
+            &parsed,
+            &["agent", "loop_guard", "budget_profiles", "grounded_summary"],
+        ),
+        multi_step_workspace: parse_loop_recipe_overrides(
+            &parsed,
+            &[
+                "agent",
+                "loop_guard",
+                "budget_profiles",
+                "multi_step_workspace",
+            ],
+        ),
+        ops_closed_loop: parse_loop_recipe_overrides(
+            &parsed,
+            &["agent", "loop_guard", "ops_closed_loop"],
+        ),
     }
 }
 

@@ -105,6 +105,8 @@ struct ImageSkillConfig {
     #[serde(default)]
     allow_compat_adapters: bool,
     #[serde(default)]
+    local_fallback_enabled: bool,
+    #[serde(default)]
     language: Option<String>,
     #[serde(default)]
     i18n_path: Option<String>,
@@ -307,24 +309,31 @@ fn execute(
             &output_path,
         ) {
             Ok((model, model_kind)) => {
-                let saved_path = output_path.to_string_lossy().to_string();
-                let preface = i18n.render(
-                    "image_generate.msg.saved",
-                    &[("path", saved_path.clone())],
-                    "Generated successfully and saved: {path}",
-                );
-                let text = format!("{preface}\nFILE:{saved_path}\nEPHEMERAL:IMAGE_SAVED");
-                let extra = json!({
-                    "provider": vendor_name(vendor),
-                    "model": model,
-                    "model_kind": model_kind,
-                    "latency_ms": 0,
-                    "outputs": [{"type":"image_file","path": saved_path}]
-                });
-                return Ok((text, extra));
+                return Ok(build_success_response(
+                    &i18n,
+                    &output_path,
+                    vendor_name(vendor),
+                    &model,
+                    model_kind,
+                    None,
+                ));
             }
             Err(err) => provider_errors.push(err),
         }
+    }
+    if cfg.image_generation.local_fallback_enabled {
+        write_local_fallback_image(&output_path)?;
+        return Ok(build_success_response(
+            &i18n,
+            &output_path,
+            "local_fallback",
+            "local-placeholder",
+            "local_fallback",
+            Some(json!({
+                "reason": "provider_generation_unavailable",
+                "provider_errors": provider_errors,
+            })),
+        ));
     }
     Err(format!(
         "all providers failed: {}",
@@ -333,6 +342,34 @@ fn execute(
             .cloned()
             .unwrap_or_else(|| "unknown error".to_string())
     ))
+}
+
+fn build_success_response(
+    i18n: &TextCatalog,
+    output_path: &Path,
+    provider: &str,
+    model: &str,
+    model_kind: &str,
+    fallback: Option<Value>,
+) -> (String, Value) {
+    let saved_path = output_path.to_string_lossy().to_string();
+    let preface = i18n.render(
+        "image_generate.msg.saved",
+        &[("path", saved_path.clone())],
+        "Generated successfully and saved: {path}",
+    );
+    let text = format!("{preface}\nFILE:{saved_path}\nEPHEMERAL:IMAGE_SAVED");
+    let mut extra = json!({
+        "provider": provider,
+        "model": model,
+        "model_kind": model_kind,
+        "latency_ms": 0,
+        "outputs": [{"type":"image_file","path": saved_path}]
+    });
+    if let Some(fallback) = fallback {
+        extra["fallback"] = fallback;
+    }
+    (text, extra)
 }
 
 fn first_model_candidate<'a>(
@@ -1222,6 +1259,17 @@ fn ensure_parent_dir(path: &Path) -> Result<(), String> {
     std::fs::create_dir_all(parent).map_err(|err| format!("create output dir failed: {err}"))
 }
 
+fn write_local_fallback_image(output_path: &Path) -> Result<(), String> {
+    ensure_parent_dir(output_path)?;
+    let bytes = STANDARD
+        .decode(LOCAL_FALLBACK_PNG_BASE64)
+        .map_err(|err| format!("decode local fallback image failed: {err}"))?;
+    std::fs::write(output_path, bytes).map_err(|err| format!("write output failed: {err}"))
+}
+
+const LOCAL_FALLBACK_PNG_BASE64: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+
 fn load_root_config() -> RootConfig {
     let root = workspace_root();
     let core_cfg = match std::fs::read_to_string(root.join("configs/config.toml"))
@@ -1260,6 +1308,15 @@ fn load_root_config() -> RootConfig {
 
 fn env_non_empty(key: &str) -> Option<String> {
     claw_core::secrets::env_non_empty_resolved_or_none(key)
+}
+
+fn env_bool(key: &str) -> Option<bool> {
+    let value = env_non_empty(key)?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "on" | "yes" => Some(true),
+        "0" | "false" | "off" | "no" => Some(false),
+        _ => None,
+    }
 }
 
 fn apply_vendor_api_key_env(target: &mut Option<VendorConfig>, key: &str) {
@@ -1305,6 +1362,9 @@ fn apply_env_overrides(cfg: &mut RootConfig) {
         &mut cfg.image_generation.providers.minimax,
         "IMAGE_GENERATION_MINIMAX_API_KEY",
     );
+    if let Some(enabled) = env_bool("IMAGE_GENERATION_LOCAL_FALLBACK") {
+        cfg.image_generation.local_fallback_enabled = enabled;
+    }
 }
 
 fn workspace_root() -> PathBuf {

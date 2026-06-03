@@ -883,6 +883,31 @@ fn memory_turn_with_single_locator_derives_short_alias_suffixes() {
 }
 
 #[test]
+fn preference_memory_turn_with_single_locator_derives_alias_without_refresh_flag() {
+    let route = route_result_for_test(crate::AskMode::direct_answer(), false);
+    let turn_analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    let merged = super::merge_alias_bindings_for_turn(
+        None,
+        Some(&turn_analysis),
+        "Remember that the note file means scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only confirmed.",
+        &route,
+        "",
+    );
+
+    assert!(merged.iter().any(|binding| {
+        binding.alias == "note file"
+            && binding.target == "scripts/nl_tests/fixtures/device_local/docs/service_notes.md"
+    }));
+}
+
+#[test]
 fn current_locator_rebinds_existing_alias_without_language_phrase_table() {
     let prior = ConversationState {
         alias_bindings: vec![SessionAliasBinding {

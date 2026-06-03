@@ -186,6 +186,23 @@ fn route_reason_has_marker(route_result: &RouteResult, marker: &str) -> bool {
         .any(|part| part.trim() == marker)
 }
 
+fn direct_auto_locator_can_rescue_background_content_clarify(route_result: &RouteResult) -> bool {
+    route_result.output_contract.requires_content_evidence
+        && !route_result.output_contract.delivery_required
+        && route_result
+            .output_contract
+            .semantic_kind
+            .is_content_excerpt_summary()
+        && !matches!(
+            route_result.output_contract.response_shape,
+            OutputResponseShape::Scalar | OutputResponseShape::FileToken
+        )
+        && matches!(
+            route_result.output_contract.locator_kind,
+            OutputLocatorKind::Path | OutputLocatorKind::Filename
+        )
+}
+
 pub(crate) fn apply_post_route_policy(
     route_result: RouteResult,
     locator_resolution: LocatorResolution,
@@ -263,12 +280,14 @@ pub(crate) fn apply_post_route_policy(
             .requires_content_evidence = true;
     }
 
+    let background_locator_clarify = route_reason_has_marker(
+        &execution_route_result,
+        "background_locator_requires_clarify",
+    );
     if auto_locator_resolved_direct
         && path_scoped_content_request
-        && !route_reason_has_marker(
-            &execution_route_result,
-            "background_locator_requires_clarify",
-        )
+        && (!background_locator_clarify
+            || direct_auto_locator_can_rescue_background_content_clarify(&execution_route_result))
     {
         execution_route_result.needs_clarify = false;
         if execution_route_result.is_clarify_gate() || execution_route_result.is_chat_gate() {
