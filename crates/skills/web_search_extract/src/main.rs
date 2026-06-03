@@ -76,21 +76,58 @@ fn main() -> Result<()> {
                 "citations": []
             }),
         };
+        let response_extra = build_response_extra(&input, &text_payload);
 
         let out = json!({
             "request_id": input.request_id,
             "status": "ok",
             "text": serde_json::to_string(&text_payload)?,
             "error_text": Value::Null,
-            "extra": {
-                "action": input.action,
-                "backend_connected": text_payload.get("status").and_then(Value::as_str) == Some("ok")
-            }
+            "extra": response_extra
         });
         writeln!(stdout, "{}", serde_json::to_string(&out)?)?;
         stdout.flush()?;
     }
     Ok(())
+}
+
+fn build_response_extra(input: &SearchInput, text_payload: &Value) -> Value {
+    let items = text_payload
+        .get("items")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let extract_urls = text_payload
+        .get("extract_urls")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let citations = text_payload
+        .get("citations")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let status = text_payload
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let result_count = items.as_array().map(Vec::len).unwrap_or(0);
+    json!({
+        "schema_version": 1,
+        "action": input.action,
+        "query": input.query,
+        "top_k": input.top_k,
+        "backend": text_payload.get("backend").cloned().unwrap_or(Value::Null),
+        "backend_connected": status == "ok",
+        "status": status,
+        "error_code": text_payload.get("error_code").cloned().unwrap_or(Value::Null),
+        "field_value": {
+            "status": status,
+            "result_count": result_count,
+            "summary": text_payload.get("summary").cloned().unwrap_or(Value::Null),
+        },
+        "items": items.clone(),
+        "candidates": items,
+        "extract_urls": extract_urls,
+        "citations": citations,
+    })
 }
 
 fn parse_input(req: &Value) -> SearchInput {
@@ -505,4 +542,53 @@ fn build_summary(items: &[SearchItem], query: &str, backend: &str) -> String {
         backend,
         sources
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input_for_test() -> SearchInput {
+        SearchInput {
+            request_id: "test".to_string(),
+            action: "search".to_string(),
+            query: "rust async tutorial".to_string(),
+            top_k: 3,
+            lang: None,
+            time_range: None,
+            domains_allow: Vec::new(),
+            domains_deny: Vec::new(),
+            backend: Some("duckduckgo_html".to_string()),
+            include_snippet: true,
+        }
+    }
+
+    #[test]
+    fn response_extra_exposes_empty_candidates_for_search_evidence() {
+        let payload = json!({
+            "status": "ok",
+            "backend": "duckduckgo_html",
+            "items": [],
+            "extract_urls": [],
+            "summary": "No results found",
+            "citations": []
+        });
+
+        let extra = build_response_extra(&input_for_test(), &payload);
+
+        assert_eq!(extra.get("action").and_then(Value::as_str), Some("search"));
+        assert_eq!(
+            extra
+                .get("candidates")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(0)
+        );
+        assert_eq!(
+            extra
+                .pointer("/field_value/result_count")
+                .and_then(Value::as_u64),
+            Some(0)
+        );
+    }
 }

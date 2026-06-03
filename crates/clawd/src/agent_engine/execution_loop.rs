@@ -134,6 +134,15 @@ fn check_repeat_action_guard(
     None
 }
 
+fn action_counts_as_tool_call(action: &AgentAction) -> bool {
+    matches!(
+        action,
+        AgentAction::CallTool { .. }
+            | AgentAction::CallSkill { .. }
+            | AgentAction::CallCapability { .. }
+    )
+}
+
 pub(super) async fn execute_actions_once(
     state: &AppState,
     task: &ClaimedTask,
@@ -156,6 +165,20 @@ pub(super) async fn execute_actions_once(
         let step_in_round = idx + 1;
         let global_step = loop_state.total_steps_executed + 1;
         let fingerprint = super::action_fingerprint(state, action);
+        if action_counts_as_tool_call(action)
+            && loop_state.tool_calls_total >= policy.max_tool_calls.max(1)
+        {
+            info!(
+                "executor_result_error task_id={} round={} step={} type=guard error=max_tool_calls reached={} action={}",
+                task.task_id,
+                loop_state.round_no,
+                step_in_round,
+                policy.max_tool_calls,
+                plan_step_label(action)
+            );
+            stop_signal = Some("max_tool_calls".to_string());
+            break;
+        }
         if let Some(reason) = check_repeat_action_guard(
             state,
             task,

@@ -33,6 +33,7 @@
 - OS command failures are returned with readable error text.
 - Non-zero subprocess exit codes are returned as `status=error` with `error_text=process command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including fields like `action`, `exit_code`, `platform`, `command_tool` for `port_list`, and `output`.
+- `port_list` additionally emits structured listener evidence in `extra.listeners`, `extra.public_listeners`, `extra.ports`, and `extra.public_ports`; use these machine fields for grounding instead of inferring ports from truncated `output` text.
 
 ## Structured Evidence Contract
 - Matrix admission status: built-in structured evidence only; `output` remains legacy text evidence unless a stricter parser is explicitly registered.
@@ -41,6 +42,10 @@
   - `exit_code`: integer subprocess exit code; evidence role `status`.
   - `platform`: string OS/platform; evidence role `field_value`.
   - `command_tool`: string selected probe for `port_list`; evidence role `field_value`.
+  - `listener_count`, `public_listener_count`, `localhost_listener_count`: integer listener counts for `port_list`; evidence role `count`.
+  - `ports`, `public_ports`: sorted unique port strings observed by `port_list`; evidence role `field_value`.
+  - `listeners`: bounded list of parsed listener objects with `local_endpoint`, `local_address`, `port`, `bind_scope`, `is_wildcard`, `is_loopback`, `process_name`, and `pid`; evidence role `field_value`.
+  - `public_listeners`: bounded subset of `listeners` where `bind_scope=all_interfaces`; evidence role `field_value`.
   - `limit`, `filter`, `pid`, `signal`, `path`, or `n`: echoed typed inputs when applicable; evidence roles `field_value` and `path`.
   - `output`: string bounded process/log observation; fallback evidence only.
 - Sensitive fields: process command lines and log tails can contain secrets or user data. Provider-facing traces should prefer counts, selected fields, excerpts, or hashes.

@@ -1,5 +1,6 @@
 use super::{
-    assistant_memory_source_text, drop_execution_summaries_when_delivery_is_scalar,
+    answer_verifier_forces_task_failure, assistant_memory_source_text,
+    deterministic_filtered_log_entry_recovery, drop_execution_summaries_when_delivery_is_scalar,
     journal_has_missing_file_search_evidence, non_failure_final_status,
     resume_context_has_directory_lookup_failure, resume_context_path_batch_facts_are_missing_only,
     resume_failure_is_unbound_path_lookup_clarify_result,
@@ -40,6 +41,66 @@ fn non_failure_final_status_preserves_clarify_semantics() {
         non_failure_final_status(true),
         crate::task_journal::TaskJournalFinalStatus::Clarify
     );
+}
+
+#[test]
+fn answer_verifier_high_confidence_gap_forces_task_failure() {
+    let mut journal = crate::task_journal::TaskJournal::for_task("task-1", "ask", "prompt");
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["command_output".to_string()],
+        answer_incomplete_reason: "answer omitted requested synthesis".to_string(),
+        should_retry: true,
+        retry_instruction: "use the observed command output".to_string(),
+        confidence: 0.85,
+    });
+
+    assert!(answer_verifier_forces_task_failure(false, &journal));
+    assert!(!answer_verifier_forces_task_failure(true, &journal));
+}
+
+#[test]
+fn filtered_log_entry_gap_recovers_from_read_range_observation() {
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-filtered-log", "ask", "prompt");
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["filtered_entry".to_string()],
+        answer_incomplete_reason: "filtered entry missing".to_string(),
+        should_retry: true,
+        retry_instruction: "filter observed log entry".to_string(),
+        confidence: 0.85,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "mode": "tail",
+                    "requested_n": 4,
+                    "path": "logs/clawd.run.log",
+                    "resolved_path": "/workspace/logs/clawd.run.log",
+                    "excerpt": "8|2026-05-27T08:04:44Z INFO task_call\n9|2026-05-27T08:04:45Z WARN removed_think_block\n10|2026-05-27T08:04:46Z ERROR provider timeout"
+                },
+                "text": "{}"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let recovered =
+        deterministic_filtered_log_entry_recovery(&journal).expect("filtered log entry recovery");
+
+    assert!(recovered.contains("log.filtered_entry.level=ERROR"));
+    assert!(recovered.contains("log.filtered_entry.line=10"));
+    assert!(recovered.contains("provider timeout"));
+    assert!(!recovered.contains("removed_think_block"));
 }
 
 #[test]

@@ -28,17 +28,20 @@ pub(crate) struct ClarifyLocatorReplyRewrite {
     pub(crate) reason: ClarifyRewriteReason,
 }
 
-/// 命中原因细分。V1 只有一种；预留位置给未来 alias-deictic / single-word fill。
+/// 命中原因细分。V1 收窄在结构化 locator-only 续答，不在本地做语义路由。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClarifyRewriteReason {
     /// 上一轮 clarify + 当前消息明显是 locator/path/单文件名续答。
     ClarifyLocatorReply,
+    /// 上一轮已有可复用操作 + 当前消息明显是 locator/path/单文件名续答。
+    FollowupLocatorReply,
 }
 
 impl ClarifyRewriteReason {
     pub(crate) fn as_metric_label(self) -> &'static str {
         match self {
             ClarifyRewriteReason::ClarifyLocatorReply => "clarify_locator_reply",
+            ClarifyRewriteReason::FollowupLocatorReply => "followup_locator_reply",
         }
     }
 }

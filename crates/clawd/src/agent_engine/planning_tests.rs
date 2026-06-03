@@ -10,15 +10,17 @@ use claw_core::skill_registry::SkillsRegistry;
 use super::{
     action_targets_config_edit, actions_use_ad_hoc_command_without_route_preferred_skill,
     active_task_append_current_locator_deterministic_plan_result,
-    archive_list_auto_locator_deterministic_plan_result, archive_read_deterministic_plan_result,
-    archive_unpack_deterministic_plan_result, broaden_default_read_range_for_structured_text,
-    build_lightweight_skill_playbooks_text, build_lightweight_skill_quick_index_text,
-    build_lightweight_tool_spec, can_fallback_to_initial_plan_after_repair_failure,
-    classify_planning_prompt_class, compact_skill_playbook_from_prompt,
+    archive_list_auto_locator_deterministic_plan_result, archive_pack_deterministic_plan_result,
+    archive_read_deterministic_plan_result, archive_unpack_deterministic_plan_result,
+    broaden_default_read_range_for_structured_text, build_lightweight_skill_playbooks_text,
+    build_lightweight_skill_quick_index_text, build_lightweight_tool_spec,
+    can_fallback_to_initial_plan_after_repair_failure, classify_planning_prompt_class,
+    compact_skill_playbook_from_prompt,
     content_excerpt_summary_auto_locator_deterministic_plan_result,
-    contract_hint_preferred_action_deterministic_plan_result,
+    contract_hint_preferred_action_deterministic_plan_result, contract_scoped_planner_skill_scope,
     directory_compare_locator_deterministic_plan_result,
     directory_entry_groups_auto_locator_deterministic_plan_result,
+    directory_purpose_auto_locator_deterministic_plan_result,
     directory_purpose_extension_inventory_deterministic_plan_result,
     directory_purpose_representative_reads_after_find_result,
     directory_tree_auto_locator_deterministic_plan_result, enforce_output_contract_tool_args,
@@ -28,6 +30,7 @@ use super::{
     file_facts_auto_locator_observation_plan, file_paths_locator_deterministic_plan_result,
     fill_missing_read_range_path_from_route_locator,
     generic_directory_auto_locator_observation_plan,
+    generic_path_content_log_analyze_deterministic_plan_result,
     git_repository_state_deterministic_plan_result, has_pre_observation_structured_output_shape,
     inject_structural_extension_filter_for_directory_inventory,
     inject_synthesize_answer_for_bare_placeholder_respond,
@@ -394,6 +397,26 @@ fn base_route_result() -> RouteResult {
         agent_display_name_hint: String::new(),
         output_contract: IntentOutputContract::default(),
     }
+}
+
+#[test]
+fn contract_scoped_planner_skill_scope_uses_allowed_action_skills() {
+    let mut route = base_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+
+    let scope = contract_scoped_planner_skill_scope(Some(&route)).expect("contract scope");
+
+    assert_eq!(scope.len(), 1);
+    assert!(scope.contains("fs_basic"));
+}
+
+#[test]
+fn contract_scoped_planner_skill_scope_leaves_unclassified_routes_open() {
+    let route = base_route_result();
+
+    assert!(contract_scoped_planner_skill_scope(Some(&route)).is_none());
 }
 
 #[test]
@@ -1403,6 +1426,87 @@ fn archive_unpack_contract_plans_direct_unpack_without_model_plan() {
     assert_eq!(
         args.get("dest").and_then(Value::as_str),
         Some("tmp/contract_matrix_unpacked")
+    );
+}
+
+#[test]
+fn archive_pack_contract_plans_direct_pack_without_model_plan() {
+    let state = test_state_with_enabled_skills(&["archive_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::ArchivePack;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/skill_calls | tmp/nl_archive_case_en.zip".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = archive_pack_deterministic_plan_result(
+        "pack archive",
+        &state,
+        Some(&route),
+        &loop_state,
+        "Zip scripts/skill_calls into tmp/nl_archive_case_en.zip",
+        Some("Zip scripts/skill_calls into tmp/nl_archive_case_en.zip"),
+        None,
+    )
+    .expect("archive pack deterministic plan");
+
+    assert_eq!(plan.steps.len(), 1);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "archive_basic", "pack");
+    assert_eq!(
+        args.get("source").and_then(Value::as_str),
+        Some("scripts/skill_calls")
+    );
+    assert_eq!(
+        args.get("archive").and_then(Value::as_str),
+        Some("tmp/nl_archive_case_en.zip")
+    );
+    assert_eq!(args.get("format").and_then(Value::as_str), Some("zip"));
+}
+
+#[test]
+fn filesystem_mutation_archive_target_plans_archive_pack_from_locator_tokens() {
+    let root = TempDirGuard::new("filesystem_mutation_archive_pack");
+    fs::create_dir_all(root.path.join("scripts/skill_calls")).expect("create source dir");
+    fs::create_dir_all(root.path.join("tmp")).expect("create tmp dir");
+    let archive_path = root.path.join("tmp/nl_archive_case_en.zip");
+    let archive_path_text = archive_path.display().to_string();
+    let mut state = test_state_with_enabled_skills(&["archive_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = base_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::FilesystemMutationResult;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = archive_path_text.clone();
+    route.resolved_intent = format!(
+        "Zip the scripts/skill_calls directory into {archive_path_text} and report success"
+    );
+    let loop_state = LoopState::new(1);
+
+    let plan = archive_pack_deterministic_plan_result(
+        "pack archive",
+        &state,
+        Some(&route),
+        &loop_state,
+        "Zip scripts/skill_calls into tmp/nl_archive_case_en.zip",
+        Some("Zip scripts/skill_calls into tmp/nl_archive_case_en.zip"),
+        Some(&archive_path_text),
+    )
+    .expect("archive pack fallback deterministic plan");
+
+    assert_eq!(plan.steps.len(), 1);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "archive_basic", "pack");
+    assert_eq!(
+        args.get("source").and_then(Value::as_str),
+        Some("scripts/skill_calls")
+    );
+    assert_eq!(
+        args.get("archive").and_then(Value::as_str),
+        Some(archive_path_text.as_str())
     );
 }
 
@@ -2960,6 +3064,69 @@ planner_kind = "tool"
 }
 
 #[test]
+fn structured_identity_presence_deterministic_plan_reads_identity_field() {
+    let root = TempDirGuard::new("structured_identity_presence_deterministic_plan");
+    let registry = root.path.join("skills_registry.toml");
+    fs::write(
+        &registry,
+        r#"[[skills]]
+name = "fs_basic"
+enabled = true
+group = "filesystem"
+planner_kind = "tool"
+
+[[skills]]
+name = "archive_basic"
+enabled = true
+group = "archive"
+planner_kind = "tool"
+"#,
+    )
+    .expect("write registry");
+    let registry_path = registry.display().to_string();
+    let mut state = test_state_with_enabled_skills(&["config_basic", "fs_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = registry_path.clone();
+    route.route_reason = "structured_identifier_presence_requires_content_evidence".to_string();
+    route.resolved_intent =
+        "Read skills_registry.toml and answer whether fs_basic is registered.".to_string();
+    let request = "Read skills_registry.toml and answer whether fs_basic is registered.";
+
+    let plan = super::scalar_content_auto_locator_deterministic_plan_result(
+        &state,
+        request,
+        Some(&route),
+        &LoopState::new(1),
+        request,
+        Some(request),
+        Some(registry_path.as_str()),
+    )
+    .expect("structured identity presence should bypass broad file reads");
+
+    assert_eq!(plan.steps.len(), 1);
+    let first = plan.steps[0]
+        .to_agent_action()
+        .expect("first step should be an action");
+    let args = expect_planned_call(&first, "config_basic", "read_field");
+    assert_eq!(
+        args.get("path").and_then(Value::as_str),
+        Some(registry_path.as_str())
+    );
+    assert_eq!(
+        args.get("field_path").and_then(Value::as_str),
+        Some("fs_basic.name")
+    );
+}
+
+#[test]
 fn rustclaw_config_validation_without_profile_keeps_validate_action() {
     let mut route = base_route_result();
     route.resolved_intent =
@@ -3879,6 +4046,54 @@ fn contract_hint_preferred_doc_parse_uses_structured_parse_doc_action() {
 }
 
 #[test]
+fn quoted_literal_content_presence_uses_deterministic_grep_plan() {
+    let root = TempDirGuard::new("quoted_literal_content_presence");
+    let target = root.path.join("virtual_tools.rs");
+    fs::write(&target, "pub const MARKER: &str = \"NEEDLE_TOKEN_123\";\n").expect("write target");
+    let target_path = target.display().to_string();
+    let mut state = test_state_with_enabled_skills(&["fs_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = target_path.clone();
+    route.resolved_intent =
+        "Check virtual_tools.rs for the quoted marker NEEDLE_TOKEN_123.".to_string();
+    let request = "Check virtual_tools.rs for “NEEDLE_TOKEN_123”.";
+
+    let plan = super::content_presence_quoted_literal_deterministic_plan_result(
+        &state,
+        request,
+        Some(&route),
+        &LoopState::new(1),
+        request,
+        Some(request),
+        Some(target_path.as_str()),
+    )
+    .expect("quoted literal content presence should use grep_text");
+
+    assert_eq!(plan.steps.len(), 1);
+    let first = plan.steps[0]
+        .to_agent_action()
+        .expect("first step should be an action");
+    let args = expect_planned_call(&first, "fs_basic", "grep_text");
+    assert_eq!(
+        args.get("root").and_then(Value::as_str),
+        Some(target_path.as_str())
+    );
+    assert_eq!(
+        args.get("query").and_then(Value::as_str),
+        Some("NEEDLE_TOKEN_123")
+    );
+}
+
+#[test]
 fn contract_hint_hidden_entries_list_dir_includes_hidden_entries() {
     let state = test_state_with_enabled_skills(&["fs_basic"]);
     let mut route = base_route_result();
@@ -4002,6 +4217,34 @@ fn service_status_process_request_uses_process_basic_filter_plan() {
 }
 
 #[test]
+fn service_status_url_request_uses_http_basic_plan() {
+    let state = test_state_with_enabled_skills(&["process_basic", "http_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    route.resolved_intent = "访问 http://127.0.0.1:8787/v1/health，简短告诉我结果".to_string();
+    let loop_state = LoopState::new(1);
+
+    let plan = service_status_deterministic_plan_result(
+        &state,
+        "observe local health URL",
+        Some(&route),
+        &loop_state,
+        "访问 http://127.0.0.1:8787/v1/health，简短告诉我结果",
+    )
+    .expect("URL status request should use http_basic");
+
+    assert_eq!(plan.steps.len(), 3);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "http_basic", "get");
+    assert_eq!(
+        args.get("url").and_then(Value::as_str),
+        Some("http://127.0.0.1:8787/v1/health")
+    );
+}
+
+#[test]
 fn service_status_workspace_product_request_uses_health_check_plan() {
     let mut state = test_state_with_enabled_skills(&["health_check", "process_basic"]);
     let tmp = TempDirGuard::new("rustclaw");
@@ -4094,6 +4337,34 @@ fn scalar_service_status_uses_health_check_plan() {
 }
 
 #[test]
+fn scalar_service_status_named_process_uses_process_basic_filter_plan() {
+    let state = test_state_with_enabled_skills(&["health_check", "process_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Scalar;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    let loop_state = LoopState::new(1);
+
+    let plan = service_status_deterministic_plan_result(
+        &state,
+        "check named service",
+        Some(&route),
+        &loop_state,
+        "telegramd",
+    )
+    .expect("named service status should use process_basic");
+
+    assert_eq!(plan.steps.len(), 1);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "process_basic", "ps");
+    assert_eq!(
+        args.get("filter").and_then(Value::as_str),
+        Some("telegramd")
+    );
+    assert_eq!(args.get("limit").and_then(Value::as_u64), Some(200));
+}
+
+#[test]
 fn structural_contracts_are_not_blocked_by_literal_command_guard() {
     let mut route = base_route_result();
     route.output_contract.requires_content_evidence = true;
@@ -4166,6 +4437,30 @@ fn service_status_without_process_target_uses_system_basic_info_plan() {
         "observe local runtime identity",
     )
     .expect("system status fallback should use system_basic info");
+
+    assert_eq!(plan.steps.len(), 1);
+    let action = plan.steps[0].to_agent_action().expect("agent action");
+    let args = expect_planned_call(&action, "system_basic", "info");
+    assert_eq!(args.as_object().map(|obj| obj.len()), Some(1));
+}
+
+#[test]
+fn service_status_generic_system_info_prefers_system_basic_over_health_check() {
+    let state = test_state_with_enabled_skills(&["health_check", "process_basic", "system_basic"]);
+    let mut route = base_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    let loop_state = LoopState::new(1);
+
+    let plan = service_status_deterministic_plan_result(
+        &state,
+        "observe local runtime identity",
+        Some(&route),
+        &loop_state,
+        "observe local runtime identity",
+    )
+    .expect("generic system status should use system_basic info");
 
     assert_eq!(plan.steps.len(), 1);
     let action = plan.steps[0].to_agent_action().expect("agent action");
@@ -5559,7 +5854,7 @@ fn extract_field_rewrites_bare_manifest_to_shallow_candidate_with_field() {
         Some(&route),
         &LoopState::new(1),
         "读取 package.json 里的 name 字段",
-        Some(root_package.to_string_lossy().as_ref()),
+        None,
         actions,
     );
     let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
@@ -5619,7 +5914,7 @@ name = "clawd"
         Some(&route),
         &LoopState::new(1),
         "读取 Cargo.toml 的 package.name",
-        Some(root_cargo.to_string_lossy().as_ref()),
+        None,
         actions,
     );
     let args = expect_planned_call(&normalized[0], "config_basic", "read_field");
@@ -5632,6 +5927,119 @@ name = "clawd"
                 .as_ref()
         )
     );
+}
+
+#[test]
+fn extract_field_keeps_root_manifest_when_auto_locator_is_workspace_root_scope() {
+    let root = TempDirGuard::new("root_scope_manifest_binding");
+    let root_package = root.path.join("package.json");
+    fs::write(
+        &root_package,
+        r#"{"dependencies":{"@xdevplatform/xurl":"^1.0.3"}}"#,
+    )
+    .expect("write root package");
+    fs::create_dir_all(root.path.join("UI")).expect("create ui");
+    fs::write(
+        root.path.join("UI/package.json"),
+        r#"{"name":"react-example"}"#,
+    )
+    .expect("write ui package");
+    let root_cargo = root.path.join("Cargo.toml");
+    fs::write(
+        &root_cargo,
+        r#"[workspace]
+members = ["crates/clawd"]
+
+[workspace.package]
+version = "0.1.7"
+"#,
+    )
+    .expect("write workspace cargo");
+    fs::create_dir_all(root.path.join("crates/clawd")).expect("create clawd");
+    fs::write(
+        root.path.join("crates/clawd/Cargo.toml"),
+        r#"[package]
+name = "clawd"
+"#,
+    )
+    .expect("write member cargo");
+
+    let mut state = test_state_with_enabled_skills(&["system_basic", "config_basic"]);
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.delivery_required = false;
+    route.resolved_intent =
+        "Read root package.json name and root Cargo.toml package.name".to_string();
+    let root_scope = root.path.display().to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "system_basic".to_string(),
+            args: json!({
+                "action": "extract_field",
+                "path": "package.json",
+                "field_path": "name",
+                "format": "json",
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "system_basic".to_string(),
+            args: json!({
+                "action": "extract_field",
+                "path": "Cargo.toml",
+                "field_path": "package.name",
+                "format": "toml",
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "Read root package.json name and root Cargo.toml package.name",
+        Some(&root_scope),
+        actions,
+    );
+    let read_paths = normalized
+        .iter()
+        .filter_map(|action| {
+            let args = match action {
+                AgentAction::CallSkill { skill, args }
+                | AgentAction::CallTool { tool: skill, args }
+                    if skill == "config_basic"
+                        && args.get("action").and_then(Value::as_str) == Some("read_field") =>
+                {
+                    args
+                }
+                _ => return None,
+            };
+            args.get("path").and_then(Value::as_str).map(|raw| {
+                let path = Path::new(raw);
+                if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    root.path.join(path)
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(read_paths.len(), 2, "normalized actions: {normalized:?}");
+    assert_eq!(read_paths[0], root_package);
+    assert_eq!(read_paths[1], root_cargo);
 }
 
 #[test]
@@ -6689,7 +7097,7 @@ fn workspace_default_evidence_does_not_expand_single_structured_count_answer() {
         &normalized[0],
         AgentAction::CallTool { tool: skill, args }
             if skill == "fs_basic"
-                && args.get("action").and_then(Value::as_str) == Some("count_entries")
+        && args.get("action").and_then(Value::as_str) == Some("count_entries")
     ));
     assert!(!normalized.iter().any(|action| {
         matches!(action, AgentAction::CallSkill { skill, .. } if skill == "git_basic")
@@ -6700,6 +7108,115 @@ fn workspace_default_evidence_does_not_expand_single_structured_count_answer() {
                         && args.get("action").and_then(Value::as_str) == Some("read_range")
             )
     }));
+}
+
+#[test]
+fn compound_listing_and_content_synthesis_refs_include_both_observations() {
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ExcerptKindJudgment;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": "scripts/nl_tests/fixtures/device_local/docs",
+                "names_only": true
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+                "mode": "head",
+                "n": 15
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &test_state(),
+        Some(&route),
+        &loop_state,
+        "list file names, read one file, then classify it",
+        None,
+        actions,
+    );
+
+    assert!(matches!(
+        &normalized[2],
+        AgentAction::SynthesizeAnswer { evidence_refs }
+            if evidence_refs == &vec!["step_1".to_string(), "step_2".to_string()]
+    ));
+}
+
+#[test]
+fn content_excerpt_summary_listing_and_content_synthesis_refs_include_both_observations() {
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "scripts/nl_tests/fixtures/device_local/docs".to_string();
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": "scripts/nl_tests/fixtures/device_local/docs",
+                "names_only": true
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "scripts/nl_tests/fixtures/device_local/docs/release_checklist.md",
+                "mode": "head",
+                "n": 20
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &test_state(),
+        Some(&route),
+        &loop_state,
+        "list file names, read one file, then classify it",
+        None,
+        actions,
+    );
+
+    assert!(matches!(
+        &normalized[2],
+        AgentAction::SynthesizeAnswer { evidence_refs }
+            if evidence_refs == &vec!["step_1".to_string(), "step_2".to_string()]
+    ));
 }
 
 #[test]
@@ -8233,6 +8750,32 @@ fn file_facts_auto_locator_accepts_single_file_metadata_mislabeled_as_quantity_c
 }
 
 #[test]
+fn file_facts_auto_locator_uses_route_locator_hint_without_auto_locator_path() {
+    let root = TempDirGuard::new("file_facts_quantity_locator_hint");
+    let report = root.path.join("README.md");
+    fs::write(&report, "hello").expect("write report");
+    let report_path = report.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = report_path.clone();
+
+    let actions = file_facts_auto_locator_observation_plan(Some(&route), None).unwrap();
+
+    assert!(matches!(
+        &actions[0],
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args }
+            if skill == "fs_basic"
+                && args.get("action").and_then(Value::as_str) == Some("stat_paths")
+                && args.get("paths") == Some(&json!([report_path]))
+    ));
+}
+
+#[test]
 fn file_facts_auto_locator_accepts_single_directory_metadata_quantity_comparison() {
     let root = TempDirGuard::new("directory_facts_quantity_comparison");
     let target = root.path.join("target");
@@ -8415,8 +8958,7 @@ fn file_facts_auto_locator_deterministic_plan_resolves_current_workspace_quantit
     .expect("deterministic file facts plan");
 
     assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 4);
-    assert!(plan.raw_plan_text.contains("stat_paths"));
+    assert_eq!(plan.steps.len(), 3);
     assert!(plan.raw_plan_text.contains("count_entries"));
     assert!(plan
         .raw_plan_text
@@ -8460,6 +9002,75 @@ fn quantity_compare_pair_locator_uses_compare_paths_without_planner_guessing() {
         .get("right_path")
         .and_then(Value::as_str)
         .is_some_and(|path| path.ends_with("Cargo.toml")));
+}
+
+#[test]
+fn quantity_compare_pair_locator_uses_count_entries_for_directory_pairs() {
+    let root = TempDirGuard::new("quantity_compare_directory_pair_locator");
+    fs::create_dir_all(root.path.join("crates/skills")).expect("write dirs");
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "crates | crates/skills".to_string();
+
+    let plan = quantity_compare_pair_locator_deterministic_plan_result(
+        &state,
+        "count entries in two directories",
+        Some(&route),
+        &LoopState::new(1),
+    )
+    .expect("deterministic directory pair count plan");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert_eq!(plan.steps.len(), 4);
+    let first = plan.steps[0].to_agent_action().expect("first action");
+    let first_args = expect_planned_call(&first, "fs_basic", "count_entries");
+    assert!(first_args
+        .get("path")
+        .and_then(Value::as_str)
+        .is_some_and(|path| path.ends_with("crates")));
+    assert_eq!(
+        first_args.get("recursive").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        first_args.get("include_hidden").and_then(Value::as_bool),
+        Some(false)
+    );
+
+    let second = plan.steps[1].to_agent_action().expect("second action");
+    let second_args = expect_planned_call(&second, "fs_basic", "count_entries");
+    assert!(second_args
+        .get("path")
+        .and_then(Value::as_str)
+        .is_some_and(|path| path.ends_with("crates/skills")));
+    assert_eq!(
+        second_args.get("recursive").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        second_args.get("include_hidden").and_then(Value::as_bool),
+        Some(false)
+    );
+
+    let synthesize = plan.steps[2].to_agent_action().expect("synthesize action");
+    assert!(matches!(
+        synthesize,
+        AgentAction::SynthesizeAnswer { evidence_refs }
+            if evidence_refs == vec!["step_1".to_string(), "step_2".to_string()]
+    ));
+    let respond = plan.steps[3].to_agent_action().expect("respond action");
+    assert!(matches!(
+        respond,
+        AgentAction::Respond { content } if content == "{{last_output}}"
+    ));
 }
 
 #[test]
@@ -9017,6 +9628,47 @@ fn existence_with_path_current_workspace_single_file_target_uses_path_batch_fact
                 Some("stat_paths")
             );
             assert_eq!(args.get("paths"), Some(&json!(["README.md"])));
+        }
+        other => panic!("expected fs_basic stat_paths action, got {other:?}"),
+    }
+}
+
+#[test]
+fn existence_with_path_current_workspace_service_file_target_uses_path_batch_facts() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.resolved_intent =
+        "Check whether rustclaw.service exists in the current repository and include the path"
+            .to_string();
+    route.output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPath;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint = "/home/guagua/rustclaw".to_string();
+    route.output_contract.delivery_required = false;
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+
+    let plan = existence_with_path_locator_deterministic_plan_result(
+        "check one service file in current workspace",
+        Some(&route),
+        &loop_state,
+        Some("/home/guagua/rustclaw"),
+        "检查仓库里有没有 rustclaw.service，只回答有或没有，并给出路径",
+    )
+    .expect("single service-file current-workspace existence route should use path facts");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert_eq!(plan.steps.len(), 1);
+    match &plan.steps[0].to_agent_action() {
+        Some(AgentAction::CallTool { tool, args }) => {
+            assert_eq!(tool, "fs_basic");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("stat_paths")
+            );
+            assert_eq!(args.get("paths"), Some(&json!(["rustclaw.service"])));
         }
         other => panic!("expected fs_basic stat_paths action, got {other:?}"),
     }
@@ -9773,7 +10425,7 @@ fn directory_tree_auto_locator_deterministic_plan_uses_system_basic_tree_summary
     .expect("directory tree plan should be available");
 
     assert_eq!(plan.plan_kind, PlanKind::Single);
-    assert_eq!(plan.steps.len(), 1);
+    assert!(!plan.steps.is_empty());
     assert!(matches!(
         plan.steps[0].to_agent_action(),
         Some(AgentAction::CallSkill { skill, args })
@@ -9784,11 +10436,92 @@ fn directory_tree_auto_locator_deterministic_plan_uses_system_basic_tree_summary
 }
 
 #[test]
-fn directory_purpose_auto_locator_keeps_synthesis_after_tree_summary() {
+fn workspace_summary_auto_locator_lists_structure_and_reads_readme() {
+    let root = TempDirGuard::new("workspace_summary_auto_locator");
+    fs::create_dir_all(root.path.join("UI")).expect("create UI dir");
+    fs::create_dir_all(root.path.join("crates")).expect("create crates dir");
+    fs::create_dir_all(root.path.join("scripts")).expect("create scripts dir");
+    fs::write(
+        root.path.join("README.md"),
+        "# Fixture\n\nA local runtime with UI and Rust crates.",
+    )
+    .expect("write README");
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = root_path.clone();
+
+    let plan = directory_tree_auto_locator_deterministic_plan_result(
+        &test_state(),
+        "summarize workspace structure",
+        Some(&route),
+        &LoopState::new(1),
+        "summarize workspace structure",
+        Some("summarize workspace structure"),
+        Some(&root_path),
+    )
+    .expect("workspace summary plan should be available");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert_eq!(plan.steps.len(), 4);
+    let actions = plan
+        .steps
+        .iter()
+        .map(|step| step.to_agent_action().expect("agent action"))
+        .collect::<Vec<_>>();
+    let list_idx = actions
+        .iter()
+        .position(|action| planned_call_is(action, "fs_basic", "list_dir"))
+        .expect("list_dir evidence action");
+    let list_args = expect_planned_call(&actions[list_idx], "fs_basic", "list_dir");
+    assert_eq!(
+        list_args.get("path").and_then(Value::as_str),
+        Some(root_path.as_str())
+    );
+    assert_eq!(
+        list_args.get("dirs_only").and_then(Value::as_bool),
+        Some(true)
+    );
+
+    let read_idx = actions
+        .iter()
+        .position(|action| {
+            planned_call(action).is_some_and(|(skill, args)| {
+                let action_name = args.get("action").and_then(Value::as_str);
+                ((skill == "fs_basic" && action_name == Some("read_text_range"))
+                    || (skill == "doc_parse" && action_name == Some("parse_doc")))
+                    && args
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .is_some_and(|path| path.ends_with("README.md"))
+            })
+        })
+        .expect("README evidence action");
+
+    assert!(matches!(
+        actions.get(2),
+        Some(AgentAction::SynthesizeAnswer { evidence_refs })
+            if evidence_refs.contains(&format!("step_{}", list_idx + 1))
+                && evidence_refs.contains(&format!("step_{}", read_idx + 1))
+    ));
+    assert!(matches!(
+        actions.get(3),
+        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+    ));
+}
+
+#[test]
+fn directory_purpose_auto_locator_lists_directory_and_reads_text_candidates() {
     let root = TempDirGuard::new("directory_purpose_auto_locator");
     fs::create_dir_all(root.path.join("docs")).expect("create docs dir");
     fs::write(root.path.join("docs").join("README.txt"), "docs").expect("write readme");
-    let root_path = root.path.display().to_string();
+    fs::write(root.path.join("docs").join("image.png"), "not text").expect("write image");
+    let docs_path = root.path.join("docs").display().to_string();
     let mut route = route_result(
         crate::AskMode::planner_execute_chat_wrapped(),
         true,
@@ -9796,9 +10529,82 @@ fn directory_purpose_auto_locator_keeps_synthesis_after_tree_summary() {
     );
     route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
     route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = docs_path.clone();
+
+    let plan = directory_purpose_auto_locator_deterministic_plan_result(
+        &test_state(),
+        "summarize directory purpose",
+        Some(&route),
+        &LoopState::new(1),
+        "summarize directory purpose",
+        Some("summarize directory purpose"),
+        Some(&docs_path),
+    )
+    .expect("directory purpose plan should be available");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert_eq!(plan.steps.len(), 4);
+    let list_action = plan.steps[0].to_agent_action().expect("list action");
+    let list_args = expect_planned_call(&list_action, "fs_basic", "list_dir");
+    assert_eq!(
+        list_args.get("path").and_then(Value::as_str),
+        Some(docs_path.as_str())
+    );
+
+    let read_action = plan.steps[1].to_agent_action().expect("read action");
+    let read_args = expect_planned_call(&read_action, "fs_basic", "read_text_range");
+    assert!(read_args
+        .get("path")
+        .and_then(Value::as_str)
+        .is_some_and(|path| path.ends_with("README.txt")));
+    assert!(matches!(
+        plan.steps.get(1).and_then(|step| step.to_agent_action()),
+        Some(AgentAction::CallTool { .. })
+    ));
+    assert!(matches!(
+        plan.steps.get(2).and_then(|step| step.to_agent_action()),
+        Some(AgentAction::SynthesizeAnswer { evidence_refs })
+            if evidence_refs == vec!["step_1".to_string(), "step_2".to_string()]
+    ));
+    assert!(matches!(
+        plan.steps.get(3).and_then(|step| step.to_agent_action()),
+        Some(AgentAction::Respond { content }) if content == "{{last_output}}"
+    ));
+
+    assert!(directory_tree_auto_locator_deterministic_plan_result(
+        &test_state(),
+        "summarize directory purpose",
+        Some(&route),
+        &LoopState::new(1),
+        "summarize directory purpose",
+        Some("summarize directory purpose"),
+        Some(&docs_path),
+    )
+    .is_none());
+}
+
+#[test]
+fn directory_purpose_auto_locator_uses_inventory_for_many_text_candidates() {
+    let root = TempDirGuard::new("directory_purpose_many_text_candidates");
+    fs::create_dir_all(root.path.join("src")).expect("create src dir");
+    for idx in 0..9 {
+        fs::write(
+            root.path.join(format!("note_{idx}.md")),
+            format!("note {idx}"),
+        )
+        .expect("write note");
+    }
+    let root_path = root.path.display().to_string();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
     route.output_contract.locator_hint = root_path.clone();
 
-    let plan = directory_tree_auto_locator_deterministic_plan_result(
+    let plan = directory_purpose_auto_locator_deterministic_plan_result(
         &test_state(),
         "summarize directory purpose",
         Some(&route),
@@ -9807,19 +10613,28 @@ fn directory_purpose_auto_locator_keeps_synthesis_after_tree_summary() {
         Some("summarize directory purpose"),
         Some(&root_path),
     )
-    .expect("directory purpose plan should be available");
+    .expect("large directory purpose plan should use bounded inventory");
 
     assert_eq!(plan.plan_kind, PlanKind::Single);
     assert_eq!(plan.steps.len(), 3);
-    assert!(matches!(
-        plan.steps[0].to_agent_action(),
-        Some(AgentAction::CallSkill { skill, args })
-            if skill == "system_basic"
-                && args.get("action").and_then(Value::as_str) == Some("tree_summary")
-    ));
+    let list_action = plan.steps[0].to_agent_action().expect("list action");
+    let list_args = expect_planned_call(&list_action, "fs_basic", "list_dir");
+    assert_eq!(
+        list_args.get("path").and_then(Value::as_str),
+        Some(root_path.as_str())
+    );
+    assert_eq!(
+        list_args.get("max_entries").and_then(Value::as_i64),
+        Some(1000)
+    );
+    assert_eq!(
+        list_args.get("dirs_only").and_then(Value::as_bool),
+        Some(true)
+    );
     assert!(matches!(
         plan.steps.get(1).and_then(|step| step.to_agent_action()),
-        Some(AgentAction::SynthesizeAnswer { .. })
+        Some(AgentAction::SynthesizeAnswer { evidence_refs })
+            if evidence_refs == vec!["last_output".to_string()]
     ));
     assert!(matches!(
         plan.steps.get(2).and_then(|step| step.to_agent_action()),
@@ -10198,8 +11013,11 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_doc_parse_for_lo
     route.output_contract.delivery_required = false;
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.join("workspace_root");
 
     let plan = content_excerpt_summary_auto_locator_deterministic_plan_result(
+        &state,
         "summarize a resolved fallback document",
         Some(&route),
         &loop_state,
@@ -10222,6 +11040,69 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_doc_parse_for_lo
             );
         }
         other => panic!("expected doc_parse parse_doc action, got {other:?}"),
+    }
+}
+
+#[test]
+fn content_excerpt_summary_auto_locator_adds_workspace_root_context_for_nested_file() {
+    let root = TempDirGuard::new("content_excerpt_workspace_context");
+    let ui_dir = root.path.join("UI");
+    fs::create_dir_all(&ui_dir).expect("create UI dir");
+    let package_json = ui_dir.join("package.json");
+    fs::write(&package_json, r#"{"name":"react-example","private":true}"#).expect("write package");
+    fs::create_dir_all(root.path.join("crates")).expect("create crates dir");
+    let package_path = package_json.display().to_string();
+    let root_path = root.path.display().to_string();
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.delivery_required = false;
+    route.output_contract.requires_content_evidence = true;
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+
+    let plan = content_excerpt_summary_auto_locator_deterministic_plan_result(
+        &state,
+        "use workspace context and a resolved package file",
+        Some(&route),
+        &loop_state,
+        Some(&package_path),
+    )
+    .expect("workspace file summary should include root context and file evidence");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert_eq!(plan.steps.len(), 2);
+    match &plan.steps[0].to_agent_action() {
+        Some(AgentAction::CallTool { tool, args }) => {
+            assert_eq!(tool, "fs_basic");
+            assert_eq!(args.get("action").and_then(Value::as_str), Some("list_dir"));
+            assert_eq!(
+                args.get("path").and_then(Value::as_str),
+                Some(root_path.as_str())
+            );
+            assert_eq!(args.get("names_only").and_then(Value::as_bool), Some(true));
+        }
+        other => panic!("expected fs_basic list_dir action, got {other:?}"),
+    }
+    match &plan.steps[1].to_agent_action() {
+        Some(AgentAction::CallTool { tool, args }) => {
+            assert_eq!(tool, "fs_basic");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("read_text_range")
+            );
+            assert_eq!(
+                args.get("path").and_then(Value::as_str),
+                Some(package_path.as_str())
+            );
+        }
+        other => panic!("expected fs_basic read_text_range action, got {other:?}"),
     }
 }
 
@@ -10265,6 +11146,63 @@ fn generic_single_document_synthesis_rewrites_bounded_read_to_doc_parse() {
         Some(&route),
         &LoopState::new(1),
         "parse README and summarize the key points",
+        None,
+        actions,
+    );
+
+    assert!(matches!(
+        &normalized[0],
+        AgentAction::CallSkill { skill, args }
+            if skill == "doc_parse"
+                && args.get("action").and_then(Value::as_str) == Some("parse_doc")
+                && args.get("path").and_then(Value::as_str) == Some(readme_path.as_str())
+    ));
+    assert!(matches!(
+        normalized.get(1),
+        Some(AgentAction::SynthesizeAnswer { .. })
+    ));
+}
+
+#[test]
+fn content_excerpt_with_summary_rewrites_bounded_read_to_doc_parse() {
+    let root = TempDirGuard::new("content_excerpt_with_summary_doc_parse");
+    let readme = root.path.join("README.md");
+    fs::write(&readme, "# RustClaw\n\nA local agent runtime.").expect("write readme");
+    let readme_path = readme.display().to_string();
+    let state = test_state_with_enabled_skills(&["doc_parse", "fs_basic"]);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = readme_path.clone();
+    route.output_contract.delivery_required = false;
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": readme_path.clone(),
+                "mode": "head",
+                "n": 80
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = super::normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "parse the document and summarize the key points",
         None,
         actions,
     );
@@ -10341,6 +11279,127 @@ fn generic_single_log_synthesis_rewrites_bounded_read_to_log_analyze() {
         normalized.get(1),
         Some(AgentAction::SynthesizeAnswer { .. })
     ));
+}
+
+#[test]
+fn generic_log_directory_auto_locator_uses_log_analyze_plan() {
+    let root = TempDirGuard::new("generic_log_directory_auto_locator");
+    let logs_dir = root.path.join("logs");
+    fs::create_dir_all(&logs_dir).expect("mkdir logs");
+    fs::write(
+        logs_dir.join("app.log"),
+        "INFO boot ok\nWARN latency high\nERROR provider timeout\n",
+    )
+    .expect("write log");
+    fs::write(logs_dir.join("notes.txt"), "not a log").expect("write notes");
+    let logs_path = logs_dir.display().to_string();
+    let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::None;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = logs_path.clone();
+    route.output_contract.delivery_required = false;
+
+    let plan = generic_path_content_log_analyze_deterministic_plan_result(
+        "inspect the current target",
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        Some(&logs_path),
+    )
+    .expect("log analyze plan");
+
+    assert_eq!(plan.steps.len(), 3);
+    assert_eq!(plan.steps[0].action_type, "call_skill");
+    assert_eq!(plan.steps[0].skill, "log_analyze");
+    assert_eq!(
+        plan.steps[0].args.get("path").and_then(Value::as_str),
+        Some(logs_path.as_str())
+    );
+    assert_eq!(
+        plan.steps[0]
+            .args
+            .get("max_matches")
+            .and_then(Value::as_u64),
+        Some(50)
+    );
+    assert_eq!(plan.steps[1].action_type, "synthesize_answer");
+}
+
+#[test]
+fn content_excerpt_summary_log_directory_auto_locator_uses_log_analyze_plan() {
+    let root = TempDirGuard::new("content_excerpt_summary_log_directory_auto_locator");
+    let logs_dir = root.path.join("logs");
+    fs::create_dir_all(&logs_dir).expect("mkdir logs");
+    fs::write(
+        logs_dir.join("model_io.log"),
+        "INFO request ok\nWARN slow provider\nERROR verifier timeout\n",
+    )
+    .expect("write log");
+    let logs_path = logs_dir.display().to_string();
+    let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = logs_path.clone();
+    route.output_contract.delivery_required = false;
+
+    let plan = generic_path_content_log_analyze_deterministic_plan_result(
+        "inspect the current target",
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        Some(&logs_path),
+    )
+    .expect("log analyze plan");
+
+    assert_eq!(plan.steps.len(), 3);
+    assert_eq!(plan.steps[0].action_type, "call_skill");
+    assert_eq!(plan.steps[0].skill, "log_analyze");
+    assert_eq!(
+        plan.steps[0].args.get("path").and_then(Value::as_str),
+        Some(logs_path.as_str())
+    );
+}
+
+#[test]
+fn content_excerpt_with_summary_log_file_does_not_use_log_analyze_plan() {
+    let root = TempDirGuard::new("content_excerpt_with_summary_log_file_auto_locator");
+    let logs_dir = root.path.join("logs");
+    fs::create_dir_all(&logs_dir).expect("mkdir logs");
+    let log = logs_dir.join("clawd.run.log");
+    fs::write(&log, "INFO ok\nWARN slow\nERROR old failure\n").expect("write log");
+    let log_path = log.display().to_string();
+    let state = test_state_with_enabled_skills(&["log_analyze", "fs_basic"]);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = log_path.clone();
+    route.output_contract.delivery_required = false;
+
+    assert!(generic_path_content_log_analyze_deterministic_plan_result(
+        "inspect the current target",
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        Some(&log_path),
+    )
+    .is_none());
 }
 
 #[test]
@@ -10465,8 +11524,11 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_uses_fs_basic_for_rep
     route.output_contract.delivery_required = false;
     let mut loop_state = LoopState::default();
     loop_state.round_no = 1;
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.join("workspace_root");
 
     let plan = content_excerpt_summary_auto_locator_deterministic_plan_result(
+        &state,
         "summarize a generated skill prompt",
         Some(&route),
         &loop_state,
@@ -10511,6 +11573,7 @@ fn content_excerpt_with_summary_does_not_use_head_read_deterministic_plan() {
 
     assert!(
         content_excerpt_summary_auto_locator_deterministic_plan_result(
+            &test_state(),
             "show a bounded excerpt and summarize it",
             Some(&route),
             &loop_state,
@@ -10570,6 +11633,7 @@ fn generic_content_evidence_does_not_use_single_file_deterministic_plan() {
 
     assert!(
         content_excerpt_summary_auto_locator_deterministic_plan_result(
+            &test_state(),
             "summarize a resolved local document",
             Some(&route),
             &loop_state,
@@ -10600,6 +11664,7 @@ fn structured_scalar_compare_does_not_use_single_file_content_deterministic_plan
 
     assert!(
         content_excerpt_summary_auto_locator_deterministic_plan_result(
+            &test_state(),
             "compare files",
             Some(&route),
             &loop_state,
@@ -12959,7 +14024,7 @@ fn scalar_path_route_treats_fs_search_query_as_name_pattern_when_action_missing(
         }),
     }];
 
-    let normalized = enforce_output_contract_tool_args(Some(&route), actions);
+    let normalized = enforce_output_contract_tool_args(Some(&route), "", None, actions);
     assert_eq!(normalized.len(), 1);
     match &normalized[0] {
         AgentAction::CallSkill { skill, args } => {
@@ -13002,7 +14067,7 @@ fn file_paths_route_preserves_grep_text_query_as_content_query() {
         }),
     }];
 
-    let normalized = enforce_output_contract_tool_args(Some(&route), actions);
+    let normalized = enforce_output_contract_tool_args(Some(&route), "", None, actions);
     assert_eq!(normalized.len(), 1);
     match &normalized[0] {
         AgentAction::CallSkill { skill, args } => {
@@ -14317,6 +15382,69 @@ fn constructed_missing_stat_path_plan_rewrites_without_specific_semantic_kind() 
 }
 
 #[test]
+fn file_paths_missing_stat_path_rewrites_to_selector_find_entries() {
+    let root = TempDirGuard::new("file_paths_missing_stat_path_selector");
+    let plan_dir = root.path.join("plan");
+    fs::create_dir_all(&plan_dir).expect("create plan dir");
+    fs::write(
+        plan_dir.join("execution_intent_routing_repair_plan_20260509_done.md"),
+        "",
+    )
+    .expect("write target md");
+    fs::write(
+        plan_dir.join("execution_retry_terminal_cases_20260510.md"),
+        "",
+    )
+    .expect("write distractor md");
+    fs::write(plan_dir.join("execution_intent_route_trace_cases.txt"), "")
+        .expect("write txt distractor");
+
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.clone();
+    let missing = plan_dir.join("definitely_missing_20260511.md");
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::FilePaths;
+    route.output_contract.locator_hint = plan_dir.display().to_string();
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "stat_paths",
+            "paths": [missing.display().to_string()]
+        }),
+    }];
+
+    let normalized = super::normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        "read plan/definitely_missing_20260511.md; if missing, search plan for execution_intent md files and only return found paths",
+        None,
+        actions,
+    );
+
+    assert_eq!(normalized.len(), 1);
+    let args = expect_planned_call(&normalized[0], "fs_basic", "find_entries");
+    let expected_root = plan_dir.display().to_string();
+    assert_eq!(
+        args.get("root").and_then(Value::as_str),
+        Some(expected_root.as_str())
+    );
+    assert_eq!(
+        args.get("pattern").and_then(Value::as_str),
+        Some("execution_intent")
+    );
+    assert_eq!(args.get("ext").and_then(Value::as_str), Some("md"));
+    assert_eq!(
+        args.get("target_kind").and_then(Value::as_str),
+        Some("file")
+    );
+}
+
+#[test]
 fn constructed_directory_stat_path_plan_rewrites_to_find_entries_for_child_selector() {
     let root = TempDirGuard::new("constructed_directory_stat_path");
     let locator = root.path.join("locator_smart/fuzzy_top3");
@@ -14889,6 +16017,230 @@ version = "0.1.7"
 }
 
 #[test]
+fn recent_scalar_contract_overrides_literal_command_guard_for_deterministic_plan() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+
+    assert!(
+        super::structural_contract_deterministic_plan_overrides_literal_command_guard(Some(&route))
+    );
+}
+
+#[test]
+fn recent_scalar_file_pair_plan_accepts_relative_route_locators() {
+    let root = TempDirGuard::new("recent_scalar_relative_pair");
+    fs::write(
+        root.path.join("Cargo.toml"),
+        r#"[workspace]
+members = []
+
+[workspace.package]
+version = "0.1.7"
+"#,
+    )
+    .expect("write cargo manifest");
+    fs::write(root.path.join("README.md"), "version: 0.1.7\n").expect("write readme");
+
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.clone();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "Cargo.toml|README.md".to_string();
+    route.resolved_intent =
+        "Extract workspace package version from Cargo.toml and the version mentioned in README.md, compare them, and answer whether they match in one sentence."
+            .to_string();
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+
+    let plan = super::recent_scalar_file_pair_deterministic_plan_result(
+        &state,
+        &route.resolved_intent,
+        Some(&route),
+        &loop_state,
+        "Read workspace package version from Cargo.toml and compare it with the version mentioned in README.md, then answer in one sentence.",
+        Some(
+            "Read workspace package version from Cargo.toml and compare it with the version mentioned in README.md, then answer in one sentence.",
+        ),
+        None,
+    )
+    .expect("relative file-pair scalar comparison should use deterministic read plan");
+
+    assert!(matches!(
+        plan.steps
+            .first()
+            .and_then(|step| step.to_agent_action())
+            .as_ref(),
+        Some(AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args })
+            if tool == "config_basic"
+                && args.get("action").and_then(Value::as_str) == Some("read_field")
+    ));
+}
+
+#[tokio::test]
+async fn plan_round_recent_scalar_file_pair_uses_deterministic_plan_before_llm() {
+    let root = TempDirGuard::new("recent_scalar_plan_round_relative_pair");
+    fs::write(
+        root.path.join("Cargo.toml"),
+        r#"[workspace]
+members = []
+
+[workspace.package]
+version = "0.1.7"
+"#,
+    )
+    .expect("write cargo manifest");
+    fs::write(root.path.join("README.md"), "version: 0.1.7\n").expect("write readme");
+
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.clone();
+    let prompt = "Read workspace package version from Cargo.toml and compare it with the version mentioned in README.md, then answer in one sentence.";
+    let task = ClaimedTask {
+        task_id: "recent-scalar-plan-round".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: json!({ "text": prompt }).to_string(),
+    };
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "Cargo.toml|README.md".to_string();
+    route.resolved_intent =
+        "Extract workspace package version from Cargo.toml and the version mentioned in README.md, compare them, and answer whether they match in one sentence."
+            .to_string();
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+    let policy = super::super::support::load_agent_loop_guard_policy(&state);
+
+    let plan = super::plan_round_actions(
+        &state,
+        &task,
+        &route.resolved_intent,
+        &route.resolved_intent,
+        &policy,
+        &loop_state,
+        None,
+        Some(&route),
+        None,
+    )
+    .await
+    .expect("plan round should use deterministic scalar compare plan");
+
+    assert_eq!(plan.plan_kind, PlanKind::Single);
+    assert!(matches!(
+        plan.steps
+            .first()
+            .and_then(|step| step.to_agent_action())
+            .as_ref(),
+        Some(AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args })
+            if tool == "config_basic"
+                && args.get("action").and_then(Value::as_str) == Some("read_field")
+    ));
+}
+
+#[tokio::test]
+async fn plan_round_recent_scalar_file_pair_uses_prompt_targets_when_route_has_single_auto_locator()
+{
+    let root = TempDirGuard::new("recent_scalar_plan_round_single_locator");
+    let cargo = root.path.join("Cargo.toml");
+    fs::write(
+        &cargo,
+        r#"[workspace]
+members = []
+
+[workspace.package]
+version = "0.1.7"
+"#,
+    )
+    .expect("write cargo manifest");
+    fs::write(root.path.join("README.md"), "version: 0.1.7\n").expect("write readme");
+
+    let mut state = test_state();
+    state.skill_rt.workspace_root = root.path.clone();
+    let prompt = "Read workspace package version from Cargo.toml and compare it with the version mentioned in README.md, then answer in one sentence.";
+    let task = ClaimedTask {
+        task_id: "recent-scalar-plan-round-single-locator".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: json!({ "text": prompt }).to_string(),
+    };
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RecentScalarEqualityCheck;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = cargo.display().to_string();
+    route.resolved_intent =
+        "Compare workspace package version from Cargo.toml with version mentioned in README.md, answer in one sentence"
+            .to_string();
+    let cargo_auto = cargo.display().to_string();
+    let planner_user_text = format!(
+        "{}\n\n[AUTO_LOCATOR]\nResolved concrete path from default locator directory: {}\nUse this path as the target unless user explicitly overrides it.\n",
+        route.resolved_intent,
+        cargo_auto
+    );
+    let mut loop_state = LoopState::default();
+    loop_state.round_no = 1;
+    let policy = super::super::support::load_agent_loop_guard_policy(&state);
+
+    let plan = super::plan_round_actions(
+        &state,
+        &task,
+        &route.resolved_intent,
+        &planner_user_text,
+        &policy,
+        &loop_state,
+        None,
+        Some(&route),
+        Some(cargo_auto.as_str()),
+    )
+    .await
+    .expect("single auto locator route should still use prompt file targets");
+
+    assert!(matches!(
+        plan.steps
+            .first()
+            .and_then(|step| step.to_agent_action())
+            .as_ref(),
+        Some(AgentAction::CallTool { tool, args } | AgentAction::CallSkill { skill: tool, args })
+            if tool == "config_basic"
+                && args.get("action").and_then(Value::as_str) == Some("read_field")
+    ));
+}
+
+#[test]
 fn quantity_compare_preserves_scalar_plus_text_evidence_for_explicit_files() {
     let root = TempDirGuard::new("quantity_scalar_plus_text");
     fs::write(
@@ -15278,9 +16630,9 @@ fn observed_terminal_synthesis_keeps_structurally_grounded_concrete_respond() {
     let rewritten =
         rewrite_observed_terminal_synthesis_concrete_respond(Some(&route), &loop_state, actions);
 
-    assert_eq!(rewritten.len(), 2);
+    assert_eq!(rewritten.len(), 1);
     assert!(matches!(
-        &rewritten[1],
+        &rewritten[0],
         AgentAction::Respond { content } if content == &answer
     ));
 }
@@ -15326,9 +16678,66 @@ fn observed_terminal_synthesis_keeps_identifier_grounded_summary_respond() {
     let rewritten =
         rewrite_observed_terminal_synthesis_concrete_respond(Some(&route), &loop_state, actions);
 
-    assert_eq!(rewritten.len(), 2);
+    assert_eq!(rewritten.len(), 1);
     assert!(matches!(
-        &rewritten[1],
+        &rewritten[0],
+        AgentAction::Respond { content } if content == &answer
+    ));
+}
+
+#[test]
+fn observed_terminal_synthesis_drops_redundant_synthesis_for_fs_basic_interface_summary() {
+    use crate::executor::{StepExecutionResult, StepExecutionStatus};
+
+    let mut loop_state = LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "action": "read_range",
+                "path": "/tmp/fs_basic.md",
+                "resolved_path": "/tmp/fs_basic.md",
+                "end_line": 92,
+                "total_lines": 92,
+                "line_safety": {
+                    "truncated_lines": 0,
+                    "compacted_lines": 0,
+                    "raw": false,
+                    "max_line_chars": 800
+                },
+                "excerpt": "1|## fs_basic - planner-facing filesystem tool\n2|Use call_tool fs_basic for filesystem tasks.\n3|runtime maps its actions to stable backing tools such as system_basic, fs_search, and file builtins.\n4|Actions: stat_paths, list_dir, count_entries, read_text_range, find_entries, grep_text, compare_paths, write_text, append_text, make_dir, remove_path."
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    let answer = "fs_basic is a virtual planner-facing filesystem tool that maps structured actions such as read_text_range and list_dir to stable backing tools like system_basic, fs_search, and file builtins.".to_string();
+    let actions = vec![
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: answer.clone(),
+        },
+    ];
+
+    let rewritten =
+        rewrite_observed_terminal_synthesis_concrete_respond(Some(&route), &loop_state, actions);
+
+    assert_eq!(rewritten.len(), 1);
+    assert!(matches!(
+        &rewritten[0],
         AgentAction::Respond { content } if content == &answer
     ));
 }
@@ -15738,6 +17147,158 @@ fn file_paths_contract_rewrites_extension_inventory_to_fs_basic() {
         }
         other => panic!("expected fs_basic find_entries action, got {other:?}"),
     }
+}
+
+#[test]
+fn file_paths_contract_enforces_requested_numeric_limit_on_find_entries() {
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "find_entries",
+            "root": "/home/guagua/rustclaw",
+            "ext": "toml",
+            "target_kind": "file",
+            "max_results": 20,
+            "recursive": true
+        }),
+    }];
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.resolved_intent = "找出仓库里 5 个代表性的 toml 文件，只输出路径列表".to_string();
+
+    let normalized = super::normalize_planned_actions(
+        &test_state(),
+        Some(&route),
+        &LoopState::new(2),
+        "找出仓库里 5 个代表性的 toml 文件，只输出路径列表",
+        None,
+        actions,
+    );
+
+    let args = expect_planned_call(&normalized[0], "fs_basic", "find_entries");
+    assert_eq!(args.get("max_results").and_then(Value::as_u64), Some(5));
+    assert_eq!(args.get("ext").and_then(Value::as_str), Some("toml"));
+}
+
+#[test]
+fn file_paths_contract_uses_original_user_text_numeric_limit() {
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "find_entries",
+            "root": "/home/guagua/rustclaw",
+            "ext": "toml",
+            "target_kind": "file",
+            "max_results": 30,
+            "recursive": true
+        }),
+    }];
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.resolved_intent =
+        "find representative toml files in this repo and output only the paths".to_string();
+
+    let normalized = super::normalize_planned_actions_with_original(
+        &test_state(),
+        Some(&route),
+        &LoopState::new(2),
+        &route.resolved_intent,
+        Some("find 5 representative toml files in this repo and output only the paths"),
+        None,
+        actions,
+    );
+
+    let args = expect_planned_call(&normalized[0], "fs_basic", "find_entries");
+    assert_eq!(args.get("max_results").and_then(Value::as_u64), Some(5));
+}
+
+#[test]
+fn file_paths_contract_preserves_allowed_grep_text_and_prunes_disallowed_steps() {
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "stat_paths",
+                "paths": ["/home/guagua/rustclaw/plan/definitely_missing_20260511.md"]
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "find_entries",
+                "root": "/home/guagua/rustclaw/plan",
+                "pattern": "*.md",
+                "target_kind": "file"
+            }),
+        },
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "grep_text",
+                "query": "execution_intent",
+                "root": "/home/guagua/rustclaw/plan",
+                "pattern": "*.md"
+            }),
+        },
+        AgentAction::CallSkill {
+            skill: "transform".to_string(),
+            args: serde_json::json!({
+                "action": "transform_data",
+                "data": [],
+                "ops": []
+            }),
+        },
+    ];
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::FilePaths;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "plan".to_string();
+    route.resolved_intent =
+        "If the first path is missing, search plan for execution_intent md files and return paths."
+            .to_string();
+
+    let normalized = super::normalize_planned_actions(
+        &test_state(),
+        Some(&route),
+        &LoopState::new(2),
+        &route.resolved_intent,
+        None,
+        actions,
+    );
+
+    assert_eq!(normalized.len(), 2, "normalized actions: {normalized:?}");
+    let first = expect_planned_call(&normalized[0], "fs_basic", "find_entries");
+    assert_eq!(
+        first.get("root").and_then(Value::as_str),
+        Some("/home/guagua/rustclaw/plan")
+    );
+    assert_eq!(first.get("pattern").and_then(Value::as_str), Some("*.md"));
+    let second = expect_planned_call(&normalized[1], "fs_basic", "grep_text");
+    assert_eq!(
+        second.get("root").and_then(Value::as_str),
+        Some("/home/guagua/rustclaw/plan")
+    );
+    assert_eq!(
+        second.get("query").and_then(Value::as_str),
+        Some("execution_intent")
+    );
+    assert_eq!(second.get("pattern").and_then(Value::as_str), Some("*.md"));
+    assert!(second.get("ext").is_none());
+    assert!(second.get("target_kind").is_none());
 }
 
 #[test]
@@ -16476,7 +18037,7 @@ fn process_basic_port_list_keeps_terminal_discussion_followup() {
 }
 
 #[test]
-fn service_status_process_basic_port_list_strips_terminal_synthesis() {
+fn service_status_process_basic_port_list_keeps_terminal_synthesis() {
     let state = test_state();
     let mut route = route_result(
         crate::AskMode::planner_execute_chat_wrapped(),
@@ -16500,12 +18061,42 @@ fn service_status_process_basic_port_list_strips_terminal_synthesis() {
     let stripped =
         strip_terminal_discussion_for_direct_skill_passthrough(&state, Some(&route), actions);
 
-    assert_eq!(stripped.len(), 1);
+    assert_eq!(stripped.len(), 3);
     assert!(matches!(
         &stripped[0],
         AgentAction::CallSkill { skill, args }
             if skill == "process_basic"
                 && args.get("action").and_then(Value::as_str) == Some("port_list")
+    ));
+    assert!(matches!(
+        &stripped[1],
+        AgentAction::SynthesizeAnswer { evidence_refs }
+            if evidence_refs == &vec!["last_output".to_string()]
+    ));
+    assert!(matches!(
+        &stripped[2],
+        AgentAction::Respond { content } if content == "{{last_output}}"
+    ));
+}
+
+#[test]
+fn service_status_process_basic_port_list_does_not_direct_finalize_model_language_shape() {
+    let state = test_state();
+    let mut route = route_result(
+        crate::AskMode::planner_execute_chat_wrapped(),
+        true,
+        OutputResponseShape::Free,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    let actions = vec![AgentAction::CallSkill {
+        skill: "process_basic".to_string(),
+        args: serde_json::json!({ "action": "port_list" }),
+    }];
+
+    assert!(!observation_only_plan_can_finalize_from_direct_output(
+        &state,
+        Some(&route),
+        &actions,
     ));
 }
 
@@ -17063,6 +18654,137 @@ fn runtime_status_scalar_patch_plans_current_user_system_basic_status() {
         plan.steps[0].args.get("kind").and_then(Value::as_str),
         Some("current_user")
     );
+}
+
+#[test]
+fn runtime_status_scalar_patch_prefers_run_cmd_when_available() {
+    let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: Some(json!({
+            "runtime_status_query": {"kind": "current_user", "scope": "system"}
+        })),
+        attachment_processing_required: false,
+    };
+
+    let plan = super::runtime_status_scalar_deterministic_plan_result(
+        &state,
+        "return current user",
+        Some(&route),
+        &loop_state,
+        Some(&analysis),
+    )
+    .expect("runtime status patch should prefer command evidence when run_cmd is available");
+
+    assert_eq!(plan.steps.len(), 1);
+    assert_eq!(plan.steps[0].skill, "run_cmd");
+    assert_eq!(
+        plan.steps[0].args.get("command").and_then(Value::as_str),
+        Some("id -un")
+    );
+    assert_eq!(
+        plan.steps[0]
+            .args
+            .get(CLAWD_LITERAL_COMMAND_ARG)
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
+fn runtime_status_scalar_patch_maps_kernel_release_to_uname_r() {
+    let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    let analysis = crate::intent_router::TurnAnalysis {
+        turn_type: Some(crate::intent_router::TurnType::StatusQuery),
+        target_task_policy: None,
+        should_interrupt_active_run: false,
+        state_patch: Some(json!({
+            "runtime_status_query": {"kind": "kernel_release", "scope": "system"}
+        })),
+        attachment_processing_required: false,
+    };
+
+    let plan = super::runtime_status_scalar_deterministic_plan_result(
+        &state,
+        "return kernel release",
+        Some(&route),
+        &loop_state,
+        Some(&analysis),
+    )
+    .expect("runtime status patch should plan kernel release command");
+
+    assert_eq!(plan.steps.len(), 1);
+    assert_eq!(plan.steps[0].skill, "run_cmd");
+    assert_eq!(
+        plan.steps[0].args.get("command").and_then(Value::as_str),
+        Some("uname -r")
+    );
+    assert_eq!(
+        plan.steps[0]
+            .args
+            .get(CLAWD_LITERAL_COMMAND_ARG)
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
+fn raw_command_output_runtime_status_plan_rewrites_to_run_cmd() {
+    let state = test_state_with_enabled_skills(&["run_cmd", "system_basic"]);
+    let loop_state = LoopState::new(1);
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Scalar,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        "runtime scalar",
+        None,
+        vec![AgentAction::CallTool {
+            tool: "system_basic".to_string(),
+            args: json!({
+                "action": "runtime_status",
+                "kind": "current_user"
+            }),
+        }],
+    );
+
+    assert_eq!(normalized.len(), 1);
+    match &normalized[0] {
+        AgentAction::CallSkill { skill, args } => {
+            assert_eq!(skill, "run_cmd");
+            assert_eq!(args.get("command").and_then(Value::as_str), Some("id -un"));
+            assert_eq!(
+                args.get(CLAWD_LITERAL_COMMAND_ARG).and_then(Value::as_bool),
+                Some(true)
+            );
+        }
+        other => panic!("expected run_cmd rewrite, got {other:?}"),
+    }
 }
 
 #[test]
@@ -17866,6 +19588,57 @@ fn injects_synthesize_answer_when_respond_is_bare_placeholder() {
     assert!(matches!(
         &out[2],
         AgentAction::Respond { content } if content == "{{last_output}}"
+    ));
+}
+
+#[test]
+fn appends_terminal_synthesize_for_command_summary_observation_plan() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::OneSentence,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::CommandOutputSummary;
+    let actions = vec![AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: json!({ "command": "ls scripts" }),
+    }];
+
+    let out =
+        super::append_terminal_synthesize_for_observation_summary_contract(Some(&route), actions);
+
+    assert_eq!(out.len(), 2);
+    assert!(matches!(
+        &out[0],
+        AgentAction::CallSkill { skill, .. } if skill == "run_cmd"
+    ));
+    assert!(matches!(
+        &out[1],
+        AgentAction::SynthesizeAnswer { evidence_refs }
+            if evidence_refs.len() == 1 && evidence_refs[0] == "last_output"
+    ));
+}
+
+#[test]
+fn does_not_append_terminal_synthesize_for_strict_raw_command_output() {
+    let mut route = route_result(
+        crate::AskMode::planner_execute_plain(),
+        true,
+        OutputResponseShape::Strict,
+    );
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    let actions = vec![AgentAction::CallSkill {
+        skill: "run_cmd".to_string(),
+        args: json!({ "command": "ls scripts" }),
+    }];
+
+    let out =
+        super::append_terminal_synthesize_for_observation_summary_contract(Some(&route), actions);
+
+    assert_eq!(out.len(), 1);
+    assert!(matches!(
+        &out[0],
+        AgentAction::CallSkill { skill, .. } if skill == "run_cmd"
     ));
 }
 

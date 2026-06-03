@@ -23,6 +23,7 @@ pub(crate) struct PromptSurfaceSignals {
     pub(crate) inline_json_shape: Option<InlineJsonShape>,
     pub(crate) locator_hint_prompt_shape: Option<LocatorHintPromptShape>,
     pub(crate) locator_reply_prompt_shape: Option<LocatorReplyPromptShape>,
+    pub(crate) quoted_literals: Vec<String>,
     pub(crate) field_selector_mentions: Vec<String>,
     pub(crate) field_selector_count: usize,
     pub(crate) dotted_field_selector: Option<String>,
@@ -80,6 +81,10 @@ impl PromptSurfaceSignals {
         self.field_selector_count > 0 || self.dotted_field_selector.is_some()
     }
 
+    pub(crate) fn single_quoted_literal(&self) -> Option<&str> {
+        (self.quoted_literals.len() == 1).then(|| self.quoted_literals[0].as_str())
+    }
+
     pub(crate) fn has_delivery_token_reference(&self) -> bool {
         self.delivery_token_reference
     }
@@ -122,6 +127,7 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
         return PromptSurfaceSignals::default();
     }
     let token_count = trimmed.split_whitespace().count();
+    let quoted_literals = extract_quoted_literals(trimmed);
     let field_selector_mentions = extract_field_selector_mentions(trimmed);
     let field_selector_count = field_selector_mentions.len();
     let dotted_field_selector = extract_dotted_field_selector(trimmed);
@@ -148,6 +154,7 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
         inline_json_shape,
         locator_hint_prompt_shape,
         locator_reply_prompt_shape,
+        quoted_literals,
         field_selector_mentions,
         field_selector_count,
         dotted_field_selector,
@@ -157,6 +164,51 @@ pub(crate) fn analyze_prompt_surface(prompt: &str) -> PromptSurfaceSignals {
         locator_target_pair,
         deictic_reference,
     }
+}
+
+pub(crate) fn extract_quoted_literals(prompt: &str) -> Vec<String> {
+    fn matching_quote(ch: char) -> Option<char> {
+        match ch {
+            '"' => Some('"'),
+            '`' => Some('`'),
+            '“' => Some('”'),
+            '‘' => Some('’'),
+            '「' => Some('」'),
+            '『' => Some('』'),
+            '《' => Some('》'),
+            _ => None,
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut iter = prompt.char_indices().peekable();
+    while let Some((start_idx, ch)) = iter.next() {
+        let Some(end_quote) = matching_quote(ch) else {
+            continue;
+        };
+        let content_start = start_idx + ch.len_utf8();
+        let mut end_idx = None;
+        while let Some((idx, candidate)) = iter.next() {
+            if candidate == end_quote {
+                end_idx = Some(idx);
+                break;
+            }
+        }
+        let Some(end_idx) = end_idx else {
+            break;
+        };
+        let literal = prompt[content_start..end_idx].trim();
+        if literal.is_empty() || literal.contains(['\n', '\r']) || literal.len() > 256 {
+            continue;
+        }
+        if !out
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(literal))
+        {
+            out.push(literal.to_string());
+        }
+    }
+    out
 }
 
 fn prompt_without_contract_test_hint_blocks(prompt: &str) -> Cow<'_, str> {

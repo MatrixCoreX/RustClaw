@@ -36,7 +36,7 @@ evidence_scope = "current_task"
 freshness = "current_task"
 artifact_kind = "text"
 channel_visibility = "user_visible"
-allowed_actions = ["fs_basic.read_text_range", "fs_basic.list_dir", "fs_basic.find_entries", "doc_parse", "system_basic.tree_summary", "config_basic.read_field", "config_basic.read_fields"]
+allowed_actions = ["fs_basic.read_text_range", "fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.count_entries", "doc_parse", "system_basic.tree_summary", "config_basic.read_field", "config_basic.read_fields"]
 forbidden_actions = ["run_cmd"]
 required_evidence = ["content_excerpt", "path"]
 final_answer_shape = "summary_with_evidence"
@@ -44,7 +44,7 @@ failure_policy = "retry_with_alternatives"
 
 [generic_profiles.evidence_expression]
 all_of = ["path"]
-any_of = ["content_excerpt", "candidates", "field_value"]
+any_of = ["content_excerpt", "candidates", "count", "field_value"]
 
 [[generic_profiles]]
 name = "generic_delivery"
@@ -96,13 +96,28 @@ failure_policy = "retry_with_alternatives"
 [contracts.raw_command_output.evidence_expression]
 any_of = ["command_output", "field_value", "content_excerpt"]
 
+[contracts.command_output_summary]
+semantic_kind = "command_output_summary"
+operation = "summarize"
+target_object = "system"
+delivery_shape = "summary"
+allowed_actions = ["run_cmd", "http_basic", "process_basic", "system_basic.runtime_status", "system_basic.info", "fs_basic.read_text_range", "config_basic.validate"]
+preferred_actions = ["run_cmd", "system_basic.runtime_status", "system_basic.info", "http_basic", "process_basic", "config_basic.validate"]
+forbidden_actions = []
+required_evidence = ["command_output"]
+final_answer_shape = "summary_with_evidence"
+failure_policy = "retry_with_alternatives"
+
+[contracts.command_output_summary.evidence_expression]
+any_of = ["command_output", "field_value", "content_excerpt"]
+
 [contracts.service_status]
 semantic_kind = "service_status"
 operation = "inspect"
 target_object = "service"
 delivery_shape = "summary"
-allowed_actions = ["health_check", "process_basic", "http_basic", "service_control", "system_basic.info", "system_basic.runtime_status", "run_cmd"]
-preferred_actions = ["health_check", "process_basic", "http_basic", "system_basic.info"]
+allowed_actions = ["health_check", "process_basic", "http_basic", "service_control", "system_basic.info", "system_basic.runtime_status", "task_control.list", "run_cmd"]
+preferred_actions = ["health_check", "process_basic", "http_basic", "system_basic.info", "task_control.list"]
 forbidden_actions = []
 required_evidence = ["field_value"]
 final_answer_shape = "status_with_source"
@@ -124,7 +139,7 @@ semantic_kind = "file_names"
 operation = "list"
 target_object = "directory"
 delivery_shape = "list"
-allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries"]
+allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.grep_text"]
 preferred_actions = ["fs_basic.list_dir"]
 required_evidence = ["candidates"]
 final_answer_shape = "name_list"
@@ -157,7 +172,7 @@ semantic_kind = "file_paths"
 operation = "list"
 target_object = "directory"
 delivery_shape = "list"
-allowed_actions = ["fs_basic.find_entries", "fs_basic.list_dir"]
+allowed_actions = ["fs_basic.find_entries", "fs_basic.list_dir", "fs_basic.grep_text"]
 preferred_actions = ["fs_basic.find_entries"]
 required_evidence = ["candidates"]
 final_answer_shape = "path_list"
@@ -182,11 +197,14 @@ semantic_kind = "content_excerpt_summary"
 operation = "summarize"
 target_object = "path"
 delivery_shape = "summary"
-allowed_actions = ["fs_basic.read_text_range", "doc_parse", "archive_basic.read", "log_analyze", "browser_web.open_extract"]
+allowed_actions = ["fs_basic.read_text_range", "fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.count_entries", "fs_basic.stat_paths", "doc_parse", "archive_basic.read", "log_analyze", "browser_web.open_extract", "config_basic.read_field", "config_basic.read_fields"]
 preferred_actions = ["fs_basic.read_text_range"]
 required_evidence = ["content_excerpt"]
 final_answer_shape = "summary_grounded_in_excerpt"
 failure_policy = "retry_with_alternatives"
+
+[contracts.content_excerpt_summary.evidence_expression]
+any_of = ["content_excerpt", "candidates", "count", "field_value"]
 
 [contracts.web_page_summary]
 semantic_kind = "web_page_summary"
@@ -265,7 +283,7 @@ semantic_kind = "content_excerpt_with_summary"
 operation = "summarize"
 target_object = "path"
 delivery_shape = "excerpt_with_summary"
-allowed_actions = ["fs_basic.read_text_range", "doc_parse", "archive_basic.read", "log_analyze", "browser_web.open_extract"]
+allowed_actions = ["fs_basic.read_text_range", "fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.stat_paths", "doc_parse", "archive_basic.read", "log_analyze", "browser_web.open_extract"]
 preferred_actions = ["fs_basic.read_text_range"]
 required_evidence = ["content_excerpt"]
 final_answer_shape = "excerpt_plus_summary"
@@ -290,11 +308,14 @@ semantic_kind = "excerpt_kind_judgment"
 operation = "summarize"
 target_object = "path"
 delivery_shape = "summary"
-allowed_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "doc_parse", "archive_basic.read"]
+allowed_actions = ["fs_basic.list_dir", "fs_basic.find_entries", "fs_basic.count_entries", "fs_basic.stat_paths", "fs_basic.read_text_range", "doc_parse", "archive_basic.read"]
 preferred_actions = ["fs_basic.read_text_range"]
 required_evidence = ["content_excerpt"]
 final_answer_shape = "judgment_with_excerpt_basis"
 failure_policy = "retry_with_alternatives"
+
+[contracts.excerpt_kind_judgment.evidence_expression]
+any_of = ["content_excerpt", "candidates", "count", "field_value"]
 
 [contracts.recent_artifacts_judgment]
 semantic_kind = "recent_artifacts_judgment"
@@ -312,9 +333,9 @@ semantic_kind = "workspace_project_summary"
 operation = "summarize"
 target_object = "directory"
 delivery_shape = "summary"
-allowed_actions = ["fs_basic.read_text_range", "git_basic.log", "system_basic.tree_summary"]
-preferred_actions = ["fs_basic.read_text_range", "system_basic.tree_summary"]
-required_evidence = ["content_excerpt"]
+allowed_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "git_basic", "system_basic.tree_summary"]
+preferred_actions = ["fs_basic.list_dir", "fs_basic.read_text_range", "system_basic.tree_summary"]
+required_evidence = ["candidates", "content_excerpt"]
 final_answer_shape = "project_summary_grounded_in_files"
 failure_policy = "retry_with_alternatives"
 
@@ -344,10 +365,13 @@ operation = "validate"
 target_object = "unknown"
 delivery_shape = "raw"
 allowed_actions = ["fs_basic.compare_paths", "fs_basic.stat_paths", "fs_basic.count_entries", "fs_basic.list_dir", "fs_basic.read_text_range", "config_basic.read_fields", "run_cmd"]
-preferred_actions = ["fs_basic.compare_paths", "fs_basic.stat_paths", "fs_basic.list_dir", "fs_basic.read_text_range"]
+preferred_actions = ["fs_basic.compare_paths", "fs_basic.stat_paths", "fs_basic.count_entries", "fs_basic.list_dir", "fs_basic.read_text_range"]
 required_evidence = ["field_value", "size_bytes"]
 final_answer_shape = "comparison_verdict"
 failure_policy = "retry_with_alternatives"
+
+[contracts.quantity_comparison.evidence_expression]
+any_of = ["field_value", "size_bytes", "count"]
 
 [contracts.execution_failed_step]
 semantic_kind = "execution_failed_step"
@@ -366,10 +390,21 @@ operation = "write"
 target_object = "path"
 delivery_shape = "file"
 artifact_kind = "file"
-allowed_actions = ["fs_basic.make_dir", "fs_basic.write_text", "fs_basic.stat_paths", "fs_basic.find_entries", "fs_basic.list_dir", "fs_basic.read_text_range", "doc_parse", "transform", "audio_synthesize", "image_generate", "image_edit"]
+allowed_actions = ["fs_basic.make_dir", "fs_basic.write_text", "fs_basic.stat_paths", "fs_basic.find_entries", "fs_basic.list_dir", "fs_basic.read_text_range", "run_cmd", "doc_parse", "transform", "audio_synthesize", "image_generate", "image_edit"]
 preferred_actions = ["fs_basic.write_text"]
 required_evidence = ["path"]
 final_answer_shape = "delivery_token_or_path"
+failure_policy = "retry_with_alternatives"
+
+[contracts.filesystem_mutation_result]
+semantic_kind = "filesystem_mutation_result"
+operation = "write"
+target_object = "path"
+delivery_shape = "summary"
+allowed_actions = ["fs_basic.make_dir", "fs_basic.write_text", "fs_basic.append_text", "fs_basic.remove_path", "fs_basic.stat_paths", "fs_basic.find_entries", "fs_basic.list_dir", "archive_basic.pack", "kb.ingest"]
+preferred_actions = ["fs_basic.make_dir", "fs_basic.write_text", "fs_basic.append_text", "fs_basic.remove_path", "archive_basic.pack", "kb.ingest"]
+required_evidence = ["path"]
+final_answer_shape = "lifecycle_result"
 failure_policy = "retry_with_alternatives"
 
 [contracts.scalar_path_only]
@@ -381,6 +416,17 @@ allowed_actions = ["fs_basic.stat_paths", "fs_basic.find_entries"]
 preferred_actions = ["fs_basic.stat_paths"]
 required_evidence = ["field_value"]
 final_answer_shape = "single_path"
+failure_policy = "retry_with_alternatives"
+
+[contracts.file_basename]
+semantic_kind = "file_basename"
+operation = "inspect"
+target_object = "path"
+delivery_shape = "raw"
+allowed_actions = ["fs_basic.stat_paths", "fs_basic.find_entries"]
+preferred_actions = ["fs_basic.stat_paths"]
+required_evidence = ["field_value"]
+final_answer_shape = "scalar"
 failure_policy = "retry_with_alternatives"
 
 [contracts.existence_with_path]

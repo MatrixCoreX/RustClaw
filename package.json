@@ -1,4 +1,6 @@
 {
+  "name": "rustclaw",
+  "private": true,
   "dependencies": {
     "@xdevplatform/xurl": "^1.0.3"
   }

@@ -268,6 +268,28 @@ fn background_locator_clarify_is_not_rescued_by_direct_auto_locator() {
 }
 
 #[test]
+fn background_content_summary_with_direct_file_auto_locator_can_execute() {
+    let mut route = route_result();
+    route.ask_mode = crate::AskMode::clarify();
+    route.needs_clarify = true;
+    route.route_reason = "background_locator_requires_clarify".to_string();
+    route.output_contract.locator_kind = OutputLocatorKind::Filename;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptSummary;
+    let result = apply_post_route_policy(
+        route,
+        LocatorResolution::Direct("/tmp/README.md".to_string()),
+    );
+    assert_eq!(
+        result.execution_route_result.ask_mode,
+        crate::AskMode::planner_execute_chat_wrapped()
+    );
+    assert!(!result.execution_route_result.needs_clarify);
+    assert_eq!(result.auto_locator_path.as_deref(), Some("/tmp/README.md"));
+}
+
+#[test]
 fn current_workspace_auto_locator_rescues_clarify() {
     let mut route = route_result();
     route.ask_mode = crate::AskMode::clarify();

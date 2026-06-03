@@ -67,6 +67,14 @@ impl FollowupFrame {
             || self.unresolved_slot == Some(FollowupUnresolvedSlot::Locator))
             && !self.source_request.trim().is_empty()
     }
+
+    fn can_reuse_operation_for_locator_reply(&self) -> bool {
+        matches!(
+            self.op_kind,
+            FollowupOpKind::Read | FollowupOpKind::List | FollowupOpKind::Delivery
+        ) && self.unresolved_slot.is_none()
+            && !self.source_request.trim().is_empty()
+    }
 }
 
 fn effective_user_key(task: &ClaimedTask) -> String {
@@ -193,20 +201,32 @@ pub(crate) fn load_active_followup_frame(
 pub(crate) fn synthesize_locator_reply_resolved_intent(
     frame: &FollowupFrame,
     locator_reply: &str,
-) -> Option<String> {
+) -> Option<(String, crate::clarify_followup::ClarifyRewriteReason)> {
     let locator_reply = locator_reply.trim();
-    if !frame.can_accept_locator_reply()
-        || !crate::clarify_followup::prompt_is_structural_locator_only(locator_reply)
-    {
+    if !crate::clarify_followup::prompt_is_structural_locator_only(locator_reply) {
         return None;
     }
-    Some(
-        format!(
+    if frame.can_accept_locator_reply() {
+        return Some((
+            format!(
             "Continue the previous request that was waiting for clarification: {}\nUser now provides the missing target/content: {}",
             frame.source_request.trim(),
             locator_reply
         ),
-    )
+            crate::clarify_followup::ClarifyRewriteReason::ClarifyLocatorReply,
+        ));
+    }
+    if frame.can_reuse_operation_for_locator_reply() {
+        return Some((
+            format!(
+                "Continue the previous resolved request by applying the same operation to the provided target/content.\nPrevious user request: {}\nProvided target/content: {}",
+                frame.source_request.trim(),
+                locator_reply
+            ),
+            crate::clarify_followup::ClarifyRewriteReason::FollowupLocatorReply,
+        ));
+    }
+    None
 }
 
 fn sanitize_ordered_entry_text(entry: &str) -> String {
@@ -287,6 +307,99 @@ fn is_compact_entry_token(token: &str) -> bool {
                 '.' | '_' | '-' | '/' | '\\' | '~' | '@' | '+' | '=' | '[' | ']' | '(' | ')'
             )
     })
+}
+
+fn markdown_bullet_entry(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let payload = ["- ", "* ", "+ "]
+        .into_iter()
+        .find_map(|prefix| trimmed.strip_prefix(prefix))?;
+    let entry = sanitize_ordered_entry_text(payload);
+    (!entry.trim().is_empty()).then_some(entry)
+}
+
+fn markdown_bullet_block_entries(text: &str) -> Vec<String> {
+    let mut entries = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if entries.len() >= 2 {
+                break;
+            }
+            entries.clear();
+            continue;
+        }
+        if let Some(entry) = markdown_bullet_entry(trimmed) {
+            entries.push(entry);
+            if entries.len() >= MAX_ORDERED_ENTRIES {
+                break;
+            }
+            continue;
+        }
+        if entries.len() >= 2 {
+            break;
+        }
+        entries.clear();
+    }
+    if entries.len() >= 2 {
+        dedupe_ordered_entries(entries)
+    } else {
+        Vec::new()
+    }
+}
+
+fn structural_ordered_entry_has_signal(entry: &str) -> bool {
+    let trimmed = entry.trim();
+    Path::new(trimmed).is_absolute()
+        || trimmed.starts_with("http://")
+        || trimmed.starts_with("https://")
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains('.')
+        || trimmed.contains('_')
+        || trimmed.contains('-')
+        || trimmed.contains('@')
+        || trimmed.contains('=')
+}
+
+fn is_structural_ordered_entry_token(entry: &str) -> bool {
+    let trimmed = entry.trim();
+    if trimmed.is_empty()
+        || trimmed.contains(char::is_whitespace)
+        || trimmed.chars().any(char::is_control)
+    {
+        return false;
+    }
+    trimmed.chars().all(|ch| {
+        ch.is_alphanumeric()
+            || matches!(
+                ch,
+                '.' | '_'
+                    | '-'
+                    | '/'
+                    | '\\'
+                    | '~'
+                    | '@'
+                    | '+'
+                    | '='
+                    | '['
+                    | ']'
+                    | '('
+                    | ')'
+                    | '%'
+                    | ':'
+            )
+    })
+}
+
+pub(crate) fn ordered_entries_are_structural_tokens(entries: &[String]) -> bool {
+    entries.len() >= 2
+        && entries
+            .iter()
+            .all(|entry| is_structural_ordered_entry_token(entry))
+        && entries
+            .iter()
+            .any(|entry| structural_ordered_entry_has_signal(entry))
 }
 
 fn resolve_ordered_entry_target(frame: &FollowupFrame, entry: &str) -> String {
@@ -418,6 +531,7 @@ fn output_contract_prefers_listing_followup(route_result: &crate::RouteResult) -
         route_result.output_contract.semantic_kind,
         crate::OutputSemanticKind::FileNames
             | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::DirectoryEntryGroups
             | crate::OutputSemanticKind::FilePaths
             | crate::OutputSemanticKind::SqliteTableListing
             | crate::OutputSemanticKind::SqliteTableNamesOnly
@@ -476,6 +590,10 @@ pub(crate) fn extract_ordered_entries_from_text(text: &str) -> Vec<String> {
     }
     if entries.len() >= 2 {
         return dedupe_ordered_entries(entries);
+    }
+    let bullet_entries = markdown_bullet_block_entries(text);
+    if bullet_entries.len() >= 2 {
+        return bullet_entries;
     }
     for line in text.lines() {
         let trimmed = line.trim();
@@ -796,6 +914,46 @@ fn answer_contains_multiple_delivery_targets(
     targets.len() >= 2
 }
 
+fn single_visible_scalar_answer(answer_text: &str, answer_messages: &[String]) -> Option<String> {
+    if let Some(candidate) = single_nonempty_line(answer_text) {
+        return Some(candidate);
+    }
+    let mut visible_lines = Vec::new();
+    for message in answer_messages {
+        if crate::finalize::is_execution_summary_message(message) {
+            continue;
+        }
+        if let Some(candidate) = single_nonempty_line(message) {
+            visible_lines.push(candidate);
+        } else if message.lines().any(|line| !line.trim().is_empty()) {
+            return None;
+        }
+    }
+    if visible_lines.len() == 1 {
+        visible_lines.pop()
+    } else {
+        None
+    }
+}
+
+fn single_nonempty_line(text: &str) -> Option<String> {
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let line = lines.next()?;
+    if lines.next().is_some() {
+        return None;
+    }
+    Some(sanitize_ordered_entry_text(line))
+}
+
+fn selected_entry_index_from_visible_scalar_answer(
+    prior: &FollowupFrame,
+    answer_text: &str,
+    answer_messages: &[String],
+) -> Option<usize> {
+    let target = single_visible_scalar_answer(answer_text, answer_messages)?;
+    selected_entry_index_for_target(prior, &target)
+}
+
 fn merge_frame_with_prior(
     mut frame: FollowupFrame,
     prior_frame: Option<&FollowupFrame>,
@@ -815,6 +973,20 @@ fn merge_frame_with_prior(
             .is_some()
     {
         frame.ordered_entries = prior.ordered_entries.clone();
+    }
+    if frame.selected_entry_index.is_some()
+        && frame.ordered_entries.is_empty()
+        && !prior.ordered_entries.is_empty()
+    {
+        frame.ordered_entries = prior.ordered_entries.clone();
+        if frame.bound_target.is_none() {
+            frame.bound_target = prior.bound_target.clone();
+        }
+        if matches!(frame.op_kind, FollowupOpKind::Generic)
+            && matches!(prior.op_kind, FollowupOpKind::List)
+        {
+            frame.op_kind = FollowupOpKind::List;
+        }
     }
     if frame.selected_entry_index.is_none() {
         if let Some(bound_target) = frame.bound_target.as_deref() {
@@ -867,13 +1039,17 @@ fn derive_frame_for_ask_outcome(
     let op_kind = op_kind_from_route(route_result, unresolved_locator, journal);
     let should_extract_answer_entries = matches!(op_kind, FollowupOpKind::List)
         || (matches!(op_kind, FollowupOpKind::Delivery)
-            && answer_contains_multiple_delivery_targets(answer_text, answer_messages));
+            && answer_contains_multiple_delivery_targets(answer_text, answer_messages))
+        || observed_facts.ordered_entries.len() >= 2;
     let mut ordered_entries = if should_extract_answer_entries {
         observed_facts.ordered_entries.clone()
     } else {
         Vec::new()
     };
     ordered_entries.truncate(MAX_ORDERED_ENTRIES);
+    let selected_entry_index = prior_frame.and_then(|prior| {
+        selected_entry_index_from_visible_scalar_answer(prior, answer_text, answer_messages)
+    });
     let frame = FollowupFrame {
         source_request: prompt.trim().to_string(),
         op_kind,
@@ -886,7 +1062,7 @@ fn derive_frame_for_ask_outcome(
             })
             .flatten(),
         ordered_entries,
-        selected_entry_index: None,
+        selected_entry_index,
         slice_spec: observed_facts.slice_spec.clone(),
         output_shape: Some(
             route_result

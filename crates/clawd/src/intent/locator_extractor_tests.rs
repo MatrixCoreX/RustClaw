@@ -44,6 +44,17 @@ fn extracts_url_locator_without_downgrading_to_path() {
 }
 
 #[test]
+fn extracts_url_locator_before_attached_structural_punctuation() {
+    let out = extract_explicit_locator_for_fallback(
+        "访问 http://127.0.0.1:8787/v1/health，简短告诉我结果",
+    )
+    .expect("url locator should be extracted before trailing punctuation");
+
+    assert_eq!(out.locator_kind, OutputLocatorKind::Url);
+    assert_eq!(out.locator_hint, "http://127.0.0.1:8787/v1/health");
+}
+
+#[test]
 fn ignores_non_locator_tokens() {
     assert!(extract_explicit_locator_for_fallback("给我讲个笑话").is_none());
 }

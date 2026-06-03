@@ -2,7 +2,7 @@ use super::{
     active_clarify_existing_workspace_locator_reply, active_clarify_run_control_prompt,
     bind_ordered_entry_reference_from_active_frame, merged_prompt_from_task_turn_analysis,
     preserve_active_clarify_output_contract_for_locator_reply,
-    promote_active_clarify_locator_reply_to_execute,
+    preserve_locator_reply_runtime_intent, promote_active_clarify_locator_reply_to_execute,
     repair_scalar_field_value_contract_for_locator_reply,
     repair_structural_file_delivery_resolution, should_apply_task_turn_merge,
     should_probe_transcript_for_clarify_fallback, task_turn_merge_prior_context,
@@ -376,6 +376,61 @@ fn runtime_resume_binding_is_disabled_when_normalizer_rejects_resume() {
         crate::intent::resume_policy::select_resume_runtime_binding(&route, Some(&binding))
             .is_none()
     );
+}
+
+#[test]
+fn locator_reply_runtime_intent_preserves_prior_operation_for_executable_route() {
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "Read the TOML configuration file at the given path".to_string(),
+        needs_clarify: false,
+        route_reason: "normalizer_path_locator".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: "scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
+                .to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let resolution =
+        crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(
+            crate::clarify_followup::ClarifyLocatorReplyRewrite {
+                resolved_intent:
+                    "Continue the previous resolved request by applying the same operation to the provided target/content.\nPrevious user request: 去那个配置里找 app.name，只把值给我\nProvided target/content: scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
+                        .to_string(),
+                prior_user_text: "去那个配置里找 app.name，只把值给我".to_string(),
+                current_user_text:
+                    "scripts/nl_tests/fixtures/device_local/configs/app_config.toml"
+                        .to_string(),
+                reason: crate::clarify_followup::ClarifyRewriteReason::FollowupLocatorReply,
+            },
+        );
+
+    preserve_locator_reply_runtime_intent(&mut route, &resolution);
+
+    assert!(route.resolved_intent.contains("app.name"));
+    assert!(route
+        .resolved_intent
+        .contains("scripts/nl_tests/fixtures/device_local/configs/app_config.toml"));
+    assert!(route
+        .route_reason
+        .contains("preserve_locator_reply_runtime_intent"));
 }
 
 #[test]
@@ -1418,6 +1473,65 @@ fn structurally_resolved_file_delivery_binds_recent_read_target_without_text_mat
         "/tmp/README.md".to_string()
     );
     assert!(route.resolved_intent.contains("/tmp/README.md"));
+    assert!(route
+        .route_reason
+        .contains("structural_file_delivery_bound_to_recent_read_target"));
+}
+
+#[test]
+fn structurally_resolved_file_delivery_binds_active_observed_scalar_path_target() {
+    let target =
+        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/case_only/Report.MD";
+    let mut route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "deliver the active file target".to_string(),
+        needs_clarify: false,
+        route_reason: "normalizer resolved delivery from immediate context".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        clarify_question: String::new(),
+        schedule_intent: None,
+        wants_file_delivery: true,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::FileToken,
+            requires_content_evidence: true,
+            delivery_required: true,
+            locator_kind: crate::OutputLocatorKind::None,
+            delivery_intent: crate::OutputDeliveryIntent::FileSingle,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: Some(crate::observed_facts::ObservedFacts {
+            bound_target: Some(target.to_string()),
+            output_shape: Some(crate::OutputResponseShape::Scalar.as_str().to_string()),
+            ..Default::default()
+        }),
+    };
+
+    repair_structural_file_delivery_resolution(&mut route, &snapshot);
+
+    assert!(!route.needs_clarify);
+    assert!(route.is_execute_gate());
+    assert!(route.wants_file_delivery);
+    assert!(route.output_contract.delivery_required);
+    assert_eq!(
+        route.output_contract.response_shape,
+        crate::OutputResponseShape::FileToken
+    );
+    assert_eq!(route.output_contract.locator_hint, target);
+    assert!(route.resolved_intent.contains(target));
     assert!(route
         .route_reason
         .contains("structural_file_delivery_bound_to_recent_read_target"));

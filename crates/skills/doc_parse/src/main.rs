@@ -127,6 +127,8 @@ struct ParseResultInternal {
     encoding: String,
 }
 
+const EXTRA_CONTENT_EXCERPT_CHARS: usize = 1200;
+
 fn main() -> Result<()> {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -178,13 +180,61 @@ fn main() -> Result<()> {
             "status": outer_status,
             "text": serde_json::to_string(&payload)?,
             "error_text": error_text,
-            "extra": { "action": "parse_doc" }
+            "extra": parse_doc_extra(&req, &payload)
         });
         writeln!(stdout, "{}", serde_json::to_string(&out)?)?;
         stdout.flush()?;
     }
 
     Ok(())
+}
+
+fn parse_doc_extra(req: &Value, payload: &ParsePayload) -> Value {
+    let requested_path = request_path(req);
+    let metadata_path = payload
+        .metadata
+        .as_ref()
+        .map(|metadata| metadata.path.clone());
+    let path = metadata_path.or_else(|| requested_path.clone());
+    let text_length_chars = payload.text.chars().count();
+    let content_excerpt = bounded_content_excerpt(&payload.text, EXTRA_CONTENT_EXCERPT_CHARS);
+    let content_excerpt_truncated = text_length_chars > EXTRA_CONTENT_EXCERPT_CHARS;
+
+    json!({
+        "action": "parse_doc",
+        "status": &payload.status,
+        "path": path,
+        "requested_path": requested_path,
+        "content_excerpt": content_excerpt,
+        "content_excerpt_truncated": content_excerpt_truncated,
+        "text_length_chars": text_length_chars,
+        "sections_count": payload.sections.len(),
+        "tables_count": payload.tables.len(),
+        "metadata": payload.metadata.as_ref().map(|metadata| json!({
+            "title": &metadata.title,
+            "pages": metadata.pages,
+            "type": &metadata.doc_type,
+            "path": &metadata.path,
+            "encoding": &metadata.encoding,
+            "truncated": metadata.truncated,
+            "page_range_applied": &metadata.page_range_applied,
+        })),
+        "error_code": &payload.error_code,
+    })
+}
+
+fn request_path(req: &Value) -> Option<String> {
+    req.get("args")
+        .unwrap_or(req)
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(ToString::to_string)
+}
+
+fn bounded_content_excerpt(text: &str, max_chars: usize) -> String {
+    text.chars().take(max_chars).collect()
 }
 
 fn normalize_action(action: &str) -> Option<&'static str> {

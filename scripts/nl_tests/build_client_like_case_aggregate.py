@@ -42,6 +42,7 @@ CANONICAL_SUITES = {
 }
 
 AUTH_CONTEXT_VALUES = {"user", "admin"}
+METADATA_TAG_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 
 RISKY_FILE_NAMES = {
     "nl_cases_sensitive_flows.txt",
@@ -128,6 +129,22 @@ def split_canonical(line: str) -> list[str]:
 
 def split_five_column(line: str) -> list[str]:
     return [part.strip() for part in line.split("|", 4)]
+
+
+def looks_like_metadata_tags(value: str) -> bool:
+    """Return true for harness metadata tags, not user turns.
+
+    Historical case files use both `suite|name|tags|prompt` and
+    `case_name|turn1|turn2|turn3`. Unknown suite names are common, so the
+    aggregate builder cannot rely only on a fixed suite allowlist. The tags
+    column, however, is machine metadata: empty or ASCII identifiers separated
+    by commas, such as `act,fs,list`, `skill:read_file`, or `write_and_deliver`.
+    """
+
+    stripped = value.strip()
+    if not stripped:
+        return True
+    return all(METADATA_TAG_RE.fullmatch(part.strip()) for part in stripped.split(","))
 
 
 def row_from_prompt(
@@ -228,30 +245,6 @@ def parse_line(source: Path, line: str, index: int, preserve_expects: bool) -> l
             "turn_chain,client_like,aggregate",
         )
 
-    if first_norm in CANONICAL_SUITES and len(canonical) >= 4:
-        suite, name, tags, prompt = canonical[:4]
-        expect = ""
-        if preserve_expects and len(canonical) >= 5 and canonical[4].strip().startswith("expect="):
-            expect = canonical[4].strip()[len("expect=") :]
-        return [
-            CaseRow(
-                suite=suite.strip(),
-                name=sanitize_field(f"{source_stem}_{name}"),
-                tags=",".join(
-                    part
-                    for part in [
-                        tags.strip(),
-                        "client_like",
-                        "aggregate",
-                    ]
-                    if part
-                ),
-                prompt=prompt,
-                expect=expect,
-                source=str(source),
-            )
-        ]
-
     five = split_five_column(line)
     if len(five) == 5 and five[1].strip().lower() in AUTH_CONTEXT_VALUES:
         # Structured assertion shape:
@@ -270,6 +263,32 @@ def parse_line(source: Path, line: str, index: int, preserve_expects: bool) -> l
                         f"auth:{sanitize_field(auth)}",
                         f"assertion:{sanitize_field(assertion)}",
                         "structured_assertion",
+                        "client_like",
+                        "aggregate",
+                    ]
+                    if part
+                ),
+                prompt=prompt,
+                expect=expect,
+                source=str(source),
+            )
+        ]
+
+    if len(canonical) >= 4 and (
+        first_norm in CANONICAL_SUITES or looks_like_metadata_tags(canonical[2])
+    ):
+        suite, name, tags, prompt = canonical[:4]
+        expect = ""
+        if preserve_expects and len(canonical) >= 5 and canonical[4].strip().startswith("expect="):
+            expect = canonical[4].strip()[len("expect=") :]
+        return [
+            CaseRow(
+                suite=suite.strip(),
+                name=sanitize_field(f"{source_stem}_{name}"),
+                tags=",".join(
+                    part
+                    for part in [
+                        tags.strip(),
                         "client_like",
                         "aggregate",
                     ]

@@ -349,6 +349,7 @@ fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
         | OutputSemanticKind::SqliteTableNamesOnly
         | OutputSemanticKind::SqliteDatabaseKindJudgment
         | OutputSemanticKind::SqliteSchemaVersion => return TaskTargetObject::Db,
+        OutputSemanticKind::FilesystemMutationResult => return TaskTargetObject::Path,
         OutputSemanticKind::StructuredKeys
         | OutputSemanticKind::ConfigValidation
         | OutputSemanticKind::ConfigMutation
@@ -362,6 +363,7 @@ fn target_object_for_route(route: &RouteResult) -> TaskTargetObject {
         | OutputSemanticKind::MarketQuote
         | OutputSemanticKind::ImageUnderstanding => return TaskTargetObject::Web,
         OutputSemanticKind::PublishingPreview => return TaskTargetObject::Web,
+        OutputSemanticKind::CommandOutputSummary => return TaskTargetObject::System,
         OutputSemanticKind::PackageManagerDetection => return TaskTargetObject::System,
         _ => {}
     }
@@ -387,7 +389,8 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::DockerImages
         | OutputSemanticKind::DockerLogs => TaskOperation::List,
         OutputSemanticKind::ScalarCount => TaskOperation::Count,
-        OutputSemanticKind::ContentExcerptSummary
+        OutputSemanticKind::CommandOutputSummary
+        | OutputSemanticKind::ContentExcerptSummary
         | OutputSemanticKind::ContentExcerptWithSummary
         | OutputSemanticKind::WebPageSummary
         | OutputSemanticKind::WebSearchSummary
@@ -399,9 +402,9 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::ExistenceWithPathSummary
         | OutputSemanticKind::RecentArtifactsJudgment
         | OutputSemanticKind::ExcerptKindJudgment => TaskOperation::Summarize,
-        OutputSemanticKind::GeneratedFileDelivery | OutputSemanticKind::ArchivePack => {
-            TaskOperation::Write
-        }
+        OutputSemanticKind::GeneratedFileDelivery
+        | OutputSemanticKind::ArchivePack
+        | OutputSemanticKind::FilesystemMutationResult => TaskOperation::Write,
         OutputSemanticKind::ArchiveUnpack
         | OutputSemanticKind::ConfigMutation
         | OutputSemanticKind::DockerContainerLifecycle => TaskOperation::Modify,
@@ -411,6 +414,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::HiddenEntriesCheck
         | OutputSemanticKind::ContentPresenceCheck
         | OutputSemanticKind::ScalarPathOnly
+        | OutputSemanticKind::FileBasename
         | OutputSemanticKind::ExistenceWithPath
         | OutputSemanticKind::GitCommitSubject
         | OutputSemanticKind::GitRepositoryState
@@ -486,13 +490,14 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         fields.insert("path");
     }
     match output_contract.semantic_kind {
-        OutputSemanticKind::RawCommandOutput => {
+        OutputSemanticKind::RawCommandOutput | OutputSemanticKind::CommandOutputSummary => {
             fields.insert("command_output");
         }
         OutputSemanticKind::ScalarCount => {
             fields.insert("count");
         }
         OutputSemanticKind::ScalarPathOnly
+        | OutputSemanticKind::FileBasename
         | OutputSemanticKind::GitCommitSubject
         | OutputSemanticKind::GitRepositoryState => {
             fields.insert("field_value");
@@ -568,6 +573,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
             fields.insert("count");
         }
         OutputSemanticKind::GeneratedFileDelivery
+        | OutputSemanticKind::FilesystemMutationResult
         | OutputSemanticKind::ArchivePack
         | OutputSemanticKind::ArchiveUnpack => {
             fields.insert("path");

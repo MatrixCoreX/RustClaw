@@ -3,14 +3,14 @@ use std::path::Path;
 use super::super::LoopState;
 use super::{
     answer_is_direct_observation_passthrough, archive_list_raw_passthrough_replacement,
-    archive_list_summary_from_body, cross_turn_observed_output_entries,
-    dir_compare_direct_answer_candidate, extract_direct_answer_from_generic_output,
-    extract_direct_answer_from_generic_output_i18n, extract_direct_scalar_from_generic_output,
-    extract_direct_scalar_from_generic_output_i18n,
+    archive_list_summary_from_body, compound_listing_content_delivery_guard_entry,
+    cross_turn_observed_output_entries, dir_compare_direct_answer_candidate,
+    extract_direct_answer_from_generic_output, extract_direct_answer_from_generic_output_i18n,
+    extract_direct_scalar_from_generic_output, extract_direct_scalar_from_generic_output_i18n,
     extract_direct_scalar_from_generic_output_with_locator_hint,
     extract_field_direct_answer_candidate, has_observed_answer_candidates,
-    inventory_dir_direct_answer_candidate, normalize_system_basic_match_path,
-    normalized_observed_listing, observed_contract_json,
+    inventory_dir_direct_answer_candidate, multi_count_quantity_comparison_guard_entry,
+    normalize_system_basic_match_path, normalized_observed_listing, observed_contract_json,
     observed_language_supports_bilingual_template, observed_output_entries,
     observed_request_language_hint, observed_request_prefers_english_template,
     observed_response_style_hint, recent_generated_output_from_user_request,
@@ -125,6 +125,71 @@ fn observed_outputs_exclude_synthesis_steps() {
         !joined.contains("stale delivered answer"),
         "entries: {joined}"
     );
+}
+
+#[test]
+fn multi_count_quantity_comparison_guard_lists_all_count_rows() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"count_inventory","path":"crates","resolved_path":"/repo/crates","recursive":false,"counts":{"total":13,"files":0,"dirs":13,"hidden":0}}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"action":"count_inventory","path":"crates/skills","resolved_path":"/repo/crates/skills","recursive":false,"counts":{"total":35,"files":0,"dirs":35,"hidden":0}}"#,
+    ));
+    let mut route = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
+    route.output_contract.semantic_kind = OutputSemanticKind::QuantityComparison;
+
+    let guard = multi_count_quantity_comparison_guard_entry(&loop_state, Some(&route))
+        .expect("multi-count guard");
+
+    assert!(
+        guard.contains("delivery_constraint=cover_all_observed_count_rows"),
+        "guard: {guard}"
+    );
+    assert!(guard.contains("observed_count_rows=2"), "guard: {guard}");
+    assert!(
+        guard.contains("observed_count.1.path=/repo/crates"),
+        "guard: {guard}"
+    );
+    assert!(
+        guard.contains("observed_count.1.count_total=13"),
+        "guard: {guard}"
+    );
+    assert!(
+        guard.contains("observed_count.2.path=/repo/crates/skills"),
+        "guard: {guard}"
+    );
+    assert!(
+        guard.contains("observed_count.2.count_total=35"),
+        "guard: {guard}"
+    );
+}
+
+#[test]
+fn compound_listing_content_delivery_guard_lists_observed_names() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","names":["archive","release_checklist.md","service_notes.md"]}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"action":"read_range","excerpt":"1|# Release Checklist\n3|1. Verify configuration loads correctly."}"#,
+    ));
+    let route = chat_wrapped_unclassified_route(OutputResponseShape::OneSentence);
+
+    let guard = compound_listing_content_delivery_guard_entry(&loop_state, Some(&route))
+        .expect("compound guard");
+
+    assert!(guard.contains("current_task_observed_listing_names"));
+    assert!(guard.contains("archive, release_checklist.md, service_notes.md"));
+    assert!(guard.contains("current_task_observed_content_excerpt: present"));
 }
 
 #[test]
@@ -1843,6 +1908,114 @@ fn virtual_fs_basic_find_ext_directory_contract_returns_parent_dirs() {
 }
 
 #[test]
+fn directory_purpose_summary_find_ext_direct_answer_keeps_full_candidate_list() {
+    let mut loop_state = LoopState::new(3);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"find_ext","count":5,"ext":"toml","results":["Cargo.toml","configs/config.toml","configs/skills_registry.toml","configs/channels/telegram.toml","configs/i18n/rss_fetch.en-US.toml"],"root":""},"text":"{\"action\":\"find_ext\",\"count\":5,\"ext\":\"toml\",\"results\":[\"Cargo.toml\",\"configs/config.toml\",\"configs/skills_registry.toml\",\"configs/channels/telegram.toml\",\"configs/i18n/rss_fetch.en-US.toml\"],\"root\":\"\"}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "config_basic",
+        r#"{"action":"extract_fields","path":"Cargo.toml","count":1,"results":[{"field_path":"workspace.dependencies.toml","exists":true,"value_text":"0.8"}]}"#,
+    ));
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
+    route_result.resolved_intent =
+        "Find all TOML files in the repository and briefly describe representative entries"
+            .to_string();
+    route_result.output_contract.semantic_kind = OutputSemanticKind::DirectoryPurposeSummary;
+    route_result.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        auto_locator_path: Some("/home/guagua/rustclaw".to_string()),
+        ..AgentRunContext::default()
+    };
+
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("find_ext directory summary should produce a direct answer");
+
+    assert!(answer.contains("find_ext.ext=toml"), "{answer}");
+    assert!(answer.contains("find_ext.count=5"), "{answer}");
+    assert!(answer.contains("Cargo.toml"), "{answer}");
+    assert!(answer.contains("configs/config.toml"), "{answer}");
+    assert!(answer.contains("configs/skills_registry.toml"), "{answer}");
+    assert!(
+        answer.contains("configs/channels/telegram.toml"),
+        "{answer}"
+    );
+    assert!(
+        answer.contains("configs/i18n/rss_fetch.en-US.toml"),
+        "{answer}"
+    );
+    assert!(
+        answer.contains("find_ext.representative.path=Cargo.toml; kind=root"),
+        "{answer}"
+    );
+    assert!(
+        answer.contains("find_ext.representative.path=configs/config.toml; kind=config"),
+        "{answer}"
+    );
+    assert!(
+        !answer.trim().starts_with("workspace.dependencies.toml"),
+        "{answer}"
+    );
+}
+
+#[test]
+fn multi_status_json_direct_answer_keeps_all_observed_status_files() {
+    let mut loop_state = LoopState::new(3);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","excerpt":"1|{\"kind\":\"telegram\",\"name\":\"primary\",\"scope\":\"telegram:primary\",\"healthy\":true,\"status\":\"running\",\"last_error\":null}","path":"/home/guagua/rustclaw/run/gateway-instance-status/telegram__primary.json","resolved_path":"/home/guagua/rustclaw/run/gateway-instance-status/telegram__primary.json"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|{\\\"kind\\\":\\\"telegram\\\",\\\"name\\\":\\\"primary\\\",\\\"scope\\\":\\\"telegram:primary\\\",\\\"healthy\\\":true,\\\"status\\\":\\\"running\\\",\\\"last_error\\\":null}\",\"path\":\"/home/guagua/rustclaw/run/gateway-instance-status/telegram__primary.json\",\"resolved_path\":\"/home/guagua/rustclaw/run/gateway-instance-status/telegram__primary.json\"}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","excerpt":"1|{\"name\":\"primary\",\"healthy\":true,\"status\":\"running\",\"last_error\":null}","path":"/home/guagua/rustclaw/run/telegram-bot-status/primary.json","resolved_path":"/home/guagua/rustclaw/run/telegram-bot-status/primary.json"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|{\\\"name\\\":\\\"primary\\\",\\\"healthy\\\":true,\\\"status\\\":\\\"running\\\",\\\"last_error\\\":null}\",\"path\":\"/home/guagua/rustclaw/run/telegram-bot-status/primary.json\",\"resolved_path\":\"/home/guagua/rustclaw/run/telegram-bot-status/primary.json\"}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_3",
+        "fs_basic",
+        r#"{"extra":{"action":"read_range","excerpt":"1|{\n2|  \"healthy\": true,\n3|  \"status\": \"login_required\",\n4|  \"last_error\": null,\n5|  \"account_label\": \"primary\"\n6|}","path":"/home/guagua/rustclaw/run/wechatd-status/primary.json","resolved_path":"/home/guagua/rustclaw/run/wechatd-status/primary.json"},"text":"{\"action\":\"read_range\",\"excerpt\":\"1|{\\n2|  \\\"healthy\\\": true,\\n3|  \\\"status\\\": \\\"login_required\\\",\\n4|  \\\"last_error\\\": null,\\n5|  \\\"account_label\\\": \\\"primary\\\"\\n6|}\",\"path\":\"/home/guagua/rustclaw/run/wechatd-status/primary.json\",\"resolved_path\":\"/home/guagua/rustclaw/run/wechatd-status/primary.json\"}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_4",
+        "synthesize_answer",
+        r#"{"healthy":true,"status":"login_required","account_label":"primary"}"#,
+    ));
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Free);
+    route_result.resolved_intent =
+        "run a basic health check here and summarize only the most important findings".to_string();
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        auto_locator_path: Some("/home/guagua/rustclaw/run".to_string()),
+        ..AgentRunContext::default()
+    };
+
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("multi status observations should produce a combined direct answer");
+
+    assert!(answer.contains("status_files.count=3"), "{answer}");
+    assert!(
+        answer.contains("gateway-instance-status/telegram__primary.json"),
+        "{answer}"
+    );
+    assert!(
+        answer.contains("telegram-bot-status/primary.json"),
+        "{answer}"
+    );
+    assert!(answer.contains("wechatd-status/primary.json"), "{answer}");
+    assert!(answer.contains("status=running"), "{answer}");
+    assert!(answer.contains("status=login_required"), "{answer}");
+    assert!(
+        answer.contains("status_files.notable.status=login_required"),
+        "{answer}"
+    );
+}
+
+#[test]
 fn fs_search_direct_answer_does_not_confirm_ambiguous_matches_when_direct_list_disallowed() {
     let value = serde_json::from_str::<serde_json::Value>(
             r#"{"action":"find_name","pattern":"abcd","count":4,"results":["abcd_report.md","my_abcd.txt","x_abcd_log.txt","zz_abcd_backup.log"],"root":""}"#,
@@ -2169,6 +2342,11 @@ fn observed_response_style_hint_reflects_output_contract_shape() {
         ..AgentRunContext::default()
     };
     assert!(observed_response_style_hint(Some(&agent_run_context)).contains("exactly one sentence"));
+    assert!(
+        observed_response_style_hint(Some(&agent_run_context)).contains(
+            "If the request has multiple deliverables, include all of them in that one sentence"
+        )
+    );
 
     route_result.output_contract.exact_sentence_count = Some(3);
     agent_run_context.route_result = Some(route_result.clone());
@@ -2497,14 +2675,16 @@ fn observed_fallback_prompt_renders_language_and_response_style_hints() {
                 ("__REQUEST_LANGUAGE_HINT__", "mixed"),
                 (
                     "__RESPONSE_STYLE_HINT__",
-                    "Return exactly one sentence unless the current user request explicitly asks for another exact sentence count.",
+                    "Return exactly one sentence unless the current user request explicitly asks for another exact sentence count. If the request has multiple deliverables, include all of them in that one sentence.",
                 ),
             ],
         );
     assert!(prompt.contains("Request language hint:\nmixed"));
     assert!(prompt.contains("Response style hint:"));
     assert!(prompt.contains("Return exactly one sentence"));
+    assert!(prompt.contains("include all of them in that one sentence"));
     assert!(prompt.contains("Do not collapse multi-dimensional structured evidence"));
+    assert!(prompt.contains("combine the deliverables into one grammatical sentence"));
 }
 
 #[test]
@@ -2572,18 +2752,119 @@ fn content_excerpt_with_summary_composes_observed_slice_and_synthesis() {
     route_result.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
     route_result.output_contract.response_shape = OutputResponseShape::Strict;
     route_result.output_contract.requires_content_evidence = true;
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
 
     let answer = super::compose_content_excerpt_with_summary_answer(
         "All observed records are ok.",
         &loop_state,
         true,
-        Some(&route_result),
+        Some(&agent_run_context),
     );
 
     assert!(answer.contains(r#""prompt_source":"clarify""#));
     assert!(answer.contains(r#""prompt_source":"dynamic_guard""#));
     assert!(answer.contains(r#""prompt_source":"context""#));
     assert!(answer.contains("All observed records are ok."));
+}
+
+#[test]
+fn content_excerpt_with_summary_does_not_prepend_log_excerpt() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"read_range","mode":"tail","requested_n":5,"path":"logs/clawd.run.log","resolved_path":"/workspace/logs/clawd.run.log","excerpt":"1700|2026-05-27T08:04:44Z INFO task_call\n1701|2026-05-27T08:04:45Z INFO task_journal_summary {\"kind\":\"ask\"}\n1702|2026-05-27T08:04:46Z WARN memory_intent"}"#,
+    ));
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route_result.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
+    route_result.output_contract.response_shape = OutputResponseShape::Strict;
+    route_result.output_contract.requires_content_evidence = true;
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        auto_locator_path: Some("/workspace/logs/clawd.run.log".to_string()),
+        ..AgentRunContext::default()
+    };
+
+    let answer = super::compose_content_excerpt_with_summary_answer(
+        "没有 ERROR 行",
+        &loop_state,
+        false,
+        Some(&agent_run_context),
+    );
+
+    assert_eq!(answer, "没有 ERROR 行");
+}
+
+#[test]
+fn content_excerpt_with_summary_strips_log_excerpt_prefix() {
+    let mut loop_state = LoopState::new(2);
+    let excerpt = "2026-05-27T08:04:44Z INFO task_call\n2026-05-27T08:04:45Z WARN memory_intent";
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        &format!(
+            r#"{{"action":"read_range","mode":"tail","requested_n":2,"path":"logs/clawd.run.log","resolved_path":"/workspace/logs/clawd.run.log","excerpt":"1|{}"}}"#,
+            excerpt.replace('\n', r"\n2|")
+        ),
+    ));
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route_result.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
+    route_result.output_contract.response_shape = OutputResponseShape::Strict;
+    route_result.output_contract.requires_content_evidence = true;
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        auto_locator_path: Some("/workspace/logs/clawd.run.log".to_string()),
+        ..AgentRunContext::default()
+    };
+
+    let answer = super::compose_content_excerpt_with_summary_answer(
+        &format!("{excerpt}\n\n最后 2 行中没有 ERROR 行。"),
+        &loop_state,
+        false,
+        Some(&agent_run_context),
+    );
+
+    assert_eq!(answer, "最后 2 行中没有 ERROR 行。");
+}
+
+#[test]
+fn content_excerpt_with_summary_prefers_auto_locator_slice_over_latest_read() {
+    let mut loop_state = LoopState::new(3);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"read_range","mode":"head","requested_n":3,"resolved_path":"/tmp/service_notes.md","excerpt":"1|# Service Notes\n2|Runtime status lives here.\n3|Use this for service checks."}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"action":"read_range","mode":"head","requested_n":3,"resolved_path":"/tmp/README.md","excerpt":"1|# Device Local Fixture\n2|This repository contains the sample project.\n3|It is used for filesystem tests."}"#,
+    ));
+    let mut route_result = chat_wrapped_unclassified_route(OutputResponseShape::Strict);
+    route_result.output_contract.semantic_kind = OutputSemanticKind::ContentExcerptWithSummary;
+    route_result.output_contract.requires_content_evidence = true;
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        auto_locator_path: Some("/tmp/service_notes.md".to_string()),
+        ..AgentRunContext::default()
+    };
+
+    let answer = super::compose_content_excerpt_with_summary_answer(
+        "README.md describes the sample project.",
+        &loop_state,
+        true,
+        Some(&agent_run_context),
+    );
+
+    assert!(answer.starts_with("# Service Notes"), "answer: {answer}");
+    assert!(answer.contains("README.md describes the sample project."));
+    assert!(
+        !answer.starts_with("# Device Local Fixture"),
+        "answer: {answer}"
+    );
 }
 
 #[test]
@@ -2626,10 +2907,16 @@ fn direct_answer_keeps_fallback_for_unstructured_content_excerpt_summary() {
         auto_locator_path: Some("/tmp/README.txt".to_string()),
         ..AgentRunContext::default()
     };
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
-        None
-    );
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("service_status health_check should expose diagnostic machine fields directly");
+    assert!(answer.contains("health_check.summary"));
+    assert!(answer.contains("clawd.status=running"));
+    assert!(answer.contains("clawd_process_count=1"));
+    assert!(answer.contains("clawd_health_port_open=true"));
+    assert!(answer.contains("clawd_log.keyword_error_count=43"));
+    assert!(answer.contains("system_health.load_avg_1m=3.81"));
+    assert!(answer.contains("system_health.memory_available_bytes=11270471680"));
+    assert!(answer.contains("system_health.disk_root_available_bytes=18108059648"));
 }
 
 #[test]
@@ -2825,6 +3112,53 @@ fn direct_answer_preserves_blank_lines_for_explicit_read_range() {
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
         Some("# RustClaw\n\n<img src=\"./RustClaw.png\" width=\"420\" />\n")
+    );
+}
+
+#[test]
+fn raw_command_output_read_range_direct_answer_preserves_visible_blank_line() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+            "step_1",
+            "fs_basic",
+            r#"{"action":"read_range","mode":"head","requested_n":2,"path":"/tmp/README.md","resolved_path":"/tmp/README.md","excerpt":"1|# RustClaw\n2|"}"#,
+        ));
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "读取 README.md 前 2 行".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "semantic_contract_requires_evidence".to_string(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Unknown,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::Filename,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::RawCommandOutput,
+            locator_hint: "README.md".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        auto_locator_path: Some("/tmp/README.md".to_string()),
+        ..AgentRunContext::default()
+    };
+
+    assert_eq!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
+        Some("# RustClaw\n（空行）")
     );
 }
 
@@ -7588,6 +7922,76 @@ fn direct_answer_formats_health_check_service_status_contract_without_llm() {
 }
 
 #[test]
+fn direct_answer_formats_wrapped_health_check_service_status_free_shape() {
+    let mut loop_state = LoopState::new(2);
+    let body = serde_json::json!({
+        "extra": {
+            "clawd_health_port_open": true,
+            "clawd_log": {
+                "exists": true,
+                "keyword_error_count": 43
+            },
+            "clawd_process_count": 1,
+            "system_health": {
+                "os_family": "linux",
+                "warnings": ["disk_root_low"]
+            },
+            "telegramd_log": {
+                "exists": true,
+                "keyword_error_count": 1
+            },
+            "telegramd_process_count": 0
+        },
+        "text": "{\"clawd_health_port_open\":true,\"clawd_process_count\":1}"
+    })
+    .to_string();
+    loop_state
+        .executed_step_results
+        .push(ok_step("step_1", "health_check", &body));
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent: "Show system/service status".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: String::new(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Unknown,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::ServiceStatus,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        user_request: Some("show status".to_string()),
+        ..AgentRunContext::default()
+    };
+
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("wrapped health_check evidence should provide service status directly");
+
+    assert!(answer.contains("health_check"));
+    assert!(answer.contains("clawd_process_count=1"));
+    assert!(answer.contains("clawd_health_port_open=true"));
+    assert!(!answer.contains("unclear"));
+    assert!(!answer.contains(r#""extra""#));
+}
+
+#[test]
 fn direct_answer_defers_health_check_diagnostic_summary_for_system_health_fields() {
     let mut loop_state = LoopState::new(2);
     let body = r#"{"clawd_process_count":1,"clawd_health_port_open":true,"clawd_log":{"exists":true,"keyword_error_count":43},"system_health":{"os_family":"linux","load_avg_1m":3.81,"memory_available_bytes":11270471680,"disk_root_available_bytes":18108059648,"warnings":[]}}"#;
@@ -7626,10 +8030,16 @@ fn direct_answer_defers_health_check_diagnostic_summary_for_system_health_fields
         ..AgentRunContext::default()
     };
 
-    assert_eq!(
-        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
-        None
-    );
+    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
+        .expect("service_status health_check should expose diagnostic machine fields directly");
+    assert!(answer.contains("health_check.summary"));
+    assert!(answer.contains("clawd.status=running"));
+    assert!(answer.contains("clawd_process_count=1"));
+    assert!(answer.contains("clawd_health_port_open=true"));
+    assert!(answer.contains("clawd_log.keyword_error_count=43"));
+    assert!(answer.contains("system_health.load_avg_1m=3.81"));
+    assert!(answer.contains("system_health.memory_available_bytes=11270471680"));
+    assert!(answer.contains("system_health.disk_root_available_bytes=18108059648"));
 }
 
 #[test]
@@ -8107,7 +8517,7 @@ fn direct_answer_defers_process_basic_port_summary_to_llm() {
 }
 
 #[test]
-fn direct_answer_formats_process_basic_port_status_contract_without_llm() {
+fn direct_answer_defers_process_basic_port_status_contract_to_llm() {
     let mut loop_state = LoopState::new(2);
     loop_state.executed_step_results.push(ok_step(
             "step_1",
@@ -8146,16 +8556,10 @@ fn direct_answer_formats_process_basic_port_status_contract_without_llm() {
         ..AgentRunContext::default()
     };
 
-    let answer = extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context))
-        .expect("service_status port output should be summarized deterministically");
-
-    assert!(answer.contains("8787"));
-    assert!(answer.contains("clawd"));
-    assert!(answer.contains("22"));
-    assert!(answer.contains("53"));
-    assert!(answer.contains("80"));
-    assert!(!answer.contains("SSH"));
-    assert!(!answer.contains("clash"));
+    assert_eq!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+        None
+    );
 }
 
 #[test]
@@ -8329,6 +8733,105 @@ fn direct_answer_preserves_http_basic_raw_scalar_for_free_shape() {
     assert_eq!(
         extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)).as_deref(),
         Some("status=200")
+    );
+}
+
+#[test]
+fn direct_answer_defers_http_basic_web_page_summary_to_observed_synthesis() {
+    let mut loop_state = LoopState::new(2);
+    let body =
+        "status=200\n{\"ok\":true,\"data\":{\"version\":\"0.1.7\",\"worker_state\":\"running\"}}\n";
+    loop_state
+        .executed_step_results
+        .push(ok_step("step_1", "http_basic", body));
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent: "web_page_summary".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: String::new(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Unknown,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::Url,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::WebPageSummary,
+            locator_hint: "http://127.0.0.1:8787/v1/health".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
+
+    assert_eq!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+        None
+    );
+    assert_eq!(
+        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)),
+        None
+    );
+}
+
+#[test]
+fn direct_answer_defers_http_basic_url_service_status_to_observed_synthesis() {
+    let mut loop_state = LoopState::new(2);
+    let body = "status=200\n{\"ok\":true,\"data\":{\"version\":\"0.1.7\",\"worker_state\":\"running\",\"queue_length\":0,\"bound_channel_count\":3}}\n";
+    loop_state
+        .executed_step_results
+        .push(ok_step("step_1", "http_basic", body));
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent: "service_status".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: String::new(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Unknown,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: OutputDeliveryIntent::None,
+            semantic_kind: OutputSemanticKind::ServiceStatus,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let agent_run_context = AgentRunContext {
+        route_result: Some(route_result),
+        ..AgentRunContext::default()
+    };
+
+    assert_eq!(
+        extract_direct_answer_from_generic_output(&loop_state, Some(&agent_run_context)),
+        None
+    );
+    assert_eq!(
+        extract_direct_scalar_from_generic_output(&loop_state, Some(&agent_run_context)),
+        None
     );
 }
 

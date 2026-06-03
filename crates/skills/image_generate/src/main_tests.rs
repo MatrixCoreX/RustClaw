@@ -41,3 +41,55 @@ fn resolve_output_path_uses_requested_workspace_path() {
 
     assert_eq!(out, workspace.join("document/skill_generate_smoke.png"));
 }
+
+#[test]
+fn provider_failures_do_not_use_local_fallback_by_default() {
+    let root = unique_temp_root("image-generate-no-fallback");
+    let err = execute(
+        &RootConfig::default(),
+        &root,
+        json!({"prompt":"minimal smoke card","output_path":"document/out.png"}),
+    )
+    .expect_err("local fallback is disabled by default");
+
+    assert!(err.contains("all providers failed"), "{err}");
+    assert!(!root.join("document/out.png").exists());
+}
+
+#[test]
+fn explicit_local_fallback_writes_image_file() {
+    let root = unique_temp_root("image-generate-local-fallback");
+    let mut cfg = RootConfig::default();
+    cfg.image_generation.local_fallback_enabled = true;
+
+    let (text, extra) = execute(
+        &cfg,
+        &root,
+        json!({"prompt":"minimal smoke card","output_path":"document/out.png"}),
+    )
+    .expect("local fallback should produce a file");
+
+    let out = root.join("document/out.png");
+    let bytes = std::fs::read(&out).expect("fallback image");
+    assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+    assert!(text.contains(&format!("FILE:{}", out.display())), "{text}");
+    assert_eq!(extra["provider"], "local_fallback");
+    assert_eq!(extra["model_kind"], "local_fallback");
+    assert_eq!(
+        extra["outputs"][0]["path"].as_str(),
+        Some(out.to_string_lossy().as_ref())
+    );
+}
+
+fn unique_temp_root(name: &str) -> PathBuf {
+    let mut root = std::env::temp_dir();
+    root.push(format!(
+        "rustclaw-{name}-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).expect("temp root");
+    root
+}

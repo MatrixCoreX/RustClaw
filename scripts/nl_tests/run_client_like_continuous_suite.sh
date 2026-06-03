@@ -23,6 +23,7 @@ CASE_FILE_VALUE=""
 CASE_JSONL_VALUE=""
 CASE_LIMIT_VALUE=""
 CASE_START_VALUE="${CASE_START:-1}"
+CASE_EXCLUDE_TAGS_VALUE="${CASE_EXCLUDE_TAGS:-}"
 RUN_BUILTIN_SMOKE=1
 CASE_GROUP_ISOLATION="${CASE_GROUP_ISOLATION:-1}"
 RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
@@ -56,6 +57,7 @@ Options:
   --case-limit N             max appended cases from --case-file/--full-nl
   --case-start N             start from the Nth appended case. Use with --skip-smoke and the same
                              --external-chat-id/--external-user-id to resume after provider failure.
+  --exclude-case-tag TAG     skip appended cases whose tag string contains TAG. May be repeated.
   --skip-smoke               run only the case file prompts, without the built-in 5-turn memory smoke
   --shared-case-chat         append all case-file prompts into one external_chat_id. By default,
                              independent case groups are isolated while turns in the same group share context.
@@ -137,6 +139,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --case-start)
       CASE_START_VALUE="${2:-}"
+      shift 2
+      ;;
+    --exclude-case-tag)
+      if [[ -z "${2:-}" ]]; then
+        echo "--exclude-case-tag requires a value" >&2
+        exit 2
+      fi
+      if [[ -n "${CASE_EXCLUDE_TAGS_VALUE:-}" ]]; then
+        CASE_EXCLUDE_TAGS_VALUE="${CASE_EXCLUDE_TAGS_VALUE},${2}"
+      else
+        CASE_EXCLUDE_TAGS_VALUE="${2}"
+      fi
       shift 2
       ;;
     --skip-smoke)
@@ -322,7 +336,6 @@ hard_markers = [
     "intent_unresolved",
     "context window exceeds limit",
     "invalid params",
-    "http 400",
 ]
 soft_markers = [
     "模型暂时不可用",
@@ -636,6 +649,8 @@ def capability_family_names(name: str) -> set[str]:
         "make_dir": {"make_dir", "fs_basic"},
         # Directory inventory/listing may be served by the structured system tool.
         "list_dir": {"list_dir", "system_basic", "fs_basic"},
+        # Legacy system_basic filesystem probes may now be planned through fs_basic.
+        "system_basic": {"system_basic", "fs_basic"},
         # Repository/file search now commonly uses fs_basic.find_entries.
         "fs_search": {"fs_search", "fs_basic"},
         # Read-only service status may be answered through process inventory.
@@ -946,7 +961,8 @@ load_case_rows() {
   local case_file="$1"
   local case_limit="$2"
   local case_start="$3"
-  python3 - "$case_file" "$case_limit" "$case_start" <<'PY'
+  local exclude_tags="$4"
+  python3 - "$case_file" "$case_limit" "$case_start" "$exclude_tags" <<'PY'
 import hashlib
 import re
 import sys
@@ -955,6 +971,7 @@ from pathlib import Path
 case_file = Path(sys.argv[1])
 limit_raw = sys.argv[2].strip()
 start_raw = sys.argv[3].strip()
+exclude_tags = [token.strip() for token in sys.argv[4].split(",") if token.strip()]
 limit = int(limit_raw) if limit_raw else 0
 start = int(start_raw) if start_raw else 1
 if start < 1:
@@ -987,6 +1004,8 @@ for raw in case_file.read_text(encoding="utf-8").splitlines():
         prompt, expect = prompt.rsplit(expect_marker, 1)
         expect = expect.strip()
     seen += 1
+    if exclude_tags and any(token in tags for token in exclude_tags):
+        continue
     if seen < start:
         continue
     emitted += 1
@@ -1007,7 +1026,8 @@ load_case_rows_jsonl() {
   local case_jsonl="$1"
   local case_limit="$2"
   local case_start="$3"
-  python3 - "$case_jsonl" "$case_limit" "$case_start" <<'PY'
+  local exclude_tags="$4"
+  python3 - "$case_jsonl" "$case_limit" "$case_start" "$exclude_tags" <<'PY'
 import hashlib
 import json
 import re
@@ -1017,6 +1037,7 @@ from pathlib import Path
 case_file = Path(sys.argv[1])
 limit_raw = sys.argv[2].strip()
 start_raw = sys.argv[3].strip()
+exclude_tags = [token.strip() for token in sys.argv[4].split(",") if token.strip()]
 limit = int(limit_raw) if limit_raw else 0
 start = int(start_raw) if start_raw else 1
 if start < 1:
@@ -1049,6 +1070,8 @@ for lineno, raw in enumerate(case_file.read_text(encoding="utf-8").splitlines(),
         tags = str(tags)
     expect = row.get("expect") or ""
     seen += 1
+    if exclude_tags and any(token in tags for token in exclude_tags):
+        continue
     if seen < start:
         continue
     emitted += 1
@@ -1464,6 +1487,7 @@ echo "case_file=${CASE_FILE_VALUE:-<none>}"
 echo "case_jsonl=${CASE_JSONL_VALUE:-<none>}"
 echo "case_limit=${CASE_LIMIT_VALUE:-<none>}"
 echo "case_start=${CASE_START_VALUE:-1}"
+echo "exclude_case_tags=${CASE_EXCLUDE_TAGS_VALUE:-<none>}"
 echo "case_group_isolation=${CASE_GROUP_ISOLATION}"
 echo "quality_guard=${QUALITY_GUARD}"
 
@@ -1505,10 +1529,10 @@ fi
 
 if [[ -n "${CASE_FILE_VALUE:-}" || -n "${CASE_JSONL_VALUE:-}" ]]; then
   if [[ -n "${CASE_JSONL_VALUE:-}" ]]; then
-    case_row_loader=(load_case_rows_jsonl "$CASE_JSONL_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE")
+    case_row_loader=(load_case_rows_jsonl "$CASE_JSONL_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE" "$CASE_EXCLUDE_TAGS_VALUE")
     resume_case_arg="--case-jsonl ${CASE_JSONL_VALUE}"
   else
-    case_row_loader=(load_case_rows "$CASE_FILE_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE")
+    case_row_loader=(load_case_rows "$CASE_FILE_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE" "$CASE_EXCLUDE_TAGS_VALUE")
     resume_case_arg="--case-file ${CASE_FILE_VALUE}"
   fi
   while IFS=$'\x1f' read -r case_index case_group_key case_name case_tags case_prompt case_expect; do

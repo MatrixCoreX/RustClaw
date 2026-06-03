@@ -594,6 +594,10 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         | "command_output"
         | "command_result"
         | "command_execution_result" => OutputSemanticKind::RawCommandOutput,
+        "command_output_summary"
+        | "command_result_summary"
+        | "command_output_synthesis"
+        | "command_result_synthesis" => OutputSemanticKind::CommandOutputSummary,
         "service_status"
         | "service_state"
         | "service_running_status"
@@ -610,14 +614,8 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         | "hidden_entries_example"
         | "hidden_entries"
         | "hidden_files" => OutputSemanticKind::HiddenEntriesCheck,
-        "file_names"
-        | "file_names_only"
-        | "file_name_only"
-        | "filename_only"
-        | "filenames_only"
-        | "names_only"
-        | "entry_names"
-        | "directory_entry_names" => OutputSemanticKind::FileNames,
+        "file_names" | "file_names_only" | "file_name_only" | "filename_only"
+        | "filenames_only" | "names_only" => OutputSemanticKind::FileNames,
         "directory_names"
         | "directory_names_only"
         | "directory_name_only"
@@ -630,6 +628,8 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         | "directory_file_groups"
         | "file_directory_groups"
         | "entry_kind_groups"
+        | "entry_names"
+        | "directory_entry_names"
         | "entries_by_kind"
         | "grouped_entries"
         | "grouped_entry_names" => OutputSemanticKind::DirectoryEntryGroups,
@@ -676,7 +676,15 @@ fn parse_output_semantic_kind_token(s: &str) -> OutputSemanticKind {
         | "new_file_delivery"
         | "created_file_delivery"
         | "write_then_send_file" => OutputSemanticKind::GeneratedFileDelivery,
+        "filesystem_mutation_result"
+        | "filesystem_mutation"
+        | "fs_mutation_result"
+        | "file_mutation_result"
+        | "path_mutation_result" => OutputSemanticKind::FilesystemMutationResult,
         "scalar_path_only" | "path_only" => OutputSemanticKind::ScalarPathOnly,
+        "file_basename" | "single_file_basename" | "bound_file_basename" => {
+            OutputSemanticKind::FileBasename
+        }
         "existence_with_path" | "exists_with_path" => OutputSemanticKind::ExistenceWithPath,
         "existence_with_path_summary"
         | "exists_with_path_summary"
@@ -974,6 +982,57 @@ fn locator_hint_points_to_workspace_root(hint: &str, workspace_root: &Path) -> b
     normalize_compare_path(candidate) == normalize_compare_path(workspace_root.to_path_buf())
 }
 
+fn workspace_identity_token(workspace_root: &Path) -> Option<String> {
+    workspace_root
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(normalize_locator_identity_token)
+        .filter(|value| !value.is_empty())
+}
+
+fn ascii_identifier_tokens(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-') {
+            current.push(ch);
+            continue;
+        }
+        if !current.is_empty() {
+            tokens.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
+}
+
+fn current_request_mentions_workspace_identity(req: &str, workspace_root: &Path) -> bool {
+    let Some(identity) = workspace_identity_token(workspace_root) else {
+        return false;
+    };
+    ascii_identifier_tokens(req)
+        .iter()
+        .map(|token| normalize_locator_identity_token(token))
+        .any(|token| token == identity)
+}
+
+fn workspace_identity_semantic_repair_context(req: &str, workspace_root: &Path) -> Option<String> {
+    if !current_request_mentions_workspace_identity(req, workspace_root) {
+        return None;
+    }
+    let workspace_name = workspace_identity_token(workspace_root)?;
+    Some(format!(
+        "workspace_identity:\n\
+         workspace_root: {}\n\
+         normalized_workspace_name: {}\n\
+         current_request_mentions_workspace_name: true",
+        workspace_root.display(),
+        workspace_name
+    ))
+}
+
 fn normalize_locator_identity_token(value: &str) -> String {
     value
         .trim()
@@ -1135,9 +1194,11 @@ fn apply_current_turn_structural_contract_repair(
         reason = Some("file_token_delivery_contract_repair");
     }
 
-    if let Some(filename) =
-        generated_file_delivery_filename_only_existing_target_repair(output_contract, req_surface)
-    {
+    if let Some(filename) = generated_file_delivery_filename_only_existing_target_repair(
+        output_contract,
+        req_surface,
+        workspace_root,
+    ) {
         output_contract.semantic_kind = OutputSemanticKind::None;
         output_contract.requires_content_evidence = true;
         output_contract.delivery_required = true;
@@ -1217,6 +1278,19 @@ fn apply_current_turn_structural_contract_repair(
         reason = Some("structured_field_selector_requires_scalar_value");
     }
 
+    if let Some(locator_hint) =
+        structured_field_value_contract_from_quantity_comparison(output_contract, req, req_surface)
+    {
+        output_contract.semantic_kind = OutputSemanticKind::None;
+        output_contract.response_shape = OutputResponseShape::Scalar;
+        output_contract.requires_content_evidence = true;
+        output_contract.delivery_required = false;
+        output_contract.delivery_intent = OutputDeliveryIntent::None;
+        output_contract.locator_kind = OutputLocatorKind::Path;
+        output_contract.locator_hint = locator_hint;
+        reason = Some("structured_field_selector_requires_scalar_value");
+    }
+
     if output_contract.semantic_kind == OutputSemanticKind::ConfigValidation
         && req_surface
             .dotted_field_selector
@@ -1257,6 +1331,17 @@ fn apply_current_turn_structural_contract_repair(
         reason = Some("structured_keys_scalar_response_requires_field_value");
     }
 
+    if current_workspace_generic_summary_needs_semantic_contract(
+        output_contract,
+        first_layer_decision,
+    ) {
+        output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+        if output_contract.locator_hint.trim().is_empty() {
+            output_contract.locator_hint = workspace_root.display().to_string();
+        }
+        reason = Some("current_workspace_summary_semantic_contract_repair");
+    }
+
     if output_contract.semantic_kind == OutputSemanticKind::WorkspaceProjectSummary
         && !matches!(
             output_contract.locator_kind,
@@ -1266,6 +1351,34 @@ fn apply_current_turn_structural_contract_repair(
     {
         output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
         reason = reason.or(Some("workspace_summary_root_locator_repair"));
+    }
+
+    if let Some(locator_hint) =
+        file_paths_missing_file_locator_parent_dir(output_contract, workspace_root)
+    {
+        output_contract.locator_kind = OutputLocatorKind::Path;
+        output_contract.locator_hint = locator_hint;
+        reason = Some("file_paths_missing_file_locator_parent_dir_repair");
+    }
+
+    if existence_with_path_mixed_locator_summary_repair(output_contract, req_surface) {
+        output_contract.semantic_kind = OutputSemanticKind::ExistenceWithPathSummary;
+        output_contract.requires_content_evidence = true;
+        reason = Some("existence_with_path_mixed_locator_summary_repair");
+    }
+
+    if quoted_literal_content_presence_contract_repair(output_contract, req_surface) {
+        output_contract.semantic_kind = OutputSemanticKind::ContentPresenceCheck;
+        output_contract.requires_content_evidence = true;
+        output_contract.delivery_required = false;
+        output_contract.delivery_intent = OutputDeliveryIntent::None;
+        if matches!(
+            output_contract.response_shape,
+            OutputResponseShape::Free | OutputResponseShape::Scalar
+        ) {
+            output_contract.response_shape = OutputResponseShape::OneSentence;
+        }
+        reason = Some("quoted_literal_content_presence_contract_repair");
     }
 
     let scalar_direct_answer = matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
@@ -1342,6 +1455,121 @@ fn apply_current_turn_structural_contract_repair(
     }
 
     reason
+}
+
+fn current_workspace_generic_summary_needs_semantic_contract(
+    output_contract: &IntentOutputContract,
+    first_layer_decision: FirstLayerDecision,
+) -> bool {
+    matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
+        && output_contract.requires_content_evidence
+        && !output_contract.delivery_required
+        && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        && matches!(output_contract.semantic_kind, OutputSemanticKind::None)
+        && matches!(
+            output_contract.response_shape,
+            OutputResponseShape::Free | OutputResponseShape::OneSentence
+        )
+        && matches!(
+            output_contract.locator_kind,
+            OutputLocatorKind::CurrentWorkspace
+        )
+}
+
+fn file_paths_missing_file_locator_parent_dir(
+    output_contract: &IntentOutputContract,
+    workspace_root: &Path,
+) -> Option<String> {
+    if output_contract.delivery_required
+        || output_contract.semantic_kind != OutputSemanticKind::FilePaths
+        || !matches!(
+            output_contract.locator_kind,
+            OutputLocatorKind::Path | OutputLocatorKind::Filename
+        )
+    {
+        return None;
+    }
+    let raw = output_contract.locator_hint.trim();
+    if raw.is_empty() || raw.contains('|') {
+        return None;
+    }
+    let raw_path = Path::new(raw);
+    let absolute_path = if raw_path.is_absolute() {
+        raw_path.to_path_buf()
+    } else {
+        workspace_root.join(raw_path)
+    };
+    if absolute_path.exists() {
+        return None;
+    }
+    let absolute_parent = absolute_path.parent()?;
+    if !absolute_parent.is_dir() {
+        return None;
+    }
+    if raw_path.is_absolute() {
+        return Some(absolute_parent.display().to_string());
+    }
+    Some(
+        raw_path
+            .parent()
+            .and_then(|parent| parent.to_str())
+            .filter(|parent| !parent.trim().is_empty())
+            .unwrap_or(".")
+            .to_string(),
+    )
+}
+
+fn existence_with_path_mixed_locator_summary_repair(
+    output_contract: &IntentOutputContract,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> bool {
+    if output_contract.delivery_required
+        || output_contract.semantic_kind != OutputSemanticKind::ExistenceWithPath
+        || !output_contract.requires_content_evidence
+        || !matches!(
+            output_contract.response_shape,
+            OutputResponseShape::Free
+                | OutputResponseShape::OneSentence
+                | OutputResponseShape::Strict
+        )
+        || !req_surface.has_concrete_locator_hint()
+    {
+        return false;
+    }
+    let locator_hint = output_contract.locator_hint.trim();
+    if locator_hint.is_empty() {
+        return false;
+    }
+    let locator_hint = locator_hint.replace('\\', "/").to_ascii_lowercase();
+    req_surface.filename_candidates.iter().any(|candidate| {
+        let candidate = candidate.trim();
+        !candidate.is_empty()
+            && Path::new(candidate).extension().is_some()
+            && !locator_hint.contains(&candidate.replace('\\', "/").to_ascii_lowercase())
+    })
+}
+
+fn quoted_literal_content_presence_contract_repair(
+    output_contract: &IntentOutputContract,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> bool {
+    if output_contract.delivery_required
+        || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        || output_contract.semantic_kind != OutputSemanticKind::ExistenceWithPath
+        || req_surface.single_quoted_literal().is_none()
+        || req_surface.has_structured_target_refinement()
+    {
+        return false;
+    }
+    if !matches!(
+        output_contract.locator_kind,
+        OutputLocatorKind::Path | OutputLocatorKind::Filename | OutputLocatorKind::CurrentWorkspace
+    ) {
+        return false;
+    }
+    !output_contract.locator_hint.trim().is_empty()
+        || req_surface.has_explicit_path_or_url()
+        || req_surface.has_single_filename_candidate()
 }
 
 fn structured_config_keys_contract_from_surface(
@@ -1424,6 +1652,46 @@ fn config_mutation_contract_from_surface(
     })
 }
 
+fn structured_field_value_contract_from_quantity_comparison(
+    output_contract: &IntentOutputContract,
+    req: &str,
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+) -> Option<String> {
+    if output_contract.delivery_required
+        || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        || !matches!(
+            output_contract.semantic_kind,
+            OutputSemanticKind::QuantityComparison
+        )
+    {
+        return None;
+    }
+    let field_path = req_surface.dotted_field_selector.as_deref()?;
+    if structural_config_value_after_field(req, field_path) {
+        return None;
+    }
+    let locator_hint = output_contract_structured_config_path(output_contract).or_else(|| {
+        crate::intent::locator_extractor::extract_explicit_locator_for_fallback(req).and_then(
+            |locator| {
+                path_has_structured_config_extension(&locator.locator_hint)
+                    .then_some(locator.locator_hint)
+            },
+        )
+    })?;
+    if split_structural_locator_targets(&locator_hint).len() != 1 {
+        return None;
+    }
+    Some(locator_hint)
+}
+
+fn split_structural_locator_targets(locator_hint: &str) -> Vec<&str> {
+    locator_hint
+        .split(['|', '\n', ';', ',', '、'])
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+        .collect()
+}
+
 fn structured_identifier_presence_contract_from_surface(
     output_contract: &IntentOutputContract,
     req: &str,
@@ -1433,7 +1701,9 @@ fn structured_identifier_presence_contract_from_surface(
         || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
         || !matches!(
             output_contract.semantic_kind,
-            OutputSemanticKind::ExistenceWithPath | OutputSemanticKind::ConfigValidation
+            OutputSemanticKind::ContentPresenceCheck
+                | OutputSemanticKind::ExistenceWithPath
+                | OutputSemanticKind::ConfigValidation
         )
     {
         return None;
@@ -1607,6 +1877,7 @@ fn planner_execute_inline_structured_transform_contract_context(
 fn generated_file_delivery_filename_only_existing_target_repair(
     output_contract: &IntentOutputContract,
     req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    workspace_root: &Path,
 ) -> Option<String> {
     if output_contract.semantic_kind != OutputSemanticKind::GeneratedFileDelivery
         || !output_contract.delivery_required
@@ -1618,11 +1889,12 @@ fn generated_file_delivery_filename_only_existing_target_repair(
     {
         return None;
     }
-    req_surface
+    let filename = req_surface
         .single_filename_candidate()
         .map(str::trim)
         .filter(|filename| !filename.is_empty())
-        .map(ToString::to_string)
+        .map(ToString::to_string)?;
+    workspace_root.join(&filename).is_file().then_some(filename)
 }
 
 fn generated_file_delivery_existing_content_summary_repair(
@@ -1667,6 +1939,7 @@ fn semantic_kind_uses_locatorless_system_observation(kind: OutputSemanticKind) -
     matches!(
         kind,
         OutputSemanticKind::RawCommandOutput
+            | OutputSemanticKind::CommandOutputSummary
             | OutputSemanticKind::ServiceStatus
             | OutputSemanticKind::PackageManagerDetection
             | OutputSemanticKind::DockerPs
@@ -1816,15 +2089,19 @@ fn archive_read_contract_from_surface(
         return None;
     }
 
-    let candidates = req_surface.filename_candidates.clone();
     let archive = if contract_repair_supported_archive_path(&output_contract.locator_hint) {
         output_contract.locator_hint.trim().to_string()
     } else {
-        candidates
+        req_surface
+            .filename_candidates
             .iter()
             .find(|candidate| contract_repair_supported_archive_path(candidate))
             .cloned()?
     };
+    if let Some(member) = archive_member_from_locator_target_pair(req_surface, &archive) {
+        return Some(format!("{} | {}", archive.trim(), member));
+    }
+    let candidates = req_surface.filename_candidates.clone();
     let archive_key = archive.trim().to_ascii_lowercase();
     let member = candidates
         .iter()
@@ -1838,6 +2115,24 @@ fn archive_read_contract_from_surface(
         .to_string();
 
     Some(format!("{} | {}", archive.trim(), member))
+}
+
+fn archive_member_from_locator_target_pair(
+    req_surface: &crate::intent::surface_signals::PromptSurfaceSignals,
+    archive: &str,
+) -> Option<String> {
+    let (left, right) = req_surface.locator_target_pair.as_ref()?;
+    let archive_key = archive.trim().to_ascii_lowercase();
+    for (archive_side, member_side) in [(left, right), (right, left)] {
+        if archive_side.trim().to_ascii_lowercase() != archive_key {
+            continue;
+        }
+        let member = member_side.trim();
+        if archive_member_candidate_is_structural(member) {
+            return Some(member.to_string());
+        }
+    }
+    None
 }
 
 fn archive_member_candidate_is_structural(candidate: &str) -> bool {
@@ -2317,6 +2612,7 @@ fn semantic_kind_can_use_existing_observed_context(kind: OutputSemanticKind) -> 
             | OutputSemanticKind::ContentPresenceCheck
             | OutputSemanticKind::ExcerptKindJudgment
             | OutputSemanticKind::RecentArtifactsJudgment
+            | OutputSemanticKind::PublishingPreview
     )
 }
 
@@ -3151,14 +3447,16 @@ fn apply_current_turn_anchor_drift_repair(
             output_contract.delivery_intent,
             OutputDeliveryIntent::FileSingle
         );
-    let preserve_raw_command =
-        output_contract.semantic_kind == OutputSemanticKind::RawCommandOutput;
+    let preserve_command_observation = matches!(
+        output_contract.semantic_kind,
+        OutputSemanticKind::RawCommandOutput | OutputSemanticKind::ExecutionFailedStep
+    );
     let preserve_quantity_comparison =
         output_contract.semantic_kind == OutputSemanticKind::QuantityComparison;
 
     output_contract.response_shape = if preserve_file_delivery {
         OutputResponseShape::FileToken
-    } else if preserve_raw_command {
+    } else if preserve_command_observation {
         output_contract.response_shape
     } else if preserve_quantity_comparison {
         OutputResponseShape::Strict
@@ -3168,7 +3466,7 @@ fn apply_current_turn_anchor_drift_repair(
     output_contract.exact_sentence_count = None;
     output_contract.requires_content_evidence = !preserve_file_delivery;
     output_contract.delivery_required = preserve_file_delivery;
-    output_contract.locator_kind = if preserve_raw_command {
+    output_contract.locator_kind = if preserve_command_observation {
         OutputLocatorKind::None
     } else if preserve_quantity_comparison {
         OutputLocatorKind::CurrentWorkspace
@@ -3180,14 +3478,14 @@ fn apply_current_turn_anchor_drift_repair(
     } else {
         OutputDeliveryIntent::None
     };
-    output_contract.semantic_kind = if preserve_raw_command {
-        OutputSemanticKind::RawCommandOutput
+    output_contract.semantic_kind = if preserve_command_observation {
+        output_contract.semantic_kind
     } else if preserve_quantity_comparison {
         OutputSemanticKind::QuantityComparison
     } else {
         OutputSemanticKind::None
     };
-    output_contract.locator_hint = if preserve_raw_command {
+    output_contract.locator_hint = if preserve_command_observation {
         String::new()
     } else if preserve_quantity_comparison {
         workspace_root.display().to_string()
@@ -3301,6 +3599,23 @@ fn apply_explicit_command_execution_contract_repair(
     {
         return None;
     }
+    if output_contract.semantic_kind == OutputSemanticKind::GeneratedFileDelivery
+        && output_contract.delivery_required
+        && output_contract.delivery_intent == OutputDeliveryIntent::FileSingle
+        && output_contract.response_shape == OutputResponseShape::FileToken
+    {
+        *needs_clarify = false;
+        clarify_question.clear();
+        output_contract.requires_content_evidence = true;
+        *first_layer_decision = FirstLayerDecision::PlannerExecute;
+        *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
+        return Some("explicit_command_preserves_generated_file_delivery_execution");
+    }
+    let preserve_command_summary_contract = command_output_summary_contract_from_structured_fields(
+        output_contract,
+        *first_layer_decision,
+        *needs_clarify,
+    );
     *needs_clarify = false;
     clarify_question.clear();
     output_contract.requires_content_evidence = true;
@@ -3308,6 +3623,8 @@ fn apply_explicit_command_execution_contract_repair(
         if output_contract.semantic_kind == OutputSemanticKind::ExecutionFailedStep {
             output_contract.response_shape = OutputResponseShape::Strict;
             OutputSemanticKind::ExecutionFailedStep
+        } else if preserve_command_summary_contract {
+            OutputSemanticKind::CommandOutputSummary
         } else {
             OutputSemanticKind::RawCommandOutput
         };
@@ -3315,7 +3632,11 @@ fn apply_explicit_command_execution_contract_repair(
     output_contract.locator_hint.clear();
     *first_layer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
-    Some("explicit_command_requires_fresh_execution")
+    Some(if preserve_command_summary_contract {
+        "explicit_command_requires_command_output_summary_execution"
+    } else {
+        "explicit_command_requires_fresh_execution"
+    })
 }
 
 fn apply_command_payload_contract_repair(
@@ -3329,12 +3650,23 @@ fn apply_command_payload_contract_repair(
     if !command_payload_declared || output_contract.delivery_required {
         return None;
     }
+    let preserve_command_summary_contract = command_output_summary_contract_from_structured_fields(
+        output_contract,
+        *first_layer_decision,
+        *needs_clarify,
+    );
     if matches!(output_contract.semantic_kind, OutputSemanticKind::None) {
-        output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+        output_contract.semantic_kind = if preserve_command_summary_contract {
+            OutputSemanticKind::CommandOutputSummary
+        } else {
+            OutputSemanticKind::RawCommandOutput
+        };
     }
     if !matches!(
         output_contract.semantic_kind,
         OutputSemanticKind::RawCommandOutput
+            | OutputSemanticKind::ExecutionFailedStep
+            | OutputSemanticKind::CommandOutputSummary
     ) {
         return None;
     }
@@ -3345,7 +3677,125 @@ fn apply_command_payload_contract_repair(
     clarify_question.clear();
     *first_layer_decision = FirstLayerDecision::PlannerExecute;
     *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
-    Some("command_payload_requires_raw_output_execution")
+    Some(if preserve_command_summary_contract {
+        "command_payload_requires_command_output_summary_execution"
+    } else {
+        "command_payload_requires_raw_output_execution"
+    })
+}
+
+fn apply_file_delivery_contract_repair(
+    wants_file_delivery: bool,
+    output_contract: &mut IntentOutputContract,
+    needs_clarify: &mut bool,
+    clarify_question: &mut String,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
+) -> Option<&'static str> {
+    if !wants_file_delivery
+        || output_contract.locator_hint.trim().is_empty()
+        || !matches!(
+            output_contract.locator_kind,
+            OutputLocatorKind::Filename | OutputLocatorKind::Path
+        )
+        || matches!(
+            output_contract.semantic_kind,
+            OutputSemanticKind::GeneratedFileDelivery
+                | OutputSemanticKind::ArchivePack
+                | OutputSemanticKind::ArchiveUnpack
+        )
+    {
+        return None;
+    }
+    if output_contract.delivery_required
+        && output_contract.delivery_intent == OutputDeliveryIntent::FileSingle
+        && output_contract.response_shape == OutputResponseShape::FileToken
+    {
+        return None;
+    }
+
+    *needs_clarify = false;
+    clarify_question.clear();
+    output_contract.requires_content_evidence = true;
+    output_contract.delivery_required = true;
+    output_contract.delivery_intent = OutputDeliveryIntent::FileSingle;
+    output_contract.response_shape = OutputResponseShape::FileToken;
+    output_contract.semantic_kind = OutputSemanticKind::None;
+    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
+    Some("file_delivery_request_preserves_delivery_contract")
+}
+
+fn restore_declared_publishing_preview_contract(
+    declared_semantic_kind: OutputSemanticKind,
+    active_text_followup_route_repair: Option<&'static str>,
+    schedule_kind: ScheduleKind,
+    output_contract: &mut IntentOutputContract,
+    needs_clarify: &mut bool,
+    clarify_question: &mut String,
+    wants_file_delivery: &mut bool,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
+) -> Option<&'static str> {
+    if declared_semantic_kind != OutputSemanticKind::PublishingPreview
+        || active_text_followup_route_repair.is_some()
+        || !matches!(schedule_kind, ScheduleKind::None)
+    {
+        return None;
+    }
+    if output_contract.semantic_kind == OutputSemanticKind::PublishingPreview
+        && output_contract.requires_content_evidence
+        && !output_contract.delivery_required
+        && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        && matches!(output_contract.locator_kind, OutputLocatorKind::None)
+        && output_contract.locator_hint.trim().is_empty()
+        && matches!(*first_layer_decision, FirstLayerDecision::PlannerExecute)
+    {
+        return None;
+    }
+
+    *needs_clarify = false;
+    clarify_question.clear();
+    *wants_file_delivery = false;
+    output_contract.semantic_kind = OutputSemanticKind::PublishingPreview;
+    output_contract.requires_content_evidence = true;
+    output_contract.delivery_required = false;
+    output_contract.delivery_intent = OutputDeliveryIntent::None;
+    output_contract.locator_kind = OutputLocatorKind::None;
+    output_contract.locator_hint.clear();
+    if matches!(
+        output_contract.response_shape,
+        OutputResponseShape::FileToken
+    ) {
+        output_contract.response_shape = OutputResponseShape::Free;
+    }
+    *first_layer_decision = FirstLayerDecision::PlannerExecute;
+    *execution_finalize_style = execution_finalize_style_for_contract(output_contract);
+    Some("declared_publishing_preview_contract_preserved")
+}
+
+fn command_output_summary_contract_from_structured_fields(
+    output_contract: &IntentOutputContract,
+    first_layer_decision: FirstLayerDecision,
+    needs_clarify: bool,
+) -> bool {
+    !needs_clarify
+        && matches!(first_layer_decision, FirstLayerDecision::PlannerExecute)
+        && output_contract.requires_content_evidence
+        && !output_contract.delivery_required
+        && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        && matches!(output_contract.locator_kind, OutputLocatorKind::None)
+        && output_contract.locator_hint.trim().is_empty()
+        && matches!(
+            output_contract.semantic_kind,
+            OutputSemanticKind::None | OutputSemanticKind::CommandOutputSummary
+        )
+        && matches!(
+            output_contract.response_shape,
+            OutputResponseShape::Free
+                | OutputResponseShape::OneSentence
+                | OutputResponseShape::Strict
+        )
 }
 
 fn route_has_structured_execution_signal(
@@ -3380,6 +3830,42 @@ fn route_has_structured_execution_signal(
         })
 }
 
+fn direct_answer_decision_should_be_overridden_by_executable_contract(
+    needs_clarify: bool,
+    first_layer_decision: FirstLayerDecision,
+    output_contract: &IntentOutputContract,
+    wants_file_delivery: bool,
+    schedule_kind: ScheduleKind,
+    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+    direct_answer_contract_repair: Option<&'static str>,
+) -> bool {
+    !needs_clarify
+        && matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
+        && structured_execution_signal_for_effective_route(
+            output_contract,
+            wants_file_delivery,
+            schedule_kind,
+            execution_recipe_hint,
+            direct_answer_contract_repair,
+        )
+}
+
+fn structured_execution_signal_for_effective_route(
+    output_contract: &IntentOutputContract,
+    wants_file_delivery: bool,
+    schedule_kind: ScheduleKind,
+    execution_recipe_hint: Option<crate::execution_recipe::ExecutionRecipeSpec>,
+    direct_answer_contract_repair: Option<&'static str>,
+) -> bool {
+    direct_answer_contract_repair.is_none()
+        && route_has_structured_execution_signal(
+            output_contract,
+            wants_file_delivery,
+            schedule_kind,
+            execution_recipe_hint,
+        )
+}
+
 fn output_semantic_kind_requires_fresh_evidence(kind: OutputSemanticKind) -> bool {
     matches!(
         kind,
@@ -3400,6 +3886,7 @@ fn output_semantic_kind_requires_fresh_evidence(kind: OutputSemanticKind) -> boo
             | OutputSemanticKind::RecentScalarEqualityCheck
             | OutputSemanticKind::ExecutionFailedStep
             | OutputSemanticKind::GeneratedFileDelivery
+            | OutputSemanticKind::FilesystemMutationResult
             | OutputSemanticKind::ExistenceWithPath
             | OutputSemanticKind::ExistenceWithPathSummary
             | OutputSemanticKind::GitCommitSubject
@@ -3583,6 +4070,99 @@ fn active_session_has_structured_execution_target(
             .is_some_and(active_observed_facts_have_structured_target)
 }
 
+fn single_component_answer_candidate(candidate: &str) -> Option<&str> {
+    let candidate = candidate.trim();
+    if candidate.is_empty()
+        || candidate.contains('\n')
+        || candidate.contains('/')
+        || candidate.contains('\\')
+        || Path::new(candidate).components().count() != 1
+    {
+        return None;
+    }
+    Some(candidate)
+}
+
+fn existing_file_basename_for_session_target(state: &AppState, target: &str) -> Option<String> {
+    let target = target.trim();
+    if target.is_empty() {
+        return None;
+    }
+    let path = Path::new(target);
+    let is_existing_file = path.is_file()
+        || path
+            .canonicalize()
+            .ok()
+            .is_some_and(|canonical| canonical.is_file());
+    let is_workspace_file = !is_existing_file && state.skill_rt.workspace_root.join(path).is_file();
+    if !is_existing_file && !is_workspace_file {
+        return None;
+    }
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToString::to_string)
+}
+
+fn active_session_bound_file_basename_candidate(
+    state: &AppState,
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+    answer_candidate: &str,
+) -> Option<String> {
+    let candidate = single_component_answer_candidate(answer_candidate)?;
+    let snapshot = session_snapshot?;
+    let mut targets = Vec::new();
+    if let Some(frame) = snapshot.active_followup_frame.as_ref() {
+        if matches!(
+            frame.op_kind,
+            crate::followup_frame::FollowupOpKind::Delivery
+                | crate::followup_frame::FollowupOpKind::Read
+        ) {
+            if let Some(target) = frame.bound_target.as_deref() {
+                targets.push(target);
+            }
+        }
+    }
+    if let Some(facts) = snapshot.active_observed_facts.as_ref() {
+        if let Some(target) = facts.bound_target.as_deref() {
+            targets.push(target);
+        }
+        targets.extend(facts.delivery_targets.iter().map(String::as_str));
+    }
+    targets.into_iter().find_map(|target| {
+        let basename = existing_file_basename_for_session_target(state, target)?;
+        basename.eq_ignore_ascii_case(candidate).then_some(basename)
+    })
+}
+
+fn apply_active_file_basename_answer_candidate_direct_repair(
+    state: &AppState,
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+    answer_candidate: &str,
+    needs_clarify: bool,
+    first_layer_decision: &mut FirstLayerDecision,
+    execution_finalize_style: &mut ActFinalizeStyle,
+    wants_file_delivery: &mut bool,
+    output_contract: &mut IntentOutputContract,
+) -> Option<&'static str> {
+    if needs_clarify || !matches!(first_layer_decision, FirstLayerDecision::DirectAnswer) {
+        return None;
+    }
+    active_session_bound_file_basename_candidate(state, session_snapshot, answer_candidate)?;
+    *first_layer_decision = FirstLayerDecision::DirectAnswer;
+    *execution_finalize_style = ActFinalizeStyle::Plain;
+    *wants_file_delivery = false;
+    output_contract.response_shape = OutputResponseShape::Scalar;
+    output_contract.requires_content_evidence = false;
+    output_contract.delivery_required = false;
+    output_contract.locator_kind = OutputLocatorKind::None;
+    output_contract.delivery_intent = OutputDeliveryIntent::None;
+    output_contract.semantic_kind = OutputSemanticKind::FileBasename;
+    output_contract.locator_hint.clear();
+    Some("active_file_basename_answer_candidate_direct")
+}
+
 fn active_session_has_ordered_entries(
     session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
 ) -> bool {
@@ -3654,6 +4234,52 @@ fn state_patch_has_ordered_entry_ref(state_patch: Option<&Value>) -> bool {
     state_patch.is_some_and(|patch| {
         patch.get("ordered_entry_ref").is_some() || patch.get("ordered_entry_reference").is_some()
     })
+}
+
+fn active_ordered_scalar_path_missing_state_patch_context(
+    out: &IntentNormalizerOut,
+    session_snapshot: Option<&crate::conversation_state::ActiveSessionSnapshot>,
+) -> Option<String> {
+    if out.needs_clarify || state_patch_has_ordered_entry_ref(out.state_patch.as_ref()) {
+        return None;
+    }
+    let output_contract =
+        parse_output_contract(out.output_contract.clone(), out.wants_file_delivery);
+    if output_contract.response_shape != OutputResponseShape::Scalar
+        || output_contract.semantic_kind != OutputSemanticKind::ScalarPathOnly
+        || output_contract.locator_kind != OutputLocatorKind::None
+        || !output_contract.locator_hint.trim().is_empty()
+        || output_contract.delivery_required
+        || output_contract.delivery_intent != OutputDeliveryIntent::None
+    {
+        return None;
+    }
+    let snapshot = session_snapshot?;
+    let frame = snapshot.active_followup_frame.as_ref()?;
+    if frame.ordered_entries.is_empty() {
+        return None;
+    }
+    let entries = frame
+        .ordered_entries
+        .iter()
+        .take(crate::followup_frame::MAX_ORDERED_ENTRIES)
+        .enumerate()
+        .map(|(index, entry)| format!("{}:{}", index + 1, entry.trim()))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let bound_target = frame
+        .bound_target
+        .as_deref()
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+        .unwrap_or("<none>");
+    let selected_entry_index = frame
+        .selected_entry_index
+        .map(|index| (index + 1).to_string())
+        .unwrap_or_else(|| "<none>".to_string());
+    Some(format!(
+        "active_ordered_scalar_path_missing_ref: active_bound_target={bound_target}; active_selected_entry_index_base1={selected_entry_index}; active_ordered_entries={entries}; required_patch=state_patch.ordered_entry_ref"
+    ))
 }
 
 fn apply_active_ordered_scalar_path_chat_repair(
@@ -4205,6 +4831,11 @@ fn apply_active_task_scope_refinement_repair(
     if unresolved_deictic_observable_target_should_clarify(&surface, output_contract, state_patch) {
         return None;
     }
+    if active_task_explicit_locator_clarify_should_preserve_binding(output_contract, *needs_clarify)
+    {
+        *turn_type = Some(TurnType::TaskCorrect);
+        return None;
+    }
     if !active_task_turn_can_reuse_semantic_patch(&surface, state_patch) {
         return None;
     }
@@ -4259,6 +4890,21 @@ fn apply_active_task_scope_refinement_repair(
     output_contract.semantic_kind = OutputSemanticKind::None;
     output_contract.locator_hint.clear();
     Some(repair_reason)
+}
+
+fn active_task_explicit_locator_clarify_should_preserve_binding(
+    output_contract: &IntentOutputContract,
+    needs_clarify: bool,
+) -> bool {
+    needs_clarify
+        && output_contract.requires_content_evidence
+        && !output_contract.delivery_required
+        && matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
+        && matches!(
+            output_contract.locator_kind,
+            OutputLocatorKind::Path | OutputLocatorKind::Filename
+        )
+        && !output_contract.locator_hint.trim().is_empty()
 }
 
 fn output_contract_allows_chat_only_task_mutation(output_contract: &IntentOutputContract) -> bool {
@@ -4346,6 +4992,7 @@ fn answer_candidate_can_conflict_with_active_text_followup(
     binding.is_some_and(|binding| {
         binding.is_distinctive()
             && !binding.in_current_request
+            && !binding.in_recent_execution_context
             && (binding.in_recent_assistant_replies
                 || binding.in_recent_turns_full
                 || binding.in_last_turn_full
@@ -4773,6 +5420,11 @@ fn active_task_invalid_turn_binding_context(
     let raw_value =
         crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<Value>(raw_normalizer_output)?;
     let obj = raw_value.as_object()?;
+    if raw_normalizer_output_uses_existing_observed_context_contract(obj)
+        && active_context_has_structured_observation_anchor(session_snapshot)
+    {
+        return None;
+    }
     let raw_turn_type = obj
         .get("turn_type")
         .and_then(scalar_json_value_text)
@@ -4802,6 +5454,55 @@ fn active_task_invalid_turn_binding_context(
         target_policy_invalid,
         crate::truncate_for_log(prior_prompt)
     ))
+}
+
+fn raw_normalizer_output_uses_existing_observed_context_contract(
+    obj: &serde_json::Map<String, Value>,
+) -> bool {
+    let Some(contract) = obj.get("output_contract").and_then(Value::as_object) else {
+        return false;
+    };
+    let semantic_kind = contract
+        .get("semantic_kind")
+        .and_then(scalar_json_value_text)
+        .map(|token| parse_output_semantic_kind(&token))
+        .unwrap_or(OutputSemanticKind::None);
+    if !semantic_kind_can_use_existing_observed_context(semantic_kind) {
+        return false;
+    }
+    let requires_content_evidence = contract
+        .get("requires_content_evidence")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| {
+            contract
+                .get("requires_content_evidence")
+                .and_then(scalar_json_value_text)
+                .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+        });
+    let delivery_required = contract
+        .get("delivery_required")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| {
+            contract
+                .get("delivery_required")
+                .and_then(scalar_json_value_text)
+                .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+        });
+    let locator_kind = contract
+        .get("locator_kind")
+        .and_then(scalar_json_value_text)
+        .map(|token| parse_output_locator_kind(&token))
+        .unwrap_or(OutputLocatorKind::None);
+
+    requires_content_evidence
+        && !delivery_required
+        && matches!(
+            locator_kind,
+            OutputLocatorKind::None
+                | OutputLocatorKind::Path
+                | OutputLocatorKind::Filename
+                | OutputLocatorKind::CurrentWorkspace
+        )
 }
 
 fn clear_memory_update_answer_candidate_if_memory_only(
@@ -5185,22 +5886,24 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("For current-weather or forecast requests covered by weather, use decision=\"planner_execute\", output_contract.semantic_kind=\"weather_query\", requires_content_evidence=true, delivery_required=false, locator_kind=\"none\", locator_hint=\"\", and execution_recipe.kind=\"none\"; keep the place, date/day target, forecast window, and output language constraints in resolved_user_intent.".to_string());
     parts.push("For stock, crypto, or other market quote/price requests covered by stock or crypto, use decision=\"planner_execute\", output_contract.semantic_kind=\"market_quote\", requires_content_evidence=true, delivery_required=false, locator_kind=\"none\", locator_hint=\"\", and execution_recipe.kind=\"none\"; keep the concrete symbol/code/name, market type if known, and requested brevity/language in resolved_user_intent.".to_string());
     parts.push("For image/photo/screenshot understanding requests covered by image_vision, use decision=\"planner_execute\", output_contract.semantic_kind=\"image_understanding\", requires_content_evidence=true, delivery_required=false, locator_kind=\"url\" with locator_hint set to the concrete image URL when one is supplied, otherwise locator_kind=\"none\", and execution_recipe.kind=\"none\"; keep the requested visual task and response language in resolved_user_intent.".to_string());
-    parts.push("If REQUEST asks about the assistant/runtime's current unfinished task queue, running tasks, queued tasks, or canceling those tasks, use the existing task_control capability with its default current-user/current-chat scope; do not ask the user to choose a queue type just because no separate system name was supplied.".to_string());
-    parts.push("If REQUEST only asks whether this assistant is currently waiting for user approval, answer from runtime invariants with decision=\"direct_answer\", turn_type=\"status_query\", execution_recipe.kind=\"none\", no evidence/delivery, and state_patch.runtime_status_query={\"kind\":\"approval_wait\",\"scope\":\"current_task\"}; leave answer_candidate empty unless that runtime fact is provided as structured context.".to_string());
+    parts.push("For knowledge-base ingest/index/build/import requests covered by kb.ingest, use decision=\"planner_execute\", output_contract.semantic_kind=\"filesystem_mutation_result\", requires_content_evidence=true, delivery_required=false, locator_kind=\"path\" or \"current_workspace\" for the source document/directory, and execution_recipe.kind=\"none\" unless an ops closed-loop mutation recipe is separately required. Keep the target namespace and source paths in resolved_user_intent; do not classify these as service_status.".to_string());
+    parts.push("If REQUEST asks about the assistant/runtime's current unfinished task queue, running tasks, queued tasks, or canceling those tasks, use the existing task_control capability with its default current-user/current-chat scope; do not ask the user to choose a queue type just because no separate system name was supplied. For readonly status/list and cancel/end requests in this task-control family, use decision=\"planner_execute\", turn_type=\"status_query\", output_contract.semantic_kind=\"service_status\", output_contract.requires_content_evidence=true, output_contract.locator_kind=\"none\", output_contract.delivery_required=false, execution_recipe.kind=\"none\", and state_patch=null unless REQUEST separately gives a real task-state update.".to_string());
+    parts.push("If REQUEST only asks whether this assistant is currently waiting for user approval, answer from runtime invariants with decision=\"direct_answer\", turn_type=\"status_query\", execution_recipe.kind=\"none\", no evidence/delivery, and state_patch.runtime_status_query={\"kind\":\"approval_wait\",\"scope\":\"current_task\"}; leave answer_candidate empty unless that runtime fact is provided as structured context. Do not use runtime_status_query.kind=\"approval_wait\" for task queue/list/running/cancel semantics; those belong to task_control.".to_string());
     parts.push("Never ask the user to paste local file contents when REQUEST names a local file/dir/workspace target; route the request for tool execution. Capability refusals are only valid after an actual tool failure, not inside this normalizer.".to_string());
     parts.push("Always include output_contract as a JSON object, never as a string token. It is the final answer contract, not a place to invent a task-specific schema. Put exact scalar recall/direct-answer values in answer_candidate as a string only when the current request itself asks for that exact value; never put answer_candidate as an object or inside output_contract. If unsure, still emit the full default output_contract object with response_shape=\"free\", requires_content_evidence=false, delivery_required=false, locator_kind=\"none\", delivery_intent=\"none\", semantic_kind=\"none\", locator_hint=\"\", and self_extension set to none.".to_string());
     parts.push("Allowed output_contract keys only: response_shape, exact_sentence_count, requires_content_evidence, delivery_required, locator_kind, delivery_intent, semantic_kind, locator_hint, self_extension. Do not emit exact_format, required_evidence, fields, examples, post_processing, or custom keys.".to_string());
     parts.push("locator_hint must be a clean concrete locator value or concrete target pair, not a full instruction sentence and not explanatory prose. If no clean locator is known, leave it empty and let needs_clarify/decision express the missing target.".to_string());
     parts.push("Allowed response_shape: free, one_sentence, strict, scalar, file_token. Allowed locator_kind: none, path, current_workspace, url, filename. Allowed delivery_intent: none, file_single, directory_lookup, directory_batch_files.".to_string());
-    parts.push("Allowed semantic_kind: none, raw_command_output, service_status, hidden_entries_check, file_names, directory_names, directory_entry_groups, file_paths, directory_purpose_summary, content_excerpt_summary, content_excerpt_with_summary, content_presence_check, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, execution_failed_step, generated_file_delivery, scalar_path_only, existence_with_path, existence_with_path_summary, recent_scalar_equality_check, git_commit_subject, git_repository_state, structured_keys, config_validation, config_mutation, config_risk_assessment, rss_news_fetch, web_page_summary, web_search_summary, weather_query, market_quote, image_understanding, publishing_preview, package_manager_detection, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment, sqlite_schema_version, archive_list, archive_pack, archive_unpack, docker_ps, docker_images, docker_logs, docker_container_lifecycle.".to_string());
+    parts.push("Allowed semantic_kind: none, raw_command_output, command_output_summary, service_status, hidden_entries_check, file_names, directory_names, directory_entry_groups, file_paths, directory_purpose_summary, content_excerpt_summary, content_excerpt_with_summary, content_presence_check, excerpt_kind_judgment, recent_artifacts_judgment, workspace_project_summary, scalar_count, quantity_comparison, execution_failed_step, generated_file_delivery, filesystem_mutation_result, scalar_path_only, file_basename, existence_with_path, existence_with_path_summary, recent_scalar_equality_check, git_commit_subject, git_repository_state, structured_keys, config_validation, config_mutation, config_risk_assessment, rss_news_fetch, web_page_summary, web_search_summary, weather_query, market_quote, image_understanding, publishing_preview, package_manager_detection, sqlite_table_listing, sqlite_table_names_only, sqlite_database_kind_judgment, sqlite_schema_version, archive_list, archive_pack, archive_unpack, docker_ps, docker_images, docker_logs, docker_container_lifecycle.".to_string());
     parts.push("Allowed turn_type: task_request, task_append, task_replace, task_correct, task_scope_update, run_control, approval_decision, status_query, feedback_or_error, preference_or_memory, or empty string. clarify is a decision, never a turn_type or resume_behavior.".to_string());
-    parts.push("state_patch must be a JSON object or null. Use null when there is no structured update; never output an empty string for state_patch. For ordered-entry follow-ups against an active ordered list, set state_patch.ordered_entry_ref to {\"index\":N,\"index_base\":1} for absolute item selection or {\"relative_offset\":K} for signed relative selection. When a standalone current REQUEST creates a new user-visible deliverable that later short corrections should edit, set state_patch.primary_task_update=\"replace\" and state_patch.active_task_boundary=\"new_deliverable\". For active-task visible corrections, set required_content_literals / replacement_pairs / forbidden_visible_literals as structured exact content literals, not language-specific phrase markers. Keep output-only/body-only/length/tone/count/format constraints in resolved_user_intent and output_contract, not in required_content_literals. For a clear deictic reference, set state_patch.deictic_reference={\"target\":\"current_action_result\"|\"current_turn_locator\"|\"comparison_result\"|\"unresolved_prior_object\"|\"missing_locator\"|\"ambiguous_locator\"}; unresolved/missing/ambiguous targets mean safe clarify. For runtime self-state questions about whether this assistant is waiting for user approval, set state_patch.runtime_status_query={\"kind\":\"approval_wait\",\"scope\":\"current_task\"}. The runtime consumes structured numbers/targets/status tokens, not language-specific ordinal words, pronouns, connectors, or status wording.".to_string());
+    parts.push("state_patch must be a JSON object or null. Use null when there is no structured update; never output an empty string for state_patch. For ordered-entry follow-ups against an active ordered list, set state_patch.ordered_entry_ref to {\"index\":N,\"index_base\":1} for absolute item selection or {\"relative_offset\":K} for signed relative selection. When a standalone current REQUEST creates a new user-visible deliverable that later short corrections should edit, set state_patch.primary_task_update=\"replace\" and state_patch.active_task_boundary=\"new_deliverable\". For active-task visible corrections, set required_content_literals / replacement_pairs / forbidden_visible_literals as structured exact content literals, not language-specific phrase markers. Keep output-only/body-only/length/tone/count/format constraints in resolved_user_intent and output_contract, not in required_content_literals. For a clear deictic reference, set state_patch.deictic_reference={\"target\":\"current_action_result\"|\"current_turn_locator\"|\"comparison_result\"|\"unresolved_prior_object\"|\"missing_locator\"|\"ambiguous_locator\"}; unresolved/missing/ambiguous targets mean safe clarify. For runtime self-state questions about whether this assistant is waiting for user approval, set state_patch.runtime_status_query={\"kind\":\"approval_wait\",\"scope\":\"current_task\"}. For current local identity/environment scalar status, set state_patch.runtime_status_query with machine kinds such as current_user or kernel_release. The runtime consumes structured numbers/targets/status tokens, not language-specific ordinal words, pronouns, connectors, or status wording.".to_string());
     parts.push("Every enum field must be exactly one listed schema token. Do not output aliases, combined values, or explanatory prose in decision/output_contract/execution_recipe/turn_type/target_task_policy.".to_string());
     parts.push("Boolean fields must be JSON true/false, not prose. self_extension must be an object with mode/trigger/execute_now; use {\"mode\":\"none\",\"trigger\":\"none\",\"execute_now\":false} unless the user explicitly asks for self-extension. If locator_kind=\"none\", locator_hint must be \"\".".to_string());
-    parts.push("If the user asks to observe/list/read first but only return a scalar result, set response_shape=\"scalar\" and use a matching semantic_kind only when one applies: scalar_count for generic counts, hidden_entries_check for hidden/dot-prefixed entry counts, scalar_path_only only for a path/current-directory/workspace-location answer, sqlite_schema_version for SQLite schema-version metadata. For config field values, package names, usernames, hostnames, titles, IDs, or other non-path scalar values, keep semantic_kind=\"none\" unless another specific enum applies. If the final answer must include both a structured field/key/path identifier and its value, it is not a scalar-only value response: use response_shape=\"strict\" and preserve the key/value shape in resolved_user_intent. If the request requires an exact non-scalar output format with fixed count, body-only delivery, one-line fixed format, placeholder format, or no-extra-output delivery, set response_shape=\"strict\" and preserve the exact format in resolved_user_intent. For any exact counted-sentence requirement, also set exact_sentence_count to that positive integer; use response_shape=\"strict\" when the count is greater than 1. Never put natural-language format descriptions in response_shape.".to_string());
+    parts.push("If the user asks to observe/list/read first but only return a scalar result, set response_shape=\"scalar\" and use a matching semantic_kind only when one applies: scalar_count for generic counts, hidden_entries_check for hidden/dot-prefixed entry counts, scalar_path_only only for a path/current-directory/workspace-location answer, file_basename only for the basename/name of the active or selected local file target, sqlite_schema_version for SQLite schema-version metadata. For active-file basename/name follow-ups, keep the answer bound to the active file target itself, not filenames that appear inside the displayed content. For config field values, package names, usernames, hostnames, titles, IDs, or other non-path scalar values, keep semantic_kind=\"none\" unless another specific enum applies. If the final answer must include both a structured field/key/path identifier and its value, it is not a scalar-only value response: use response_shape=\"strict\" and preserve the key/value shape in resolved_user_intent. If the request requires an exact non-scalar output format with fixed count, body-only delivery, one-line fixed format, placeholder format, or no-extra-output delivery, set response_shape=\"strict\" and preserve the exact format in resolved_user_intent. For any exact counted-sentence requirement, also set exact_sentence_count to that positive integer; use response_shape=\"strict\" when the count is greater than 1. Never put natural-language format descriptions in response_shape.".to_string());
     parts.push("For command/tool execution where the final answer is about execution failure itself, including a single failed command/action or ordered failed step(s), set response_shape=\"strict\", semantic_kind=\"execution_failed_step\", requires_content_evidence=true, delivery_required=false. This is a semantic judgment from the requested final answer shape, not a phrase-list trigger.".to_string());
-    parts.push("For bounded file or log excerpt observations, choose the semantic_kind from the final answer, not from the tool used to gather evidence. A direct request to display a bounded line slice, head/tail slice, or exact range must use semantic_kind=\"raw_command_output\" with the exact slice/count preserved in resolved_user_intent and response_shape=\"strict\" when the final answer should paste/show the observed lines themselves. If the answer must only explain, summarize, conclude, judge, describe a phenomenon, or provide a one-sentence takeaway from the observed excerpt, use semantic_kind=\"content_excerpt_summary\" or semantic_kind=\"excerpt_kind_judgment\" for excerpt classification. If the final answer must include both the bounded observed slice and the requested synthesis, use semantic_kind=\"content_excerpt_with_summary\". Do not classify a plain bounded line read as content_excerpt_summary unless model-language interpretation is part of the requested deliverable.".to_string());
+    parts.push("For bounded file or log excerpt observations, choose the semantic_kind from the final answer, not from the tool used to gather evidence. A direct request to display a bounded line slice, head/tail slice, or exact range must use semantic_kind=\"raw_command_output\" with the exact slice/count preserved in resolved_user_intent and response_shape=\"strict\" when the final answer should paste/show the observed lines themselves. When a follow-up names a different local file but repeats the previous bounded-read operation, inherit only the slice/count constraint and still use raw_command_output unless the current deliverable asks for interpretation. If the answer must only explain, summarize, conclude, judge, describe a phenomenon, or provide a one-sentence takeaway from the observed excerpt, use semantic_kind=\"content_excerpt_summary\" or semantic_kind=\"excerpt_kind_judgment\" for excerpt classification. If the final answer must include both the bounded observed slice and the requested synthesis, use semantic_kind=\"content_excerpt_with_summary\". Do not classify a plain bounded line read as content_excerpt_summary unless model-language interpretation is part of the requested deliverable.".to_string());
     parts.push("For requests to create/save/write a new artifact and then send/deliver it, set response_shape=\"file_token\", semantic_kind=\"generated_file_delivery\", delivery_required=true, delivery_intent=\"file_single\", requires_content_evidence=true. If the user did not supply a filename but the artifact type/content is clear, do not ask for one; let execution planning choose a safe workspace filename.".to_string());
+    parts.push("For filesystem mutations where the final answer should report the action result instead of deliver a file artifact, set response_shape=\"one_sentence\", semantic_kind=\"filesystem_mutation_result\", delivery_required=false, delivery_intent=\"none\", and requires_content_evidence=true. Keep the concrete path as locator_hint when known. Use this for structured local path mutations such as creating a directory, writing/appending/removing a path, or similar filesystem lifecycle actions when the requested deliverable is the observed success/failure result.".to_string());
     parts.push("For archive pack/create/compress or unpack/extract/decompress requests, use semantic_kind=\"archive_pack\" or semantic_kind=\"archive_unpack\" even when the final answer asks only for the resulting path or status. Do not classify archive operations as generated_file_delivery; they have dedicated archive contracts and actions.".to_string());
     parts.push("For requests to send/deliver/receive an existing or selected local file, including a file selected from an observed or target directory by ordinal/order such as first/last/newest/largest, set wants_file_delivery=true, response_shape=\"file_token\", delivery_required=true, delivery_intent=\"file_single\", requires_content_evidence=true. The final answer must be a file token, not a bare filename, file_path_and_content answer_candidate, or pasted file content. This is a semantic delivery contract, not a phrase list.".to_string());
     parts.push("Text drafting/composition is not file delivery by default. If REQUEST asks to write/draft/compose an article, note, proposal, summary, checklist, tutorial, guide, or long-form text for the chat, but does not explicitly ask to save it to a file/path/document or send/deliver it as an attachment/artifact, do not use response_shape=\"file_token\" or semantic_kind=\"generated_file_delivery\". Keep delivery_required=false, wants_file_delivery=false, and use response_shape=\"free\" or \"strict\" according to the requested prose format. If the text is project-bound and needs workspace facts, use decision=\"planner_execute\", requires_content_evidence=true, locator_kind=\"current_workspace\"; still keep file delivery disabled. Examples: \"帮我写一篇关于 RustClaw 的长文\" / \"Write a long article about RustClaw\" means pasted prose in chat, while \"帮我写成 md 文件并发给我\" / \"Create a markdown file and send it to me\" means generated file delivery.".to_string());
@@ -5208,6 +5911,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("For exact same/different comparison of two scalar/field values that still need observation, use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, response_shape=\"strict\", semantic_kind=\"recent_scalar_equality_check\". Keep the requested final line format in resolved_user_intent.".to_string());
     parts.push("For a comparison where one side is a scalar field/value from a structured manifest or config file and the other side is the corresponding value mentioned in a README/docs file, use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, semantic_kind=\"recent_scalar_equality_check\", and response_shape=\"one_sentence\"/\"strict\" according to the requested final answer. This is a semantic contract for field/document evidence, not generic document summarization.".to_string());
     parts.push("For comparison or classification of prose excerpts/opening sections by audience, purpose, document role, or content type, use semantic_kind=\"excerpt_kind_judgment\" with content evidence. Do not route these as scalar equality checks because the compared evidence is prose, not scalar fields.".to_string());
+    parts.push("When REQUEST compares, classifies, or selects among already observed recent execution results/excerpts and the final answer only asks for the chosen name/path/label, bind it to RECENT_EXECUTION_CONTEXT or RECENT turns, not to a fresh workspace listing. Use semantic_kind=\"excerpt_kind_judgment\" or \"recent_artifacts_judgment\" while evidence is still needed; if the recent observed context already contains enough evidence and the selected scalar is clear, use decision=\"direct_answer\", response_shape=\"scalar\", requires_content_evidence=false, semantic_kind=\"none\", locator_kind=\"none\", and put the selected scalar in answer_candidate.".to_string());
     parts.push("For recent-file listings plus any grounded type, category, purpose, use, or role judgment about those selected recent entries, use semantic_kind=\"recent_artifacts_judgment\" with content evidence. Preserve both the recent-entry selection and the judgment/explanation deliverable in resolved_user_intent so planning can first observe the sorted entries and then read bounded content when needed.".to_string());
     parts.push("For file/path metadata comparisons across concrete local targets (for example size/大小, modified time/修改时间, existence state, or other observable path facts), use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, semantic_kind=\"quantity_comparison\", and response_shape=\"scalar\"/\"one_sentence\"/\"strict\" according to the requested final answer. This is a semantic contract decision, not a phrase-list trigger; do not treat metadata comparison as document content summarization just because the user also asks for a short explanation.".to_string());
     parts.push("For local project package-manager, dependency-manager, frontend package-manager, or build-tool detection, use decision=\"planner_execute\", requires_content_evidence=true, delivery_required=false, semantic_kind=\"package_manager_detection\", and locator_kind=\"current_workspace\" or \"path\" when the request names a project directory. This is a project capability contract based on manifest/lock-file observation; do not route it as generic file_names merely because marker filenames are inspected.".to_string());
@@ -5216,7 +5920,7 @@ fn render_compact_intent_normalizer_prompt(
     parts.push("For structured document key-name requests against JSON/TOML/YAML/config files, use decision=\"planner_execute\", requires_content_evidence=true, response_shape=\"strict\" when the user asks only for the keys, and semantic_kind=\"structured_keys\". Keep locator_kind/locator_hint pointed at the structured file; do not treat key-name requests as file excerpts.".to_string());
     parts.push("For hidden or dot-prefixed directory entry checks, use decision=\"planner_execute\", requires_content_evidence=true, locator_kind=\"current_workspace\" or \"path\", and semantic_kind=\"hidden_entries_check\". When the final answer is constrained to count only, use response_shape=\"scalar\" with this same semantic_kind. When the final answer is constrained to yes/no plus a limited set of entries, use response_shape=\"strict\" so later stages do not prepend execution traces.".to_string());
     parts.push("For existence checks whose final answer is a presence judgment over a concrete file, directory, path, or local artifact, use decision=\"planner_execute\", requires_content_evidence=true, semantic_kind=\"existence_with_path\", and the narrowest locator_kind that matches the target scope. If the final answer asks only for yes/no or exists/not-exists, use response_shape=\"scalar\"; if it asks to include a path/locator or other evidence fields, use response_shape=\"strict\". Do not use semantic_kind=\"scalar_count\" merely because the requested final answer is short or binary; presence judgment is not numeric counting. If the same request also asks for a brief content-grounded purpose, summary, role, or explanation when found, use semantic_kind=\"existence_with_path_summary\" instead so planning observes both the path and bounded content before synthesis. Preserve the final answer wording constraint in resolved_user_intent so later stages do not prepend execution traces.".to_string());
-    parts.push("For directory/file inventory with name or extension filtering, set requires_content_evidence=true and locator_kind=\"current_workspace\" or \"path\". Use semantic_kind=\"file_names\" only when the final answer is an exact file or mixed entry names-only list. Use semantic_kind=\"directory_names\" when the final answer is exact folder/directory names only. Use semantic_kind=\"directory_entry_groups\" when the final answer must separate the same directory's files and directories into groups. Use semantic_kind=\"file_paths\" when the final answer must be file paths, especially repository/workspace-wide extension searches or representative file path lists. If the same request also asks for explanation, purpose, judgment, comparison, or a brief conclusion, do not use an exact names/paths contract; use directory_purpose_summary when it asks what entries are for / more like, otherwise keep semantic_kind=\"none\" and preserve the combined listing+synthesis requirement in resolved_user_intent/reason. If a nuance has no enum, keep response_shape=\"free\" or semantic_kind=\"none\" instead of inventing enum values.".to_string());
+    parts.push("For directory/file inventory with name or extension filtering, set requires_content_evidence=true and locator_kind=\"current_workspace\" or \"path\". Use semantic_kind=\"file_names\" only when the final answer is restricted to exact file names. Use semantic_kind=\"directory_names\" when the final answer is exact folder/directory names only. Use semantic_kind=\"directory_entry_groups\" for direct child entry names or inventory from one directory when files and directories may both be valid, even if the final visible answer should be names-only rather than grouped prose. Use semantic_kind=\"file_paths\" when the final answer must be file paths, especially repository/workspace-wide extension searches or representative file path lists. If the same request also asks for explanation, purpose, judgment, comparison, or a brief conclusion, do not use an exact names/paths contract; use directory_purpose_summary when it asks what entries are for / more like, otherwise keep semantic_kind=\"none\" and preserve the combined listing+synthesis requirement in resolved_user_intent/reason. If a nuance has no enum, keep response_shape=\"free\" or semantic_kind=\"none\" instead of inventing enum values.".to_string());
     parts.push("For bounded or ordered direct child inventory of a directory/workspace, including modification-time or recency ordering, keep the route executable with response_shape=\"strict\", requires_content_evidence=true, delivery_required=false, and semantic_kind=\"directory_entry_groups\" unless the final answer is restricted to files-only or directories-only. Preserve the ordering/count requirement in resolved_user_intent; do not downgrade such requests to semantic_kind=\"none\" or a generic tree/workspace overview.".to_string());
     parts.push("Use decision=\"planner_execute\" when the request inspects local/system/workspace state, whether the final answer is direct raw/scalar/list output or a narrative synthesis. For current-directory or workspace-location scalar answers, set output_contract.response_shape=\"scalar\" and output_contract.semantic_kind=\"scalar_path_only\" from the request meaning, not from local phrase-classifier hints.".to_string());
     parts.push("For directory-scoped locator search where the user wants the resolved entry path itself, use response_shape=\"scalar\", semantic_kind=\"scalar_path_only\", requires_content_evidence=true, delivery_required=false, and bind the concrete directory as locator context while preserving the target entry name/stem in resolved_user_intent.".to_string());
@@ -5270,7 +5974,7 @@ fn render_compact_intent_normalizer_prompt(
         .map(str::to_string)
         .unwrap_or_else(|| compact_runtime_context_from_auth(auth_policy_context));
     parts.push(format!("LANG={}", request_language_hint));
-    parts.push("CONTRACT: output_contract must be a JSON object. hidden/dot-entry check => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"hidden_entries_check\". yes/no-only existence check => response_shape=\"scalar\", semantic_kind=\"existence_with_path\"; existence check that must return a path/locator/evidence field => response_shape=\"strict\", semantic_kind=\"existence_with_path\"; if it also needs a content-grounded purpose/summary/explanation when found, use semantic_kind=\"existence_with_path_summary\". URL/web-page content or title summary => locator_kind=\"url\", requires_content_evidence=true, semantic_kind=\"web_page_summary\". Web search result summary => locator_kind=\"none\", requires_content_evidence=true, semantic_kind=\"web_search_summary\". Weather current/forecast observation => locator_kind=\"none\", requires_content_evidence=true, semantic_kind=\"weather_query\". Stock/crypto market quote observation => locator_kind=\"none\", requires_content_evidence=true, semantic_kind=\"market_quote\". Image/photo/screenshot understanding => requires_content_evidence=true, semantic_kind=\"image_understanding\", locator_kind=\"url\" only when a concrete image URL is supplied. External publishing-channel draft/preview => requires_content_evidence=true, semantic_kind=\"publishing_preview\", locator_kind=\"none\". exact file or mixed entry names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_names\". exact folder/directory names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"directory_names\". grouped files-vs-directories list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"directory_entry_groups\". exact file paths list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_paths\". exact bounded file/log line slice => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"raw_command_output\". local file/path metadata comparison => requires_content_evidence=true, semantic_kind=\"quantity_comparison\". git commit subject/title only => response_shape=\"scalar\", requires_content_evidence=true, semantic_kind=\"git_commit_subject\". read-only Git repository state => requires_content_evidence=true, semantic_kind=\"git_repository_state\". current path only => response_shape=\"scalar\", semantic_kind=\"scalar_path_only\"; never use scalar_path_only for directory listings.".to_string());
+    parts.push("CONTRACT: output_contract must be a JSON object. hidden/dot-entry check => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"hidden_entries_check\". yes/no-only existence check => response_shape=\"scalar\", semantic_kind=\"existence_with_path\"; existence check that must return a path/locator/evidence field => response_shape=\"strict\", semantic_kind=\"existence_with_path\"; if it also needs a content-grounded purpose/summary/explanation when found, use semantic_kind=\"existence_with_path_summary\". URL/web-page content or title summary => locator_kind=\"url\", requires_content_evidence=true, semantic_kind=\"web_page_summary\". Web search result summary => locator_kind=\"none\", requires_content_evidence=true, semantic_kind=\"web_search_summary\". Weather current/forecast observation => locator_kind=\"none\", requires_content_evidence=true, semantic_kind=\"weather_query\". Stock/crypto market quote observation => locator_kind=\"none\", requires_content_evidence=true, semantic_kind=\"market_quote\". Image/photo/screenshot understanding => requires_content_evidence=true, semantic_kind=\"image_understanding\", locator_kind=\"url\" only when a concrete image URL is supplied. External publishing-channel draft/preview => requires_content_evidence=true, semantic_kind=\"publishing_preview\", locator_kind=\"none\". command output that needs explanation/diagnosis/judgment/rewrite/synthesis => requires_content_evidence=true, semantic_kind=\"command_output_summary\". exact file-only names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_names\". exact folder/directory names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"directory_names\". direct directory child inventory or mixed entry names list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"directory_entry_groups\". exact file paths list => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"file_paths\". exact bounded file/log line slice => response_shape=\"strict\", requires_content_evidence=true, semantic_kind=\"raw_command_output\". local file/path metadata comparison => requires_content_evidence=true, semantic_kind=\"quantity_comparison\". git commit subject/title only => response_shape=\"scalar\", requires_content_evidence=true, semantic_kind=\"git_commit_subject\". read-only Git repository state => requires_content_evidence=true, semantic_kind=\"git_repository_state\". current path only => response_shape=\"scalar\", semantic_kind=\"scalar_path_only\"; active/selected file basename only => response_shape=\"scalar\", semantic_kind=\"file_basename\"; never use scalar_path_only for directory listings.".to_string());
     // Keep memory and assistant recall context close to the current request so
     // compact head+tail truncation preserves both structure labels and goals.
     parts.push(compact_prompt_slot(
@@ -5287,7 +5991,7 @@ fn render_compact_intent_normalizer_prompt(
     ));
     parts.push(compact_prompt_slot("RUNTIME", &runtime_context, 260));
     parts.push("LOCAL_EXEC: local file/dir/command/count/metadata/read/list/summarize => planner_execute; no cannot-access-FS reply; never ask user to paste local files.".to_string());
-    parts.push("SUMMARY_RECALL: summary != ID recall; answer_candidate only for exact scalar request; memory scores are metadata. RUNTIME_STATUS approval_wait=>direct_answer status_query. FOLLOWUP_ANCHOR_PRIORITY: ANCHOR/ACTIVE_TASK beat MEMORY for ordinal/deictic or active writing refinements unless REQUEST asks scalar recall.".to_string());
+    parts.push("SUMMARY_RECALL: summary != ID recall; answer_candidate only for exact scalar request; memory scores are metadata. RECENT_OBSERVED_JUDGMENT: comparisons/selections over already observed recent excerpts use RECENT_EXECUTION/RECENT turns and direct scalar answer when evidence is already present; do not turn them into fresh file_names/path lookup. RUNTIME_STATUS approval_wait=>direct_answer status_query; task_control queue/running/cancel status=>planner_execute service_status; kb.ingest=>planner_execute filesystem_mutation_result. FOLLOWUP_ANCHOR_PRIORITY: ANCHOR/ACTIVE_TASK beat MEMORY for ordinal/deictic or active writing refinements unless REQUEST asks scalar recall.".to_string());
     parts.push(compact_prompt_slot("RUNTIME", &runtime_context, 240));
     // Keep memory, assistant replies, active-task state, and the request in the
     // compact tail together; small-context providers often preserve only
@@ -5338,7 +6042,7 @@ fn render_intent_normalizer_json_retry_prompt(
     let parts = vec![
         "JSON-only retry. Output one object now; start with `{` and stop after `}`. No reasoning, no markdown, no `<think>`.".to_string(),
         "Fill this route schema; use only listed machine tokens.".to_string(),
-        "{\"resolved_user_intent\":\"...\",\"answer_candidate\":\"\",\"resume_behavior\":\"none\",\"schedule_kind\":\"none\",\"schedule_intent\":null,\"wants_file_delivery\":false,\"should_refresh_long_term_memory\":false,\"agent_display_name_hint\":\"\",\"needs_clarify\":false,\"clarify_question\":\"\",\"reason\":\"...\",\"confidence\":0.9,\"decision\":\"clarify|direct_answer|planner_execute\",\"output_contract\":{\"response_shape\":\"free|strict|scalar|one_sentence|file_token\",\"exact_sentence_count\":null,\"requires_content_evidence\":false,\"delivery_required\":false,\"locator_kind\":\"none|path|current_workspace|url|filename\",\"delivery_intent\":\"none|file_single|directory_lookup|directory_batch_files\",\"semantic_kind\":\"none|service_status|file_names|directory_names|directory_entry_groups|file_paths|raw_command_output|scalar_count|quantity_comparison|git_repository_state|structured_keys|config_validation|config_mutation|config_risk_assessment|rss_news_fetch|web_page_summary|web_search_summary|weather_query|market_quote|image_understanding|publishing_preview|package_manager_detection|existence_with_path|existence_with_path_summary\",\"locator_hint\":\"\",\"self_extension\":{\"mode\":\"none\",\"trigger\":\"none\",\"execute_now\":false}},\"execution_recipe\":{\"kind\":\"none\",\"profile\":\"none\",\"target_scope\":\"none\"},\"turn_type\":\"task_request|status_query|\",\"target_task_policy\":\"standalone|\",\"should_interrupt_active_run\":false,\"state_patch\":null,\"attachment_processing_required\":false}".to_string(),
+        "{\"resolved_user_intent\":\"...\",\"answer_candidate\":\"\",\"resume_behavior\":\"none\",\"schedule_kind\":\"none\",\"schedule_intent\":null,\"wants_file_delivery\":false,\"should_refresh_long_term_memory\":false,\"agent_display_name_hint\":\"\",\"needs_clarify\":false,\"clarify_question\":\"\",\"reason\":\"...\",\"confidence\":0.9,\"decision\":\"clarify|direct_answer|planner_execute\",\"output_contract\":{\"response_shape\":\"free|strict|scalar|one_sentence|file_token\",\"exact_sentence_count\":null,\"requires_content_evidence\":false,\"delivery_required\":false,\"locator_kind\":\"none|path|current_workspace|url|filename\",\"delivery_intent\":\"none|file_single|directory_lookup|directory_batch_files\",\"semantic_kind\":\"none|service_status|file_names|directory_names|directory_entry_groups|file_paths|raw_command_output|command_output_summary|scalar_count|quantity_comparison|git_repository_state|structured_keys|config_validation|config_mutation|config_risk_assessment|rss_news_fetch|web_page_summary|web_search_summary|weather_query|market_quote|image_understanding|publishing_preview|package_manager_detection|existence_with_path|existence_with_path_summary|file_basename\",\"locator_hint\":\"\",\"self_extension\":{\"mode\":\"none\",\"trigger\":\"none\",\"execute_now\":false}},\"execution_recipe\":{\"kind\":\"none\",\"profile\":\"none\",\"target_scope\":\"none\"},\"turn_type\":\"task_request|status_query|\",\"target_task_policy\":\"standalone|\",\"should_interrupt_active_run\":false,\"state_patch\":null,\"attachment_processing_required\":false}".to_string(),
         "Observable local/system/workspace inspection, command output, file/config reads, validation, risk assessment, listings, counts, and metadata => decision=\"planner_execute\" with requires_content_evidence=true.".to_string(),
         "Main application configuration risk/security/audit/guard assessment => semantic_kind=\"config_risk_assessment\", locator_kind=\"path\", locator_hint=\"configs/config.toml\" unless another concrete config path is named. Preserve no-secret-leak requirements in resolved_user_intent; do not expose secret values.".to_string(),
         "Only use decision=\"clarify\" when a required target/action is genuinely missing. Do not ask the user to paste local files when a local target is named or implied by the application config contract.".to_string(),
@@ -5828,9 +6532,28 @@ fn contract_repair_report_from_before_after(before: &Value, after: &Value) -> Co
     report
 }
 
+#[cfg(test)]
 fn semantic_suspect_detail_for_normalizer_output(
     out: &IntentNormalizerOut,
     req_surface: Option<&crate::intent::surface_signals::PromptSurfaceSignals>,
+    req: &str,
+    workspace_root: &Path,
+) -> Option<&'static str> {
+    semantic_suspect_detail_for_normalizer_output_with_command_runtime(
+        out,
+        req_surface,
+        req,
+        workspace_root,
+        None,
+    )
+}
+
+fn semantic_suspect_detail_for_normalizer_output_with_command_runtime(
+    out: &IntentNormalizerOut,
+    req_surface: Option<&crate::intent::surface_signals::PromptSurfaceSignals>,
+    req: &str,
+    workspace_root: &Path,
+    command_runtime: Option<&crate::CommandIntentRuntime>,
 ) -> Option<&'static str> {
     if out.needs_clarify {
         return None;
@@ -5860,10 +6583,47 @@ fn semantic_suspect_detail_for_normalizer_output(
         && contract.requires_content_evidence
         && matches!(
             parse_output_semantic_kind(&contract.semantic_kind),
+            OutputSemanticKind::DirectoryEntryGroups
+        )
+    {
+        return Some("directory_entry_groups_contract_needs_semantic_shape_review");
+    }
+    if parse_first_layer_decision_text(&out.decision) == Some(FirstLayerDecision::PlannerExecute)
+        && contract.requires_content_evidence
+        && matches!(
+            parse_output_semantic_kind(&contract.semantic_kind),
             OutputSemanticKind::ExistenceWithPathSummary
         )
     {
         return Some("existence_summary_contract_needs_semantic_shape_review");
+    }
+    if parse_first_layer_decision_text(&out.decision) == Some(FirstLayerDecision::PlannerExecute)
+        && !out.wants_file_delivery
+        && !contract.delivery_required
+        && contract.requires_content_evidence
+        && out.answer_candidate.trim().is_empty()
+        && matches!(
+            parse_output_delivery_intent(&contract.delivery_intent),
+            OutputDeliveryIntent::None
+        )
+        && matches!(
+            parse_output_semantic_kind(&contract.semantic_kind),
+            OutputSemanticKind::RawCommandOutput
+        )
+        && matches!(
+            parse_output_response_shape(&contract.response_shape),
+            OutputResponseShape::Scalar
+                | OutputResponseShape::OneSentence
+                | OutputResponseShape::Free
+                | OutputResponseShape::Strict
+        )
+        && raw_command_locator_contract_has_observable_target(contract, req_surface)
+        && !normalizer_execution_recipe_declares_active_profile(out.execution_recipe.as_ref())
+        && command_runtime.is_none_or(|runtime| {
+            crate::agent_engine::explicit_command_segment_for_policy(runtime, req).is_none()
+        })
+    {
+        return Some("raw_command_output_locator_needs_semantic_review");
     }
     if parse_first_layer_decision_text(&out.decision) == Some(FirstLayerDecision::PlannerExecute)
         && !out.wants_file_delivery
@@ -5939,7 +6699,7 @@ fn semantic_suspect_detail_for_normalizer_output(
     }
     if !matches!(
         parse_output_semantic_kind(&contract.semantic_kind),
-        OutputSemanticKind::None
+        OutputSemanticKind::None | OutputSemanticKind::FileBasename
     ) {
         return Some("chat_route_has_observable_semantic_kind");
     }
@@ -5950,7 +6710,63 @@ fn semantic_suspect_detail_for_normalizer_output(
     {
         return Some("chat_route_has_observable_locator");
     }
+    if out.answer_candidate.trim().is_empty()
+        && contract.exact_sentence_count.is_none()
+        && matches!(
+            parse_output_response_shape(&contract.response_shape),
+            OutputResponseShape::Free
+        )
+        && req_surface.is_some_and(|surface| {
+            surface.token_count >= 3
+                && surface.inline_json_shape.is_none()
+                && !surface.has_delivery_token_reference()
+                && !surface.has_deictic_reference()
+                && !surface.is_structural_locator_only_reply()
+        })
+        && current_request_mentions_workspace_identity(req, workspace_root)
+    {
+        return Some("workspace_identity_chat_route_needs_semantic_review");
+    }
     None
+}
+
+fn raw_command_locator_contract_has_observable_target(
+    contract: &IntentOutputContractOut,
+    req_surface: Option<&crate::intent::surface_signals::PromptSurfaceSignals>,
+) -> bool {
+    let locator_hint = contract.locator_hint.trim();
+    if !locator_hint.is_empty()
+        && !locator_hint.contains('|')
+        && matches!(
+            parse_output_locator_kind(&contract.locator_kind),
+            OutputLocatorKind::Path
+                | OutputLocatorKind::Filename
+                | OutputLocatorKind::CurrentWorkspace
+                | OutputLocatorKind::Url
+        )
+    {
+        return true;
+    }
+    req_surface.is_some_and(|surface| {
+        surface.has_explicit_path_or_url()
+            || surface.has_single_filename_candidate()
+            || surface.has_concrete_locator_hint()
+    })
+}
+
+fn normalizer_execution_recipe_declares_active_profile(
+    recipe: Option<&IntentExecutionRecipeOut>,
+) -> bool {
+    let Some(recipe) = recipe else {
+        return false;
+    };
+    !matches!(
+        crate::execution_recipe::parse_execution_recipe_kind_text(&recipe.kind),
+        crate::execution_recipe::ExecutionRecipeKind::None
+    ) || !matches!(
+        crate::execution_recipe::parse_execution_recipe_profile_text(&recipe.profile),
+        crate::execution_recipe::ExecutionRecipeProfile::None
+    )
 }
 
 fn contract_has_single_path_locator_target(
@@ -6181,7 +6997,12 @@ fn output_contract_has_executable_shape(contract: Option<&serde_json::Map<String
         || contract
             .get("semantic_kind")
             .and_then(scalar_json_value_text)
-            .is_some_and(|value| normalize_output_semantic_kind_for_schema(&value) != "none")
+            .is_some_and(|value| {
+                !matches!(
+                    parse_output_semantic_kind(&value),
+                    OutputSemanticKind::None | OutputSemanticKind::FileBasename
+                )
+            })
 }
 
 fn execution_recipe_schema_field_changed(
@@ -6590,6 +7411,10 @@ fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static str {
         | "command_execution_result"
         | "shell_output"
         | "terminal_output" => OutputSemanticKind::RawCommandOutput.as_str(),
+        "command_output_summary"
+        | "command_result_summary"
+        | "command_output_synthesis"
+        | "command_result_synthesis" => OutputSemanticKind::CommandOutputSummary.as_str(),
         "service_state"
         | "service_running_status"
         | "process_status"
@@ -6608,22 +7433,9 @@ fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static str {
         | "hidden_entries_check"
         | "hidden_files_example"
         | "hidden_entries_example" => OutputSemanticKind::HiddenEntriesCheck.as_str(),
-        "file_names"
-        | "file_names_only"
-        | "file_name_only"
-        | "files_listing"
-        | "files_list"
-        | "names_only"
-        | "entry_names"
-        | "directory_entry_names"
-        | "file_listing"
-        | "file_list"
-        | "filename_listing"
-        | "filename_list"
-        | "filename_only"
-        | "filenames_list"
-        | "filenames_only"
-        | "list_filenames"
+        "file_names" | "file_names_only" | "file_name_only" | "files_listing" | "files_list"
+        | "names_only" | "file_listing" | "file_list" | "filename_listing" | "filename_list"
+        | "filename_only" | "filenames_list" | "filenames_only" | "list_filenames"
         | "list_file_names" => OutputSemanticKind::FileNames.as_str(),
         "directory_names"
         | "directory_names_only"
@@ -6637,6 +7449,8 @@ fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static str {
         | "directory_file_groups"
         | "file_directory_groups"
         | "entry_kind_groups"
+        | "entry_names"
+        | "directory_entry_names"
         | "entries_by_kind"
         | "grouped_entries"
         | "grouped_entry_names" => OutputSemanticKind::DirectoryEntryGroups.as_str(),
@@ -6670,6 +7484,9 @@ fn normalize_output_semantic_kind_for_schema(raw: &str) -> &'static str {
         }
         "new_file_delivery" | "created_file_delivery" | "write_then_send_file" => {
             OutputSemanticKind::GeneratedFileDelivery.as_str()
+        }
+        "file_basename" | "single_file_basename" | "bound_file_basename" => {
+            OutputSemanticKind::FileBasename.as_str()
         }
         "value_only" | "file_field_value" | "field_value" => OutputSemanticKind::None.as_str(),
         normalized => parse_output_semantic_kind(normalized).as_str(),
@@ -6978,7 +7795,12 @@ fn normalize_decision_from_executable_output_contract(obj: &mut serde_json::Map<
             .get("semantic_kind")
             .and_then(|value| value.as_str())
             .map(normalize_output_semantic_kind_for_schema)
-            .is_some_and(|kind| kind != "none")
+            .is_some_and(|kind| {
+                !matches!(
+                    parse_output_semantic_kind(kind),
+                    OutputSemanticKind::None | OutputSemanticKind::FileBasename
+                )
+            })
         || contract
             .get("delivery_required")
             .and_then(|value| value.as_bool())
@@ -7608,13 +8430,24 @@ fn apply_unobserved_runtime_status_answer_candidate_repair(
 ) -> Option<&'static str> {
     let execution_recipe_hint_is_neutral = execution_recipe_hint
         .is_none_or(|spec| spec.kind.as_str() == "none" && spec.profile.as_str() == "none");
+    let direct_unobserved_scalar =
+        matches!(*first_layer_decision, FirstLayerDecision::DirectAnswer)
+            && !output_contract.requires_content_evidence;
+    let planner_unobserved_scalar =
+        matches!(*first_layer_decision, FirstLayerDecision::PlannerExecute)
+            && !output_contract.requires_content_evidence;
+    let planner_status_scalar_needs_evidence =
+        matches!(*first_layer_decision, FirstLayerDecision::PlannerExecute)
+            && matches!(*turn_type, Some(TurnType::StatusQuery))
+            && output_contract.requires_content_evidence;
     if needs_clarify
         || wants_file_delivery
         || !matches!(schedule_kind, ScheduleKind::None)
         || !execution_recipe_hint_is_neutral
-        || !matches!(*first_layer_decision, FirstLayerDecision::DirectAnswer)
+        || !(direct_unobserved_scalar
+            || planner_unobserved_scalar
+            || planner_status_scalar_needs_evidence)
         || !matches!(output_contract.response_shape, OutputResponseShape::Scalar)
-        || output_contract.requires_content_evidence
         || output_contract.delivery_required
         || !matches!(output_contract.locator_kind, OutputLocatorKind::None)
         || !matches!(output_contract.delivery_intent, OutputDeliveryIntent::None)
@@ -7757,6 +8590,8 @@ fn runtime_status_kind_for_operation_token(token: &str) -> Option<&'static str> 
         "hostname" | "host_name" | "current_hostname" | "current_host" | "machine_name" => {
             Some("host_name")
         }
+        "kernel" | "kernel_name" | "kernel_release" | "os_kernel" | "system_kernel" | "uname"
+        | "uname_r" => Some("kernel_release"),
         "pwd"
         | "cwd"
         | "current_working_directory"
@@ -8457,19 +9292,26 @@ fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>
         .and_then(|value| value.as_str())
         .map(normalize_output_semantic_kind_for_schema)
         .unwrap_or("none");
-    let semantic_kind =
+    let mut semantic_kind =
         if raw_scalar_output_contract_token.as_deref() == Some("raw") && direct_answer_decision {
-            "none"
+            "none".to_string()
         } else {
-            semantic_kind
+            semantic_kind.to_string()
         };
+    if semantic_kind == OutputSemanticKind::DirectoryEntryGroups.as_str()
+        && response_shape == "free"
+    {
+        semantic_kind = OutputSemanticKind::DirectoryPurposeSummary
+            .as_str()
+            .to_string();
+    }
     contract.insert(
         "semantic_kind".to_string(),
-        Value::String(semantic_kind.to_string()),
+        Value::String(semantic_kind.clone()),
     );
-    let semantic_kind_enum = parse_output_semantic_kind(semantic_kind);
+    let semantic_kind_enum = parse_output_semantic_kind(&semantic_kind);
     if matches!(
-        semantic_kind,
+        semantic_kind.as_str(),
         kind if kind == OutputSemanticKind::FileNames.as_str()
             || kind == OutputSemanticKind::DirectoryNames.as_str()
             || kind == OutputSemanticKind::DirectoryEntryGroups.as_str()
@@ -8524,6 +9366,20 @@ fn normalize_output_contract_for_schema(obj: &mut serde_json::Map<String, Value>
         }
         contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
         contract.insert("delivery_required".to_string(), Value::Bool(false));
+    }
+    if semantic_kind == OutputSemanticKind::FilesystemMutationResult.as_str() {
+        if response_shape == "free" {
+            contract.insert(
+                "response_shape".to_string(),
+                Value::String("one_sentence".to_string()),
+            );
+        }
+        contract.insert("requires_content_evidence".to_string(), Value::Bool(true));
+        contract.insert("delivery_required".to_string(), Value::Bool(false));
+        contract.insert(
+            "delivery_intent".to_string(),
+            Value::String("none".to_string()),
+        );
     }
     if semantic_kind == OutputSemanticKind::GeneratedFileDelivery.as_str() {
         contract.insert(
@@ -8780,6 +9636,10 @@ fn apply_contract_repair_judge_output(
         out.output_contract.as_ref(),
         &mut output_contract,
     );
+    let preserved_structured_scalar_field = preserve_structured_scalar_field_contract_during_repair(
+        out.output_contract.as_ref(),
+        &mut output_contract,
+    );
     let missing_turn_binding_for_content_read =
         contract_repair_reason_requires_missing_locator_clarify(&repair.reason);
     let mut needs_clarify = repair.needs_clarify;
@@ -8843,6 +9703,12 @@ fn apply_contract_repair_judge_output(
     if preserved_structured_config_keys {
         append_route_reason(&mut out.reason, "structured_config_key_contract_preserved");
     }
+    if preserved_structured_scalar_field {
+        append_route_reason(
+            &mut out.reason,
+            "structured_scalar_field_contract_preserved",
+        );
+    }
     true
 }
 
@@ -8878,6 +9744,51 @@ fn preserve_structured_config_key_contract_during_repair(
         OutputResponseShape::Free | OutputResponseShape::OneSentence
     ) {
         repair.response_shape = OutputResponseShape::Strict.as_str().to_string();
+    }
+    true
+}
+
+fn preserve_structured_scalar_field_contract_during_repair(
+    current: Option<&IntentOutputContractOut>,
+    repair: &mut IntentOutputContractOut,
+) -> bool {
+    let Some(current) = current else {
+        return false;
+    };
+    let current_contract = parse_output_contract(Some(current.clone()), false);
+    let repaired_contract = parse_output_contract(Some(repair.clone()), false);
+    if current_contract.semantic_kind != OutputSemanticKind::None
+        || repaired_contract.semantic_kind != OutputSemanticKind::ContentExcerptSummary
+        || !matches!(
+            current_contract.response_shape,
+            OutputResponseShape::Scalar | OutputResponseShape::Strict
+        )
+        || !matches!(
+            repaired_contract.response_shape,
+            OutputResponseShape::Scalar | OutputResponseShape::Strict
+        )
+        || !current_contract.requires_content_evidence
+        || current_contract.delivery_required
+        || repaired_contract.delivery_required
+        || !matches!(current_contract.delivery_intent, OutputDeliveryIntent::None)
+        || !matches!(
+            repaired_contract.delivery_intent,
+            OutputDeliveryIntent::None
+        )
+        || output_contract_structured_config_path(&current_contract).is_none()
+        || output_contract_structured_config_path(&repaired_contract).is_none()
+    {
+        return false;
+    }
+    repair.semantic_kind = OutputSemanticKind::None.as_str().to_string();
+    repair.requires_content_evidence = true;
+    repair.delivery_required = false;
+    repair.delivery_intent = OutputDeliveryIntent::None.as_str().to_string();
+    if matches!(
+        repaired_contract.response_shape,
+        OutputResponseShape::Free | OutputResponseShape::OneSentence
+    ) {
+        repair.response_shape = current_contract.response_shape.as_str().to_string();
     }
     true
 }
@@ -9352,9 +10263,35 @@ pub(crate) async fn run_intent_normalizer(
             append_contract_repair_context(&mut contract_repair_context, invalid_binding_context);
             contract_repair_report.add("semantic_suspect", "active_task_invalid_turn_binding");
         }
-        if let Some(detail) =
-            semantic_suspect_detail_for_normalizer_output(&out, Some(&req_surface))
+        if let Some(ordered_ref_context) =
+            active_ordered_scalar_path_missing_state_patch_context(&out, session_snapshot)
         {
+            append_contract_repair_context(&mut contract_repair_context, ordered_ref_context);
+            contract_repair_report.add(
+                "semantic_suspect",
+                "active_ordered_scalar_path_missing_ordered_entry_ref",
+            );
+        }
+        if let Some(detail) = semantic_suspect_detail_for_normalizer_output_with_command_runtime(
+            &out,
+            Some(&req_surface),
+            req,
+            &state.skill_rt.workspace_root,
+            Some(&state.policy.command_intent),
+        ) {
+            if detail == "workspace_identity_chat_route_needs_semantic_review" {
+                if let Some(context) =
+                    workspace_identity_semantic_repair_context(req, &state.skill_rt.workspace_root)
+                {
+                    append_contract_repair_context(&mut contract_repair_context, context);
+                }
+            } else if detail == "raw_command_output_locator_needs_semantic_review" {
+                append_contract_repair_context(
+                    &mut contract_repair_context,
+                    "raw_command_output_locator_review: explicit_command_segment=false; command_payload=false"
+                        .to_string(),
+                );
+            }
             contract_repair_report.add("semantic_suspect", detail);
         }
         let mut active_text_answer_candidate_repair_applied = false;
@@ -9399,6 +10336,7 @@ pub(crate) async fn run_intent_normalizer(
         let mut wants_file_delivery = out.wants_file_delivery;
         let mut output_contract =
             parse_output_contract(out.output_contract.clone(), wants_file_delivery);
+        let declared_semantic_kind = output_contract.semantic_kind;
         let mut clarify_question = out.clarify_question.trim().to_string();
         let mut execution_recipe_hint = parse_execution_recipe_hint(out.execution_recipe.clone());
         let mut needs_clarify = out.needs_clarify;
@@ -9558,6 +10496,20 @@ pub(crate) async fn run_intent_normalizer(
                 execution_finalize_style,
             );
         }
+        let file_delivery_contract_repair = apply_file_delivery_contract_repair(
+            wants_file_delivery,
+            &mut output_contract,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut first_layer_decision,
+            &mut execution_finalize_style,
+        );
+        if file_delivery_contract_repair.is_some() {
+            synced_route_label = route_label_from_first_layer_decision(
+                first_layer_decision,
+                execution_finalize_style,
+            );
+        }
         let raw_output_explicit_locator_repair = apply_raw_output_explicit_locator_repair(
             &mut output_contract,
             &surface_req,
@@ -9610,24 +10562,43 @@ pub(crate) async fn run_intent_normalizer(
                 execution_finalize_style,
             );
         }
-        let decision_contract_conflict_repair = if !needs_clarify
-            && matches!(first_layer_decision, FirstLayerDecision::DirectAnswer)
-            && route_has_structured_execution_signal(
-                &output_contract,
-                wants_file_delivery,
-                schedule_kind,
-                execution_recipe_hint,
-            ) {
-            first_layer_decision = FirstLayerDecision::PlannerExecute;
-            execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
+        let active_file_basename_answer_candidate_repair =
+            apply_active_file_basename_answer_candidate_direct_repair(
+                state,
+                session_snapshot,
+                &out.answer_candidate,
+                needs_clarify,
+                &mut first_layer_decision,
+                &mut execution_finalize_style,
+                &mut wants_file_delivery,
+                &mut output_contract,
+            );
+        if active_file_basename_answer_candidate_repair.is_some() {
             synced_route_label = route_label_from_first_layer_decision(
                 first_layer_decision,
                 execution_finalize_style,
             );
-            Some("direct_answer_decision_overridden_by_executable_contract")
-        } else {
-            None
-        };
+        }
+        let decision_contract_conflict_repair =
+            if direct_answer_decision_should_be_overridden_by_executable_contract(
+                needs_clarify,
+                first_layer_decision,
+                &output_contract,
+                wants_file_delivery,
+                schedule_kind,
+                execution_recipe_hint,
+                active_file_basename_answer_candidate_repair,
+            ) {
+                first_layer_decision = FirstLayerDecision::PlannerExecute;
+                execution_finalize_style = execution_finalize_style_for_contract(&output_contract);
+                synced_route_label = route_label_from_first_layer_decision(
+                    first_layer_decision,
+                    execution_finalize_style,
+                );
+                Some("direct_answer_decision_overridden_by_executable_contract")
+            } else {
+                None
+            };
         let explicit_command_execution_repair = apply_explicit_command_execution_contract_repair(
             &state.policy.command_intent,
             req,
@@ -10028,6 +10999,14 @@ pub(crate) async fn run_intent_normalizer(
                 reason.push_str(repair_reason);
             }
         }
+        if let Some(repair_reason) = file_delivery_contract_repair {
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
+        }
         if let Some(repair_reason) = raw_output_explicit_locator_repair {
             if reason.trim().is_empty() {
                 reason = repair_reason.to_string();
@@ -10037,6 +11016,14 @@ pub(crate) async fn run_intent_normalizer(
             }
         }
         if let Some(repair_reason) = explicit_command_execution_repair {
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
+        }
+        if let Some(repair_reason) = active_file_basename_answer_candidate_repair {
             if reason.trim().is_empty() {
                 reason = repair_reason.to_string();
             } else if !reason.contains(repair_reason) {
@@ -10099,7 +11086,7 @@ pub(crate) async fn run_intent_normalizer(
                 crate::truncate_for_log(req)
             );
         }
-        if let Some(repair_reason) = apply_active_text_followup_route_repair(
+        let active_text_followup_route_repair = apply_active_text_followup_route_repair(
             req,
             session_snapshot,
             &mut turn_type,
@@ -10117,7 +11104,8 @@ pub(crate) async fn run_intent_normalizer(
                 || resolved_directory_pair_from_current_request(state, req).is_some(),
             active_text_answer_candidate_repair_applied,
             &mut out.answer_candidate,
-        ) {
+        );
+        if let Some(repair_reason) = active_text_followup_route_repair {
             clarify_question.clear();
             force_current_request_resolved_intent = true;
             if reason.trim().is_empty() {
@@ -10132,6 +11120,28 @@ pub(crate) async fn run_intent_normalizer(
                 task.task_id,
                 crate::truncate_for_log(req)
             );
+        }
+        if let Some(repair_reason) = restore_declared_publishing_preview_contract(
+            declared_semantic_kind,
+            active_text_followup_route_repair,
+            schedule_kind,
+            &mut output_contract,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut wants_file_delivery,
+            &mut first_layer_decision,
+            &mut execution_finalize_style,
+        ) {
+            synced_route_label = route_label_from_first_layer_decision(
+                first_layer_decision,
+                execution_finalize_style,
+            );
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
         }
         let resolved_user_intent = if force_current_request_resolved_intent || resolved.is_empty() {
             req.to_string()
@@ -10323,6 +11333,28 @@ pub(crate) async fn run_intent_normalizer(
                 crate::truncate_for_log(req)
             );
         }
+        if let Some(repair_reason) = apply_archive_unpack_missing_archive_locator_clarify(
+            &mut output_contract,
+            &req_surface,
+            session_snapshot,
+            &mut needs_clarify,
+            &mut clarify_question,
+            &mut first_layer_decision,
+            &mut execution_finalize_style,
+        ) {
+            if reason.trim().is_empty() {
+                reason = repair_reason.to_string();
+            } else if !reason.contains(repair_reason) {
+                reason.push_str("; ");
+                reason.push_str(repair_reason);
+            }
+            info!(
+                "{} intent_normalizer task_id={} archive_unpack_missing_archive_late_clarify input={}",
+                crate::highlight_tag("routing"),
+                task.task_id,
+                crate::truncate_for_log(req)
+            );
+        }
         let turn_analysis = if turn_type.is_some()
             || target_task_policy.is_some()
             || out.should_interrupt_active_run
@@ -10442,11 +11474,12 @@ pub(crate) async fn run_intent_normalizer(
             && bare_path_only
             && bare_path_fills_active_observable_task
             && matches!(first_layer_decision, FirstLayerDecision::Clarify);
-        let structured_execution_signal = route_has_structured_execution_signal(
+        let structured_execution_signal = structured_execution_signal_for_effective_route(
             &output_contract,
             wants_file_delivery,
             schedule_kind,
             execution_recipe_hint,
+            active_file_basename_answer_candidate_repair,
         );
         let first_layer_decision_eff = if needs_clarify_eff {
             FirstLayerDecision::Clarify
@@ -10833,6 +11866,7 @@ fn contract_hint_fallback_decision(
 fn response_shape_for_contract_hint_fallback(kind: OutputSemanticKind) -> OutputResponseShape {
     match kind {
         OutputSemanticKind::RawCommandOutput
+        | OutputSemanticKind::CommandOutputSummary
         | OutputSemanticKind::ServiceStatus
         | OutputSemanticKind::DirectoryPurposeSummary
         | OutputSemanticKind::ContentExcerptSummary
@@ -10842,6 +11876,7 @@ fn response_shape_for_contract_hint_fallback(kind: OutputSemanticKind) -> Output
         | OutputSemanticKind::WorkspaceProjectSummary
         | OutputSemanticKind::ExecutionFailedStep
         | OutputSemanticKind::ExistenceWithPathSummary
+        | OutputSemanticKind::FilesystemMutationResult
         | OutputSemanticKind::GitRepositoryState
         | OutputSemanticKind::ConfigValidation
         | OutputSemanticKind::ConfigMutation
@@ -10859,6 +11894,7 @@ fn response_shape_for_contract_hint_fallback(kind: OutputSemanticKind) -> Output
         | OutputSemanticKind::ArchiveUnpack => OutputResponseShape::OneSentence,
         OutputSemanticKind::ScalarCount
         | OutputSemanticKind::ScalarPathOnly
+        | OutputSemanticKind::FileBasename
         | OutputSemanticKind::RecentScalarEqualityCheck
         | OutputSemanticKind::GitCommitSubject
         | OutputSemanticKind::SqliteSchemaVersion
@@ -10905,6 +11941,7 @@ fn apply_contract_hint_locator_defaults(
 ) {
     match output_contract.semantic_kind {
         OutputSemanticKind::RawCommandOutput
+        | OutputSemanticKind::CommandOutputSummary
         | OutputSemanticKind::ServiceStatus
         | OutputSemanticKind::PackageManagerDetection
         | OutputSemanticKind::DockerPs

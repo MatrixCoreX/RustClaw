@@ -1,6 +1,6 @@
 use super::{
-    action_effect_is_repeatable_for_active_recipe, capture_round_progress_snapshot,
-    check_repeat_action_guard, finalize_execute_round_outcome,
+    action_counts_as_tool_call, action_effect_is_repeatable_for_active_recipe,
+    capture_round_progress_snapshot, check_repeat_action_guard, finalize_execute_round_outcome,
 };
 
 #[test]
@@ -20,6 +20,32 @@ fn explicit_user_visible_output_marks_plan_exhausted() {
         outcome.stop_signal.as_deref(),
         Some("plan_exhausted_user_visible")
     );
+}
+
+#[test]
+fn max_tool_call_budget_counts_only_external_calls() {
+    assert!(action_counts_as_tool_call(&crate::AgentAction::CallTool {
+        tool: "system_basic".to_string(),
+        args: serde_json::json!({})
+    }));
+    assert!(action_counts_as_tool_call(&crate::AgentAction::CallSkill {
+        skill: "fs_basic".to_string(),
+        args: serde_json::json!({})
+    }));
+    assert!(action_counts_as_tool_call(
+        &crate::AgentAction::CallCapability {
+            capability: "fs_basic.read_text_range".to_string(),
+            args: serde_json::json!({})
+        }
+    ));
+    assert!(!action_counts_as_tool_call(
+        &crate::AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()]
+        }
+    ));
+    assert!(!action_counts_as_tool_call(&crate::AgentAction::Respond {
+        content: "done".to_string()
+    }));
 }
 
 #[test]
@@ -90,11 +116,15 @@ fn repeat_guard_allows_repeated_respond_delivery() {
     let policy = super::AgentLoopGuardPolicy {
         max_steps: 8,
         max_rounds: 2,
+        max_tool_calls: 12,
         recoverable_failure_extra_rounds: 0,
         repeat_action_limit: 1,
         no_progress_limit: 1,
         multi_round_enabled: true,
         answer_verifier_retry_limit: 1,
+        fast_read: Default::default(),
+        grounded_summary: Default::default(),
+        multi_step_workspace: Default::default(),
         ops_closed_loop: Default::default(),
     };
 
@@ -135,11 +165,15 @@ fn repeat_guard_blocks_identical_non_respond_after_limit() {
     let policy = super::AgentLoopGuardPolicy {
         max_steps: 8,
         max_rounds: 2,
+        max_tool_calls: 12,
         recoverable_failure_extra_rounds: 0,
         repeat_action_limit: 1,
         no_progress_limit: 1,
         multi_round_enabled: true,
         answer_verifier_retry_limit: 1,
+        fast_read: Default::default(),
+        grounded_summary: Default::default(),
+        multi_step_workspace: Default::default(),
         ops_closed_loop: Default::default(),
     };
 

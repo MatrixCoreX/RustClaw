@@ -50,6 +50,11 @@
 - **Semantics:** Each run fetches **1m** candles covering the lookback span; **reference/base** price is the **oldest** close in that span (window start), **current** price is the **newest** close. Change % is \((current - reference) / reference × 100\). Threshold and `direction` (`up` / `down` / `both`) apply to that percentage.
 - **User-visible text** states the lookback window, **reference/base** and **current** prices, change %, threshold, and direction (wording follows `configs/i18n/crypto.*.toml` / built-in defaults).
 - **Structured `extra` (success):** includes at least `action`, `symbol`, `exchange`, `window_minutes`, `threshold_pct`, `direction`, `triggered`, `trend`, `change_pct`, **`reference_price`** (same numeric as window-start close), **`current_price`**, **`start_price`** (alias of `reference_price`, kept for backward compatibility), `candles` (count fetched), `notify` (same as `triggered`), plus optional schedule echo fields when present.
+
+### `quote` / `multi_quote` — response `extra`
+- `extra.content_excerpt`: compact quote text for runtime evidence checks. Consumers should use this structured field instead of depending on localized `text` parsing.
+- `extra.quote` / `extra.quotes`: preferred quote objects with `symbol`, `price_usd`, `change_24h_pct`, `exchange`, and `source`.
+- `extra.quotes_by_exchange`: per-exchange quote objects when available.
 | `onchain` | `chain` | no | string | `bitcoin` | `bitcoin`/`btc` or `ethereum`/`eth`. |
 | `onchain` (eth address mode) | `address` | no | string | - | If provided, returns address balance + recent txs. |
 | `onchain` (eth address mode) | `token` | no | string | `eth` | Native or configured ERC20 token symbol. |
@@ -125,7 +130,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"ETHUSDT price_usd=3200.0 ...","error_text":null}
+{"request_id":"demo-1","status":"ok","text":"ETHUSDT price_usd=3200.0 ...","error_text":null,"extra":{"action":"quote","content_excerpt":"ETHUSDT price_usd=3200.0 ...","quote":{"symbol":"ETHUSDT","price_usd":3200.0,"change_24h_pct":null,"exchange":"binance","source":"binance_api"},"quotes_by_exchange":{"binance":{"symbol":"ETHUSDT","price_usd":3200.0,"change_24h_pct":null,"exchange":"binance","source":"binance_api"}}}}
 ```
 
 ### Example 1b — Scheduled price alias with multiple symbols

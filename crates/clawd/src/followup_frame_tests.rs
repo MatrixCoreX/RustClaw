@@ -17,8 +17,12 @@ fn locator_reply_resolved_intent_uses_persisted_request() {
     let rewritten =
         synthesize_locator_reply_resolved_intent(&frame, "/tmp/device_local/logs/model_io.log")
             .expect("frame should accept locator reply");
-    assert!(rewritten.contains("看一下那个 model io log 最后 4 行"));
-    assert!(rewritten.contains("/tmp/device_local/logs/model_io.log"));
+    assert_eq!(
+        rewritten.1,
+        crate::clarify_followup::ClarifyRewriteReason::ClarifyLocatorReply
+    );
+    assert!(rewritten.0.contains("看一下那个 model io log 最后 4 行"));
+    assert!(rewritten.0.contains("/tmp/device_local/logs/model_io.log"));
 }
 
 #[test]
@@ -219,6 +223,22 @@ fn extracts_ordered_entries_from_markdown_numbered_listing() {
 }
 
 #[test]
+fn extracts_ordered_entries_from_markdown_bullet_listing_with_surrounding_prose() {
+    let entries = extract_ordered_entries_from_text(
+        "在 `fuzzy_top3` 目录下找到4个文件名包含 \"abcd\" 的文件：\n- `abcd_report.md`\n- `my_abcd.txt`\n- `x_abcd_log.txt`\n- `zz_abcd_backup.log`\n这些都是模糊匹配测试的 fixture 文件。",
+    );
+    assert_eq!(
+        entries,
+        vec![
+            "abcd_report.md",
+            "my_abcd.txt",
+            "x_abcd_log.txt",
+            "zz_abcd_backup.log"
+        ]
+    );
+}
+
+#[test]
 fn persisted_followup_frame_round_trips_with_slice_and_entries() {
     let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
     let task = crate::ClaimedTask {
@@ -370,6 +390,77 @@ fn compact_listing_answer_persists_ordered_entries_for_followup() {
         ]
     );
     assert_eq!(frame.selected_entry_index, None);
+}
+
+#[test]
+fn read_answer_with_visible_structural_bullets_persists_ordered_entries_for_followup() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        task_id: "task-followup-visible-search-bullets".to_string(),
+        user_id: 15,
+        chat_id: 16,
+        user_key: Some("test-user".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let root = "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3";
+    let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "find matching entries under a known directory".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "test".to_string(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Unknown,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Free,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
+            locator_hint: root.to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    replace_active_frame_from_ask_outcome(
+        &state,
+        &task,
+        "find abcd under fuzzy_top3",
+        &route_result,
+        "在 `fuzzy_top3` 目录下找到4个文件名包含 \"abcd\" 的文件：\n- `abcd_report.md`\n- `my_abcd.txt`\n- `x_abcd_log.txt`\n- `zz_abcd_backup.log`\n这些都是模糊匹配测试的 fixture 文件。",
+        &[],
+        false,
+        &journal,
+    );
+    let frame = load_active_followup_frame(&state, &task).expect("frame should load");
+    assert_eq!(frame.op_kind, FollowupOpKind::Read);
+    assert_eq!(frame.bound_target.as_deref(), Some(root));
+    assert_eq!(
+        frame.ordered_entries,
+        vec![
+            "abcd_report.md",
+            "my_abcd.txt",
+            "x_abcd_log.txt",
+            "zz_abcd_backup.log"
+        ]
+    );
+    assert_eq!(
+        super::ordered_entry_target_at(&frame, 0).as_deref(),
+        Some("/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md")
+    );
 }
 
 #[test]
@@ -710,6 +801,167 @@ fn selected_target_turn_inherits_prior_ordered_entries_and_index() {
     assert_eq!(frame.ordered_entries, prior_frame.ordered_entries);
     assert_eq!(frame.selected_entry_index, Some(1));
     assert_eq!(frame.bound_target.as_deref(), Some("logs/clawd.log"));
+}
+
+#[test]
+fn scalar_answer_matching_prior_ordered_entry_persists_selected_index() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        task_id: "task-followup-scalar-selected-entry".to_string(),
+        user_id: 22,
+        chat_id: 23,
+        user_key: Some("test-user".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let prior_frame = FollowupFrame {
+        source_request: "list sqlite tables".to_string(),
+        op_kind: FollowupOpKind::List,
+        bound_target: Some(
+            "scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite".to_string(),
+        ),
+        ordered_entries: vec![
+            "orders".to_string(),
+            "service_logs".to_string(),
+            "users".to_string(),
+        ],
+        source_task_id: "older-task".to_string(),
+        updated_at_ts: 1,
+        expires_at_ts: crate::now_ts_u64() + 300,
+        ..FollowupFrame::default()
+    };
+    persist_frame(&state, &task, &prior_frame).expect("persist prior frame");
+    let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::direct_answer(),
+        resolved_intent: "select an observed ordered entry".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "test".to_string(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Unknown,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            requires_content_evidence: false,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::None,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+
+    replace_active_frame_from_ask_outcome(
+        &state,
+        &task,
+        "select second entry",
+        &route_result,
+        "service_logs",
+        &[],
+        false,
+        &journal,
+    );
+    let frame = load_active_followup_frame(&state, &task).expect("frame should load");
+
+    assert_eq!(frame.op_kind, FollowupOpKind::List);
+    assert_eq!(frame.ordered_entries, prior_frame.ordered_entries);
+    assert_eq!(frame.selected_entry_index, Some(1));
+    assert_eq!(frame.bound_target, prior_frame.bound_target);
+}
+
+#[test]
+fn scalar_answer_matching_prior_read_candidate_list_keeps_selection_for_next_position() {
+    let state = AppState::test_default_with_fixture_provider().with_seeded_db_schema();
+    let task = crate::ClaimedTask {
+        task_id: "task-followup-read-candidate-selected-entry".to_string(),
+        user_id: 24,
+        chat_id: 25,
+        user_key: Some("test-user".to_string()),
+        channel: "ui".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let root = "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3";
+    let prior_frame = FollowupFrame {
+        source_request: "find abcd under fuzzy_top3".to_string(),
+        op_kind: FollowupOpKind::Read,
+        bound_target: Some(root.to_string()),
+        ordered_entries: vec![
+            "abcd_report.md".to_string(),
+            "my_abcd.txt".to_string(),
+            "x_abcd_log.txt".to_string(),
+            "zz_abcd_backup.log".to_string(),
+        ],
+        source_task_id: "older-search-task".to_string(),
+        updated_at_ts: 1,
+        expires_at_ts: crate::now_ts_u64() + 300,
+        ..FollowupFrame::default()
+    };
+    persist_frame(&state, &task, &prior_frame).expect("persist prior frame");
+    let journal = crate::task_journal::TaskJournal::for_task(&task.task_id, "ask", "prompt");
+    let selected = format!("{root}/my_abcd.txt");
+    let route_result = RouteResult {
+        ask_mode: crate::AskMode::direct_answer(),
+        resolved_intent: "select an observed ordered path entry".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "test".to_string(),
+        route_confidence: None,
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Unknown,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+            locator_hint: selected.clone(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+
+    replace_active_frame_from_ask_outcome(
+        &state,
+        &task,
+        "select second entry",
+        &route_result,
+        &selected,
+        &[],
+        false,
+        &journal,
+    );
+    let frame = load_active_followup_frame(&state, &task).expect("frame should load");
+
+    assert_eq!(frame.op_kind, FollowupOpKind::Read);
+    assert_eq!(frame.ordered_entries, prior_frame.ordered_entries);
+    assert_eq!(frame.selected_entry_index, Some(1));
+    assert_eq!(frame.bound_target.as_deref(), Some(selected.as_str()));
+    assert_eq!(
+        super::ordered_entry_target_at(&frame, 0).as_deref(),
+        Some("/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3/abcd_report.md")
+    );
 }
 
 #[test]

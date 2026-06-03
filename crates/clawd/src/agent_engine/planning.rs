@@ -1,7 +1,7 @@
 use claw_core::skill_registry::PrimaryFallbackRole;
 use regex::Regex;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -9,11 +9,11 @@ use tracing::{info, warn};
 
 use super::{
     attempt_ledger::build_attempt_ledger_compact, build_loop_history_compact,
-    build_single_plan_prompt, build_skill_playbooks_text, build_skill_quick_index_text,
-    build_turn_analysis_prompt_block, plan_step_label, AgentLoopGuardPolicy, LoopState,
-    SinglePlanEnvelope, AGENT_TOOL_SPEC_PATH, LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH,
-    LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH, PLAN_REPAIR_PROMPT_LOGICAL_PATH,
-    SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH,
+    build_single_plan_prompt, build_skill_playbooks_text_scoped,
+    build_skill_quick_index_text_scoped, build_turn_analysis_prompt_block, plan_step_label,
+    AgentLoopGuardPolicy, LoopState, SinglePlanEnvelope, AGENT_TOOL_SPEC_PATH,
+    LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH, LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH,
+    PLAN_REPAIR_PROMPT_LOGICAL_PATH, SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH,
 };
 use crate::{
     llm_gateway, plan_step_from_agent_action, AgentAction, AppState, ClaimedTask, PlanKind,
@@ -413,6 +413,27 @@ fn round1_prompt_spec_for_class(
             "lightweight_execution_prompt",
             LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH,
         ),
+    }
+}
+
+fn contract_scoped_planner_skill_scope(
+    route_result: Option<&RouteResult>,
+) -> Option<BTreeSet<String>> {
+    let route = route_result?;
+    if route.needs_clarify || route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+    {
+        return None;
+    }
+    let skills =
+        crate::contract_matrix::allowed_action_refs_for_output_contract(&route.output_contract)
+            .into_iter()
+            .map(|action| action.skill)
+            .filter(|skill| !skill.trim().is_empty())
+            .collect::<BTreeSet<_>>();
+    if skills.is_empty() || skills.len() > 10 {
+        None
+    } else {
+        Some(skills)
     }
 }
 
@@ -1042,6 +1063,7 @@ fn action_supports_direct_observed_finalize(
                 return route_result.is_some_and(|route| {
                     route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
                         && matches!(action_name.as_str(), "ps" | "port_list")
+                        && !route_allows_model_language_terminal_respond(Some(route))
                 });
             }
             if route_result.is_some_and(|route| {
@@ -1565,6 +1587,17 @@ fn strip_terminal_discussion_for_direct_skill_passthrough(
     {
         return actions;
     }
+    if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+        && route_allows_model_language_terminal_respond(Some(route_result))
+        && actions
+            .iter()
+            .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. }))
+        && actions
+            .iter()
+            .any(is_process_basic_status_observation_action)
+    {
+        return actions;
+    }
     if has_mixed_last_output_terminal_respond(&actions) {
         return actions;
     }
@@ -1581,6 +1614,23 @@ fn strip_terminal_discussion_for_direct_skill_passthrough(
     } else {
         actions
     }
+}
+
+fn is_process_basic_status_observation_action(action: &AgentAction) -> bool {
+    let (skill, args) = match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            (skill.as_str(), args)
+        }
+        _ => return false,
+    };
+    if !skill.eq_ignore_ascii_case("process_basic") {
+        return false;
+    }
+    args.get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(str::to_ascii_lowercase)
+        .is_some_and(|action_name| matches!(action_name.as_str(), "ps" | "port_list"))
 }
 
 fn delivery_success_terminal_reply(state: &AppState, actions: &[AgentAction]) -> bool {
@@ -2558,6 +2608,74 @@ fn scalar_content_auto_locator_observation_plan(
     ])
 }
 
+fn content_presence_quoted_literal_deterministic_plan_result(
+    state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    let route = route_result?;
+    if loop_state.round_no > 1
+        || loop_state.has_tool_or_skill_output
+        || route.needs_clarify
+        || route.output_contract.delivery_required
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::ContentPresenceCheck
+    {
+        return None;
+    }
+    let literal_sources = [
+        original_user_text,
+        Some(user_text),
+        Some(route.resolved_intent.as_str()),
+    ];
+    let mut literals = Vec::new();
+    for source in literal_sources.into_iter().flatten() {
+        for literal in crate::intent::surface_signals::extract_quoted_literals(source) {
+            if !literals
+                .iter()
+                .any(|existing: &String| existing.eq_ignore_ascii_case(&literal))
+            {
+                literals.push(literal);
+            }
+        }
+    }
+    if literals.len() != 1 {
+        return None;
+    }
+    let target = auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (!hint.is_empty()).then_some(hint)
+        })?;
+    let path = resolve_existing_metadata_locator_path(&state.skill_rt.workspace_root, target)?;
+    if !Path::new(&path).is_file() || is_supported_archive_path(&path) {
+        return None;
+    }
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "grep_text",
+            "root": path,
+            "query": literals.remove(0),
+            "max_results": 8,
+        }),
+    }];
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
 fn scalar_content_auto_locator_deterministic_plan_result(
     state: &AppState,
     goal: &str,
@@ -2635,7 +2753,11 @@ fn active_task_append_current_locator_deterministic_plan_result(
     }
     let path = auto_locator_path
         .map(str::trim)
-        .filter(|path| !path.is_empty())?;
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (!hint.is_empty()).then_some(hint)
+        })?;
     let path_obj = Path::new(path);
     if path_obj.is_dir() {
         return None;
@@ -2701,7 +2823,11 @@ fn file_facts_auto_locator_observation_plan(
     }
     let path = auto_locator_path
         .map(str::trim)
-        .filter(|path| !path.is_empty())?;
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (!hint.is_empty()).then_some(hint)
+        })?;
     let path_ref = Path::new(path);
     let quantity_metadata_target = route.output_contract.semantic_kind
         == crate::OutputSemanticKind::QuantityComparison
@@ -3024,9 +3150,7 @@ fn directory_tree_auto_locator_observation_plan(
         )
         || !matches!(
             route.output_contract.semantic_kind,
-            crate::OutputSemanticKind::None
-                | crate::OutputSemanticKind::DirectoryPurposeSummary
-                | crate::OutputSemanticKind::WorkspaceProjectSummary
+            crate::OutputSemanticKind::None | crate::OutputSemanticKind::WorkspaceProjectSummary
         )
     {
         return None;
@@ -3041,33 +3165,64 @@ fn directory_tree_auto_locator_observation_plan(
     if !Path::new(&path).is_dir() {
         return None;
     }
-    let tree_summary = AgentAction::CallSkill {
-        skill: "system_basic".to_string(),
-        args: serde_json::json!({
-            "action": "tree_summary",
-            "path": path,
-            "max_depth": 2,
-            "max_children_per_dir": 12,
-            "include_hidden": false,
-        }),
-    };
-    if matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::DirectoryPurposeSummary
-            | crate::OutputSemanticKind::WorkspaceProjectSummary
-    ) {
-        Some(vec![
-            tree_summary,
-            AgentAction::SynthesizeAnswer {
-                evidence_refs: vec!["last_output".to_string()],
-            },
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::WorkspaceProjectSummary {
+        let dirs_only = directory_has_direct_child_dirs(&path);
+        let mut actions = vec![AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: serde_json::json!({
+                "action": "list_dir",
+                "path": path.clone(),
+                "names_only": false,
+                "dirs_only": dirs_only,
+                "max_entries": 1000,
+                "sort_by": "name",
+                "include_hidden": false,
+            }),
+        }];
+        if let Some(readme_path) = workspace_summary_readme_path(&path) {
+            actions.push(AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "read_text_range",
+                    "path": readme_path,
+                    "mode": "head",
+                    "n": 80,
+                }),
+            });
+        }
+        let evidence_refs = if actions.len() > 1 {
+            vec!["step_1".to_string(), "step_2".to_string()]
+        } else {
+            vec!["last_output".to_string()]
+        };
+        actions.extend([
+            AgentAction::SynthesizeAnswer { evidence_refs },
             AgentAction::Respond {
                 content: "{{last_output}}".to_string(),
             },
-        ])
+        ]);
+        Some(actions)
     } else {
+        let tree_summary = AgentAction::CallSkill {
+            skill: "system_basic".to_string(),
+            args: serde_json::json!({
+                "action": "tree_summary",
+                "path": path,
+                "max_depth": 2,
+                "max_children_per_dir": 12,
+                "include_hidden": false,
+            }),
+        };
         Some(vec![tree_summary])
     }
+}
+
+fn workspace_summary_readme_path(root: &str) -> Option<String> {
+    ["README.md", "README.zh-CN.md", "readme.md"]
+        .into_iter()
+        .map(|name| Path::new(root).join(name))
+        .find(|path| path.is_file())
+        .map(|path| path.display().to_string())
 }
 
 fn directory_tree_auto_locator_deterministic_plan_result(
@@ -3099,6 +3254,199 @@ fn directory_tree_auto_locator_deterministic_plan_result(
         auto_locator_path,
         actions,
     );
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
+const DIRECTORY_PURPOSE_MAX_TEXT_READS: usize = 24;
+const DIRECTORY_PURPOSE_TREE_SUMMARY_TEXT_READ_THRESHOLD: usize = 8;
+
+fn directory_purpose_text_like_path(path: &Path) -> bool {
+    let Some(ext) = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+    else {
+        return false;
+    };
+    matches!(
+        ext.as_str(),
+        "adoc"
+            | "csv"
+            | "json"
+            | "jsonl"
+            | "log"
+            | "markdown"
+            | "md"
+            | "rst"
+            | "toml"
+            | "txt"
+            | "yaml"
+            | "yml"
+    )
+}
+
+fn directory_purpose_direct_text_read_paths(root: &str) -> Vec<String> {
+    let root_path = Path::new(root);
+    let canonical_root = root_path
+        .canonicalize()
+        .unwrap_or_else(|_| root_path.to_path_buf());
+    let mut candidates = fs::read_dir(root_path)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && directory_purpose_text_like_path(path))
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        let left_name = left
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let right_name = right
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        left_name.cmp(&right_name)
+    });
+
+    let mut selected = Vec::new();
+    for candidate in candidates {
+        if selected.len() >= DIRECTORY_PURPOSE_MAX_TEXT_READS {
+            break;
+        }
+        let canonical_candidate = candidate
+            .canonicalize()
+            .unwrap_or_else(|_| candidate.clone());
+        if !canonical_candidate.starts_with(&canonical_root) || !canonical_candidate.is_file() {
+            continue;
+        }
+        let read_path = canonical_candidate.display().to_string();
+        if !selected.iter().any(|existing| existing == &read_path) {
+            selected.push(read_path);
+        }
+    }
+    selected
+}
+
+fn directory_has_direct_child_dirs(root: &str) -> bool {
+    fs::read_dir(root)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .any(|entry| {
+            entry
+                .file_type()
+                .ok()
+                .is_some_and(|file_type| file_type.is_dir())
+        })
+}
+
+fn directory_purpose_auto_locator_deterministic_plan_result(
+    _state: &AppState,
+    goal: &str,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    _user_text: &str,
+    _original_user_text: Option<&str>,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
+        return None;
+    }
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary
+        || !route_expects_terminal_user_answer(route)
+        || !matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Free
+                | crate::OutputResponseShape::OneSentence
+                | crate::OutputResponseShape::Strict
+        )
+        || directory_purpose_extension_locator(route).is_some()
+    {
+        return None;
+    }
+    if crate::task_contract::target_locators_for_route(route).len() > 1 {
+        return None;
+    }
+    let path = route_directory_locator_path(route, auto_locator_path)?;
+    if !Path::new(&path).is_dir() {
+        return None;
+    }
+    let read_paths = directory_purpose_direct_text_read_paths(&path);
+    if read_paths.len() > DIRECTORY_PURPOSE_TREE_SUMMARY_TEXT_READ_THRESHOLD {
+        let dirs_only = directory_has_direct_child_dirs(&path);
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "list_dir",
+                    "path": path,
+                    "names_only": false,
+                    "dirs_only": dirs_only,
+                    "max_entries": 1000,
+                    "sort_by": "name",
+                    "include_hidden": false,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["last_output".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+        let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+            .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+        return Some(build_plan_result(
+            goal,
+            &raw_plan_text,
+            PlanKind::Single,
+            &actions,
+        ));
+    }
+
+    let mut actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "list_dir",
+            "path": path,
+            "names_only": false,
+            "max_entries": 1000,
+            "sort_by": "name",
+        }),
+    }];
+    actions.extend(read_paths.into_iter().map(|path| AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "read_text_range",
+            "path": path,
+            "mode": "head",
+            "n": 40,
+        }),
+    }));
+    let evidence_refs = (1..=actions.len())
+        .map(|idx| format!("step_{idx}"))
+        .collect::<Vec<_>>();
+    actions.push(AgentAction::SynthesizeAnswer { evidence_refs });
+    actions.push(AgentAction::Respond {
+        content: "{{last_output}}".to_string(),
+    });
     let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
     Some(build_plan_result(
@@ -3399,6 +3747,47 @@ fn quantity_compare_pair_locator_deterministic_plan_result(
     let right =
         resolve_existing_metadata_locator_path(&state.skill_rt.workspace_root, &targets[1])?;
     if left.eq_ignore_ascii_case(&right) {
+        return None;
+    }
+    let left_is_dir = Path::new(&left).is_dir();
+    let right_is_dir = Path::new(&right).is_dir();
+    if left_is_dir && right_is_dir {
+        let actions = vec![
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "count_entries",
+                    "path": left,
+                    "recursive": false,
+                    "include_hidden": false,
+                }),
+            },
+            AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args: serde_json::json!({
+                    "action": "count_entries",
+                    "path": right,
+                    "recursive": false,
+                    "include_hidden": false,
+                }),
+            },
+            AgentAction::SynthesizeAnswer {
+                evidence_refs: vec!["step_1".to_string(), "step_2".to_string()],
+            },
+            AgentAction::Respond {
+                content: "{{last_output}}".to_string(),
+            },
+        ];
+        let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+            .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+        return Some(build_plan_result(
+            goal,
+            &raw_plan_text,
+            PlanKind::Single,
+            &actions,
+        ));
+    }
+    if left_is_dir || right_is_dir {
         return None;
     }
     let action = AgentAction::CallTool {
@@ -4597,7 +4986,7 @@ fn existence_with_path_locator_observation_plan(
     let current_surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_text);
     let current_has_structural_locator =
         current_surface.has_explicit_path_or_url() || current_surface.has_filename_candidates();
-    let explicit_targets = explicit_document_file_targets(current_user_text)
+    let explicit_targets = explicit_existence_file_targets(current_user_text)
         .into_iter()
         .take(8)
         .collect::<Vec<_>>();
@@ -4688,6 +5077,29 @@ fn single_filename_target_for_directory_locator(
     }
     let filenames = crate::delivery_utils::extract_filename_candidates(&route.resolved_intent);
     (filenames.len() == 1).then(|| filenames[0].clone())
+}
+
+fn explicit_existence_file_targets(user_text: &str) -> Vec<String> {
+    let mut targets = Vec::new();
+    for locator in
+        crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(
+            user_text,
+        )
+    {
+        if locator.locator_kind != crate::OutputLocatorKind::Path
+            || document_target_already_covered(&targets, &locator.locator_hint)
+        {
+            continue;
+        }
+        targets.push(locator.locator_hint);
+    }
+    for candidate in crate::delivery_utils::extract_filename_candidates(user_text) {
+        if document_target_already_covered(&targets, &candidate) {
+            continue;
+        }
+        targets.push(candidate);
+    }
+    targets
 }
 
 fn search_name_target_token_is_safe(candidate: &str) -> bool {
@@ -5190,6 +5602,102 @@ fn log_analyze_supported_path(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn directory_contains_log_like_files(path: &Path) -> bool {
+    if !path.is_dir() {
+        return false;
+    }
+    let Ok(entries) = fs::read_dir(path) else {
+        return false;
+    };
+    entries.flatten().take(64).any(|entry| {
+        let path = entry.path();
+        path.is_file()
+            && path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.trim().eq_ignore_ascii_case("log"))
+    })
+}
+
+fn log_analyze_supported_target(path: &str) -> bool {
+    let path = Path::new(path);
+    if path.is_file() {
+        return log_analyze_supported_path(path.to_string_lossy().as_ref());
+    }
+    directory_contains_log_like_files(path)
+}
+
+fn generic_path_content_log_analyze_target_path(
+    route_result: Option<&RouteResult>,
+    auto_locator_path: Option<&str>,
+) -> Option<String> {
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None | crate::OutputSemanticKind::ContentExcerptSummary
+        )
+        || !matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+    {
+        return None;
+    }
+    auto_locator_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (!hint.is_empty()).then_some(hint)
+        })
+        .filter(|path| log_analyze_supported_target(path))
+        .map(ToString::to_string)
+}
+
+fn generic_path_content_log_analyze_deterministic_plan_result(
+    goal: &str,
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    if loop_state.round_no > 1
+        || loop_state.has_tool_or_skill_output
+        || !log_analyze_is_enabled(state)
+    {
+        return None;
+    }
+    let path = generic_path_content_log_analyze_target_path(route_result, auto_locator_path)?;
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "log_analyze".to_string(),
+            args: serde_json::json!({
+                "path": path,
+                "max_matches": 50
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        PlanKind::Single,
+        &actions,
+    ))
+}
+
 fn route_allows_single_file_content_understanding(route: &RouteResult) -> bool {
     route
         .output_contract
@@ -5223,13 +5731,45 @@ fn single_file_content_understanding_target_path(
         .map(ToString::to_string)
 }
 
+fn workspace_root_context_list_action_for_target(
+    state: &AppState,
+    target_path: &str,
+) -> Option<AgentAction> {
+    let workspace_root = &state.skill_rt.workspace_root;
+    let target = resolve_workspace_path(workspace_root, target_path);
+    if !target.is_file() {
+        return None;
+    }
+    let within_workspace = match (target.canonicalize(), workspace_root.canonicalize()) {
+        (Ok(target), Ok(root)) => target.starts_with(&root) && target != root,
+        _ => target.starts_with(workspace_root) && target != *workspace_root,
+    };
+    if !within_workspace {
+        return None;
+    }
+    Some(AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: serde_json::json!({
+            "action": "list_dir",
+            "path": workspace_root.display().to_string(),
+            "names_only": true,
+            "limit": 120
+        }),
+    })
+}
+
 fn content_excerpt_summary_auto_locator_observation_plan(
+    state: &AppState,
     route_result: Option<&RouteResult>,
     auto_locator_path: Option<&str>,
 ) -> Option<Vec<AgentAction>> {
     let path = single_file_content_understanding_target_path(route_result, auto_locator_path)?;
+    let mut actions = Vec::new();
+    if let Some(context_action) = workspace_root_context_list_action_for_target(state, &path) {
+        actions.push(context_action);
+    }
     if repo_text_artifact_prefers_bounded_fs_read(&path) {
-        return Some(vec![AgentAction::CallTool {
+        actions.push(AgentAction::CallTool {
             tool: "fs_basic".to_string(),
             args: serde_json::json!({
                 "action": "read_text_range",
@@ -5237,12 +5777,13 @@ fn content_excerpt_summary_auto_locator_observation_plan(
                 "mode": "head",
                 "n": 120
             }),
-        }]);
+        });
+        return Some(actions);
     }
     if !doc_parse_supported_path(&path) {
         return None;
     }
-    Some(vec![AgentAction::CallSkill {
+    actions.push(AgentAction::CallSkill {
         skill: "doc_parse".to_string(),
         args: serde_json::json!({
             "action": "parse_doc",
@@ -5250,7 +5791,8 @@ fn content_excerpt_summary_auto_locator_observation_plan(
             "max_chars": 12000,
             "include_metadata": true
         }),
-    }])
+    });
+    Some(actions)
 }
 
 fn repo_text_artifact_prefers_bounded_fs_read(path: &str) -> bool {
@@ -5281,6 +5823,7 @@ fn repo_text_artifact_prefers_bounded_fs_read(path: &str) -> bool {
 }
 
 fn content_excerpt_summary_auto_locator_deterministic_plan_result(
+    state: &AppState,
     goal: &str,
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
@@ -5295,8 +5838,11 @@ fn content_excerpt_summary_auto_locator_deterministic_plan_result(
     if loop_state.round_no > 1 || loop_state.has_tool_or_skill_output {
         return None;
     }
-    let actions =
-        content_excerpt_summary_auto_locator_observation_plan(route_result, auto_locator_path)?;
+    let actions = content_excerpt_summary_auto_locator_observation_plan(
+        state,
+        route_result,
+        auto_locator_path,
+    )?;
     let actions = canonicalize_legacy_file_config_capabilities(actions);
     let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
@@ -5566,6 +6112,68 @@ fn archive_unpack_deterministic_plan_result(
             "dest": dest,
         }),
     }];
+    let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
+        .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
+    Some(build_plan_result(
+        goal,
+        &raw_plan_text,
+        if loop_state.round_no <= 1 {
+            PlanKind::Single
+        } else {
+            PlanKind::Incremental
+        },
+        &actions,
+    ))
+}
+
+fn archive_pack_deterministic_plan_result(
+    goal: &str,
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    loop_state: &LoopState,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    auto_locator_path: Option<&str>,
+) -> Option<PlanResult> {
+    if loop_state.has_tool_or_skill_output || !archive_basic_enabled_for_planning(state) {
+        return None;
+    }
+    let route = route_result?;
+    if route.needs_clarify
+        || !route.is_execute_gate()
+        || !route.output_contract.requires_content_evidence
+    {
+        return None;
+    }
+    let (source, archive) = archive_pack_pair_for_route_or_text(
+        &state.skill_rt.workspace_root,
+        route,
+        user_text,
+        original_user_text,
+        auto_locator_path,
+    )?;
+    let action = AgentAction::CallSkill {
+        skill: "archive_basic".to_string(),
+        args: serde_json::json!({
+            "action": "pack",
+            "source": source,
+            "archive": archive,
+            "format": archive_format_for_path(&archive),
+        }),
+    };
+    let AgentAction::CallSkill { skill, args } = &action else {
+        return None;
+    };
+    if crate::contract_matrix::action_policy_for_output_contract(
+        Some(&route.output_contract),
+        skill,
+        args,
+    )
+    .is_some_and(|policy| !policy.is_allowed())
+    {
+        return None;
+    }
+    let actions = vec![action];
     let raw_plan_text = serde_json::to_string(&serde_json::json!({ "steps": actions }))
         .unwrap_or_else(|_| "{\"steps\":[]}".to_string());
     Some(build_plan_result(
@@ -7637,11 +8245,10 @@ fn prefer_doc_parse_for_single_document_synthesis(
     let Some(route) = route_result else {
         return actions;
     };
-    if route
-        .output_contract
-        .semantic_kind
-        .is_content_excerpt_summary()
-    {
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ContentExcerptSummary
+    ) {
         return actions;
     }
     if !route_allows_single_document_parse_synthesis(route) {
@@ -8592,6 +9199,7 @@ fn structural_contract_deterministic_plan_overrides_literal_command_guard(
                     | crate::OutputSemanticKind::ContentExcerptWithSummary
                     | crate::OutputSemanticKind::ExistenceWithPath
                     | crate::OutputSemanticKind::ExistenceWithPathSummary
+                    | crate::OutputSemanticKind::RecentScalarEqualityCheck
             )
     })
 }
@@ -8904,6 +9512,10 @@ fn normalize_planned_actions_with_original_and_context(
         auto_locator_path,
         actions,
     );
+    let actions =
+        expand_compound_listing_and_content_synthesis_refs(route_result, loop_state, actions);
+    let actions =
+        append_terminal_synthesize_for_observation_summary_contract(route_result, actions);
     mark_non_mutating_run_cmd_sequences_continue_on_error(state, actions)
 }
 
@@ -9007,7 +9619,15 @@ fn normalize_legacy_compatibility_actions(
         strip_terminal_discussion_for_scalar_path_observation(route_result, loop_state, actions);
     let actions =
         strip_terminal_discussion_for_direct_skill_passthrough(state, route_result, actions);
-    let actions = normalize_action_schema_aliases(state, route_result, actions);
+    let actions = normalize_action_schema_aliases(
+        state,
+        route_result,
+        user_text,
+        original_user_text,
+        actions,
+    );
+    let actions =
+        expand_compound_listing_and_content_synthesis_refs(route_result, loop_state, actions);
     let actions = repair_guard_config_default_path_for_invalid_locator(
         route_result,
         auto_locator_path,
@@ -9774,12 +10394,15 @@ fn is_rustclaw_config_guard_path(path: &str) -> bool {
 fn normalize_action_schema_aliases(
     state: &AppState,
     route_result: Option<&RouteResult>,
+    user_text: &str,
+    original_user_text: Option<&str>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
     let actions = normalize_doc_parse_schema_aliases(actions);
     let actions = normalize_transform_schema_aliases(actions);
     let actions = normalize_fs_basic_schema_aliases(actions);
     let actions = normalize_system_basic_schema_aliases(actions);
+    let actions = rewrite_raw_runtime_status_to_run_cmd(state, route_result, actions);
     let actions = normalize_git_basic_schema_aliases(route_result, actions);
     let actions = fill_missing_read_range_path_from_route_locator(route_result, actions);
     let actions = rewrite_filtered_list_dir_to_inventory_dir(state, route_result, actions);
@@ -9811,7 +10434,84 @@ fn normalize_action_schema_aliases(
         None,
         actions,
     );
-    enforce_output_contract_tool_args(route_result, actions)
+    let actions =
+        enforce_output_contract_tool_args(route_result, user_text, original_user_text, actions);
+    prune_file_paths_contract_disallowed_actions(route_result, actions)
+}
+
+fn rewrite_raw_runtime_status_to_run_cmd(
+    state: &AppState,
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.needs_clarify
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput
+        || !run_cmd_available_for_plan(state)
+    {
+        return actions;
+    }
+    actions
+        .into_iter()
+        .map(|action| {
+            let Some((skill, args)) = (match &action {
+                AgentAction::CallSkill { skill, args } => Some((skill.as_str(), args)),
+                AgentAction::CallTool { tool, args } => Some((tool.as_str(), args)),
+                _ => None,
+            }) else {
+                return action;
+            };
+            if state.resolve_canonical_skill_name(skill) != "system_basic" {
+                return action;
+            }
+            let action_name = args
+                .get("action")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
+            if !action_name.eq_ignore_ascii_case("runtime_status") {
+                return action;
+            }
+            let Some(command) = args
+                .get("kind")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .and_then(runtime_status_query_run_cmd_command)
+            else {
+                return action;
+            };
+            let mut run_args = serde_json::json!({
+                "command": command,
+                "cwd": state.skill_rt.workspace_root.display().to_string(),
+            });
+            run_args[super::CLAWD_LITERAL_COMMAND_ARG] = Value::Bool(true);
+            if !crate::contract_matrix::action_policy_for_output_contract(
+                Some(&route.output_contract),
+                "run_cmd",
+                &run_args,
+            )
+            .is_some_and(|policy| policy.is_allowed())
+            {
+                return action;
+            }
+            info!(
+                "plan_rewrite_raw_runtime_status_to_run_cmd kind={}",
+                args.get("kind")
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .unwrap_or_default()
+            );
+            AgentAction::CallSkill {
+                skill: "run_cmd".to_string(),
+                args: run_args,
+            }
+        })
+        .collect()
 }
 
 fn broaden_default_read_range_for_structured_text(actions: Vec<AgentAction>) -> Vec<AgentAction> {
@@ -12291,12 +12991,12 @@ fn recent_scalar_current_workspace_deterministic_plan_result(
     let AgentAction::CallSkill { skill, args } = &probe else {
         return None;
     };
-    if !crate::contract_matrix::action_policy_for_output_contract(
+    if crate::contract_matrix::action_policy_for_output_contract(
         Some(&route.output_contract),
         skill,
         args,
     )
-    .is_some_and(|policy| policy.is_allowed())
+    .is_some_and(|policy| !policy.is_allowed())
     {
         return None;
     }
@@ -12496,6 +13196,73 @@ fn service_status_deterministic_plan_result(
     {
         return None;
     }
+    if let Some(url) = service_status_url_locator(route, user_text) {
+        let action = AgentAction::CallSkill {
+            skill: "http_basic".to_string(),
+            args: serde_json::json!({
+                "action": "get",
+                "url": url,
+            }),
+        };
+        if let AgentAction::CallSkill { skill, args } = &action {
+            if crate::contract_matrix::action_policy_for_output_contract(
+                Some(&route.output_contract),
+                skill,
+                args,
+            )
+            .is_some_and(|policy| policy.is_allowed())
+            {
+                let actions = vec![
+                    action,
+                    AgentAction::SynthesizeAnswer {
+                        evidence_refs: vec!["step_1".to_string()],
+                    },
+                    AgentAction::Respond {
+                        content: "{{last_output}}".to_string(),
+                    },
+                ];
+                return Some(build_plan_result(
+                    goal,
+                    "deterministic:service_status_http_get",
+                    PlanKind::Single,
+                    &actions,
+                ));
+            }
+        }
+    }
+    if process_basic_available_for_plan(state)
+        && !request_mentions_workspace_product(state, user_text)
+    {
+        if let Some(port) = first_port_filter_token(user_text) {
+            return Some(build_plan_result(
+                goal,
+                "deterministic:service_status_port_list",
+                PlanKind::Single,
+                &[AgentAction::CallSkill {
+                    skill: "process_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": "port_list",
+                        "filter": port,
+                    }),
+                }],
+            ));
+        }
+        if let Some(filter) = process_status_filter_token(user_text) {
+            return Some(build_plan_result(
+                goal,
+                "deterministic:service_status_process_list",
+                PlanKind::Single,
+                &[AgentAction::CallSkill {
+                    skill: "process_basic".to_string(),
+                    args: serde_json::json!({
+                        "action": "ps",
+                        "limit": 200,
+                        "filter": filter,
+                    }),
+                }],
+            ));
+        }
+    }
     if route.output_contract.response_shape == crate::OutputResponseShape::Scalar
         && health_check_available_for_plan(state)
     {
@@ -12546,6 +13313,28 @@ fn service_status_deterministic_plan_result(
             }],
         ));
     }
+    if system_basic_available_for_plan(state) {
+        let action = AgentAction::CallTool {
+            tool: "system_basic".to_string(),
+            args: serde_json::json!({"action":"info"}),
+        };
+        if let AgentAction::CallTool { tool: skill, args } = &action {
+            if crate::contract_matrix::action_policy_for_output_contract(
+                Some(&route.output_contract),
+                skill,
+                args,
+            )
+            .is_some_and(|policy| policy.is_allowed())
+            {
+                return Some(build_plan_result(
+                    goal,
+                    "deterministic:service_status_system_info",
+                    PlanKind::Single,
+                    &[action],
+                ));
+            }
+        }
+    }
     if process_basic_available_for_plan(state) {
         if let Some(port) = first_port_filter_token(user_text) {
             return Some(build_plan_result(
@@ -12577,29 +13366,19 @@ fn service_status_deterministic_plan_result(
             ));
         }
     }
-    if system_basic_available_for_plan(state) && !process_basic_available_for_plan(state) {
-        let action = AgentAction::CallTool {
-            tool: "system_basic".to_string(),
-            args: serde_json::json!({"action":"info"}),
-        };
-        if let AgentAction::CallTool { tool: skill, args } = &action {
-            if crate::contract_matrix::action_policy_for_output_contract(
-                Some(&route.output_contract),
-                skill,
-                args,
-            )
-            .is_some_and(|policy| policy.is_allowed())
-            {
-                return Some(build_plan_result(
-                    goal,
-                    "deterministic:service_status_system_info",
-                    PlanKind::Single,
-                    &[action],
-                ));
-            }
-        }
-    }
     None
+}
+
+fn service_status_url_locator(route: &RouteResult, user_text: &str) -> Option<String> {
+    [user_text, route.resolved_intent.as_str()]
+        .into_iter()
+        .filter_map(crate::intent::locator_extractor::extract_explicit_locator_for_fallback)
+        .find(|locator| locator.locator_kind == crate::OutputLocatorKind::Url)
+        .map(|locator| locator.locator_hint)
+        .or_else(|| {
+            let hint = route.output_contract.locator_hint.trim();
+            (hint.starts_with("http://") || hint.starts_with("https://")).then(|| hint.to_string())
+        })
 }
 
 fn runtime_status_query_kind(
@@ -12620,9 +13399,20 @@ fn runtime_status_query_system_basic_kind(kind: &str) -> Option<&'static str> {
     match kind {
         "current_user" => Some("current_user"),
         "host_name" => Some("host_name"),
+        "kernel_release" => Some("kernel_release"),
         "current_working_directory" | "current_process_cwd" | "process_cwd" => {
             Some("current_working_directory")
         }
+        _ => None,
+    }
+}
+
+fn runtime_status_query_run_cmd_command(kind: &str) -> Option<&'static str> {
+    match kind {
+        "current_user" => Some("id -un"),
+        "host_name" => Some("hostname"),
+        "kernel_release" => Some("uname -r"),
+        "current_working_directory" | "current_process_cwd" | "process_cwd" => Some("pwd"),
         _ => None,
     }
 }
@@ -12641,20 +13431,35 @@ fn runtime_status_scalar_deterministic_plan_result(
         || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
         || route.output_contract.semantic_kind != crate::OutputSemanticKind::RawCommandOutput
         || route.output_contract.delivery_required
-        || !system_basic_available_for_plan(state)
+        || (!run_cmd_available_for_plan(state) && !system_basic_available_for_plan(state))
     {
         return None;
     }
-    let kind = runtime_status_query_kind(turn_analysis)
-        .and_then(runtime_status_query_system_basic_kind)?;
-    let action = AgentAction::CallTool {
-        tool: "system_basic".to_string(),
-        args: serde_json::json!({
-            "action": "runtime_status",
-            "kind": kind,
-        }),
+    let kind = runtime_status_query_kind(turn_analysis)?;
+    let action = if run_cmd_available_for_plan(state) {
+        let command = runtime_status_query_run_cmd_command(kind)?;
+        let mut args = serde_json::json!({
+            "command": command,
+            "cwd": state.skill_rt.workspace_root.display().to_string(),
+        });
+        args[super::CLAWD_LITERAL_COMMAND_ARG] = Value::Bool(true);
+        AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args,
+        }
+    } else {
+        let kind = runtime_status_query_system_basic_kind(kind)?;
+        AgentAction::CallTool {
+            tool: "system_basic".to_string(),
+            args: serde_json::json!({
+                "action": "runtime_status",
+                "kind": kind,
+            }),
+        }
     };
-    if let AgentAction::CallTool { tool: skill, args } = &action {
+    if let AgentAction::CallTool { tool: skill, args } | AgentAction::CallSkill { skill, args } =
+        &action
+    {
         if !crate::contract_matrix::action_policy_for_output_contract(
             Some(&route.output_contract),
             skill,
@@ -13892,6 +14697,8 @@ fn rewrite_single_evidence_ref_after_step_strip(
 
 fn enforce_output_contract_tool_args(
     route_result: Option<&RouteResult>,
+    user_text: &str,
+    original_user_text: Option<&str>,
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
     let Some(route) = route_result else {
@@ -13906,7 +14713,13 @@ fn enforce_output_contract_tool_args(
                 | AgentAction::CallTool { tool: skill, args }
                     if skill.eq_ignore_ascii_case("system_basic") =>
                 {
-                    if rewrite_inventory_ext_filter_action_to_fs_basic(route, skill, args) {
+                    if rewrite_inventory_ext_filter_action_to_fs_basic(
+                        route,
+                        user_text,
+                        original_user_text,
+                        skill,
+                        args,
+                    ) {
                         return action;
                     }
                     let Some(obj) = args.as_object_mut() else {
@@ -13951,7 +14764,13 @@ fn enforce_output_contract_tool_args(
                 | AgentAction::CallTool { tool: skill, args }
                     if skill.eq_ignore_ascii_case("fs_basic") =>
                 {
-                    if rewrite_inventory_ext_filter_action_to_fs_basic(route, skill, args) {
+                    if rewrite_inventory_ext_filter_action_to_fs_basic(
+                        route,
+                        user_text,
+                        original_user_text,
+                        skill,
+                        args,
+                    ) {
                         return action;
                     }
                     let Some(obj) = args.as_object_mut() else {
@@ -13963,9 +14782,29 @@ fn enforce_output_contract_tool_args(
                         .map(str::trim)
                         .unwrap_or_default()
                         .to_ascii_lowercase();
-                    if matches!(action_name.as_str(), "find_entries" | "list_dir") {
+                    if rewrite_file_paths_grep_text_to_find_entries(route, obj) {
+                        enforce_file_paths_result_limit(
+                            route,
+                            user_text,
+                            original_user_text,
+                            "find_entries",
+                            obj,
+                        );
+                        return action;
+                    }
+                    if matches!(
+                        action_name.as_str(),
+                        "find_entries" | "find_ext" | "list_dir"
+                    ) {
                         enforce_file_names_inventory_args(route, obj);
                         enforce_directory_names_inventory_args(route, obj);
+                        enforce_file_paths_result_limit(
+                            route,
+                            user_text,
+                            original_user_text,
+                            &action_name,
+                            obj,
+                        );
                     }
                     if action_name == "list_dir" {
                         enforce_strict_directory_metadata_inventory_args(route, obj);
@@ -13976,6 +14815,162 @@ fn enforce_output_contract_tool_args(
             action
         })
         .collect()
+}
+
+fn rewrite_file_paths_grep_text_to_find_entries(
+    route: &RouteResult,
+    obj: &mut serde_json::Map<String, Value>,
+) -> bool {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths {
+        return false;
+    }
+    let action_name = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if !action_name.eq_ignore_ascii_case("grep_text") {
+        return false;
+    }
+    if crate::contract_matrix::action_policy_for_output_contract(
+        Some(&route.output_contract),
+        "fs_basic",
+        &Value::Object(obj.clone()),
+    )
+    .is_some_and(|policy| policy.is_allowed())
+    {
+        return false;
+    }
+    let Some(query) = obj
+        .get("query")
+        .or_else(|| obj.get("keyword"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+    else {
+        return false;
+    };
+    let ext = first_ext_filter_value(obj).or_else(|| {
+        obj.get("pattern")
+            .and_then(Value::as_str)
+            .and_then(extension_from_globish_pattern)
+    });
+    obj.insert(
+        "action".to_string(),
+        Value::String("find_entries".to_string()),
+    );
+    obj.insert("pattern".to_string(), Value::String(query));
+    obj.insert("target_kind".to_string(), Value::String("file".to_string()));
+    obj.entry("recursive".to_string())
+        .or_insert(Value::Bool(true));
+    if let Some(ext) = ext {
+        obj.insert("ext".to_string(), Value::String(ext));
+    }
+    obj.remove("query");
+    obj.remove("keyword");
+    info!("plan_contract_rewrite_file_paths_grep_text_to_find_entries");
+    true
+}
+
+fn prune_file_paths_contract_disallowed_actions(
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths
+        || route.output_contract.delivery_required
+    {
+        return actions;
+    }
+    let has_allowed_executable = actions.iter().any(|action| {
+        matches!(
+            file_paths_contract_executable_action_allowed(action),
+            Some(true)
+        )
+    });
+    if !has_allowed_executable {
+        return actions;
+    }
+
+    let keep_flags = actions
+        .iter()
+        .map(|action| {
+            !matches!(
+                file_paths_contract_executable_action_allowed(action),
+                Some(false)
+            )
+        })
+        .collect::<Vec<_>>();
+    if keep_flags.iter().all(|keep| *keep) {
+        return actions;
+    }
+
+    let mut old_to_new = vec![None; actions.len() + 1];
+    let mut next_idx = 1usize;
+    for (old_idx, keep) in keep_flags.iter().enumerate() {
+        if *keep {
+            old_to_new[old_idx + 1] = Some(next_idx);
+            next_idx += 1;
+        }
+    }
+
+    let stripped = keep_flags.iter().filter(|keep| !**keep).count();
+    let rewritten = actions
+        .into_iter()
+        .zip(keep_flags)
+        .filter_map(|(action, keep)| {
+            if !keep {
+                return None;
+            }
+            Some(match action {
+                AgentAction::SynthesizeAnswer { evidence_refs } => AgentAction::SynthesizeAnswer {
+                    evidence_refs: rewrite_evidence_refs_after_step_strip(
+                        &evidence_refs,
+                        &old_to_new,
+                    ),
+                },
+                other => other,
+            })
+        })
+        .collect::<Vec<_>>();
+    info!(
+        "plan_contract_prune_file_paths_disallowed_actions stripped_steps={}",
+        stripped
+    );
+    rewritten
+}
+
+fn file_paths_contract_executable_action_allowed(action: &AgentAction) -> Option<bool> {
+    let (skill, args) = match action {
+        AgentAction::CallSkill { skill, args } | AgentAction::CallTool { tool: skill, args } => {
+            (skill.as_str(), args)
+        }
+        AgentAction::CallCapability { .. } => return Some(false),
+        AgentAction::Think { .. }
+        | AgentAction::Respond { .. }
+        | AgentAction::SynthesizeAnswer { .. } => return None,
+    };
+    let action_name = args
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    let skill = skill.trim().to_ascii_lowercase();
+    let action_name = action_name.to_ascii_lowercase();
+    Some(match skill.as_str() {
+        "fs_basic" => matches!(
+            action_name.as_str(),
+            "find_entries" | "find_ext" | "grep_text" | "list_dir"
+        ),
+        "fs_search" => matches!(
+            action_name.as_str(),
+            "find_name" | "find_ext" | "find_path" | "find_entries" | "grep_text"
+        ),
+        _ => false,
+    })
 }
 
 fn structural_extension_filter_from_text(text: &str) -> Option<String> {
@@ -14171,6 +15166,56 @@ fn enforce_file_names_inventory_args(
     info!("plan_contract_enforce_file_names_inventory");
 }
 
+fn requested_file_paths_result_limit(
+    route: &RouteResult,
+    user_text: &str,
+    original_user_text: Option<&str>,
+) -> Option<u64> {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths
+        || route.output_contract.delivery_required
+    {
+        return None;
+    }
+    contract_hint_selector_limit(&route.resolved_intent)
+        .or_else(|| first_ascii_integer_limit(&route.resolved_intent))
+        .or_else(|| contract_hint_selector_limit(user_text))
+        .or_else(|| first_ascii_integer_limit(user_text))
+        .or_else(|| original_user_text.and_then(contract_hint_selector_limit))
+        .or_else(|| original_user_text.and_then(first_ascii_integer_limit))
+        .or_else(|| contract_hint_selector_limit(&route.route_reason))
+        .or_else(|| first_ascii_integer_limit(&route.route_reason))
+}
+
+fn enforce_file_paths_result_limit(
+    route: &RouteResult,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    action_name: &str,
+    obj: &mut serde_json::Map<String, Value>,
+) {
+    let Some(limit) = requested_file_paths_result_limit(route, user_text, original_user_text)
+    else {
+        return;
+    };
+    let key = if action_name.eq_ignore_ascii_case("list_dir") {
+        "max_entries"
+    } else {
+        "max_results"
+    };
+    if obj
+        .get(key)
+        .and_then(Value::as_u64)
+        .is_some_and(|current| current == limit)
+    {
+        return;
+    }
+    obj.insert(key.to_string(), Value::Number(limit.into()));
+    info!(
+        "plan_contract_enforce_file_paths_result_limit action={} limit={}",
+        action_name, limit
+    );
+}
+
 fn first_ext_filter_value(obj: &serde_json::Map<String, Value>) -> Option<String> {
     let value = obj
         .get("ext_filter")
@@ -14231,6 +15276,8 @@ fn should_rewrite_inventory_ext_filter_to_fs_basic(route: &RouteResult) -> bool 
 
 fn rewrite_inventory_ext_filter_action_to_fs_basic(
     route: &RouteResult,
+    user_text: &str,
+    original_user_text: Option<&str>,
     skill: &mut String,
     args: &mut Value,
 ) -> bool {
@@ -14257,10 +15304,12 @@ fn rewrite_inventory_ext_filter_action_to_fs_basic(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(".");
-    let max_results = obj
-        .get("max_entries")
-        .or_else(|| obj.get("limit"))
-        .and_then(Value::as_u64)
+    let max_results = requested_file_paths_result_limit(route, user_text, original_user_text)
+        .or_else(|| {
+            obj.get("max_entries")
+                .or_else(|| obj.get("limit"))
+                .and_then(Value::as_u64)
+        })
         .unwrap_or(100);
     *skill = "fs_basic".to_string();
     *args = serde_json::json!({
@@ -14815,6 +15864,45 @@ fn structured_listing_terminal_plan_satisfies_observation(actions: &[AgentAction
                     if !evidence_refs.is_empty()
             )
         })
+}
+
+fn expand_compound_listing_and_content_synthesis_refs(
+    route_result: Option<&RouteResult>,
+    _loop_state: &LoopState,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    let Some(route) = route_result else {
+        return actions;
+    };
+    if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
+        return actions;
+    }
+    if !actions.iter().any(action_provides_name_listing_evidence)
+        || !actions.iter().any(action_reads_workspace_text_content)
+    {
+        return actions;
+    }
+    let mut rewritten = actions;
+    for idx in 0..rewritten.len() {
+        let AgentAction::SynthesizeAnswer { evidence_refs } = &rewritten[idx] else {
+            continue;
+        };
+        if evidence_refs.len() != 1 {
+            continue;
+        }
+        let prior_refs = observation_action_evidence_refs(&rewritten[..idx]);
+        if prior_refs.len() < 2 {
+            continue;
+        }
+        if let AgentAction::SynthesizeAnswer { evidence_refs } = &mut rewritten[idx] {
+            *evidence_refs = prior_refs.clone();
+            info!(
+                "plan_expand_compound_listing_content_synthesis_refs refs={}",
+                prior_refs.join(",")
+            );
+        }
+    }
+    rewritten
 }
 
 fn action_provides_name_listing_evidence(action: &AgentAction) -> bool {
@@ -15706,6 +16794,38 @@ fn rewrite_constructed_missing_stat_path_to_exact_find_entries(
     let Some((path, call_kind)) = single_fs_basic_stat_path_candidate(&actions[0]) else {
         return actions;
     };
+    if let Some((root, pattern, ext)) = file_paths_missing_stat_path_selector_search_repair(
+        &state.skill_rt.workspace_root,
+        route,
+        &path,
+        user_text,
+    ) {
+        info!(
+            "plan_rewrite_file_paths_missing_stat_path_to_find_entries root={} pattern={}",
+            crate::truncate_for_log(&root),
+            crate::truncate_for_log(&pattern)
+        );
+        let mut args = serde_json::json!({
+            "action": "find_entries",
+            "root": root,
+            "pattern": pattern,
+            "target_kind": "file",
+            "recursive": true,
+        });
+        if let (Some(ext), Some(obj)) = (ext, args.as_object_mut()) {
+            obj.insert("ext".to_string(), Value::String(ext));
+        }
+        return match call_kind {
+            PlannedCallKind::Tool => vec![AgentAction::CallTool {
+                tool: "fs_basic".to_string(),
+                args,
+            }],
+            PlannedCallKind::Skill => vec![AgentAction::CallSkill {
+                skill: "fs_basic".to_string(),
+                args,
+            }],
+        };
+    }
     let (root, basename, exact) = if let Some((root, basename)) =
         constructed_missing_stat_path_search_repair(
             &state.skill_rt.workspace_root,
@@ -15757,6 +16877,95 @@ fn route_allows_constructed_stat_path_search_repair(route: &RouteResult) -> bool
         && route.is_execute_gate()
         && !route.output_contract.delivery_required
         && route.output_contract.requires_content_evidence
+}
+
+fn file_paths_missing_stat_path_selector_search_repair(
+    workspace_root: &Path,
+    route: &RouteResult,
+    raw_path: &str,
+    user_text: &str,
+) -> Option<(String, String, Option<String>)> {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::FilePaths {
+        return None;
+    }
+    let raw_path = raw_path.trim();
+    if raw_path.is_empty() || raw_path.contains(['*', '?', '[', ']']) {
+        return None;
+    }
+    let candidate = resolve_workspace_path(workspace_root, raw_path);
+    if candidate.exists() {
+        return None;
+    }
+    let parent = candidate.parent()?.to_path_buf();
+    if !parent.is_dir()
+        || !file_paths_missing_stat_parent_is_anchored(
+            workspace_root,
+            route,
+            raw_path,
+            &parent,
+            user_text,
+        )
+    {
+        return None;
+    }
+    let ext = Path::new(raw_path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::trim)
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| ext.to_ascii_lowercase());
+    let pattern = directory_child_structural_selector_for_file_paths(
+        workspace_root,
+        raw_path,
+        &parent,
+        user_text,
+        ext.as_deref(),
+    )?;
+    let root = Path::new(raw_path)
+        .parent()
+        .and_then(|parent| parent.to_str())
+        .map(str::trim)
+        .filter(|parent| !parent.is_empty())
+        .map(ToString::to_string)
+        .or_else(|| {
+            parent
+                .strip_prefix(workspace_root)
+                .ok()
+                .and_then(|relative| relative.to_str())
+                .map(ToString::to_string)
+        })
+        .unwrap_or_else(|| parent.display().to_string());
+    Some((root, pattern, ext))
+}
+
+fn file_paths_missing_stat_parent_is_anchored(
+    workspace_root: &Path,
+    route: &RouteResult,
+    raw_path: &str,
+    parent: &Path,
+    user_text: &str,
+) -> bool {
+    let raw_parent = Path::new(raw_path)
+        .parent()
+        .and_then(|parent| parent.to_str())
+        .map(str::trim)
+        .filter(|parent| !parent.is_empty());
+    if raw_parent.is_some_and(|parent| structural_token_present(user_text, parent))
+        || path_text_variants(workspace_root, raw_parent.unwrap_or_default(), parent)
+            .iter()
+            .any(|variant| structural_token_present(user_text, variant))
+    {
+        return true;
+    }
+    let locator_hint = route.output_contract.locator_hint.trim();
+    if locator_hint.is_empty() {
+        return false;
+    }
+    let locator = resolve_workspace_path(workspace_root, locator_hint);
+    same_existing_or_display_path(&locator, parent)
+        || locator
+            .parent()
+            .is_some_and(|locator_parent| same_existing_or_display_path(locator_parent, parent))
 }
 
 fn single_fs_basic_stat_path_candidate(action: &AgentAction) -> Option<(String, PlannedCallKind)> {
@@ -15909,12 +17118,90 @@ fn directory_child_name_pattern_selector(
         .map(|(token, _)| token)
 }
 
+fn directory_child_structural_selector_for_file_paths(
+    workspace_root: &Path,
+    raw_path: &str,
+    directory: &Path,
+    user_text: &str,
+    ext_filter: Option<&str>,
+) -> Option<String> {
+    let mut path_tokens = structural_selector_tokens(raw_path);
+    for component in path_text_variants(workspace_root, raw_path, directory) {
+        path_tokens.extend(structural_selector_tokens(&component));
+    }
+    if let Some(ext) = ext_filter {
+        path_tokens.insert(ext.to_ascii_lowercase());
+    }
+
+    let mut scores: HashMap<String, usize> = HashMap::new();
+    let entries = fs::read_dir(directory).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if let Some(ext_filter) = ext_filter {
+            let entry_ext = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(str::trim)
+                .unwrap_or_default();
+            if !entry_ext.eq_ignore_ascii_case(ext_filter) {
+                continue;
+            }
+        }
+        let Some(name) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        for token in structural_selector_candidates(name) {
+            if token.len() < 2 || path_tokens.contains(&token) {
+                continue;
+            }
+            if structural_token_present(user_text, &token) {
+                *scores.entry(token).or_insert(0) += 1;
+            }
+        }
+    }
+    scores
+        .into_iter()
+        .max_by(|(left_token, left_count), (right_token, right_count)| {
+            left_token
+                .len()
+                .cmp(&right_token.len())
+                .then_with(|| left_count.cmp(right_count))
+                .then_with(|| right_token.cmp(left_token))
+        })
+        .map(|(token, _)| token)
+}
+
 fn structural_selector_tokens(text: &str) -> HashSet<String> {
     text.split(|ch: char| !ch.is_ascii_alphanumeric())
         .map(str::trim)
         .filter(|token| token.len() >= 2)
         .map(|token| token.to_ascii_lowercase())
         .collect()
+}
+
+fn structural_selector_candidates(text: &str) -> HashSet<String> {
+    let mut candidates = structural_selector_tokens(text);
+    let words = text
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .map(str::trim)
+        .filter(|token| token.len() >= 2)
+        .map(|token| token.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    for window in 2..=words.len().min(4) {
+        for slice in words.windows(window) {
+            candidates.insert(slice.join("_"));
+            candidates.insert(slice.join("-"));
+        }
+    }
+    candidates
 }
 
 fn path_text_variants(workspace_root: &Path, raw_path: &str, resolved: &Path) -> Vec<String> {
@@ -17753,6 +19040,11 @@ fn should_repair_structured_extract_path(
     let raw = Path::new(raw_path);
     let raw_is_bare_filename = raw.components().count() == 1;
     if raw_is_bare_filename {
+        if auto_locator_is_workspace_root_scope(workspace_root, auto_locator_path)
+            && is_workspace_root_direct_child(workspace_root, current)
+        {
+            return false;
+        }
         return true;
     }
     if !matches!(
@@ -17769,6 +19061,20 @@ fn should_repair_structured_extract_path(
         .filter(|value| !value.is_empty())
         .map(|auto_path| same_existing_or_display_path(Path::new(auto_path), current))
         .unwrap_or(true)
+}
+
+fn auto_locator_is_workspace_root_scope(
+    workspace_root: &Path,
+    auto_locator_path: Option<&str>,
+) -> bool {
+    let Some(raw_auto_path) = auto_locator_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    let auto_path = resolve_workspace_path(workspace_root, raw_auto_path);
+    auto_path.is_dir() && same_existing_or_display_path(&auto_path, workspace_root)
 }
 
 fn resolve_workspace_path(workspace_root: &Path, raw_path: &str) -> PathBuf {
@@ -18804,6 +20110,109 @@ fn archive_pack_pair_for_route(route: &RouteResult) -> Option<(String, String)> 
         return None;
     }
     Some((source, archive))
+}
+
+fn archive_pack_pair_for_route_or_text(
+    workspace_root: &Path,
+    route: &RouteResult,
+    user_text: &str,
+    original_user_text: Option<&str>,
+    auto_locator_path: Option<&str>,
+) -> Option<(String, String)> {
+    if let Some(pair) = archive_pack_pair_for_route(route) {
+        return Some(pair);
+    }
+    if !matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ArchivePack
+            | crate::OutputSemanticKind::FilesystemMutationResult
+            | crate::OutputSemanticKind::GeneratedFileDelivery
+    ) {
+        return None;
+    }
+
+    let mut archive_candidates = Vec::<String>::new();
+    for candidate in [
+        Some(route.output_contract.locator_hint.as_str()),
+        auto_locator_path,
+        Some(user_text),
+        original_user_text,
+        Some(route.resolved_intent.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        collect_archive_locator_candidates(&mut archive_candidates, candidate);
+    }
+    let archive = archive_candidates
+        .iter()
+        .find(|candidate| is_supported_archive_path(candidate))
+        .cloned()?;
+
+    let mut source_candidates = Vec::<String>::new();
+    for text in [
+        Some(user_text),
+        original_user_text,
+        Some(route.resolved_intent.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        for locator in
+            crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(text)
+        {
+            let candidate = locator.locator_hint.trim();
+            if candidate.is_empty()
+                || is_supported_archive_path(candidate)
+                || source_candidates
+                    .iter()
+                    .any(|existing| existing.eq_ignore_ascii_case(candidate))
+            {
+                continue;
+            }
+            let resolved = resolve_workspace_path(workspace_root, candidate);
+            if resolved.exists() {
+                source_candidates.push(candidate.to_string());
+            }
+        }
+    }
+    let source = source_candidates.into_iter().next()?;
+    Some((source, archive))
+}
+
+fn collect_archive_locator_candidates(out: &mut Vec<String>, text: &str) {
+    let text = text.trim();
+    if text.is_empty() {
+        return;
+    }
+    if is_supported_archive_path(text)
+        && !out
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(text))
+    {
+        out.push(text.to_string());
+    }
+    for locator in
+        crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(text)
+    {
+        let candidate = locator.locator_hint.trim();
+        if is_supported_archive_path(candidate)
+            && !out
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(candidate))
+        {
+            out.push(candidate.to_string());
+        }
+    }
+    for candidate in crate::delivery_utils::extract_filename_candidates(text) {
+        if is_supported_archive_path(&candidate)
+            && !out
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(&candidate))
+        {
+            out.push(candidate);
+        }
+    }
 }
 
 fn action_args(action: &AgentAction) -> Option<&Value> {
@@ -20394,6 +21803,19 @@ fn concrete_respond_has_structural_observation_anchors(
     false
 }
 
+fn route_allows_model_language_terminal_respond(route: Option<&RouteResult>) -> bool {
+    let Some(route) = route else {
+        return false;
+    };
+    if route.output_contract.delivery_required
+        || route.output_contract.response_shape == crate::OutputResponseShape::FileToken
+    {
+        return false;
+    }
+    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+        .is_some_and(|shape| shape.allows_model_language())
+}
+
 fn rewrite_observed_terminal_synthesis_concrete_respond(
     route_result: Option<&RouteResult>,
     loop_state: &LoopState,
@@ -20417,6 +21839,14 @@ fn rewrite_observed_terminal_synthesis_concrete_respond(
     };
     if !is_concrete_final_respond_content(content) {
         return actions;
+    }
+    if route_allows_model_language_terminal_respond(route_result)
+        && concrete_respond_has_structural_observation_anchors(loop_state, content)
+    {
+        let mut rewritten = actions;
+        rewritten.remove(last_idx - 1);
+        info!("plan_drop_redundant_observed_synthesis_before_grounded_respond");
+        return rewritten;
     }
     let content_excerpt_contract = route_result.is_some_and(|route| {
         route
@@ -21123,6 +22553,77 @@ fn inject_synthesize_answer_for_bare_placeholder_respond(
     rewritten
 }
 
+fn route_requires_terminal_observation_synthesis(route_result: Option<&RouteResult>) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+    {
+        return false;
+    }
+    if route.output_contract.response_shape == crate::OutputResponseShape::OneSentence
+        || route.output_contract.exact_sentence_count.is_some()
+    {
+        return matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+                | crate::OutputSemanticKind::RawCommandOutput
+                | crate::OutputSemanticKind::CommandOutputSummary
+                | crate::OutputSemanticKind::DirectoryPurposeSummary
+                | crate::OutputSemanticKind::ContentExcerptSummary
+                | crate::OutputSemanticKind::ContentExcerptWithSummary
+                | crate::OutputSemanticKind::WorkspaceProjectSummary
+        );
+    }
+    matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::CommandOutputSummary
+            | crate::OutputSemanticKind::DirectoryPurposeSummary
+            | crate::OutputSemanticKind::ContentExcerptSummary
+            | crate::OutputSemanticKind::ContentExcerptWithSummary
+            | crate::OutputSemanticKind::WorkspaceProjectSummary
+    )
+}
+
+fn append_terminal_synthesize_for_observation_summary_contract(
+    route_result: Option<&RouteResult>,
+    actions: Vec<AgentAction>,
+) -> Vec<AgentAction> {
+    if !route_requires_terminal_observation_synthesis(route_result) {
+        return actions;
+    }
+    if actions.is_empty() {
+        return actions;
+    }
+    if matches!(
+        actions.last(),
+        Some(AgentAction::Respond { .. } | AgentAction::SynthesizeAnswer { .. })
+    ) {
+        return actions;
+    }
+    if !matches!(
+        actions.last(),
+        Some(
+            AgentAction::CallSkill { .. }
+                | AgentAction::CallTool { .. }
+                | AgentAction::CallCapability { .. }
+        )
+    ) {
+        return actions;
+    }
+    let mut rewritten = actions;
+    rewritten.push(AgentAction::SynthesizeAnswer {
+        evidence_refs: vec!["last_output".to_string()],
+    });
+    info!("plan_append_terminal_synthesize_for_observation_summary_contract");
+    rewritten
+}
+
 fn strip_intermediate_synthesize_before_later_execution(
     actions: Vec<AgentAction>,
 ) -> Vec<AgentAction> {
@@ -21355,6 +22856,21 @@ pub(super) async fn plan_round_actions(
             );
             return Ok(plan_result);
         }
+        if let Some(plan_result) = content_presence_quoted_literal_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            user_text,
+            Some(&original_user_text_for_policy),
+            auto_locator_path,
+        ) {
+            info!(
+                "plan_deterministic_content_presence_quoted_literal task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
         if let Some(plan_result) = git_repository_state_deterministic_plan_result(
             goal,
             route_result,
@@ -21525,6 +23041,34 @@ pub(super) async fn plan_round_actions(
             );
             return Ok(plan_result);
         }
+        if let Some(plan_result) = directory_purpose_auto_locator_deterministic_plan_result(
+            state,
+            goal,
+            route_result,
+            loop_state,
+            user_text,
+            Some(&original_user_text_for_policy),
+            auto_locator_path,
+        ) {
+            info!(
+                "plan_deterministic_directory_purpose_auto_locator task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
+        if let Some(plan_result) = generic_path_content_log_analyze_deterministic_plan_result(
+            goal,
+            state,
+            route_result,
+            loop_state,
+            auto_locator_path,
+        ) {
+            info!(
+                "plan_deterministic_generic_path_content_log_analyze task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
         if let Some(plan_result) = directory_tree_auto_locator_deterministic_plan_result(
             state,
             goal,
@@ -21554,6 +23098,21 @@ pub(super) async fn plan_round_actions(
             );
             return Ok(plan_result);
         }
+        if let Some(plan_result) = archive_pack_deterministic_plan_result(
+            goal,
+            state,
+            route_result,
+            loop_state,
+            &original_user_text_for_policy,
+            Some(&original_user_text_for_policy),
+            auto_locator_path,
+        ) {
+            info!(
+                "plan_deterministic_archive_pack task_id={} round={}",
+                task.task_id, loop_state.round_no
+            );
+            return Ok(plan_result);
+        }
         if let Some(plan_result) =
             archive_unpack_deterministic_plan_result(goal, state, route_result, loop_state)
         {
@@ -21577,6 +23136,7 @@ pub(super) async fn plan_round_actions(
             return Ok(plan_result);
         }
         if let Some(plan_result) = content_excerpt_summary_auto_locator_deterministic_plan_result(
+            state,
             goal,
             route_result,
             loop_state,
@@ -21601,13 +23161,14 @@ pub(super) async fn plan_round_actions(
     } else {
         "<omitted: lightweight_execution>".to_string()
     };
+    let contract_skill_scope = contract_scoped_planner_skill_scope(route_result);
     let skill_playbooks = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
-        build_skill_playbooks_text(state, task)
+        build_skill_playbooks_text_scoped(state, task, contract_skill_scope.as_ref())
     } else {
         build_lightweight_skill_playbooks_text(state, task)
     };
     let skill_quick_index = if matches!(planning_class, PlanningPromptClass::OpenPlanning) {
-        build_skill_quick_index_text(state, task)
+        build_skill_quick_index_text_scoped(state, task, contract_skill_scope.as_ref())
     } else {
         build_lightweight_skill_quick_index_text(state, task)
     };

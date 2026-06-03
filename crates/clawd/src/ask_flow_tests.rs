@@ -1,4 +1,5 @@
 use super::{
+    active_file_basename_direct_answer_candidate,
     active_ordered_entries_count_direct_answer_candidate, apply_direct_answer_gate_outcome,
     ask_reply_with_chat_process, chat_prompt_context_with_route_resolution,
     chat_request_for_prompt, chat_user_request, contract_test_hint_should_enter_planner_loop,
@@ -16,6 +17,7 @@ use super::{
     direct_chat_answer_needs_repair, direct_chat_answer_repair_prompt,
     ensure_active_task_required_visible_literals, forbidden_visible_literals_from_state_patch,
     locator_hint_mentions_current_request, normalizer_chat_direct_answer_candidate,
+    normalizer_chat_direct_answer_candidate_with_context_summary,
     normalizer_runtime_fact_direct_answer_candidate, output_contract_from_direct_answer_gate,
     preferred_route_clarify_question, promote_inline_json_transform_context_to_planner,
     recent_count_comparison_direct_answer, replacement_pairs_from_state_patch,
@@ -652,22 +654,100 @@ fn direct_answer_gate_promotes_resolved_workspace_child_context() {
     };
     let gate = gate_out("direct_answer", gate_contract(false, "none", "none"));
 
-    let outcome = apply_direct_answer_gate_outcome(
-        &state,
-        &mut ctx,
-        "Preview how images under ./document could be categorized. Do not move files.",
-        gate,
-    );
+    let request = "Preview how images under ./document could be categorized. Do not move files.";
+    let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
 
     assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
     let route = ctx.route_result.expect("route");
     assert!(route.is_execute_gate());
+    assert_eq!(route.resolved_intent, request);
     assert!(route.output_contract.requires_content_evidence);
     assert_eq!(
         route.output_contract.locator_kind,
         crate::OutputLocatorKind::Path
     );
     assert!(route.output_contract.locator_hint.ends_with("document"));
+    assert!(route
+        .route_reason
+        .contains("direct_answer_gate_workspace_child_context_execute"));
+}
+
+#[test]
+fn direct_answer_gate_keeps_exact_answer_candidate_for_workspace_path_explanation() {
+    let root = TempDirGuard::new("gate_exact_answer_workspace_path");
+    std::fs::create_dir_all(root.path.join("logs")).expect("logs dir");
+    std::fs::write(root.path.join("logs").join("clawd.log"), "startup\n").expect("log file");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+
+    let mut route = chat_route_for_gate();
+    route.resolved_intent = concat!(
+        "用一句话说明 logs/clawd.log 的用途\n",
+        "answer_candidate: logs/clawd.log 记录 clawd 守护进程的运行日志，包括启动、错误和请求等关键信息。"
+    )
+    .to_string();
+    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
+    route.output_contract.exact_sentence_count = Some(1);
+    let mut ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut contract = gate_contract(false, "none", "none");
+    contract.response_shape = "one_sentence".to_string();
+    contract.exact_sentence_count = Some(1);
+    let gate = gate_out("direct_answer", contract);
+
+    let outcome = apply_direct_answer_gate_outcome(
+        &state,
+        &mut ctx,
+        "不要执行命令，用一句话说明 logs/clawd.log 一般是干什么的。",
+        gate,
+    );
+
+    assert!(matches!(outcome, DirectAnswerPreflight::DirectAnswer));
+    let route = ctx.route_result.expect("route");
+    assert!(route.is_chat_gate());
+    assert!(!route.output_contract.requires_content_evidence);
+    assert!(route
+        .route_reason
+        .contains("direct_answer_gate_exact_candidate_ignored_execution"));
+}
+
+#[test]
+fn direct_answer_gate_planner_execute_preserves_current_workspace_child_request() {
+    let root = TempDirGuard::new("gate_workspace_child_context_planner");
+    std::fs::create_dir_all(root.path.join("docs")).expect("docs dir");
+    std::fs::write(root.path.join("docs").join("release.md"), "# Release\n").expect("release doc");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+
+    let mut route = chat_route_for_gate();
+    route.resolved_intent = concat!(
+        "list docs, then classify release.md\n",
+        "answer_candidate: release.md is a checklist"
+    )
+    .to_string();
+    let mut ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let gate = gate_out("planner_execute", gate_contract(false, "none", "none"));
+
+    let request = "List files under ./docs, then read release.md and classify it in one sentence.";
+    let outcome = apply_direct_answer_gate_outcome(&state, &mut ctx, request, gate);
+
+    assert!(matches!(outcome, DirectAnswerPreflight::PlannerExecute(_)));
+    let route = ctx.route_result.expect("route");
+    assert!(route.is_execute_gate());
+    assert_eq!(route.resolved_intent, request);
+    assert!(route.output_contract.requires_content_evidence);
+    assert_eq!(
+        route.output_contract.locator_kind,
+        crate::OutputLocatorKind::Path
+    );
+    assert!(route.output_contract.locator_hint.ends_with("docs"));
     assert!(route
         .route_reason
         .contains("direct_answer_gate_workspace_child_context_execute"));
@@ -1864,9 +1944,14 @@ fn direct_answer_gate_marks_contextual_inline_payload_execution() {
         route.output_contract.locator_kind,
         crate::OutputLocatorKind::None
     );
-    assert!(route
-        .route_reason
-        .contains("inline_structured_payload_context_execute"));
+    assert!(
+        route
+            .route_reason
+            .contains("inline_structured_payload_context_execute"),
+        "route_reason={:?}, output_contract={:?}",
+        route.route_reason,
+        route.output_contract
+    );
 }
 
 #[test]
@@ -3458,6 +3543,42 @@ fn chat_prompt_context_includes_recent_execution_when_contract_requires_evidence
 }
 
 #[test]
+fn chat_prompt_context_includes_recent_execution_for_repaired_evidence_route() {
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::direct_answer(),
+        resolved_intent: "Compare two previously observed file excerpts.".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "semantic_contract_requires_evidence; active_text_followup_route_repair"
+            .to_string(),
+        route_confidence: Some(0.94),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract::default(),
+    };
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        cross_turn_recent_execution_context: Some(
+            "first read_range result: README fixture\nsecond read_range result: service notes"
+                .to_string(),
+        ),
+        ..Default::default()
+    };
+
+    let rendered = chat_prompt_context_with_route_resolution("<none>", Some(&ctx));
+
+    assert!(rendered.contains("### RECENT_EXECUTION_CONTEXT"));
+    assert!(rendered.contains("README fixture"));
+    assert!(rendered.contains("service notes"));
+}
+
+#[test]
 fn chat_user_request_preserves_inline_structured_prompt_when_resolution_dropped_payload() {
     let prompt = r#"sort this JSON array by score descending and render it as a markdown table: [{"name":"alpha","score":7},{"name":"beta","score":12}]"#;
     let resolved =
@@ -3555,8 +3676,10 @@ fn alias_state_patch_uses_structured_ack_without_chat_llm() {
 
 #[test]
 fn structural_alias_ack_uses_quote_and_single_locator_without_gate_llm() {
+    let mut route = chat_route_for_gate();
+    route.should_refresh_long_term_memory = true;
     let ctx = crate::agent_engine::AgentRunContext {
-        route_result: Some(chat_route_for_gate()),
+        route_result: Some(route),
         turn_analysis: Some(crate::intent_router::TurnAnalysis {
             turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
             target_task_policy: Some(crate::intent_router::TargetTaskPolicy::Standalone),
@@ -3580,6 +3703,67 @@ fn structural_alias_ack_uses_quote_and_single_locator_without_gate_llm() {
         "已记住：`乙` -> `/tmp/device/docs/service_notes.md`。"
     );
     assert!(reply.messages.is_empty());
+}
+
+#[test]
+fn structural_alias_ack_uses_unquoted_memory_alias_and_answer_candidate() {
+    let mut route = chat_route_for_gate();
+    route.resolved_intent = concat!(
+        "Acknowledge and retain that the note file path is ",
+        "scripts/nl_tests/fixtures/device_local/docs/service_notes.md\n",
+        "answer_candidate: confirmed"
+    )
+    .to_string();
+    route.should_refresh_long_term_memory = false;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        turn_analysis: Some(crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+            target_task_policy: None,
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        }),
+        ..Default::default()
+    };
+
+    let reply = structural_alias_binding_ack(
+        Some(&ctx),
+        "Remember that the note file means scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only confirmed.",
+        "Acknowledge and retain that the note file path is scripts/nl_tests/fixtures/device_local/docs/service_notes.md\nanswer_candidate: confirmed",
+        "en",
+    )
+    .unwrap();
+
+    assert_eq!(reply.text, "confirmed");
+    assert!(reply.messages.is_empty());
+}
+
+#[test]
+fn structural_alias_ack_rejects_recall_question_without_memory_update_contract() {
+    let mut route = chat_route_for_gate();
+    route.resolved_intent =
+        "Recall the first file and the directory inspected earlier.".to_string();
+    route.should_refresh_long_term_memory = false;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        turn_analysis: Some(crate::intent_router::TurnAnalysis {
+            turn_type: Some(crate::intent_router::TurnType::PreferenceOrMemory),
+            target_task_policy: None,
+            should_interrupt_active_run: false,
+            state_patch: None,
+            attachment_processing_required: false,
+        }),
+        ..Default::default()
+    };
+
+    assert!(structural_alias_binding_ack(
+        Some(&ctx),
+        "上一个结果里说的“第一个文件”是什么，上上个动作查的又是什么目录",
+        "Recall the first file and the directory inspected earlier.",
+        "zh-CN",
+    )
+    .is_none());
 }
 
 #[test]
@@ -3758,6 +3942,157 @@ followup_ordered_entries: 1:orders | 2:service_logs | 3:users"
         )
         .as_deref(),
         Some("orders")
+    );
+}
+
+#[test]
+fn normalizer_chat_direct_answer_uses_repaired_turn_binding_candidate() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut route = chat_route_for_gate();
+    let candidate = "上一个结果中的第一个文件是 app.log；上上个动作查询的目录是 /tmp/device/logs";
+    route.resolved_intent = format!("recent_turn_binding\nanswer_candidate: {candidate}");
+    route.route_reason =
+        "recent turn binding resolved; llm_semantic_contract_repair:contract_structurally_valid_but_turn_binding_invalid_active_task_context; repaired target /tmp/device/logs"
+            .to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        context_bundle_summary: Some(
+            "route_view=false resolved_prompt=recent_turn_binding\n\
+answer_candidate: 上一个结果中的第一个文件是 app.log；上上个动作查询的目录是 /tmp/device/logs\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_op_kind: Read\n\
+followup_bound_target: /tmp/device/docs\n\
+observed_bound_target: /tmp/device/docs"
+                .to_string(),
+        ),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        normalizer_chat_direct_answer_candidate(&state, "merged prompt", Some(&ctx)).as_deref(),
+        Some(candidate)
+    );
+}
+
+#[test]
+fn normalizer_chat_direct_answer_uses_context_answer_candidate_with_route_path_support() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut route = chat_route_for_gate();
+    let candidate = "第一个文件是 app.log，上上个动作查询的目录是 /tmp/device/logs";
+    route.resolved_intent = "recent_turn_binding".to_string();
+    route.route_reason = "recent context resolved app.log and the logs directory".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        context_bundle_summary: Some(
+            "route_view=false resolved_prompt=recent_turn_binding\n\
+answer_candidate: 第一个文件是 app.log，上上个动作查询的目录是 /tmp/device/logs\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_op_kind: Read\n\
+followup_bound_target: /tmp/device/docs\n\
+observed_bound_target: /tmp/device/docs"
+                .to_string(),
+        ),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        normalizer_chat_direct_answer_candidate(&state, "merged prompt", Some(&ctx)).as_deref(),
+        Some(candidate)
+    );
+}
+
+#[test]
+fn normalizer_chat_direct_answer_uses_context_answer_candidate_with_existing_workspace_path() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut route = chat_route_for_gate();
+    let target = state
+        .skill_rt
+        .workspace_root
+        .join("rustclaw_context_candidate_marker");
+    std::fs::create_dir_all(&target).expect("create workspace child");
+    let target = target.to_string_lossy().to_string();
+    let candidate = format!("resolved directory: {target}");
+    route.resolved_intent = "recent_turn_binding".to_string();
+    route.route_reason = "recent context resolved the requested directory".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        context_bundle_summary: Some(format!(
+            "route_view=false resolved_prompt=recent_turn_binding\n\
+answer_candidate: {candidate}\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_op_kind: Read\n\
+followup_bound_target: /tmp/device/docs\n\
+observed_bound_target: /tmp/device/docs"
+        )),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        normalizer_chat_direct_answer_candidate(
+            &state,
+            &format!("recent_turn_binding\nanswer_candidate: {candidate}"),
+            Some(&ctx),
+        )
+        .as_deref(),
+        Some(candidate.as_str())
+    );
+}
+
+#[test]
+fn normalizer_chat_direct_answer_uses_rendered_context_override_candidate() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut route = chat_route_for_gate();
+    let target = state
+        .skill_rt
+        .workspace_root
+        .join("rustclaw_context_candidate_marker");
+    std::fs::create_dir_all(&target).expect("create workspace child");
+    let target = target.to_string_lossy().to_string();
+    let candidate = format!("resolved directory: {target}");
+    route.resolved_intent = "recent_turn_binding".to_string();
+    route.route_reason = "recent context resolved the requested directory".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let rendered_context = format!(
+        "route_view=false resolved_prompt=recent_turn_binding\n\
+answer_candidate: {candidate}\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_op_kind: Read\n\
+followup_bound_target: /tmp/device/docs\n\
+observed_bound_target: /tmp/device/docs"
+    );
+
+    assert_eq!(
+        normalizer_chat_direct_answer_candidate_with_context_summary(
+            &state,
+            &format!("recent_turn_binding\nanswer_candidate: {candidate}"),
+            Some(&ctx),
+            Some(&rendered_context),
+        )
+        .as_deref(),
+        Some(candidate.as_str())
+    );
+}
+
+#[test]
+fn normalizer_chat_direct_answer_rejects_repaired_turn_binding_without_path_proof() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut route = chat_route_for_gate();
+    route.resolved_intent =
+        "recent_turn_binding\nanswer_candidate: 查询目录是 /tmp/device/logs".to_string();
+    route.route_reason =
+        "recent turn binding resolved; llm_semantic_contract_repair:contract_structurally_valid_but_turn_binding_invalid_active_task_context; repaired target /tmp/device/docs"
+            .to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        normalizer_chat_direct_answer_candidate(&state, "merged prompt", Some(&ctx)),
+        None
     );
 }
 
@@ -3987,6 +4322,37 @@ fn normalizer_runtime_fact_direct_answer_allows_scalar_clarify_guard_output() {
 }
 
 #[test]
+fn normalizer_runtime_fact_direct_answer_skips_execute_gate() {
+    let Some(runtime_user) = ["USER", "LOGNAME", "USERNAME"]
+        .into_iter()
+        .filter_map(|key| std::env::var(key).ok())
+        .map(|value| value.trim().to_string())
+        .find(|value| !value.is_empty())
+    else {
+        return;
+    };
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let mut route = chat_route_for_gate();
+    route.ask_mode = crate::AskMode::planner_execute_plain();
+    route.resolved_intent = format!("runtime_scalar\nanswer_candidate: {runtime_user}");
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = false;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    assert!(normalizer_runtime_fact_direct_answer_candidate(
+        &state,
+        &format!("runtime_scalar\nanswer_candidate: {runtime_user}"),
+        Some(&ctx),
+    )
+    .is_none());
+}
+
+#[test]
 fn runtime_scalar_path_direct_answer_uses_verified_contract_locator() {
     let state = crate::AppState::test_default_with_fixture_provider();
     let runtime_path = state.skill_rt.workspace_root.to_string_lossy().to_string();
@@ -4059,6 +4425,425 @@ fn runtime_scalar_path_direct_answer_rejects_unverified_locator() {
 
     assert_eq!(
         runtime_scalar_path_direct_answer_candidate(&state, Some(&ctx)),
+        None
+    );
+}
+
+#[test]
+fn active_file_basename_direct_answer_uses_active_bound_file_target() {
+    let root = TempDirGuard::new("active_file_basename");
+    let target = root.path.join("README.md");
+    std::fs::write(&target, "# Demo\n").expect("write readme");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::direct_answer(),
+        resolved_intent: "Return the active file target basename.".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "active file basename contract".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            semantic_kind: crate::OutputSemanticKind::FileBasename,
+            locator_kind: crate::OutputLocatorKind::None,
+            locator_hint: String::new(),
+            ..Default::default()
+        },
+    };
+    let target = target.display().to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        context_bundle_summary: Some(format!(
+            "route_view=false\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_source_request: read opening\n\
+followup_op_kind: Read\n\
+followup_bound_target: {target}\n\
+observed_bound_target: {target}\n"
+        )),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        active_file_basename_direct_answer_candidate(&state, Some(&ctx)).as_deref(),
+        Some("README.md")
+    );
+}
+
+#[test]
+fn active_file_basename_direct_answer_overrides_clarify_evidence_misroute() {
+    let root = TempDirGuard::new("active_file_basename_clarify");
+    let target = root.path.join("README.txt");
+    std::fs::write(&target, "# Demo\n").expect("write readme");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::clarify(),
+        resolved_intent: "Return the active file target basename.".to_string(),
+        needs_clarify: true,
+        clarify_question: String::new(),
+        route_reason: "active file basename contract needs evidence".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            semantic_kind: crate::OutputSemanticKind::FileBasename,
+            locator_kind: crate::OutputLocatorKind::None,
+            locator_hint: String::new(),
+            requires_content_evidence: true,
+            ..Default::default()
+        },
+    };
+    let target = target.display().to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        context_bundle_summary: Some(format!(
+            "route_view=false\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_source_request: deliver first entry\n\
+followup_op_kind: Delivery\n\
+followup_bound_target: {target}\n\
+observed_bound_target: {target}\n"
+        )),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        active_file_basename_direct_answer_candidate(&state, Some(&ctx)).as_deref(),
+        Some("README.txt")
+    );
+}
+
+#[test]
+fn active_file_basename_direct_answer_uses_bound_answer_candidate_for_generic_scalar_contract() {
+    let root = TempDirGuard::new("active_file_basename_candidate");
+    let target = root.path.join("README.txt");
+    std::fs::write(&target, "# Demo\n").expect("write readme");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent: "Return the compact active result.\nanswer_candidate: README.txt"
+            .to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "generic scalar candidate from active file result".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_kind: crate::OutputLocatorKind::None,
+            locator_hint: String::new(),
+            requires_content_evidence: true,
+            ..Default::default()
+        },
+    };
+    let target = target.display().to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        context_bundle_summary: Some(format!(
+            "route_view=false\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_source_request: deliver first entry\n\
+followup_op_kind: Delivery\n\
+followup_bound_target: {target}\n\
+observed_bound_target: {target}\n"
+        )),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        active_file_basename_direct_answer_candidate(&state, Some(&ctx)).as_deref(),
+        Some("README.txt")
+    );
+}
+
+#[test]
+fn active_file_basename_direct_answer_uses_context_answer_candidate() {
+    let root = TempDirGuard::new("active_file_basename_context_candidate");
+    let target = root.path.join("release_checklist.md");
+    std::fs::write(&target, "# Demo\n").expect("write release");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent: "Return compact active result.".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "direct_answer_decision_overridden_by_executable_contract".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_kind: crate::OutputLocatorKind::None,
+            locator_hint: String::new(),
+            requires_content_evidence: true,
+            ..Default::default()
+        },
+    };
+    let target = target.display().to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        context_bundle_summary: Some(format!(
+            "route_view=false resolved_prompt=only basename\n\
+answer_candidate: release_checklist.md\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_source_request: deliver release checklist\n\
+followup_op_kind: Delivery\n\
+followup_bound_target: {target}\n\
+observed_bound_target: {target}\n"
+        )),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        active_file_basename_direct_answer_candidate(&state, Some(&ctx)).as_deref(),
+        Some("release_checklist.md")
+    );
+}
+
+#[test]
+fn active_file_basename_direct_answer_uses_bound_answer_candidate_for_scalar_path_contract() {
+    let root = TempDirGuard::new("active_file_basename_scalar_path");
+    let target = root.path.join("README.txt");
+    std::fs::write(&target, "# Demo\n").expect("write readme");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent:
+            "Return the basename of the active delivered file.\nanswer_candidate: README.txt"
+                .to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "scalar path candidate from active file result".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            semantic_kind: crate::OutputSemanticKind::ScalarPathOnly,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            locator_hint: String::new(),
+            requires_content_evidence: true,
+            ..Default::default()
+        },
+    };
+    let target = target.display().to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        context_bundle_summary: Some(format!(
+            "route_view=false\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_source_request: deliver first entry\n\
+followup_op_kind: Delivery\n\
+followup_bound_target: {target}\n\
+observed_bound_target: {target}\n"
+        )),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        active_file_basename_direct_answer_candidate(&state, Some(&ctx)).as_deref(),
+        Some("README.txt")
+    );
+}
+
+#[test]
+fn active_file_basename_direct_answer_uses_delivery_anchor_for_file_names_contract() {
+    let root = TempDirGuard::new("active_file_basename_file_names");
+    let target = root.path.join("README.txt");
+    std::fs::write(&target, "# Demo\n").expect("write readme");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent: "Return the active delivered file name.".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "file names contract from active file delivery".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Strict,
+            semantic_kind: crate::OutputSemanticKind::FileNames,
+            locator_kind: crate::OutputLocatorKind::None,
+            locator_hint: String::new(),
+            requires_content_evidence: true,
+            ..Default::default()
+        },
+    };
+    let target = target.display().to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        context_bundle_summary: Some(format!(
+            "route_view=false\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_source_request: deliver first entry\n\
+followup_op_kind: Delivery\n\
+followup_bound_target: {target}\n\
+observed_bound_target: {target}\n"
+        )),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        active_file_basename_direct_answer_candidate(&state, Some(&ctx)).as_deref(),
+        Some("README.txt")
+    );
+}
+
+#[test]
+fn active_file_basename_direct_answer_uses_delivery_anchor_mutation_marker() {
+    let root = TempDirGuard::new("active_file_basename_delivery_marker");
+    let target = root.path.join("Report.MD");
+    std::fs::write(&target, "# Demo\n").expect("write report");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = root.path.clone();
+    state.skill_rt.default_locator_search_dir = root.path.clone();
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent: "Return a direct active delivery follow-up.".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "active_task_mutation_to_direct_answer".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Free,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_kind: crate::OutputLocatorKind::None,
+            locator_hint: String::new(),
+            requires_content_evidence: true,
+            ..Default::default()
+        },
+    };
+    let target = target.display().to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        context_bundle_summary: Some(format!(
+            "route_view=false\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_source_request: deliver this file\n\
+followup_op_kind: Delivery\n\
+followup_bound_target: {target}\n\
+observed_bound_target: {target}\n"
+        )),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        active_file_basename_direct_answer_candidate(&state, Some(&ctx)).as_deref(),
+        Some("Report.MD")
+    );
+}
+
+#[test]
+fn active_file_basename_direct_answer_rejects_generic_scalar_contract() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let target = state.skill_rt.workspace_root.join("README.md");
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::direct_answer(),
+        resolved_intent: "Return a scalar from the active output.".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "generic scalar contract".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_kind: crate::OutputLocatorKind::None,
+            locator_hint: String::new(),
+            ..Default::default()
+        },
+    };
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        context_bundle_summary: Some(format!(
+            "route_view=false\n\n\
+### ACTIVE_EXECUTION_ANCHOR\n\
+followup_bound_target: {}\n",
+            target.display()
+        )),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        active_file_basename_direct_answer_candidate(&state, Some(&ctx)),
         None
     );
 }
