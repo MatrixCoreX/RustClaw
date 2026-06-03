@@ -403,7 +403,7 @@ fn fetch_with_url_succeeds_direct_feed() {
         serde_json::Value::Object(args.as_object().unwrap().clone()),
     );
     assert!(result.is_ok(), "{result:?}");
-    let text = result.unwrap();
+    let text = result.unwrap().text;
     assert!(!text.trim().is_empty());
 }
 
@@ -572,7 +572,7 @@ fn partial_fail_returns_ok_when_at_least_one_source_succeeds() {
         "expected ok when at least one source succeeds: {:?}",
         result
     );
-    let text = result.unwrap();
+    let text = result.unwrap().text;
     assert!(text.contains("sources_ok="));
     assert!(text.contains("items="));
 }
@@ -597,7 +597,35 @@ fn limit_applied_after_merge_and_dedupe() {
     let args = args.as_object().unwrap().clone();
     let result = execute(&mut cfg, serde_json::Value::Object(args));
     assert!(result.is_ok(), "{:?}", result);
-    let text = result.unwrap();
+    let text = result.unwrap().text;
     assert!(text.starts_with("sources_ok="));
     assert!(text.contains("items=2") || text.contains("items=1"));
+}
+
+#[test]
+fn feed_item_extra_exposes_structured_news_fields() {
+    let item = FeedItem {
+        title: "Example market update".to_string(),
+        link: "https://example.com/news/1".to_string(),
+        date: "2026-06-02T10:00:00Z".to_string(),
+        source: "https://example.com/feed.xml".to_string(),
+        layer: "feed".to_string(),
+    };
+
+    let extra = feed_item_extra(&item);
+
+    assert_eq!(
+        extra.get("title").and_then(Value::as_str),
+        Some("Example market update")
+    );
+    assert_eq!(
+        extra.get("link").and_then(Value::as_str),
+        Some("https://example.com/news/1")
+    );
+    assert_eq!(
+        extra.get("source_host").and_then(Value::as_str),
+        Some("example.com")
+    );
+    assert_eq!(extra.get("layer").and_then(Value::as_str), Some("feed"));
+    assert!(extra.get("topic").and_then(Value::as_str).is_some());
 }

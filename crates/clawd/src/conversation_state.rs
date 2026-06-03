@@ -377,6 +377,7 @@ fn merge_alias_bindings_for_turn(
     let mut alias_bindings = merge_alias_bindings(prior_state, turn_analysis);
     for binding in structural_alias_bindings_from_prompt(
         prior_state,
+        turn_analysis,
         prompt,
         route_result,
         resolved_prompt_for_execution,
@@ -393,6 +394,7 @@ fn merge_alias_bindings_for_turn(
 
 fn structural_alias_bindings_from_prompt(
     prior_state: Option<&ConversationState>,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     prompt: &str,
     route_result: &crate::RouteResult,
     resolved_prompt_for_execution: &str,
@@ -402,6 +404,16 @@ fn structural_alias_bindings_from_prompt(
         structural_alias_binding_from_prompt(prompt, route_result, resolved_prompt_for_execution)
     {
         out.push(binding);
+    } else if turn_analysis
+        .and_then(|analysis| analysis.turn_type)
+        .is_some_and(|turn_type| {
+            matches!(
+                turn_type,
+                crate::intent_router::TurnType::PreferenceOrMemory
+            )
+        })
+    {
+        out.extend(structural_alias_bindings_from_single_locator_prefix(prompt));
     }
     let rebinds = structural_alias_rebinds_from_prompt(prior_state, prompt);
     if !rebinds.is_empty() {
@@ -559,6 +571,24 @@ fn single_structural_quoted_alias(text: &str) -> Option<String> {
     candidates.sort();
     candidates.dedup();
     (candidates.len() == 1).then(|| candidates.remove(0))
+}
+
+pub(crate) fn structural_alias_binding_from_memory_prompt(
+    prompt: &str,
+    route_result: &crate::RouteResult,
+    resolved_prompt_for_execution: &str,
+) -> Option<SessionAliasBinding> {
+    if let Some(binding) =
+        structural_alias_binding_from_prompt(prompt, route_result, resolved_prompt_for_execution)
+    {
+        return Some(binding);
+    }
+    if !route_result.is_chat_gate() || route_result.output_contract.requires_content_evidence {
+        return None;
+    }
+    structural_alias_bindings_from_single_locator_prefix(prompt)
+        .into_iter()
+        .next()
 }
 
 fn structural_alias_candidate_is_safe(candidate: &str) -> bool {

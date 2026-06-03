@@ -14,6 +14,7 @@ It is search-only:
 - returns normalized search result items
 - does not perform browser rendering or page content extraction
 - can provide URL list for downstream `browser_web` extraction
+- successful responses mirror the structured search payload into `extra.items`, `extra.candidates`, and `extra.field_value` so runtime evidence checks do not parse the JSON string in `text`
 
 ## Config Entry Points (from interface)
 - No dedicated config entry points declared.
@@ -63,6 +64,24 @@ Response:
   "request_id": "web-1",
   "status": "ok",
   "text": "{\"status\":\"ok\",\"backend\":\"duckduckgo_html\",\"items\":[{\"title\":\"Rust Async\",\"url\":\"https://example.com\"}],\"extract_urls\":[\"https://example.com\"],\"summary\":\"1 result\",\"citations\":[\"https://example.com\"],\"notes\":\"search only\"}",
+  "extra": {
+    "schema_version": 1,
+    "action": "search_extract",
+    "query": "rust async tutorial",
+    "top_k": 3,
+    "backend": "duckduckgo_html",
+    "backend_connected": true,
+    "status": "ok",
+    "field_value": {
+      "status": "ok",
+      "result_count": 1,
+      "summary": "1 result"
+    },
+    "items": [{"title":"Rust Async","url":"https://example.com","rank":1,"source":"example.com","snippet":null}],
+    "candidates": [{"title":"Rust Async","url":"https://example.com","rank":1,"source":"example.com","snippet":null}],
+    "extract_urls": ["https://example.com"],
+    "citations": ["https://example.com"]
+  },
   "error_text": null
 }
 ```
@@ -83,6 +102,8 @@ Returned JSON inside `text` contains:
 - `summary`: lightweight result summary (based on result metadata only)
 - `citations[]`: same as result URLs
 - `notes`: boundary hint
+- `extra.items` / `extra.candidates`: same normalized result array, present even when empty
+- `extra.field_value.result_count`: stable result count for evidence checks
 
 - Dedup by normalized URL.
 - URL normalization removes fragments and common tracking params (`utm_*`, `gclid`, `fbclid`).

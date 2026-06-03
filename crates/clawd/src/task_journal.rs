@@ -6,14 +6,31 @@ const MAX_OBSERVED_EVIDENCE_ITEMS: usize = 24;
 const MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS: usize = 240;
 const MAX_OBSERVED_EVIDENCE_KEYS: usize = 16;
 const MAX_OBSERVED_EVIDENCE_DEPTH: usize = 3;
+const MAX_OBSERVED_MULTILINE_EXCERPT_LINES: usize = 12;
 const MAX_OBSERVED_ARRAY_SAMPLES: usize = 3;
+const MAX_OBSERVED_ARRAY_VALUE_SAMPLES: usize = 48;
 const MAX_RESULT_TRACE_BYTES: usize = 128 * 1024;
 const MAX_RESULT_TRACE_ARRAY_ITEMS: usize = 24;
 const MAX_RESULT_TRACE_STRING_CHARS: usize = 768;
 const MAX_RESULT_TRACE_COMPACT_ARRAY_ITEMS: usize = 8;
 const MAX_RESULT_TRACE_COMPACT_STRING_CHARS: usize = 240;
 const JSON_EVIDENCE_PRIORITY_KEYS: &[&str] = &[
+    "title",
+    "content_excerpt",
+    "excerpt",
+    "text",
+    "summary",
+    "snippet",
+    "field_value",
+    "path",
+    "resolved_path",
+    "metadata",
     "sort_by",
+    "clawd_process_count",
+    "telegramd_process_count",
+    "clawd_health_port_open",
+    "clawd_log",
+    "telegramd_log",
     "candidates",
     "names",
     "entries",
@@ -637,7 +654,13 @@ const EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         format: "json",
         schema_version: 1,
         source_action_ref: None,
-        provided_evidence: &["error_text", "error_kind", "generic_json_fields"],
+        provided_evidence: &[
+            "command_output",
+            "error_text",
+            "error_kind",
+            "field_value",
+            "generic_json_fields",
+        ],
         strict_shape_eligible: false,
         fallback: true,
     },
@@ -770,7 +793,7 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
     step_json_extractor(
         "fs_basic.grep_text",
         "fs_basic.grep_text.structured_json_v1",
-        &["content_excerpt", "content_match", "path"],
+        &["candidates", "content_excerpt", "content_match", "path"],
     ),
     step_json_extractor(
         "fs_basic.read_text_range",
@@ -865,12 +888,29 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
     step_json_extractor(
         "git_basic",
         "git_basic.structured_json_v1",
-        &["field_value", "status"],
+        &[
+            "command_output",
+            "content_excerpt",
+            "field_value",
+            "status",
+            "subject",
+        ],
     ),
     step_json_extractor(
         "health_check",
         "health_check.structured_json_v1",
         &["field_value", "status"],
+    ),
+    step_json_extractor(
+        "http_basic",
+        "http_basic.structured_json_v1",
+        &[
+            "content_excerpt",
+            "field_value",
+            "status",
+            "status_code",
+            "url",
+        ],
     ),
     step_json_extractor(
         "log_analyze",
@@ -1034,6 +1074,11 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         "archive_basic.unpack.structured_json_v1",
         &["path"],
     ),
+    step_json_extractor(
+        "kb.ingest",
+        "kb.ingest.structured_json_v1",
+        &["count", "field_value", "path"],
+    ),
     step_text_extractor(
         "archive_basic",
         "archive_basic.text_legacy_v1",
@@ -1058,6 +1103,11 @@ const EXPLICIT_EVIDENCE_EXTRACTOR_REGISTRY: &[EvidenceExtractorSpec] = &[
         "x",
         "x.text_legacy_v1",
         &["field_value", "legacy_machine_tokens"],
+    ),
+    step_text_extractor(
+        "task_control.list",
+        "task_control.list.text_legacy_v1",
+        &["content_excerpt", "field_value", "status"],
     ),
     EvidenceExtractorSpec {
         observation_source: EvidenceObservationSource::StepOutput,
@@ -1206,6 +1256,7 @@ fn observed_evidence_from_step_output(step: &TaskJournalStepTrace) -> Option<Val
     let fallback_extractor = match serde_json::from_str::<Value>(output) {
         Ok(value) => {
             let mut collector = ObservedEvidenceCollector::default();
+            collect_embedded_http_json_body_evidence(&mut collector, &value);
             collect_json_observed_evidence(&mut collector, "json_output", "", &value, 0);
             let fallback_extractor = evidence_extractor_spec(
                 EvidenceObservationSource::StepOutput,
@@ -1214,6 +1265,9 @@ fn observed_evidence_from_step_output(step: &TaskJournalStepTrace) -> Option<Val
             let extractor =
                 explicit_step_output_extractor_spec(step, output, fallback_extractor.kind)
                     .unwrap_or(fallback_extractor);
+            if extractor.extractor_ref == "git_basic.structured_json_v1" {
+                collect_git_json_observed_evidence_fields(&mut collector, &value);
+            }
             return observed_evidence_from_collector(collector, extractor);
         }
         Err(_) => evidence_extractor_spec(
@@ -1234,6 +1288,7 @@ fn collect_observed_evidence_from_output(
     let mut collector = ObservedEvidenceCollector::default();
     let extractor = match serde_json::from_str::<Value>(output) {
         Ok(value) => {
+            collect_embedded_http_json_body_evidence(&mut collector, &value);
             collect_json_observed_evidence(&mut collector, "json_output", "", &value, 0);
             evidence_extractor_spec(
                 EvidenceObservationSource::StepOutput,
@@ -1442,6 +1497,8 @@ fn observed_evidence_from_error(error: Option<&str>) -> Option<Value> {
         if let Some(extra) = structured.extra.as_ref() {
             collect_json_observed_evidence(&mut collector, "structured_error.extra", "", extra, 0);
         }
+        collect_structured_error_not_found_evidence(&mut collector, &structured);
+        collect_structured_error_command_output_evidence(&mut collector, &structured);
         evidence_extractor_spec(
             EvidenceObservationSource::StepError,
             EvidenceExtractorKind::StructuredJson,
@@ -1467,6 +1524,85 @@ fn observed_evidence_from_error(error: Option<&str>) -> Option<Value> {
         "truncated": item_count > collector.items.len(),
         "items": collector.items,
     }))
+}
+
+fn collect_structured_error_not_found_evidence(
+    collector: &mut ObservedEvidenceCollector,
+    structured: &crate::skills::StructuredSkillError,
+) {
+    if structured.error_kind != "not_found" {
+        return;
+    }
+    collector.push(json_observed_evidence_item(
+        "structured_error",
+        "exists",
+        &json!(false),
+    ));
+    collector.push(json_observed_evidence_item(
+        "structured_error",
+        "kind",
+        &json!("missing"),
+    ));
+    collector.push(json_observed_evidence_item(
+        "structured_error",
+        "content_match",
+        &json!(false),
+    ));
+    if let Some(path) = structured
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get("path"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        collector.push(json_observed_evidence_item(
+            "structured_error",
+            "path",
+            &json!(path),
+        ));
+    }
+}
+
+fn collect_structured_error_command_output_evidence(
+    collector: &mut ObservedEvidenceCollector,
+    structured: &crate::skills::StructuredSkillError,
+) {
+    let has_run_cmd_failure_shape = structured.skill.eq_ignore_ascii_case("run_cmd")
+        || structured
+            .extra
+            .as_ref()
+            .is_some_and(|extra| extra.get("exit_code").is_some() || extra.get("stderr").is_some());
+    if !has_run_cmd_failure_shape {
+        return;
+    }
+    let summary_skill = if structured.skill.trim().is_empty() {
+        "run_cmd"
+    } else {
+        structured.skill.as_str()
+    };
+    let structured_error = crate::skills::structured_skill_error_from_parts(
+        summary_skill,
+        structured.error_kind.as_str(),
+        structured.error_text.as_str(),
+        structured.platform.as_deref(),
+        structured.extra.clone(),
+    );
+    let summary = crate::skills::normalize_skill_error_for_user(summary_skill, &structured_error);
+    let summary = summary.trim();
+    if summary.is_empty() {
+        return;
+    }
+    collector.push(text_extracted_evidence_item_with_source(
+        "command_output",
+        "structured_error.extractor",
+        summary,
+    ));
+    collector.push(text_extracted_evidence_item_with_source(
+        "field_value",
+        "structured_error.extractor",
+        summary,
+    ));
 }
 
 #[derive(Default)]
@@ -1499,16 +1635,20 @@ fn collect_json_observed_evidence(
             if depth > 0 {
                 collector.push(json_observed_evidence_item(source, prefix, value));
             }
+            collect_structured_missing_search_evidence(collector, source, prefix, map);
             let mut emitted_priority_keys = BTreeSet::new();
-            if depth == 0 && prefix.is_empty() {
-                for key in JSON_EVIDENCE_PRIORITY_KEYS {
-                    if let Some(child) = map.get(*key) {
-                        if *key == "entries" {
-                            collector.push(json_observed_evidence_item(source, key, child));
-                        } else {
-                            collect_json_object_child(collector, source, depth, prefix, key, child);
-                            emitted_priority_keys.insert((*key).to_string());
-                        }
+            for key in JSON_EVIDENCE_PRIORITY_KEYS {
+                if let Some(child) = map.get(*key) {
+                    let field = if prefix.is_empty() {
+                        (*key).to_string()
+                    } else {
+                        format!("{prefix}.{key}")
+                    };
+                    if *key == "entries" && depth == 0 && prefix.is_empty() {
+                        collector.push(json_observed_evidence_item(source, &field, child));
+                    } else {
+                        collect_json_object_child(collector, source, depth, prefix, key, child);
+                        emitted_priority_keys.insert((*key).to_string());
                     }
                 }
             }
@@ -1541,6 +1681,202 @@ fn collect_json_observed_evidence(
     }
 }
 
+fn collect_embedded_http_json_body_evidence(
+    collector: &mut ObservedEvidenceCollector,
+    value: &Value,
+) {
+    let collected_preview = value
+        .pointer("/extra/body_preview")
+        .and_then(Value::as_str)
+        .is_some_and(|body| {
+            collect_embedded_json_body_string_evidence(
+                collector,
+                "json_output.extra.body_json",
+                body,
+            )
+        });
+    if collected_preview {
+        return;
+    }
+    let Some(text) = value.get("text").and_then(Value::as_str) else {
+        return;
+    };
+    let Some(body) = status_prefixed_json_body(text) else {
+        return;
+    };
+    collect_embedded_json_body_string_evidence(collector, "json_output.text.body_json", &body);
+}
+
+fn collect_embedded_json_body_string_evidence(
+    collector: &mut ObservedEvidenceCollector,
+    source: &str,
+    body: &str,
+) -> bool {
+    let body = body.trim();
+    if body.is_empty() {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(body) else {
+        return false;
+    };
+    collect_priority_json_status_scalar_evidence(collector, source, "body", &value, 0);
+    collect_json_observed_evidence(collector, source, "body", &value, 0);
+    true
+}
+
+fn status_prefixed_json_body(output: &str) -> Option<String> {
+    let mut non_empty_lines = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let first_line = non_empty_lines.next()?;
+    if !first_line.starts_with("status=") {
+        return None;
+    }
+    let body = non_empty_lines.collect::<Vec<_>>().join("\n");
+    (!body.is_empty()).then_some(body)
+}
+
+fn collect_priority_json_status_scalar_evidence(
+    collector: &mut ObservedEvidenceCollector,
+    source: &str,
+    prefix: &str,
+    value: &Value,
+    depth: usize,
+) {
+    if depth > MAX_OBSERVED_EVIDENCE_DEPTH {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                let field = if prefix.is_empty() {
+                    key.to_string()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                if json_status_scalar_field_is_priority(&field, child) {
+                    collector.push(json_observed_evidence_item(source, &field, child));
+                }
+                if matches!(child, Value::Object(_) | Value::Array(_)) {
+                    collect_priority_json_status_scalar_evidence(
+                        collector,
+                        source,
+                        &field,
+                        child,
+                        depth + 1,
+                    );
+                }
+            }
+        }
+        Value::Array(items) => {
+            for (idx, child) in items.iter().take(MAX_OBSERVED_ARRAY_SAMPLES).enumerate() {
+                let field = if prefix.is_empty() {
+                    format!("[{idx}]")
+                } else {
+                    format!("{prefix}[{idx}]")
+                };
+                if json_status_scalar_field_is_priority(&field, child) {
+                    collector.push(json_observed_evidence_item(source, &field, child));
+                }
+                if matches!(child, Value::Object(_) | Value::Array(_)) {
+                    collect_priority_json_status_scalar_evidence(
+                        collector,
+                        source,
+                        &field,
+                        child,
+                        depth + 1,
+                    );
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn json_status_scalar_field_is_priority(field: &str, value: &Value) -> bool {
+    if !matches!(
+        value,
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_)
+    ) {
+        return false;
+    }
+    let normalized = normalize_evidence_field(field);
+    let leaf = normalized_field_leaf(&normalized);
+    matches!(
+        leaf,
+        "ok" | "status"
+            | "healthy"
+            | "version"
+            | "worker_state"
+            | "uptime_seconds"
+            | "running_length"
+    ) || leaf.ends_with("_healthy")
+        || leaf.ends_with("_status")
+        || leaf.ends_with("_state")
+        || (matches!(leaf, "name" | "kind" | "scope") && normalized.contains("statuses["))
+}
+
+fn collect_structured_missing_search_evidence(
+    collector: &mut ObservedEvidenceCollector,
+    source: &str,
+    prefix: &str,
+    map: &serde_json::Map<String, Value>,
+) {
+    let Some(locator) = structured_missing_search_locator(map) else {
+        return;
+    };
+    let field_prefix = if prefix.is_empty() {
+        String::new()
+    } else {
+        format!("{prefix}.")
+    };
+    collector.push(text_extracted_evidence_item_with_source(
+        &format!("{field_prefix}path"),
+        source,
+        &locator,
+    ));
+    collector.push(json_observed_evidence_item(
+        source,
+        &format!("{field_prefix}exists"),
+        &json!(false),
+    ));
+}
+
+fn structured_missing_search_locator(map: &serde_json::Map<String, Value>) -> Option<String> {
+    let action = map
+        .get("action")
+        .and_then(Value::as_str)
+        .map(normalize_evidence_field)?;
+    if !matches!(action.as_str(), "find_entries" | "find_name" | "find_path") {
+        return None;
+    }
+    if map.get("count").and_then(Value::as_u64) != Some(0) {
+        return None;
+    }
+    if map
+        .get("results")
+        .and_then(Value::as_array)
+        .is_some_and(|results| !results.is_empty())
+    {
+        return None;
+    }
+    map.get("patterns")
+        .and_then(Value::as_array)
+        .and_then(|patterns| patterns.iter().find_map(structured_search_pattern_locator))
+}
+
+fn structured_search_pattern_locator(value: &Value) -> Option<String> {
+    let locator = value.as_str()?.trim();
+    if locator.is_empty()
+        || locator.len() > MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS
+        || locator.contains(|ch| matches!(ch, '\n' | '\r' | '\0'))
+    {
+        return None;
+    }
+    Some(locator.to_string())
+}
+
 fn collect_json_object_child(
     collector: &mut ObservedEvidenceCollector,
     source: &str,
@@ -1558,6 +1894,7 @@ fn collect_json_object_child(
         format!("{prefix}.{key}")
     };
     collector.push(json_observed_evidence_item(source, &field, child));
+    collect_multiline_excerpt_line_evidence(collector, source, &field, child);
     if depth < MAX_OBSERVED_EVIDENCE_DEPTH && matches!(child, Value::Object(_) | Value::Array(_)) {
         let child_source = if depth == 0 && key == "extra" {
             "json_output.extra"
@@ -1566,6 +1903,42 @@ fn collect_json_object_child(
         };
         collect_json_observed_evidence(collector, child_source, &field, child, depth + 1);
     }
+}
+
+fn collect_multiline_excerpt_line_evidence(
+    collector: &mut ObservedEvidenceCollector,
+    source: &str,
+    field: &str,
+    value: &Value,
+) {
+    let Some(text) = value.as_str() else {
+        return;
+    };
+    if !json_field_should_split_multiline_excerpt(field) || !text.contains('\n') {
+        return;
+    }
+    for (idx, line) in text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(MAX_OBSERVED_MULTILINE_EXCERPT_LINES)
+        .enumerate()
+    {
+        collector.push(json!({
+            "field": "content_excerpt",
+            "source": source,
+            "kind": "text",
+            "origin_field": field,
+            "line_index": idx,
+            "excerpt": redacted_text_excerpt(line),
+            "hash": stable_trace_hash(line),
+        }));
+    }
+}
+
+fn json_field_should_split_multiline_excerpt(field: &str) -> bool {
+    let leaf = normalized_field_leaf(field);
+    matches!(leaf, "excerpt" | "content_excerpt")
 }
 
 fn json_observed_evidence_item(source: &str, field: &str, value: &Value) -> Value {
@@ -1607,6 +1980,29 @@ fn json_observed_evidence_item(source: &str, field: &str, value: &Value) -> Valu
                     json!(sample_keys.into_iter().collect::<Vec<_>>()),
                 );
             }
+            if !sensitive_field {
+                let mut redacted_sample_values = 0_usize;
+                let sample_values = items
+                    .iter()
+                    .take(MAX_OBSERVED_ARRAY_VALUE_SAMPLES)
+                    .filter_map(|value| {
+                        provider_safe_array_sample_value(value, &mut redacted_sample_values)
+                    })
+                    .collect::<Vec<_>>();
+                if !sample_values.is_empty() {
+                    item.insert("sample_values".to_string(), json!(sample_values));
+                    item.insert(
+                        "sample_values_truncated".to_string(),
+                        json!(items.len() > MAX_OBSERVED_ARRAY_VALUE_SAMPLES),
+                    );
+                }
+                if redacted_sample_values > 0 {
+                    item.insert(
+                        "redacted_sample_values".to_string(),
+                        json!(redacted_sample_values),
+                    );
+                }
+            }
         }
         Value::Null => {
             item.insert("excerpt".to_string(), json!("null"));
@@ -1623,15 +2019,70 @@ fn json_observed_evidence_item(source: &str, field: &str, value: &Value) -> Valu
             item.insert("hash".to_string(), json!(stable_trace_hash(&text)));
         }
         Value::String(value) => {
-            if sensitive_field || text_looks_sensitive(value) {
+            if sensitive_field {
+                item.insert("redacted".to_string(), json!(true));
+            } else if text_looks_sensitive(value) && !evidence_field_allows_redacted_excerpt(field)
+            {
                 item.insert("redacted".to_string(), json!(true));
             } else {
-                item.insert("excerpt".to_string(), json!(evidence_excerpt(value)));
+                let excerpt = if text_looks_sensitive(value) {
+                    redacted_text_excerpt(value)
+                } else {
+                    evidence_excerpt(value)
+                };
+                item.insert("excerpt".to_string(), json!(excerpt));
                 item.insert("hash".to_string(), json!(stable_trace_hash(value)));
             }
         }
     }
     Value::Object(item)
+}
+
+fn provider_safe_array_sample_value(value: &Value, redacted_count: &mut usize) -> Option<Value> {
+    match value {
+        Value::String(value) => {
+            if text_looks_sensitive(value) {
+                *redacted_count += 1;
+                None
+            } else {
+                Some(json!(evidence_excerpt(value)))
+            }
+        }
+        Value::Number(_) | Value::Bool(_) | Value::Null => Some(value.clone()),
+        Value::Object(map) => {
+            let mut sampled = serde_json::Map::new();
+            for key in [
+                "name",
+                "path",
+                "resolved_path",
+                "kind",
+                "size_bytes",
+                "modified_ts",
+            ] {
+                let Some(child) = map.get(key) else {
+                    continue;
+                };
+                if evidence_field_is_sensitive(key) {
+                    continue;
+                }
+                match child {
+                    Value::String(text) => {
+                        if text_looks_sensitive(text) {
+                            *redacted_count += 1;
+                        } else {
+                            sampled.insert(key.to_string(), json!(evidence_excerpt(text)));
+                        }
+                    }
+                    Value::Number(_) | Value::Bool(_) | Value::Null => {
+                        sampled.insert(key.to_string(), child.clone());
+                    }
+                    _ => {}
+                }
+            }
+            (!sampled.is_empty()).then(|| Value::Object(sampled))
+        }
+        Value::Array(_) => None,
+    }
 }
 
 fn text_observed_evidence_item(output: &str) -> Value {
@@ -1674,6 +2125,7 @@ fn collect_text_observed_evidence_fields(collector: &mut ObservedEvidenceCollect
         collector.push(text_extracted_evidence_item("path", &path));
     }
     collect_text_machine_key_value_evidence(collector, output);
+    collect_status_prefixed_json_body_evidence(collector, output);
     let lines = output
         .lines()
         .map(str::trim)
@@ -1709,6 +2161,37 @@ fn collect_text_observed_evidence_fields(collector: &mut ObservedEvidenceCollect
     }
 }
 
+fn collect_status_prefixed_json_body_evidence(
+    collector: &mut ObservedEvidenceCollector,
+    output: &str,
+) {
+    let mut non_empty_lines = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let Some(first_line) = non_empty_lines.next() else {
+        return;
+    };
+    if !first_line.starts_with("status=") {
+        return;
+    }
+    let body = non_empty_lines.collect::<Vec<_>>().join("\n");
+    if body.is_empty() {
+        return;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(&body) else {
+        return;
+    };
+    collect_priority_json_status_scalar_evidence(
+        collector,
+        "text_output.body_json",
+        "body",
+        &value,
+        0,
+    );
+    collect_json_observed_evidence(collector, "text_output.body_json", "body", &value, 0);
+}
+
 fn collect_git_text_observed_evidence_fields(
     collector: &mut ObservedEvidenceCollector,
     output: &str,
@@ -1716,8 +2199,82 @@ fn collect_git_text_observed_evidence_fields(
     if let Some(subject) = text_git_oneline_subject_evidence(output) {
         collector.push(text_extracted_evidence_item("subject", &subject));
     }
+    let subjects = text_git_oneline_subjects_evidence(output);
+    if !subjects.is_empty() {
+        collector.push(text_extracted_evidence_item_with_source(
+            "git_subjects",
+            "text_output.extractor",
+            &subjects.join("\n"),
+        ));
+    }
     if let Some(state) = text_git_state_evidence(output) {
         collector.push(text_extracted_evidence_item("state", state));
+    }
+}
+
+fn collect_git_json_observed_evidence_fields(
+    collector: &mut ObservedEvidenceCollector,
+    value: &Value,
+) {
+    let Some(extra) = value.get("extra").and_then(Value::as_object) else {
+        return;
+    };
+    let action = extra
+        .get("action")
+        .or_else(|| extra.get("raw_action"))
+        .and_then(Value::as_str)
+        .map(normalize_machine_token)
+        .unwrap_or_default();
+    if !matches!(
+        action.as_str(),
+        "log" | "status" | "branch" | "current_branch" | "changed_files" | "rev_parse"
+    ) {
+        return;
+    }
+    let Some(output) = extra
+        .get("output")
+        .or_else(|| value.get("text"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|output| !output.is_empty())
+    else {
+        return;
+    };
+    collector.push(text_extracted_evidence_item_with_source(
+        "command_output",
+        "json_output.extra",
+        output,
+    ));
+    collector.push(text_extracted_evidence_item_with_source(
+        "content_excerpt",
+        "json_output.extra",
+        output,
+    ));
+    if action == "log" {
+        if let Some(subject) = text_git_oneline_subject_evidence(output) {
+            collector.push(text_extracted_evidence_item_with_source(
+                "subject",
+                "json_output.extra",
+                &subject,
+            ));
+        }
+        let subjects = text_git_oneline_subjects_evidence(output);
+        if !subjects.is_empty() {
+            collector.push(text_extracted_evidence_item_with_source(
+                "git_subjects",
+                "json_output.extra",
+                &subjects.join("\n"),
+            ));
+        }
+    }
+    if action == "status" {
+        if let Some(state) = text_git_state_evidence(output) {
+            collector.push(text_extracted_evidence_item_with_source(
+                "state",
+                "json_output.extra",
+                state,
+            ));
+        }
     }
 }
 
@@ -1779,10 +2336,14 @@ fn machine_key_value_evidence_key_allowed(key: &str) -> bool {
 }
 
 fn text_extracted_evidence_item(field: &str, value: &str) -> Value {
+    text_extracted_evidence_item_with_source(field, "text_output.extractor", value)
+}
+
+fn text_extracted_evidence_item_with_source(field: &str, source: &str, value: &str) -> Value {
     let excerpt = redacted_text_excerpt(value);
     json!({
         "field": field,
-        "source": "text_output.extractor",
+        "source": source,
         "kind": "text",
         "excerpt": excerpt,
         "hash": stable_trace_hash(value),
@@ -1922,6 +2483,14 @@ fn labeled_text_path_evidence(output: &str) -> Option<String> {
 }
 
 fn text_git_oneline_subject_evidence(output: &str) -> Option<String> {
+    text_git_oneline_subjects_evidence(output)
+        .into_iter()
+        .next()
+}
+
+fn text_git_oneline_subjects_evidence(output: &str) -> Vec<String> {
+    const MAX_GIT_SUBJECT_EVIDENCE: usize = 12;
+    let mut subjects = Vec::new();
     for line in output
         .lines()
         .map(str::trim)
@@ -1939,10 +2508,13 @@ fn text_git_oneline_subject_evidence(output: &str) -> Option<String> {
         };
         let subject = subject.trim();
         if text_looks_like_git_hash(hash) && !subject.is_empty() {
-            return Some(subject.to_string());
+            subjects.push(subject.to_string());
+            if subjects.len() >= MAX_GIT_SUBJECT_EVIDENCE {
+                break;
+            }
         }
     }
-    None
+    subjects
 }
 
 fn text_looks_like_git_hash(value: &str) -> bool {
@@ -2021,6 +2593,23 @@ fn evidence_field_is_sensitive(field: &str) -> bool {
     .any(|needle| normalized.contains(needle))
 }
 
+fn evidence_field_allows_redacted_excerpt(field: &str) -> bool {
+    let leaf = normalized_field_leaf(field);
+    matches!(
+        leaf,
+        "body"
+            | "body_preview"
+            | "content"
+            | "content_excerpt"
+            | "description"
+            | "excerpt"
+            | "snippet"
+            | "summary"
+            | "text"
+            | "title"
+    )
+}
+
 fn evidence_excerpt(text: &str) -> String {
     let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.len() <= MAX_OBSERVED_EVIDENCE_EXCERPT_CHARS {
@@ -2053,6 +2642,9 @@ fn text_looks_sensitive(text: &str) -> bool {
     if known_non_secret_config_risk_label(trimmed) {
         return false;
     }
+    if looks_like_safe_file_token(trimmed) {
+        return false;
+    }
     if trimmed.contains('/') || trimmed.contains('\\') {
         return false;
     }
@@ -2068,6 +2660,53 @@ fn text_looks_sensitive(text: &str) -> bool {
         .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | '+'))
         .count();
     dense_chars * 100 / trimmed.len().max(1) >= 85
+}
+
+fn looks_like_safe_file_token(text: &str) -> bool {
+    let Some((stem, ext)) = text.rsplit_once('.') else {
+        return false;
+    };
+    if stem.is_empty()
+        || ext.is_empty()
+        || ext.len() > 12
+        || !ext.chars().all(|ch| ch.is_ascii_alphanumeric())
+    {
+        return false;
+    }
+    let ext = ext.to_ascii_lowercase();
+    matches!(
+        ext.as_str(),
+        "bash"
+            | "bmp"
+            | "csv"
+            | "db"
+            | "gif"
+            | "gz"
+            | "html"
+            | "jpeg"
+            | "jpg"
+            | "json"
+            | "lock"
+            | "log"
+            | "md"
+            | "mp3"
+            | "pdf"
+            | "png"
+            | "rs"
+            | "sh"
+            | "sqlite"
+            | "svg"
+            | "tar"
+            | "toml"
+            | "ts"
+            | "tsx"
+            | "txt"
+            | "wav"
+            | "webp"
+            | "yaml"
+            | "yml"
+            | "zip"
+    )
 }
 
 fn known_non_secret_config_risk_label(text: &str) -> bool {
@@ -2259,7 +2898,12 @@ pub(crate) fn evidence_coverage_for_route(
         crate::task_contract::required_evidence_fields_for_output_contract(&route.output_contract);
     let (observed_fields, mut observed_canonical, observed_extractors, observed_evidence_sources) =
         observed_evidence_field_sets(journal);
-    augment_route_canonical_evidence(route, &observed_fields, &mut observed_canonical);
+    augment_route_canonical_evidence(
+        route,
+        &observed_fields,
+        &observed_extractors,
+        &mut observed_canonical,
+    );
     let evidence_expression = crate::contract_matrix::bundled_contract_matrix()
         .and_then(|matrix| matrix.match_output_contract(&route.output_contract))
         .map(|matched| matched.evidence_expression());
@@ -2486,8 +3130,18 @@ fn observed_evidence_field_sets(
 fn augment_route_canonical_evidence(
     route: &crate::RouteResult,
     observed_fields: &BTreeSet<String>,
+    observed_extractors: &BTreeSet<String>,
     observed_canonical: &mut BTreeSet<String>,
 ) {
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::ConfigMutation {
+        if observed_field_present(observed_fields, "valid")
+            || observed_field_present(observed_fields, "validated")
+            || config_mutation_plan_fields_present(observed_fields)
+            || observed_extractors.contains("config_edit.plan_config_change.structured_json_v1")
+        {
+            observed_canonical.insert("valid".to_string());
+        }
+    }
     if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
         && observed_canonical.contains("size_bytes")
     {
@@ -2502,11 +3156,35 @@ fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+        && (observed_canonical.contains("content_excerpt")
+            || observed_canonical.contains("field_value")
+            || observed_fields.contains("excerpt")
+            || observed_fields.contains("text_excerpt"))
+    {
+        observed_canonical.insert("command_output".to_string());
+    }
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FileNames | crate::OutputSemanticKind::FilePaths
+    ) && observed_canonical.contains("content_match")
+        && observed_canonical.contains("path")
+    {
+        observed_canonical.insert("candidates".to_string());
+    }
     if route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly
         && (observed_canonical.contains("path")
             || observed_canonical.contains("content_match")
             || observed_canonical.contains("candidates")
             || observed_field_with_prefix(observed_fields, "results["))
+    {
+        observed_canonical.insert("field_value".to_string());
+    }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::RecentArtifactsJudgment
+        && (observed_canonical.contains("content_excerpt")
+            || observed_canonical.contains("content_match")
+            || observed_fields.contains("excerpt")
+            || observed_fields.contains("text_excerpt"))
     {
         observed_canonical.insert("field_value".to_string());
     }
@@ -2551,6 +3229,15 @@ fn augment_route_canonical_evidence(
     {
         observed_canonical.insert("field_value".to_string());
     }
+    if matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::WebPageSummary
+            | crate::OutputSemanticKind::ContentExcerptSummary
+            | crate::OutputSemanticKind::ContentExcerptWithSummary
+    ) && http_response_body_fields_present(observed_fields)
+    {
+        observed_canonical.insert("content_excerpt".to_string());
+    }
     if route.output_contract.semantic_kind == crate::OutputSemanticKind::PublishingPreview
         && (observed_canonical.contains("command_output")
             || observed_canonical.contains("content_excerpt")
@@ -2571,6 +3258,10 @@ fn observed_field_with_prefix(observed_fields: &BTreeSet<String>, prefix: &str) 
     observed_fields
         .iter()
         .any(|field| field.starts_with(prefix))
+}
+
+fn http_response_body_fields_present(observed_fields: &BTreeSet<String>) -> bool {
+    observed_fields.contains("body") || observed_field_with_prefix(observed_fields, "body.")
 }
 
 fn normalized_field_leaf(field: &str) -> &str {
@@ -2599,18 +3290,52 @@ fn step_can_supply_contract_evidence(
     match step.status {
         crate::executor::StepExecutionStatus::Ok => true,
         crate::executor::StepExecutionStatus::Error => {
-            step.skill == "run_cmd"
-                && route.is_some_and(|route| {
-                    route.output_contract.semantic_kind
-                        == crate::OutputSemanticKind::ExecutionFailedStep
-                        || crate::task_contract::required_evidence_fields_for_output_contract(
-                            &route.output_contract,
-                        )
-                        .iter()
-                        .any(|field| field == "command_output")
-                })
+            step_error_supplies_negative_contract_evidence(step, route)
+                || step.skill == "run_cmd"
+                    && route.is_some_and(|route| {
+                        route.output_contract.semantic_kind
+                            == crate::OutputSemanticKind::ExecutionFailedStep
+                            || crate::task_contract::required_evidence_fields_for_output_contract(
+                                &route.output_contract,
+                            )
+                            .iter()
+                            .any(|field| field == "command_output")
+                    })
         }
     }
+}
+
+fn step_error_supplies_negative_contract_evidence(
+    step: &TaskJournalStepTrace,
+    route: Option<&crate::RouteResult>,
+) -> bool {
+    let Some(route) = route else {
+        return false;
+    };
+    if !matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ContentPresenceCheck
+            | crate::OutputSemanticKind::ContentExcerptSummary
+            | crate::OutputSemanticKind::ContentExcerptWithSummary
+            | crate::OutputSemanticKind::ExcerptKindJudgment
+            | crate::OutputSemanticKind::ExistenceWithPath
+            | crate::OutputSemanticKind::ExistenceWithPathSummary
+    ) {
+        return false;
+    }
+    let Some(error) = step
+        .error_excerpt
+        .as_deref()
+        .map(str::trim)
+        .filter(|error| !error.is_empty())
+    else {
+        return false;
+    };
+    if error.starts_with("__RC_READ_FILE_NOT_FOUND__:") {
+        return true;
+    }
+    crate::skills::parse_structured_skill_error(error)
+        .is_some_and(|structured| structured.error_kind == "not_found")
 }
 
 pub(crate) fn step_reads_text_content(step: &TaskJournalStepTrace) -> bool {
@@ -2639,6 +3364,18 @@ pub(crate) fn step_reads_text_content(step: &TaskJournalStepTrace) -> bool {
         "archive_basic" => matches!(action.as_deref(), Some("read")),
         _ => false,
     }
+}
+
+fn observed_field_present(observed_fields: &BTreeSet<String>, field: &str) -> bool {
+    observed_fields.contains(field) || observed_fields.contains(&format!("extra.{field}"))
+}
+
+fn config_mutation_plan_fields_present(observed_fields: &BTreeSet<String>) -> bool {
+    observed_field_present(observed_fields, "path")
+        && observed_field_present(observed_fields, "field_path")
+        && observed_field_present(observed_fields, "new_value")
+        && observed_field_present(observed_fields, "would_change")
+        && observed_field_present(observed_fields, "requires_confirmation")
 }
 
 fn normalize_evidence_field(field: &str) -> String {
@@ -2736,6 +3473,7 @@ fn canonical_evidence_fields_for_observed_field(field: &str) -> Vec<String> {
                 "branch",
                 "commit",
                 "valid",
+                "validated",
                 "available",
                 "healthy",
                 "running",
@@ -2839,6 +3577,16 @@ fn canonical_evidence_fields_for_observed_item(field: &str, item: &Value) -> Vec
             }
             _ => {}
         }
+    }
+    if matches!(
+        field.split_once('[').map(|(prefix, _)| prefix),
+        Some("results" | "paths" | "candidates" | "entries")
+    ) && item
+        .get("excerpt")
+        .and_then(Value::as_str)
+        .is_some_and(text_line_looks_like_path)
+    {
+        values.insert("path".to_string());
     }
     values.into_iter().collect()
 }

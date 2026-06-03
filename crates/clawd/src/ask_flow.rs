@@ -146,6 +146,15 @@ fn normalizer_answer_candidate_from_resolved_prompt(resolved_prompt: &str) -> Op
     }
 }
 
+fn normalizer_answer_candidate_from_context_bundle_summary(summary: &str) -> Option<String> {
+    summary
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix("answer_candidate:").map(str::trim))
+        .filter(|candidate| !candidate.is_empty())
+        .map(ToString::to_string)
+}
+
 fn paths_refer_to_same_existing_location(left: &Path, right: &Path) -> bool {
     if left == right {
         return true;
@@ -277,6 +286,66 @@ fn active_execution_anchor_targets(summary: &str) -> Vec<String> {
     targets
 }
 
+fn active_execution_anchor_bound_targets(summary: &str) -> Vec<String> {
+    let mut in_active_anchor = false;
+    let mut targets = Vec::new();
+    for line in summary.lines() {
+        let line = line.trim();
+        if line == "### ACTIVE_EXECUTION_ANCHOR" {
+            in_active_anchor = true;
+            continue;
+        }
+        if in_active_anchor && line.starts_with("### ") {
+            break;
+        }
+        if !in_active_anchor {
+            continue;
+        }
+        if let Some(target) = line
+            .strip_prefix("followup_bound_target:")
+            .or_else(|| line.strip_prefix("observed_bound_target:"))
+            .map(str::trim)
+            .filter(|target| !target.is_empty())
+        {
+            targets.push(target.to_string());
+        }
+    }
+    targets
+}
+
+fn active_execution_anchor_has_delivery_op(summary: &str) -> bool {
+    let mut in_active_anchor = false;
+    for line in summary.lines() {
+        let line = line.trim();
+        if line == "### ACTIVE_EXECUTION_ANCHOR" {
+            in_active_anchor = true;
+            continue;
+        }
+        if in_active_anchor && line.starts_with("### ") {
+            break;
+        }
+        if !in_active_anchor {
+            continue;
+        }
+        if line
+            .strip_prefix("followup_op_kind:")
+            .map(str::trim)
+            .is_some_and(|op_kind| op_kind.eq_ignore_ascii_case("Delivery"))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn ask_route_reason_has_marker(route: &crate::RouteResult, marker: &str) -> bool {
+    route
+        .route_reason
+        .split(';')
+        .map(str::trim)
+        .any(|part| part == marker || part.starts_with(&format!("{marker}:")))
+}
+
 fn active_anchor_ordered_entry_targets(entries: &str) -> Vec<String> {
     entries
         .split(" | ")
@@ -404,10 +473,133 @@ fn normalizer_answer_candidate_matches_bound_runtime_context(
     normalizer_bound_runtime_answer_candidate(state, candidate, agent_run_context).is_some()
 }
 
+fn normalizer_answer_candidate_matches_repaired_turn_binding(
+    state: &AppState,
+    route: &crate::RouteResult,
+    candidate: &str,
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> bool {
+    const TURN_BINDING_REPAIR_MARKER: &str =
+        "llm_semantic_contract_repair:contract_structurally_valid_but_turn_binding_invalid_active_task_context";
+    let candidate = candidate.trim();
+    if candidate.is_empty()
+        || candidate.contains('\n')
+        || candidate.starts_with('{')
+        || candidate.starts_with('[')
+        || !route_reason_has_exact_marker(route, TURN_BINDING_REPAIR_MARKER)
+    {
+        return false;
+    }
+    let pathlike_tokens = answer_candidate_pathlike_tokens(candidate);
+    if pathlike_tokens.is_empty() {
+        return false;
+    }
+    pathlike_tokens.into_iter().all(|token| {
+        pathlike_token_matches_structured_context(state, route, agent_run_context, &token)
+    })
+}
+
+fn normalizer_answer_candidate_matches_context_turn_binding(
+    state: &AppState,
+    route: &crate::RouteResult,
+    candidate: &str,
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> bool {
+    let candidate = candidate.trim();
+    if candidate.is_empty()
+        || candidate.contains('\n')
+        || candidate.starts_with('{')
+        || candidate.starts_with('[')
+    {
+        return false;
+    }
+    let pathlike_tokens = answer_candidate_pathlike_tokens(candidate);
+    if pathlike_tokens.is_empty() {
+        return false;
+    }
+    pathlike_tokens.into_iter().all(|token| {
+        pathlike_token_matches_structured_context(state, route, agent_run_context, &token)
+    })
+}
+
+fn pathlike_token_matches_structured_context(
+    state: &AppState,
+    route: &crate::RouteResult,
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+    token: &str,
+) -> bool {
+    pathlike_token_matches_target(token, route.output_contract.locator_hint.as_str())
+        || agent_run_context
+            .and_then(|ctx| ctx.auto_locator_path.as_deref())
+            .is_some_and(|target| pathlike_token_matches_target(token, target))
+        || agent_run_context
+            .and_then(|ctx| ctx.context_bundle_summary.as_deref())
+            .is_some_and(|summary| {
+                active_execution_anchor_targets(summary)
+                    .iter()
+                    .any(|target| pathlike_token_matches_target(token, target))
+            })
+        || pathlike_token_is_existing_workspace_path(state, token)
+}
+
+fn pathlike_token_matches_target(token: &str, target: &str) -> bool {
+    let token = normalize_pathlike_binding_token(token);
+    let target = normalize_pathlike_binding_token(target);
+    if token.is_empty() || target.is_empty() {
+        return false;
+    }
+    token == target
+        || target.ends_with(&format!("/{token}"))
+        || token
+            .rsplit('/')
+            .next()
+            .filter(|basename| {
+                basename.len() >= 3 && token_path_component_looks_structural(basename)
+            })
+            .is_some_and(|basename| target.ends_with(&format!("/{basename}")) || target == basename)
+}
+
+fn normalize_pathlike_binding_token(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`'))
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_string()
+}
+
+fn pathlike_token_is_existing_workspace_path(state: &AppState, token: &str) -> bool {
+    let path = Path::new(token.trim());
+    if !path.is_absolute() {
+        return false;
+    }
+    let Ok(path) = path.canonicalize() else {
+        return false;
+    };
+    let Ok(workspace_root) = state.skill_rt.workspace_root.canonicalize() else {
+        return false;
+    };
+    path.starts_with(workspace_root)
+}
+
 fn normalizer_chat_direct_answer_candidate(
     state: &AppState,
     resolved_prompt: &str,
     agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> Option<String> {
+    normalizer_chat_direct_answer_candidate_with_context_summary(
+        state,
+        resolved_prompt,
+        agent_run_context,
+        None,
+    )
+}
+
+fn normalizer_chat_direct_answer_candidate_with_context_summary(
+    state: &AppState,
+    resolved_prompt: &str,
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+    context_bundle_summary_override: Option<&str>,
 ) -> Option<String> {
     let route = agent_run_context?.route_result.as_ref()?;
     if route.needs_clarify || route.is_execute_gate() {
@@ -420,8 +612,14 @@ fn normalizer_chat_direct_answer_candidate(
     {
         return None;
     }
-    let candidate = normalizer_answer_candidate_from_resolved_prompt(resolved_prompt)
-        .or_else(|| normalizer_answer_candidate_from_resolved_prompt(&route.resolved_intent))?;
+    let primary_candidate = normalizer_answer_candidate_from_resolved_prompt(resolved_prompt)
+        .or_else(|| normalizer_answer_candidate_from_resolved_prompt(&route.resolved_intent));
+    let context_candidate = context_bundle_summary_override
+        .or_else(|| agent_run_context.and_then(|ctx| ctx.context_bundle_summary.as_deref()))
+        .and_then(normalizer_answer_candidate_from_context_bundle_summary);
+    let candidate = primary_candidate
+        .clone()
+        .or_else(|| context_candidate.clone())?;
     let bound_candidate =
         normalizer_bound_runtime_answer_candidate(state, &candidate, agent_run_context);
     if contract.requires_content_evidence {
@@ -429,6 +627,24 @@ fn normalizer_chat_direct_answer_candidate(
             return bound_candidate;
         }
         return None;
+    }
+    if normalizer_answer_candidate_matches_repaired_turn_binding(
+        state,
+        route,
+        &candidate,
+        agent_run_context,
+    ) {
+        return Some(candidate);
+    }
+    if context_candidate.as_deref() == Some(candidate.as_str())
+        && normalizer_answer_candidate_matches_context_turn_binding(
+            state,
+            route,
+            &candidate,
+            agent_run_context,
+        )
+    {
+        return Some(candidate);
     }
     bound_candidate.or_else(|| {
         normalizer_answer_candidate_matches_active_observation_synthesis(
@@ -446,7 +662,8 @@ fn normalizer_runtime_fact_direct_answer_candidate(
 ) -> Option<String> {
     let route = agent_run_context?.route_result.as_ref()?;
     let contract = &route.output_contract;
-    if contract.requires_content_evidence
+    if route.is_execute_gate()
+        || contract.requires_content_evidence
         || contract.delivery_required
         || route.wants_file_delivery
         || !matches!(contract.delivery_intent, crate::OutputDeliveryIntent::None)
@@ -534,6 +751,102 @@ fn runtime_scalar_path_direct_answer_candidate(
     let candidate = contract.locator_hint.trim();
     normalizer_answer_candidate_matches_runtime_fact(state, candidate)
         .then(|| candidate.to_string())
+}
+
+fn active_file_basename_direct_answer_candidate(
+    state: &AppState,
+    agent_run_context: Option<&crate::agent_engine::AgentRunContext>,
+) -> Option<String> {
+    let ctx = agent_run_context?;
+    let route = ctx.route_result.as_ref()?;
+    let summary = ctx.context_bundle_summary.as_deref()?.trim();
+    if summary.is_empty() {
+        return None;
+    }
+    let semantic_kind = route.output_contract.semantic_kind;
+    let semantic_basename = semantic_kind == crate::OutputSemanticKind::FileBasename;
+    let has_delivery_anchor = active_execution_anchor_has_delivery_op(summary);
+    let active_delivery_direct_answer = has_delivery_anchor
+        && ask_route_reason_has_marker(route, "active_task_mutation_to_direct_answer");
+    let semantic_delivery_file_name =
+        semantic_kind == crate::OutputSemanticKind::FileNames && has_delivery_anchor;
+    let candidate_bound_basename = matches!(
+        semantic_kind,
+        crate::OutputSemanticKind::None | crate::OutputSemanticKind::ScalarPathOnly
+    );
+    let locator_ok = route.output_contract.locator_kind == crate::OutputLocatorKind::None
+        || (candidate_bound_basename
+            && route.output_contract.locator_kind == crate::OutputLocatorKind::CurrentWorkspace
+            && route.output_contract.locator_hint.trim().is_empty());
+    if ((route.wants_file_delivery || route.output_contract.delivery_required)
+        && !active_delivery_direct_answer)
+        || (route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+            && !(semantic_delivery_file_name
+                && matches!(
+                    route.output_contract.response_shape,
+                    crate::OutputResponseShape::Free | crate::OutputResponseShape::Strict
+                ))
+            && !active_delivery_direct_answer)
+        || (!semantic_basename
+            && !candidate_bound_basename
+            && !semantic_delivery_file_name
+            && !active_delivery_direct_answer)
+        || (!locator_ok && !active_delivery_direct_answer)
+        || (route.output_contract.delivery_intent != crate::OutputDeliveryIntent::None
+            && !active_delivery_direct_answer)
+    {
+        return None;
+    }
+    let mut basenames = Vec::new();
+    for target in active_execution_anchor_bound_targets(summary) {
+        let target = target.trim();
+        if target.is_empty() {
+            continue;
+        }
+        let path = Path::new(target);
+        let is_existing_file = path.is_file()
+            || path
+                .canonicalize()
+                .ok()
+                .is_some_and(|canonical| canonical.is_file());
+        let is_workspace_file =
+            !is_existing_file && state.skill_rt.workspace_root.join(path).is_file();
+        if !is_existing_file && !is_workspace_file {
+            continue;
+        }
+        let Some(basename) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        if !basenames
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(basename))
+        {
+            basenames.push(basename.to_string());
+        }
+    }
+    match basenames.as_slice() {
+        [basename]
+            if semantic_basename
+                || semantic_delivery_file_name
+                || active_delivery_direct_answer =>
+        {
+            Some(basename.clone())
+        }
+        _ => {
+            let candidate =
+                normalizer_answer_candidate_from_resolved_prompt(&route.resolved_intent)
+                    .or_else(|| normalizer_answer_candidate_from_context_bundle_summary(summary))?;
+            let candidate = single_component_basename_candidate(&candidate)?;
+            basenames
+                .into_iter()
+                .find(|basename| basename.eq_ignore_ascii_case(candidate))
+        }
+    }
 }
 
 fn route_is_recent_count_comparison(
@@ -783,6 +1096,9 @@ fn parse_gate_semantic_kind(raw: &str) -> crate::OutputSemanticKind {
         | "command_output"
         | "command_result"
         | "command_execution_result" => crate::OutputSemanticKind::RawCommandOutput,
+        "command_output_summary" | "command_result_summary" | "command_output_synthesis" => {
+            crate::OutputSemanticKind::CommandOutputSummary
+        }
         "service_status" => crate::OutputSemanticKind::ServiceStatus,
         "hidden_entries_check" => crate::OutputSemanticKind::HiddenEntriesCheck,
         "file_names" => crate::OutputSemanticKind::FileNames,
@@ -800,7 +1116,9 @@ fn parse_gate_semantic_kind(raw: &str) -> crate::OutputSemanticKind {
         "quantity_comparison" => crate::OutputSemanticKind::QuantityComparison,
         "execution_failed_step" => crate::OutputSemanticKind::ExecutionFailedStep,
         "generated_file_delivery" => crate::OutputSemanticKind::GeneratedFileDelivery,
+        "filesystem_mutation_result" => crate::OutputSemanticKind::FilesystemMutationResult,
         "scalar_path_only" => crate::OutputSemanticKind::ScalarPathOnly,
+        "file_basename" => crate::OutputSemanticKind::FileBasename,
         "existence_with_path" => crate::OutputSemanticKind::ExistenceWithPath,
         "existence_with_path_summary" => crate::OutputSemanticKind::ExistenceWithPathSummary,
         "recent_scalar_equality_check" => crate::OutputSemanticKind::RecentScalarEqualityCheck,
@@ -1878,10 +2196,12 @@ fn direct_answer_gate_contextual_inline_structured_payload_execute(
         && contract.locator_hint.trim().is_empty()
 }
 
-fn direct_answer_gate_inline_json_payload_surface(current_user_request: &str) -> bool {
+fn direct_answer_gate_embedded_inline_json_payload_surface(current_user_request: &str) -> bool {
     let surface = crate::intent::surface_signals::analyze_prompt_surface(current_user_request);
-    surface.inline_json_shape.is_some()
-        && !surface.has_explicit_path_or_url()
+    matches!(
+        surface.inline_json_shape,
+        Some(crate::intent::surface_signals::InlineJsonShape::EmbeddedPayload)
+    ) && !surface.has_explicit_path_or_url()
         && !surface.has_filename_candidates()
         && !surface.has_delivery_token_reference()
         && surface.locator_target_pair.is_none()
@@ -1990,6 +2310,7 @@ fn direct_answer_gate_existing_observed_result_should_stay_chat(
             "" | "none"
                 | "content_excerpt_summary"
                 | "raw_command_output"
+                | "command_output_summary"
                 | "content_presence_check"
         )
     {
@@ -2473,8 +2794,13 @@ fn route_is_memory_update_ack_contract(
     has_alias_only_state_patch: bool,
 ) -> bool {
     (route.should_refresh_long_term_memory || has_alias_only_state_patch)
-        && !route.needs_clarify
+        && route_allows_memory_ack_shape(route)
+}
+
+fn route_allows_memory_ack_shape(route: &crate::RouteResult) -> bool {
+    !route.needs_clarify
         && !route.wants_file_delivery
+        && route.is_chat_gate()
         && !route.output_contract.requires_content_evidence
         && !route.output_contract.delivery_required
         && matches!(
@@ -2795,6 +3121,7 @@ fn apply_direct_answer_gate_outcome(
     current_user_request: &str,
     gate: DirectAnswerGateOut,
 ) -> DirectAnswerPreflight {
+    let mut gate = gate;
     if let Some(preflight) = contract_test_hint_forced_planner_preflight(
         ctx,
         current_user_request,
@@ -2844,7 +3171,7 @@ fn apply_direct_answer_gate_outcome(
     let has_authoritative_deictic_anchor = ctx.has_authoritative_deictic_anchor;
     let force_inline_transform_execution = transform_skill_available_for_plan(state)
         && (crate::intent::surface_signals::inline_json_transform_request(current_user_request)
-            || (direct_answer_gate_inline_json_payload_surface(current_user_request)
+            || (direct_answer_gate_embedded_inline_json_payload_surface(current_user_request)
                 && (decision == DirectAnswerGateDecision::PlannerExecute
                     || normalizer_answer_candidate_from_resolved_prompt(&route.resolved_intent)
                         .as_deref()
@@ -2945,6 +3272,21 @@ fn apply_direct_answer_gate_outcome(
                     "direct_answer_gate_package_manager_detect_execute",
                 );
             }
+            if normalizer_answer_candidate_from_resolved_prompt(&resolved_prompt).is_some()
+                && !output_contract_requires_planner_execution(&contract)
+                && bound_direct_answer_candidate_satisfies_output_contract(&contract)
+                && matches!(
+                    contract.response_shape,
+                    crate::OutputResponseShape::OneSentence
+                )
+                && contract.exact_sentence_count == Some(1)
+            {
+                append_route_reason(
+                    route,
+                    "direct_answer_gate_exact_candidate_ignored_execution",
+                );
+                return DirectAnswerPreflight::DirectAnswer;
+            }
             let promoted_workspace_child_context =
                 direct_answer_gate_promotes_workspace_child_context(
                     state,
@@ -2961,6 +3303,9 @@ fn apply_direct_answer_gate_outcome(
                     &contract,
                     recent_request_file_target_count,
                 );
+            if promoted_workspace_child_context {
+                gate.resolved_user_intent = current_user_request.trim().to_string();
+            }
             if promoted_recent_file_context {
                 contract.requires_content_evidence = true;
                 if matches!(contract.locator_kind, crate::OutputLocatorKind::None) {
@@ -3131,6 +3476,16 @@ fn apply_direct_answer_gate_outcome(
                 &mut contract,
                 structured_scalar_extraction,
             );
+            let promoted_workspace_child_context =
+                direct_answer_gate_promotes_workspace_child_context(
+                    state,
+                    current_user_request,
+                    route,
+                    &mut contract,
+                );
+            if promoted_workspace_child_context {
+                gate.resolved_user_intent = current_user_request.trim().to_string();
+            }
             if force_inline_transform_execution {
                 contract.requires_content_evidence = true;
                 contract.locator_kind = crate::OutputLocatorKind::None;
@@ -3262,7 +3617,9 @@ fn apply_direct_answer_gate_outcome(
             ) {
                 return apply_direct_answer_gate_unbound_deictic_clarify(route, &gate);
             }
-            let reason_tag = if direct_answer_gate_contextual_inline_structured_payload_execute(
+            let reason_tag = if promoted_workspace_child_context {
+                "direct_answer_gate_workspace_child_context_execute"
+            } else if direct_answer_gate_contextual_inline_structured_payload_execute(
                 current_user_request,
                 &contract,
             ) {
@@ -3677,17 +4034,43 @@ fn structural_alias_binding_ack(
         return None;
     }
     let route_result = ctx.route_result.as_ref()?;
-    let binding = crate::conversation_state::structural_alias_binding_from_prompt(
+    if !route_allows_memory_ack_shape(route_result) {
+        return None;
+    }
+    let binding = crate::conversation_state::structural_alias_binding_from_memory_prompt(
         prompt,
         route_result,
         resolved_prompt_for_execution,
     )?;
-    let answer = if language_hint == "en" {
-        format!("Remembered: `{}` -> `{}`.", binding.alias, binding.target)
-    } else {
-        format!("已记住：`{}` -> `{}`。", binding.alias, binding.target)
-    };
+    let answer = normalizer_memory_ack_answer_candidate(route_result).unwrap_or_else(|| {
+        if language_hint == "en" {
+            format!("Remembered: `{}` -> `{}`.", binding.alias, binding.target)
+        } else {
+            format!("已记住：`{}` -> `{}`。", binding.alias, binding.target)
+        }
+    });
     Some(ask_reply_with_chat_process(answer, language_hint))
+}
+
+fn normalizer_memory_ack_answer_candidate(route_result: &crate::RouteResult) -> Option<String> {
+    let candidate =
+        normalizer_answer_candidate_from_resolved_prompt(&route_result.resolved_intent)?;
+    let trimmed = candidate.trim();
+    if trimmed.is_empty()
+        || trimmed.contains(['\n', '\r'])
+        || trimmed.chars().count() > 120
+        || crate::finalize::is_execution_summary_message(trimmed)
+    {
+        return None;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(trimmed);
+    if surface.has_concrete_locator_hint()
+        || crate::intent::locator_extractor::extract_explicit_locator_for_fallback(trimmed)
+            .is_some()
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
 }
 
 pub(crate) fn build_resume_continue_execute_prompt(
@@ -4387,7 +4770,7 @@ fn chat_recent_execution_context(
 ) -> Option<String> {
     let ctx = agent_run_context?;
     let route = ctx.route_result.as_ref()?;
-    if !route.output_contract.requires_content_evidence {
+    if !chat_route_should_include_recent_execution_context(route) {
         return None;
     }
     let context = ctx
@@ -4396,8 +4779,23 @@ fn chat_recent_execution_context(
         .map(str::trim)
         .filter(|value| !value.is_empty() && *value != "<none>")?;
     Some(format!(
-        "### RECENT_EXECUTION_CONTEXT\nUse this observed execution context as evidence for this turn when the route contract requires content evidence. Do not invent details beyond it.\n{context}"
+        "### RECENT_EXECUTION_CONTEXT\nUse this observed execution context as evidence for this turn when the route contract or repaired route requires prior observed evidence. Do not invent details beyond it.\n{context}"
     ))
+}
+
+fn chat_route_should_include_recent_execution_context(route: &crate::RouteResult) -> bool {
+    route.output_contract.requires_content_evidence
+        || route_reason_has_exact_marker(route, "semantic_contract_requires_evidence")
+        || route_reason_has_exact_marker(route, "active_text_followup_route_repair")
+}
+
+fn route_reason_has_exact_marker(route: &crate::RouteResult, marker: &str) -> bool {
+    route
+        .route_reason
+        .split(';')
+        .map(str::trim)
+        .any(|part| part == marker)
+        || route.route_reason.trim() == marker
 }
 
 fn chat_user_request<'a>(resolved_prompt: &'a str, execution_user_request: &'a str) -> &'a str {
@@ -4693,6 +5091,20 @@ pub(crate) async fn execute_ask_routed(
         ));
     }
     if let Some(candidate) =
+        active_file_basename_direct_answer_candidate(state, agent_run_context.as_ref())
+    {
+        tracing::info!(
+            "{} worker_once: ask active_file_basename_direct_answer task_id={} answer={}",
+            crate::highlight_tag("routing"),
+            task.task_id,
+            candidate
+        );
+        return Ok(ask_reply_with_chat_process(
+            candidate,
+            &process_language_hint,
+        ));
+    }
+    if let Some(candidate) =
         runtime_scalar_path_direct_answer_candidate(state, agent_run_context.as_ref())
     {
         tracing::info!(
@@ -4738,6 +5150,23 @@ pub(crate) async fn execute_ask_routed(
                 chat_prompt_context,
                 agent_run_context.as_ref(),
             );
+            if let Some(candidate) = normalizer_chat_direct_answer_candidate_with_context_summary(
+                state,
+                resolved_prompt,
+                agent_run_context.as_ref(),
+                Some(&chat_prompt_context),
+            ) {
+                tracing::info!(
+                    "{} worker_once: ask normalizer_verified_context_candidate task_id={} len={}",
+                    crate::highlight_tag("routing"),
+                    task.task_id,
+                    candidate.len()
+                );
+                return Ok(ask_reply_with_chat_process(
+                    candidate,
+                    &process_language_hint,
+                ));
+            }
             let resolved_chat_prompt =
                 crate::bootstrap::load_required_prompt_template_for_state_with_meta(
                     state,

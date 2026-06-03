@@ -638,6 +638,31 @@ fn quantity_comparison_keeps_recent_execution_history() {
 }
 
 #[test]
+fn recent_observed_judgments_keep_recent_execution_history() {
+    for semantic_kind in [
+        crate::OutputSemanticKind::ContentExcerptSummary,
+        crate::OutputSemanticKind::ContentExcerptWithSummary,
+        crate::OutputSemanticKind::ContentPresenceCheck,
+        crate::OutputSemanticKind::ExcerptKindJudgment,
+        crate::OutputSemanticKind::RecentArtifactsJudgment,
+    ] {
+        let mut route = base_route_result();
+        route.output_contract.semantic_kind = semantic_kind;
+        route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+        route.output_contract.requires_content_evidence = true;
+
+        assert!(
+            route_needs_recent_execution_history(&route),
+            "{semantic_kind:?} should keep recent execution history"
+        );
+        assert!(
+            !uses_light_execution_context_budget(&route, &route.resolved_intent),
+            "{semantic_kind:?} should not use the light execution budget"
+        );
+    }
+}
+
+#[test]
 fn unanchored_light_routes_keep_execution_anchor_context() {
     let mut route = base_route_result();
     route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();

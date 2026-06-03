@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use tracing::{debug, info, warn};
 
@@ -64,14 +64,31 @@ fn ensure_task_running(state: &AppState, task: &ClaimedTask) -> Result<(), Strin
 /// Phase 2+: Planner 可见技能按 task/agent 动态收敛：
 /// （execution-enabled）∩（agent allowed_skills）。
 /// 每个可见技能需在 registry 中提供 skill prompt 的逻辑路径配置，才会注入 playbook。
-fn build_skill_playbooks_text(state: &AppState, task: &ClaimedTask) -> String {
-    let enabled = state.planner_available_skills_for_task(task);
+fn planner_available_skills_for_task_scoped(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_scope: Option<&BTreeSet<String>>,
+) -> Vec<String> {
+    let mut enabled = state.planner_available_skills_for_task(task);
+    if let Some(skill_scope) = skill_scope {
+        enabled.retain(|skill| skill_scope.contains(skill));
+    }
+    enabled
+}
+
+fn build_skill_playbooks_text_scoped(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_scope: Option<&BTreeSet<String>>,
+) -> String {
+    let enabled = planner_available_skills_for_task_scoped(state, task, skill_scope);
     let enabled_count = enabled.len();
     let agent_id = state.task_agent_id(task);
     info!(
-        "planner skill playbooks: agent_id={} planner_visible_skills_count={} skills=[{}]",
+        "planner skill playbooks: agent_id={} planner_visible_skills_count={} scoped={} skills=[{}]",
         agent_id,
         enabled_count,
+        skill_scope.is_some(),
         enabled.join(", ")
     );
 
@@ -195,8 +212,12 @@ fn quick_index_planner_capabilities(manifest: &claw_core::skill_registry::SkillM
 }
 
 /// 首轮路由提示：给 LLM 一份“技能速览”，降低误判成纯 chat 的概率。
-fn build_skill_quick_index_text(state: &AppState, task: &ClaimedTask) -> String {
-    let enabled = state.planner_available_skills_for_task(task);
+fn build_skill_quick_index_text_scoped(
+    state: &AppState,
+    task: &ClaimedTask,
+    skill_scope: Option<&BTreeSet<String>>,
+) -> String {
+    let enabled = planner_available_skills_for_task_scoped(state, task, skill_scope);
     if enabled.is_empty() {
         return "- (no enabled skills)".to_string();
     }

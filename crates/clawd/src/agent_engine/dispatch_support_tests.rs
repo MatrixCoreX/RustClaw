@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 use super::{
     classify_skill_failure_recovery, deterministic_observed_execution_status_answer,
     deterministic_scalar_markdown_heading_answer, strip_internal_execution_args,
-    synthesize_answer_allows_direct_fallback,
+    strip_unsupported_planner_metadata_args, synthesize_answer_allows_direct_fallback,
     synthesize_contract_matrix_direct_observed_fallback_answer,
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer, synthesize_failure_observed_facts,
@@ -26,8 +26,9 @@ fn test_state_with_registry() -> AppState {
         DEFAULT_AGENT_ID.to_string(),
         AgentRuntimeConfig::from_config(&AgentConfig::default(), Vec::new()),
     )]);
-    let registry = SkillsRegistry::load_from_path(Path::new("configs/skills_registry.toml"))
-        .expect("load registry");
+    let registry_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
+    let registry = SkillsRegistry::load_from_path(&registry_path).expect("load registry");
     AppState {
         core: crate::CoreServices {
             agents_by_id: Arc::new(agents_by_id),
@@ -135,6 +136,48 @@ fn internal_execution_args_are_removed_before_skill_call() {
     strip_internal_execution_args(&mut args);
 
     assert_eq!(args, serde_json::json!({"command": "echo visible"}));
+}
+
+#[test]
+fn unsupported_confirm_arg_is_removed_before_make_dir_skill_call() {
+    let state = test_state_with_registry();
+    let canonical = state.resolve_canonical_skill_name("make_dir");
+    let manifest = state.skill_manifest(&canonical).expect("make_dir manifest");
+    assert!(
+        manifest.input_schema.is_some(),
+        "make_dir manifest should expose input_schema"
+    );
+    let mut args = serde_json::json!({
+        "path": "document",
+        "confirm": true
+    });
+
+    let removed = strip_unsupported_planner_metadata_args(&state, &canonical, &mut args);
+
+    assert_eq!(removed, vec!["confirm"]);
+    assert_eq!(args, serde_json::json!({"path": "document"}));
+}
+
+#[test]
+fn confirm_arg_is_kept_when_skill_schema_declares_it() {
+    let state = test_state_with_registry();
+    let mut args = serde_json::json!({
+        "action": "register_external_skill",
+        "skill_name": "demo_skill",
+        "confirm": true
+    });
+
+    let removed = strip_unsupported_planner_metadata_args(&state, "extension_manager", &mut args);
+
+    assert!(removed.is_empty(), "{removed:?}");
+    assert_eq!(
+        args,
+        serde_json::json!({
+            "action": "register_external_skill",
+            "skill_name": "demo_skill",
+            "confirm": true
+        })
+    );
 }
 
 #[test]
@@ -275,6 +318,46 @@ fn permission_failure_without_remaining_action_finalizes_without_shell_fallback(
             4,
             "system_basic",
             Some(&serde_json::json!({"action":"read_range","path":"/root/secret.txt"})),
+            &err,
+        ),
+        Some("recoverable_failure_finalize")
+    );
+}
+
+#[test]
+fn crypto_account_access_failure_finalizes_without_replan() {
+    let state = test_state_with_registry();
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "crypto".to_string(),
+            args: serde_json::json!({"action":"positions"}),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    let marker = r#"__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:{"exchange":"binance","detail":"binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"}"#;
+    let err = format!(
+        "__RC_SKILL_ERROR__:{}",
+        serde_json::json!({
+            "skill": "crypto",
+            "error_kind": "unknown",
+            "error_text": marker,
+            "extra": null
+        })
+    );
+
+    assert_eq!(
+        classify_skill_failure_recovery(
+            &state,
+            &actions,
+            0,
+            2,
+            "crypto",
+            Some(&serde_json::json!({"action":"positions"})),
             &err,
         ),
         Some("recoverable_failure_finalize")
@@ -925,12 +1008,12 @@ fn contract_matrix_synthesis_defers_multi_count_quantity_comparison_to_model() {
     loop_state.executed_step_results.push(ok_step(
         "step_1",
         "fs_basic",
-        r#"{"action":"count_inventory","path":"docs","recursive":false,"counts":{"total":3,"files":2,"dirs":1,"total_size_bytes":425}}"#,
+        r#"{"extra":{"action":"count_inventory","path":"docs","recursive":false,"counts":{"total":3,"files":2,"dirs":1,"total_size_bytes":425}},"text":"{\"action\":\"count_inventory\",\"path\":\"docs\",\"recursive\":false,\"counts\":{\"total\":3,\"files\":2,\"dirs\":1,\"total_size_bytes\":425}}"}"#,
     ));
     loop_state.executed_step_results.push(ok_step(
         "step_2",
         "fs_basic",
-        r#"{"action":"count_inventory","path":"logs","recursive":false,"counts":{"total":2,"files":2,"dirs":0,"total_size_bytes":2698}}"#,
+        r#"{"extra":{"action":"count_inventory","path":"logs","recursive":false,"counts":{"total":2,"files":2,"dirs":0,"total_size_bytes":2698}},"text":"{\"action\":\"count_inventory\",\"path\":\"logs\",\"recursive\":false,\"counts\":{\"total\":2,\"files\":2,\"dirs\":0,\"total_size_bytes\":2698}}"}"#,
     ));
     let route = crate::RouteResult {
         ask_mode: crate::AskMode::planner_execute_plain(),
@@ -970,6 +1053,55 @@ fn contract_matrix_synthesis_defers_multi_count_quantity_comparison_to_model() {
         Some(&ctx)
     )
     .is_none());
+}
+
+#[test]
+fn synthesize_direct_fallback_defers_multi_count_quantity_comparison_to_model() {
+    let state = test_state_with_registry();
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"count_inventory","path":"docs","recursive":false,"counts":{"total":3,"files":2,"dirs":1,"total_size_bytes":425}},"text":"{\"action\":\"count_inventory\",\"path\":\"docs\",\"recursive\":false,\"counts\":{\"total\":3,\"files\":2,\"dirs\":1,\"total_size_bytes\":425}}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "fs_basic",
+        r#"{"extra":{"action":"count_inventory","path":"logs","recursive":false,"counts":{"total":2,"files":2,"dirs":0,"total_size_bytes":2698}},"text":"{\"action\":\"count_inventory\",\"path\":\"logs\",\"recursive\":false,\"counts\":{\"total\":2,\"files\":2,\"dirs\":0,\"total_size_bytes\":2698}}"}"#,
+    ));
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "count two directory child totals and compare them".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "quantity compare".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::OneSentence,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::QuantityComparison,
+            locator_hint: "docs | logs".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let ctx = AgentRunContext {
+        route_result: Some(route),
+        ..AgentRunContext::default()
+    };
+
+    assert!(synthesize_direct_observed_fallback_answer(&state, &loop_state, Some(&ctx)).is_none());
 }
 
 #[test]
@@ -1018,6 +1150,54 @@ fn contract_matrix_synthesis_defers_multiline_content_excerpt_summary_to_model()
     assert!(
         synthesize_direct_fallback_would_passthrough_multiline_read_range(&loop_state, Some(&ctx))
     );
+    assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
+    assert!(synthesize_contract_matrix_direct_observed_fallback_answer(
+        &state,
+        &loop_state,
+        Some(&ctx)
+    )
+    .is_none());
+}
+
+#[test]
+fn command_output_summary_contract_defers_direct_fallback_to_synthesis() {
+    let state = test_state_with_registry();
+    let mut loop_state = LoopState::new(2);
+    loop_state
+        .executed_step_results
+        .push(ok_step("step_1", "run_cmd", "/home/guagua/rustclaw\n"));
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent: "Run commands and summarize the observed outputs.".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "command output summary".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::None,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::CommandOutputSummary,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let ctx = AgentRunContext {
+        route_result: Some(route),
+        ..AgentRunContext::default()
+    };
+
     assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
     assert!(synthesize_contract_matrix_direct_observed_fallback_answer(
         &state,

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 use crate::{AppState, ClaimedTask};
 
@@ -248,15 +249,18 @@ pub(crate) fn derive_observed_facts_from_ask_outcome(
 
     let journal_ordered_entries =
         crate::followup_frame::derive_ordered_entries_from_journal(journal);
+    let visible_ordered_entries =
+        crate::followup_frame::extract_ordered_entries_from_text(&combined);
     let may_capture_ordered_entries = route_contract_can_publish_ordered_entries(route_result)
         || !journal_ordered_entries.is_empty()
         || combined_contains_delivery_file_token(&combined);
-    let mut ordered_entries = if may_capture_ordered_entries {
-        let entries = crate::followup_frame::extract_ordered_entries_from_text(&combined);
-        if entries.is_empty() {
+    let visible_entries_are_structural =
+        crate::followup_frame::ordered_entries_are_structural_tokens(&visible_ordered_entries);
+    let mut ordered_entries = if may_capture_ordered_entries || visible_entries_are_structural {
+        if visible_ordered_entries.is_empty() {
             journal_ordered_entries
         } else {
-            entries
+            visible_ordered_entries
         }
     } else {
         Vec::new()
@@ -283,6 +287,7 @@ pub(crate) fn derive_observed_facts_from_ask_outcome(
         .or_else(|| {
             crate::followup_frame::derive_bound_target_from_answer(answer_text, answer_messages)
         })
+        .or_else(|| scalar_path_answer_bound_target(&combined, route_result))
         .or_else(|| {
             let hint = route_result.output_contract.locator_hint.trim();
             (!hint.is_empty()).then(|| hint.to_string())
@@ -328,6 +333,7 @@ fn route_contract_can_publish_ordered_entries(route_result: &crate::RouteResult)
             route_result.output_contract.semantic_kind,
             crate::OutputSemanticKind::FileNames
                 | crate::OutputSemanticKind::DirectoryNames
+                | crate::OutputSemanticKind::DirectoryEntryGroups
                 | crate::OutputSemanticKind::FilePaths
                 | crate::OutputSemanticKind::SqliteTableListing
                 | crate::OutputSemanticKind::SqliteTableNamesOnly
@@ -344,6 +350,77 @@ fn combined_contains_delivery_file_token(combined: &str) -> bool {
         .lines()
         .map(str::trim_start)
         .any(|line| line.starts_with("FILE:"))
+}
+
+fn scalar_path_answer_bound_target(
+    combined: &str,
+    route_result: &crate::RouteResult,
+) -> Option<String> {
+    if !scalar_path_contract_can_bind_target(route_result) {
+        return None;
+    }
+    let mut lines = combined
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    let line = lines.next()?;
+    if lines.next().is_some() {
+        return None;
+    }
+    normalize_scalar_path_bound_target(
+        line,
+        route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarPathOnly,
+    )
+}
+
+fn scalar_path_contract_can_bind_target(route_result: &crate::RouteResult) -> bool {
+    matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::ScalarPathOnly
+    ) || (matches!(
+        route_result.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar
+    ) && route_result.output_contract.requires_content_evidence
+        && matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        ))
+}
+
+fn normalize_scalar_path_bound_target(
+    candidate: &str,
+    allow_single_component: bool,
+) -> Option<String> {
+    let candidate = candidate.trim().trim_matches(|ch: char| {
+        matches!(
+            ch,
+            '`' | '"' | '\'' | '“' | '”' | '‘' | '’' | '<' | '>' | '《' | '》'
+        )
+    });
+    if candidate.is_empty()
+        || candidate.starts_with("FILE:")
+        || candidate.starts_with("http://")
+        || candidate.starts_with("https://")
+        || candidate.starts_with('{')
+        || candidate.starts_with('[')
+        || candidate.chars().any(char::is_control)
+    {
+        return None;
+    }
+    let path = Path::new(candidate);
+    if path.is_absolute() || candidate.contains('/') || candidate.contains('\\') {
+        return Some(candidate.to_string());
+    }
+    if allow_single_component
+        && path.components().count() == 1
+        && candidate.contains('.')
+        && !candidate.chars().any(char::is_whitespace)
+    {
+        return Some(candidate.to_string());
+    }
+    None
 }
 
 #[cfg(test)]

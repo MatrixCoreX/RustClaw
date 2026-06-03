@@ -69,6 +69,9 @@ pub(crate) fn should_verify_answer(
     ) {
         return false;
     }
+    if finalizer_terminal_blocker_can_skip_answer_verifier(route_result, journal) {
+        return false;
+    }
     let task_contract = TaskContract::from_route_result(route_result);
     if task_contract.intent_kind.as_str() != "planner_execute" {
         return false;
@@ -97,7 +100,28 @@ pub(crate) fn structurally_satisfies_answer_contract(
     ) {
         return true;
     }
+    if workspace_project_summary_answer_is_grounded_in_successful_observation(
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
+        return true;
+    }
     if git_repository_state_answer_is_grounded_in_successful_observation(
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
+        return true;
+    }
+    if service_status_port_answer_is_grounded_in_successful_observation(
+        route_result,
+        journal,
+        candidate_answer,
+    ) {
+        return true;
+    }
+    if health_check_diagnostic_answer_is_grounded_in_successful_observation(
         route_result,
         journal,
         candidate_answer,
@@ -380,6 +404,305 @@ fn schema_field_value<'a>(candidate: &'a str, prefix: &str) -> Option<&'a str> {
                 .find_map(|part| part.strip_prefix(prefix).map(str::trim))
         })
         .filter(|value| !value.is_empty())
+}
+
+fn service_status_port_answer_is_grounded_in_successful_observation(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ServiceStatus {
+        return false;
+    }
+    let candidate_answer = candidate_answer.trim();
+    if candidate_answer.is_empty() {
+        return false;
+    }
+    let observed_ports = observed_service_status_ports(route, journal);
+    if observed_ports.is_empty() {
+        return false;
+    }
+    let candidate_ports = candidate_service_status_ports(candidate_answer);
+    if candidate_ports.is_empty() {
+        return false;
+    }
+    candidate_ports.is_subset(&observed_ports) && observed_ports.is_subset(&candidate_ports)
+}
+
+fn observed_service_status_ports(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> BTreeSet<u16> {
+    let mut ports = BTreeSet::new();
+    for step in &journal.step_results {
+        if !step_can_supply_verifier_observation_for_route(route, step) {
+            continue;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        collect_keyed_port_numbers(output, &mut ports);
+        collect_socket_suffix_ports(output, &mut ports);
+    }
+    ports
+}
+
+fn candidate_service_status_ports(candidate_answer: &str) -> BTreeSet<u16> {
+    let mut ports = BTreeSet::new();
+    collect_keyed_port_numbers(candidate_answer, &mut ports);
+    collect_markdown_table_first_cell_ports(candidate_answer, &mut ports);
+    collect_socket_suffix_ports(candidate_answer, &mut ports);
+    ports
+}
+
+fn health_check_diagnostic_answer_is_grounded_in_successful_observation(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ServiceStatus {
+        return false;
+    }
+    let candidate = candidate_answer.trim();
+    if candidate.is_empty() {
+        return false;
+    }
+    journal.step_results.iter().any(|step| {
+        step_can_supply_verifier_observation_for_route(route, step)
+            && step.skill == "health_check"
+            && step.output_excerpt.as_deref().is_some_and(|output| {
+                let Some(value) = health_check_value_from_output(output) else {
+                    return false;
+                };
+                let tokens = health_check_diagnostic_expected_tokens(&value);
+                tokens.len() > 1 && tokens.iter().all(|token| candidate.contains(token))
+            })
+    })
+}
+
+fn health_check_value_from_output(output: &str) -> Option<serde_json::Value> {
+    let value = serde_json::from_str::<serde_json::Value>(output.trim()).ok()?;
+    if health_check_json_has_primary_fields(&value) {
+        return Some(value);
+    }
+    if let Some(extra) = value.get("extra") {
+        if health_check_json_has_primary_fields(extra) {
+            return Some(extra.clone());
+        }
+    }
+    value
+        .get("text")
+        .and_then(|text| text.as_str())
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text.trim()).ok())
+        .filter(health_check_json_has_primary_fields)
+}
+
+fn health_check_json_has_primary_fields(value: &serde_json::Value) -> bool {
+    value.get("clawd_process_count").is_some()
+        || value.get("clawd_health_port_open").is_some()
+        || value.get("system_health").is_some()
+}
+
+fn health_check_diagnostic_expected_tokens(value: &serde_json::Value) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let process_count = value
+        .get("clawd_process_count")
+        .and_then(|field| field.as_i64());
+    let port_open = value
+        .get("clawd_health_port_open")
+        .and_then(|field| field.as_bool());
+    let status = match (process_count, port_open) {
+        (Some(count), Some(true)) if count > 0 => "clawd.status=running",
+        (Some(count), _) if count <= 0 => "clawd.status=not_running",
+        (Some(_), Some(false)) => "clawd.status=degraded",
+        (None, Some(true)) => "clawd.status=reachable",
+        _ => "clawd.status=unknown",
+    };
+    tokens.push(status.to_string());
+    if let Some(count) = process_count {
+        tokens.push(format!("clawd_process_count={count}"));
+    }
+    if let Some(open) = port_open {
+        tokens.push(format!("clawd_health_port_open={open}"));
+    }
+    if let Some(count) = value
+        .get("telegramd_process_count")
+        .and_then(|field| field.as_i64())
+    {
+        tokens.push(format!("telegramd_process_count={count}"));
+    }
+    collect_health_check_log_tokens(value, "clawd_log", &mut tokens);
+    collect_health_check_log_tokens(value, "telegramd_log", &mut tokens);
+    collect_health_check_system_tokens(value, &mut tokens);
+    tokens
+}
+
+fn collect_health_check_log_tokens(
+    value: &serde_json::Value,
+    field_name: &str,
+    tokens: &mut Vec<String>,
+) {
+    let Some(log) = value.get(field_name).and_then(|field| field.as_object()) else {
+        return;
+    };
+    if let Some(exists) = log.get("exists").and_then(|field| field.as_bool()) {
+        tokens.push(format!("{field_name}.exists={exists}"));
+    }
+    if let Some(count) = log
+        .get("keyword_error_count")
+        .and_then(|field| field.as_i64())
+    {
+        tokens.push(format!("{field_name}.keyword_error_count={count}"));
+    }
+}
+
+fn collect_health_check_system_tokens(value: &serde_json::Value, tokens: &mut Vec<String>) {
+    let Some(system) = value
+        .get("system_health")
+        .and_then(|field| field.as_object())
+    else {
+        return;
+    };
+    for key in [
+        "os_family",
+        "service_manager",
+        "cpu_count",
+        "load_avg_1m",
+        "load_avg_5m",
+        "load_avg_15m",
+        "memory_available_bytes",
+        "memory_total_bytes",
+        "disk_root_available_bytes",
+        "disk_root_total_bytes",
+        "uptime_seconds",
+    ] {
+        let Some(field) = system.get(key) else {
+            continue;
+        };
+        if let Some(text) = health_check_scalar_token_value(field) {
+            tokens.push(format!("system_health.{key}={text}"));
+        }
+    }
+    if let Some(warnings) = system
+        .get("warnings")
+        .and_then(|field| field.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::trim))
+                .filter(|item| !item.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|items| !items.is_empty())
+    {
+        tokens.push(format!("system_health.warnings={}", warnings.join(",")));
+    }
+}
+
+fn health_check_scalar_token_value(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_str()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .or_else(|| value.as_i64().map(|number| number.to_string()))
+        .or_else(|| value.as_u64().map(|number| number.to_string()))
+        .or_else(|| value.as_f64().map(|number| number.to_string()))
+        .or_else(|| value.as_bool().map(|flag| flag.to_string()))
+}
+
+fn collect_keyed_port_numbers(text: &str, ports: &mut BTreeSet<u16>) {
+    for line in text.lines() {
+        let line = line.trim();
+        if !line.to_ascii_lowercase().contains("port") {
+            continue;
+        }
+        for marker in [".number=", "number=", "port="] {
+            let Some((_, tail)) = line.split_once(marker) else {
+                continue;
+            };
+            if let Some(port) = parse_leading_port_number(tail) {
+                ports.insert(port);
+            }
+        }
+    }
+}
+
+fn collect_markdown_table_first_cell_ports(text: &str, ports: &mut BTreeSet<u16>) {
+    let rows = text
+        .lines()
+        .map(markdown_table_row_cells)
+        .filter(|cells| !cells.is_empty())
+        .collect::<Vec<_>>();
+    if rows.len() < 3 || !markdown_table_separator_row(&rows[1]) {
+        return;
+    }
+    for row in rows.iter().skip(2) {
+        let Some(first_cell) = row.first() else {
+            continue;
+        };
+        if let Some(port) = parse_port_cell(first_cell) {
+            ports.insert(port);
+        }
+    }
+}
+
+fn collect_socket_suffix_ports(text: &str, ports: &mut BTreeSet<u16>) {
+    let bytes = text.as_bytes();
+    let mut idx = 0;
+    while idx < bytes.len() {
+        if bytes[idx] != b':' {
+            idx += 1;
+            continue;
+        }
+        let digit_start = idx + 1;
+        if digit_start >= bytes.len() || !bytes[digit_start].is_ascii_digit() {
+            idx += 1;
+            continue;
+        }
+        let mut digit_end = digit_start;
+        while digit_end < bytes.len() && bytes[digit_end].is_ascii_digit() {
+            digit_end += 1;
+        }
+        if digit_end - digit_start <= 5 && socket_port_boundary(bytes.get(digit_end).copied()) {
+            if let Ok(port) = text[digit_start..digit_end].parse::<u16>() {
+                if port > 0 {
+                    ports.insert(port);
+                }
+            }
+        }
+        idx = digit_end;
+    }
+}
+
+fn socket_port_boundary(next: Option<u8>) -> bool {
+    next.is_none_or(|ch| !ch.is_ascii_alphanumeric() && !matches!(ch, b'.' | b'_'))
+}
+
+fn parse_leading_port_number(raw: &str) -> Option<u16> {
+    let digits = raw
+        .trim_start()
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    parse_port_number(&digits)
+}
+
+fn parse_port_cell(raw: &str) -> Option<u16> {
+    let normalized = raw
+        .trim()
+        .trim_matches('`')
+        .trim_matches('*')
+        .trim()
+        .to_string();
+    parse_port_number(&normalized)
+}
+
+fn parse_port_number(raw: &str) -> Option<u16> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.len() > 5 || !raw.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    raw.parse::<u16>().ok().filter(|port| *port > 0)
 }
 
 fn observed_archive_unpack_destination_paths(
@@ -1262,10 +1585,62 @@ fn directory_purpose_summary_answer_is_grounded_in_successful_observation(
     if candidate.is_empty() {
         return false;
     }
+    if directory_purpose_summary_listing_content_answer_is_grounded(route, journal, candidate) {
+        return true;
+    }
+    if directory_purpose_summary_find_ext_answer_is_grounded(journal, candidate) {
+        return true;
+    }
     let Some(largest) = observed_largest_path_batch_size(journal) else {
         return false;
     };
     path_size_answer_mentions_observed_largest(candidate, &largest)
+}
+
+fn workspace_project_summary_answer_is_grounded_in_successful_observation(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::WorkspaceProjectSummary {
+        return false;
+    }
+    let candidate = candidate_answer.trim();
+    if candidate.is_empty() {
+        return false;
+    }
+    let Some(names) = latest_observed_directory_structure_names(journal) else {
+        return false;
+    };
+    let mentioned = names
+        .iter()
+        .filter(|name| observed_name_is_mentioned(candidate, name))
+        .take(2)
+        .count();
+    mentioned >= 2
+}
+
+fn directory_purpose_summary_listing_content_answer_is_grounded(
+    route: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
+        return false;
+    }
+    let Some(names) = observed_inventory_names_for_contract(route, journal) else {
+        return false;
+    };
+    if names.len() < 2 || !journal_has_content_excerpt_observation(journal) {
+        return false;
+    }
+    if requested_listing_name_limit(route).is_some() {
+        observed_names_all_mentioned(candidate_answer, &names)
+    } else {
+        names
+            .iter()
+            .any(|name| observed_name_is_mentioned(candidate_answer, name))
+    }
 }
 
 fn observed_largest_path_batch_size(
@@ -1324,6 +1699,80 @@ fn collect_path_batch_sizes(value: &serde_json::Value, largest: &mut Option<Obse
             *largest = Some(candidate);
         }
     }
+}
+
+fn directory_purpose_summary_find_ext_answer_is_grounded(
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> bool {
+    let Some((results, count)) = observed_find_ext_results(journal) else {
+        return false;
+    };
+    if count == 0 || results.is_empty() || !answer_mentions_size(candidate_answer, count as u64) {
+        return false;
+    }
+    if results.len() <= 80 {
+        return results
+            .iter()
+            .all(|path| path_answer_mentions_any_variant(candidate_answer, path));
+    }
+    results
+        .iter()
+        .take(8)
+        .all(|path| path_answer_mentions_any_variant(candidate_answer, path))
+}
+
+fn observed_find_ext_results(
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<(Vec<String>, usize)> {
+    journal
+        .step_results
+        .iter()
+        .rev()
+        .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+        .filter_map(|step| step.output_excerpt.as_deref())
+        .filter_map(|output| serde_json::from_str::<serde_json::Value>(output.trim()).ok())
+        .find_map(|value| find_ext_results_from_value(&value))
+}
+
+fn find_ext_results_from_value(value: &serde_json::Value) -> Option<(Vec<String>, usize)> {
+    if let Some(batch) = find_ext_results_from_object(value) {
+        return Some(batch);
+    }
+    if let Some(extra) = value.get("extra") {
+        if let Some(batch) = find_ext_results_from_object(extra) {
+            return Some(batch);
+        }
+    }
+    value
+        .get("text")
+        .and_then(|text| text.as_str())
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text.trim()).ok())
+        .and_then(|value| find_ext_results_from_object(&value))
+}
+
+fn find_ext_results_from_object(value: &serde_json::Value) -> Option<(Vec<String>, usize)> {
+    if value.get("action").and_then(|item| item.as_str()) != Some("find_ext") {
+        return None;
+    }
+    let results = value
+        .get("results")
+        .and_then(|item| item.as_array())?
+        .iter()
+        .filter_map(|item| item.as_str())
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if results.is_empty() {
+        return None;
+    }
+    let count = value
+        .get("count")
+        .and_then(|item| item.as_u64())
+        .and_then(|item| usize::try_from(item).ok())
+        .unwrap_or(results.len());
+    Some((results, count))
 }
 
 fn path_size_answer_mentions_observed_largest(
@@ -1737,6 +2186,13 @@ fn is_external_execution_step(step: &crate::task_journal::TaskJournalStepTrace) 
 
 fn step_can_supply_verifier_observation(step: &crate::task_journal::TaskJournalStepTrace) -> bool {
     step.status == crate::executor::StepExecutionStatus::Ok && !is_synthesis_or_verifier_step(step)
+}
+
+fn step_can_supply_verifier_prompt_observation(
+    step: &crate::task_journal::TaskJournalStepTrace,
+) -> bool {
+    is_external_execution_step(step)
+        && crate::task_journal::observed_evidence_for_step_trace(step).is_some()
 }
 
 fn step_can_supply_verifier_observation_for_route(
@@ -2364,6 +2820,18 @@ pub(crate) async fn verify_answer_observe_only(
         );
         return Some(local_gap);
     }
+    if let Some(local_gap) =
+        local_compound_listing_answer_verifier_gap(route_result, journal, candidate_answer)
+    {
+        tracing::warn!(
+            task_id = %task.task_id,
+            missing_evidence_fields = ?local_gap.missing_evidence_fields,
+            answer_incomplete_reason = %local_gap.answer_incomplete_reason,
+            retry_instruction = %local_gap.retry_instruction,
+            "answer_verifier_local_compound_listing_gap"
+        );
+        return Some(local_gap);
+    }
     if structural_satisfaction_can_skip_verifier(route_result, journal, candidate_answer) {
         tracing::info!(
             task_id = %task.task_id,
@@ -2476,7 +2944,156 @@ fn structural_satisfaction_can_skip_verifier(
     candidate_answer: &str,
 ) -> bool {
     local_missing_evidence_verifier_gap(route_result, journal).is_none()
-        && structurally_satisfies_answer_contract(route_result, journal, candidate_answer)
+        && (finalizer_summary_can_skip_answer_verifier(route_result, journal)
+            || structurally_satisfies_answer_contract(route_result, journal, candidate_answer))
+}
+
+fn finalizer_summary_can_skip_answer_verifier(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    let Some(shape) = crate::contract_matrix::final_answer_shape_for_output_contract(
+        &route_result.output_contract,
+    ) else {
+        return false;
+    };
+    if shape.allows_model_language() {
+        return false;
+    }
+    let Some(summary) = journal.finalizer_summary.as_ref() else {
+        return false;
+    };
+    summary.contract_ok
+        && summary.grounded_ok == Some(true)
+        && summary.format_ok == Some(true)
+        && summary.completion_ok != Some(false)
+        && summary.used_evidence_ids_count > 0
+}
+
+fn finalizer_missing_target_can_skip_missing_evidence_gap(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    finalizer_summary_can_skip_answer_verifier(route_result, journal)
+        && latest_non_control_step_is_missing_target(journal)
+}
+
+fn finalizer_account_access_error_can_skip_missing_evidence_gap(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    if !route_result.output_contract.requires_content_evidence {
+        return false;
+    }
+    let Some(summary) = journal.finalizer_summary.as_ref() else {
+        return false;
+    };
+    summary.disposition == Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        && summary.completion_ok == Some(true)
+        && summary.grounded_ok == Some(true)
+        && summary.format_ok != Some(false)
+        && summary.used_evidence_ids_count > 0
+        && latest_non_control_step_is_crypto_account_access_error(journal)
+}
+
+fn finalizer_terminal_blocker_can_skip_answer_verifier(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    if !route_result.output_contract.requires_content_evidence {
+        return false;
+    }
+    let Some(summary) = journal.finalizer_summary.as_ref() else {
+        return false;
+    };
+    summary.disposition == Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        && summary.contract_ok
+        && summary.completion_ok == Some(true)
+        && summary.grounded_ok == Some(true)
+        && summary.format_ok != Some(false)
+        && summary.used_evidence_ids_count > 0
+        && latest_non_control_step_is_terminal_blocker(journal)
+}
+
+fn latest_non_control_step_is_terminal_blocker(journal: &crate::task_journal::TaskJournal) -> bool {
+    journal
+        .step_results
+        .iter()
+        .rev()
+        .find(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+        })
+        .is_some_and(|step| {
+            step.status == crate::executor::StepExecutionStatus::Error
+                && step
+                    .error_excerpt
+                    .as_deref()
+                    .is_some_and(step_error_is_terminal_blocker)
+        })
+}
+
+fn latest_non_control_step_is_missing_target(journal: &crate::task_journal::TaskJournal) -> bool {
+    journal
+        .step_results
+        .iter()
+        .rev()
+        .find(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+        })
+        .is_some_and(|step| {
+            step.status == crate::executor::StepExecutionStatus::Error
+                && step
+                    .error_excerpt
+                    .as_deref()
+                    .is_some_and(step_error_is_missing_target)
+        })
+}
+
+fn step_error_is_missing_target(error: &str) -> bool {
+    crate::skills::parse_structured_skill_error(error)
+        .is_some_and(|structured| structured.error_kind == "not_found")
+        || error.trim().starts_with("__RC_READ_FILE_NOT_FOUND__:")
+}
+
+fn step_error_is_terminal_blocker(error: &str) -> bool {
+    if step_error_is_missing_target(error)
+        || crate::skills::error_looks_like_os_permission_denied(error)
+    {
+        return true;
+    }
+    crate::skills::parse_structured_skill_error(error).is_some_and(|structured| {
+        matches!(
+            structured.error_kind.as_str(),
+            "permission_denied" | "policy_block" | "path_outside_workspace"
+        )
+    })
+}
+
+fn latest_non_control_step_is_crypto_account_access_error(
+    journal: &crate::task_journal::TaskJournal,
+) -> bool {
+    journal
+        .step_results
+        .iter()
+        .rev()
+        .find(|step| {
+            !matches!(
+                step.skill.as_str(),
+                "respond" | "synthesize_answer" | "think" | "answer_verifier"
+            )
+        })
+        .is_some_and(|step| {
+            step.status == crate::executor::StepExecutionStatus::Error
+                && step.error_excerpt.as_deref().is_some_and(|error| {
+                    crate::skills::is_crypto_account_access_error(&step.skill, error)
+                })
+        })
 }
 
 pub(crate) fn local_missing_evidence_verifier_gap(
@@ -2491,6 +3108,12 @@ pub(crate) fn local_missing_evidence_verifier_gap(
     }
     let coverage = crate::task_journal::evidence_coverage_for_route(route_result, journal);
     if coverage.is_complete() {
+        return None;
+    }
+    if finalizer_missing_target_can_skip_missing_evidence_gap(route_result, journal) {
+        return None;
+    }
+    if finalizer_account_access_error_can_skip_missing_evidence_gap(route_result, journal) {
         return None;
     }
     let missing = coverage.missing_evidence;
@@ -2508,6 +3131,188 @@ pub(crate) fn local_missing_evidence_verifier_gap(
         ),
         confidence: 0.9,
     })
+}
+
+pub(crate) fn local_compound_listing_answer_verifier_gap(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+    candidate_answer: &str,
+) -> Option<AnswerVerifierOut> {
+    if !route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || !matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::ExcerptKindJudgment
+                | crate::OutputSemanticKind::ContentExcerptSummary
+                | crate::OutputSemanticKind::ContentExcerptWithSummary
+                | crate::OutputSemanticKind::DirectoryPurposeSummary
+        )
+    {
+        return None;
+    }
+    if route_result.output_contract.semantic_kind
+        == crate::OutputSemanticKind::DirectoryPurposeSummary
+        && requested_listing_name_limit(route_result).is_none()
+    {
+        return None;
+    }
+    let names = observed_inventory_names_for_contract(route_result, journal)?;
+    if names.len() < 2 || !journal_has_content_excerpt_observation(journal) {
+        return None;
+    }
+    let missing = names
+        .iter()
+        .filter(|name| !observed_name_is_mentioned(candidate_answer, name))
+        .cloned()
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return None;
+    }
+    Some(AnswerVerifierOut {
+        pass: false,
+        missing_evidence_fields: vec!["candidates".to_string()],
+        answer_incomplete_reason: format!(
+            "answer omitted observed listing item(s): {}",
+            missing.join(", ")
+        ),
+        should_retry: true,
+        retry_instruction: "Use the already observed listing items and content excerpt to produce one combined final answer in the requested shape.".to_string(),
+        confidence: 0.92,
+    })
+}
+
+fn latest_observed_inventory_names(
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<Vec<String>> {
+    latest_observed_directory_structure_names(journal).and_then(|names| {
+        (!names.is_empty()).then_some(
+            names
+                .into_iter()
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty())
+                .collect::<Vec<_>>(),
+        )
+    })
+}
+
+fn latest_observed_directory_structure_names(
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<Vec<String>> {
+    journal
+        .step_results
+        .iter()
+        .rev()
+        .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+        .filter_map(|step| step.output_excerpt.as_deref())
+        .filter_map(|output| serde_json::from_str::<serde_json::Value>(output.trim()).ok())
+        .find_map(|value| {
+            if !value_is_directory_structure_observation(&value) {
+                return None;
+            }
+            let mut names = BTreeSet::new();
+            collect_observed_strict_list_items_from_value(&value, &mut names);
+            let names = names.into_iter().collect::<Vec<_>>();
+            (!names.is_empty()).then_some(names)
+        })
+}
+
+fn value_is_directory_structure_observation(value: &serde_json::Value) -> bool {
+    matches!(
+        value.get("action").and_then(|value| value.as_str()),
+        Some("inventory_dir" | "list_dir" | "tree_summary")
+    ) || value
+        .get("names")
+        .and_then(|value| value.as_array())
+        .is_some()
+        || value
+            .get("names_by_kind")
+            .and_then(|value| value.as_object())
+            .is_some()
+        || value
+            .get("entries")
+            .and_then(|value| value.as_array())
+            .is_some()
+        || value
+            .get("candidates")
+            .and_then(|value| value.as_array())
+            .is_some()
+}
+
+fn observed_inventory_names_for_contract(
+    route_result: &RouteResult,
+    journal: &crate::task_journal::TaskJournal,
+) -> Option<Vec<String>> {
+    let mut names = latest_observed_inventory_names(journal)?;
+    if let Some(limit) = requested_listing_name_limit(route_result) {
+        names.truncate(limit.min(names.len()));
+    }
+    Some(names)
+}
+
+fn requested_listing_name_limit(route_result: &RouteResult) -> Option<usize> {
+    contract_hint_selector_limit(&route_result.resolved_intent)
+        .or_else(|| first_ascii_integer_limit(&route_result.resolved_intent))
+        .or_else(|| first_ascii_integer_limit(&route_result.route_reason))
+        .and_then(|limit| usize::try_from(limit).ok())
+        .filter(|limit| *limit > 0)
+}
+
+fn contract_hint_selector_limit(text: &str) -> Option<u64> {
+    text.split(|ch: char| ch == '\n' || ch == ';' || ch == ',' || ch.is_whitespace())
+        .filter_map(|part| part.split_once('='))
+        .find_map(|(key, value)| {
+            (key.trim() == "selector_limit")
+                .then(|| value.trim().parse::<u64>().ok())
+                .flatten()
+        })
+}
+
+fn first_ascii_integer_limit(text: &str) -> Option<u64> {
+    let mut buf = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_digit() {
+            buf.push(ch);
+        } else if !buf.is_empty() {
+            break;
+        }
+    }
+    if buf.is_empty() {
+        None
+    } else {
+        buf.parse::<u64>().ok().filter(|value| *value > 0)
+    }
+}
+
+fn observed_names_all_mentioned(candidate_answer: &str, names: &[String]) -> bool {
+    names
+        .iter()
+        .all(|name| observed_name_is_mentioned(candidate_answer, name))
+}
+
+fn observed_name_is_mentioned(candidate_answer: &str, name: &str) -> bool {
+    let answer = candidate_answer.replace('\\', "/").to_ascii_lowercase();
+    let normalized = name.replace('\\', "/").to_ascii_lowercase();
+    !normalized.is_empty() && answer.contains(&normalized)
+}
+
+fn journal_has_content_excerpt_observation(journal: &crate::task_journal::TaskJournal) -> bool {
+    journal
+        .step_results
+        .iter()
+        .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+        .filter_map(|step| step.output_excerpt.as_deref())
+        .filter_map(|output| serde_json::from_str::<serde_json::Value>(output.trim()).ok())
+        .any(|value| {
+            matches!(
+                value.get("action").and_then(|value| value.as_str()),
+                Some("read_range" | "read_text_range")
+            ) && value
+                .get("excerpt")
+                .or_else(|| value.get("content"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .is_some_and(|text| !text.is_empty())
+        })
 }
 
 fn task_contract_prompt_block(task_contract: &TaskContract) -> String {
@@ -2622,7 +3427,7 @@ fn execution_evidence_prompt_block(journal: &crate::task_journal::TaskJournal) -
     let mut steps = journal
         .step_results
         .iter()
-        .filter(|step| step_can_supply_verifier_observation(step))
+        .filter(|step| step_can_supply_verifier_prompt_observation(step))
         .rev()
         .take(MAX_VERIFIER_STEPS)
         .map(provider_safe_step_evidence)

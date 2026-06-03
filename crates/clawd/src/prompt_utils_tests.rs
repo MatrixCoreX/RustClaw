@@ -211,6 +211,51 @@ fn validate_against_schema_defaults_missing_direct_answer_gate_reference_resolut
 }
 
 #[test]
+fn validate_against_schema_normalizes_contract_repair_confidence_label() {
+    let raw = r#"{
+        "apply": true,
+        "reason": "config_risk_assessment_contract_repair",
+        "confidence": "high",
+        "decision": "planner_execute",
+        "needs_clarify": false,
+        "clarify_question": "",
+        "resolved_user_intent": "Check configs/config.toml for obvious configuration issues.",
+        "output_contract": {
+            "response_shape": "one_sentence",
+            "exact_sentence_count": 1,
+            "requires_content_evidence": true,
+            "delivery_required": false,
+            "locator_kind": "path",
+            "delivery_intent": "none",
+            "semantic_kind": "config_risk_assessment",
+            "locator_hint": "/home/guagua/rustclaw/configs/config.toml",
+            "self_extension": {"mode": "none", "trigger": "none", "execute_now": false}
+        },
+        "execution_recipe": {"kind": "none", "profile": "none", "target_scope": "none"},
+        "turn_type": "task_request",
+        "target_task_policy": "standalone",
+        "state_patch": null
+    }"#;
+
+    let validated =
+        super::validate_against_schema::<Value>(raw, super::PromptSchemaId::ContractRepairJudge)
+            .expect("confidence labels from repair judge should be canonicalized");
+
+    assert!(validated.schema_normalized);
+    assert_eq!(
+        validated.value.get("confidence").and_then(|v| v.as_f64()),
+        Some(0.9)
+    );
+    assert_eq!(
+        validated
+            .value
+            .pointer("/output_contract/semantic_kind")
+            .and_then(|v| v.as_str()),
+        Some("config_risk_assessment")
+    );
+}
+
+#[test]
 fn validate_against_schema_normalizes_direct_answer_gate_file_locator_alias() {
     let raw = r#"{
         "decision": "planner_execute",

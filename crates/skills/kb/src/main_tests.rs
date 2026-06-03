@@ -1,8 +1,9 @@
 use super::{
-    normalize_search_path_prefix, parse_ingest_args, parse_stats_args, split_chunks,
+    do_ingest, normalize_search_path_prefix, parse_ingest_args, parse_stats_args, split_chunks,
     storage_path_for, storage_segment, tokenize, KbRuntime,
 };
 use serde_json::json;
+use std::fs;
 use std::path::PathBuf;
 
 #[test]
@@ -31,6 +32,57 @@ fn ingest_args_accept_single_path_alias() {
     .expect("parse single path alias");
 
     assert_eq!(parsed.paths, vec!["README.md"]);
+}
+
+#[test]
+fn ingest_success_extra_includes_path_evidence_fields() {
+    let root = std::env::temp_dir().join(format!(
+        "rustclaw_kb_ingest_path_evidence_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create temp kb workspace");
+    fs::write(
+        root.join("README.md"),
+        "# Demo\n\nThis document is indexed for a knowledge-base ingest test.",
+    )
+    .expect("write README fixture");
+    let runtime = KbRuntime {
+        scope_user_key: "user:test".to_string(),
+        workspace_root: root.clone(),
+        unified_index_db_path: Some(root.join("data").join("rustclaw.db")),
+        unified_index_busy_timeout_ms: None,
+    };
+
+    let out = do_ingest(
+        &runtime,
+        &json!({
+            "action": "ingest",
+            "namespace": "demo_docs_nl",
+            "paths": ["README.md"],
+            "overwrite": true
+        }),
+    )
+    .expect("ingest succeeds");
+
+    assert_eq!(
+        out.get("path").and_then(|value| value.as_str()),
+        Some("README.md")
+    );
+    assert_eq!(
+        out.get("paths")
+            .and_then(|value| value.as_array())
+            .and_then(|items| items.first())
+            .and_then(|value| value.as_str()),
+        Some("README.md")
+    );
+    assert_eq!(
+        out.pointer("/stats/ingested_docs")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

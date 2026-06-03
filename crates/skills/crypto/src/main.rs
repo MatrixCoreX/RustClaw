@@ -1104,8 +1104,7 @@ fn handle_quote(
         kraken.as_ref(),
         coingecko.as_ref(),
     );
-    Ok((
-        text,
+    let extra = market_quote_extra(
         json!({
             "action": "quote",
             "quote": pref,
@@ -1119,7 +1118,9 @@ fn handle_quote(
             },
             "errors": errors
         }),
-    ))
+        &text,
+    );
+    Ok((text, extra))
 }
 
 fn handle_multi_quote(
@@ -1189,7 +1190,15 @@ fn handle_multi_quote(
     }
     let mut extra = json!({ "action": "multi_quote", "quotes": quotes });
     extra["quotes_by_exchange"] = Value::Array(by_exchange_rows);
-    Ok((lines.join("\n"), extra))
+    let text = lines.join("\n");
+    Ok((text.clone(), market_quote_extra(extra, &text)))
+}
+
+fn market_quote_extra(mut extra: Value, text: &str) -> Value {
+    if let Some(obj) = extra.as_object_mut() {
+        obj.insert("content_excerpt".to_string(), json!(text));
+    }
+    extra
 }
 
 fn format_market_quote_line(

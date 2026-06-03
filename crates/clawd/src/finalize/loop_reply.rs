@@ -236,6 +236,104 @@ fn replace_raw_read_delivery_with_synthesis(
     true
 }
 
+fn replace_raw_observation_delivery_with_synthesis(
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || !latest_publishable_synthesis_step_matches(loop_state)
+    {
+        return false;
+    }
+    if !route_expects_synthesis_over_raw_observation(route) {
+        return false;
+    }
+    let Some(synthesis) = loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    else {
+        return false;
+    };
+    if crate::finalize::looks_like_planner_artifact(synthesis)
+        || crate::finalize::looks_like_internal_trace_artifact(synthesis)
+    {
+        return false;
+    }
+    let Some(current_delivery) = current_user_visible_delivery_text(loop_state) else {
+        return false;
+    };
+    if current_delivery == synthesis
+        || !crate::agent_engine::observed_output::answer_is_direct_observation_passthrough(
+            current_delivery,
+            loop_state,
+        )
+    {
+        return false;
+    }
+
+    info!(
+        "final_result_replace_raw_observation_delivery_with_synthesis task_id={} raw={}",
+        task.task_id,
+        crate::truncate_for_log(current_delivery)
+    );
+    loop_state.delivery_messages.clear();
+    append_delivery_message(
+        &task.task_id,
+        &mut loop_state.delivery_messages,
+        synthesis.to_string(),
+    );
+    loop_state.last_user_visible_respond = Some(synthesis.to_string());
+    true
+}
+
+fn valid_publishable_synthesis_output(loop_state: &LoopState) -> Option<&str> {
+    if !latest_publishable_synthesis_step_matches(loop_state) {
+        return None;
+    }
+    loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+}
+
+fn route_expects_synthesis_over_raw_observation(route: &crate::RouteResult) -> bool {
+    if route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+    {
+        return false;
+    }
+    if crate::agent_engine::observed_output::route_requires_synthesized_delivery(route) {
+        return true;
+    }
+    let constrained_sentence_delivery = route.output_contract.response_shape
+        == crate::OutputResponseShape::OneSentence
+        || route.output_contract.exact_sentence_count.is_some();
+    if !route.output_contract.requires_content_evidence || !constrained_sentence_delivery {
+        return false;
+    }
+    matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::None
+            | crate::OutputSemanticKind::RawCommandOutput
+            | crate::OutputSemanticKind::CommandOutputSummary
+            | crate::OutputSemanticKind::DirectoryPurposeSummary
+            | crate::OutputSemanticKind::ContentExcerptSummary
+            | crate::OutputSemanticKind::ContentExcerptWithSummary
+            | crate::OutputSemanticKind::WorkspaceProjectSummary
+    )
+}
+
 fn delivery_is_raw_read_observation(delivery: &str, loop_state: &LoopState) -> bool {
     let delivery = delivery.trim();
     if delivery.is_empty()
@@ -326,13 +424,34 @@ fn route_requires_file_token(agent_run_context: Option<&AgentRunContext>) -> boo
         .unwrap_or(false)
 }
 
+fn structured_json_values_from_output(output: &str) -> Vec<serde_json::Value> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
+        return Vec::new();
+    };
+    let mut values = vec![value.clone()];
+    if let Some(extra) = value.get("extra") {
+        values.push(extra.clone());
+    }
+    if let Some(inner) = value
+        .get("text")
+        .and_then(|text| text.as_str())
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+    {
+        values.push(inner);
+    }
+    values
+}
+
 pub(crate) fn output_excerpt_has_missing_file_evidence(output: &str) -> bool {
     if output.trim().eq_ignore_ascii_case("NOT_FOUND") {
         return true;
     }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
-        return false;
-    };
+    structured_json_values_from_output(output)
+        .iter()
+        .any(output_value_has_missing_file_evidence)
+}
+
+fn output_value_has_missing_file_evidence(value: &serde_json::Value) -> bool {
     let locator_found_nothing = value
         .get("action")
         .and_then(|v| v.as_str())
@@ -352,7 +471,7 @@ pub(crate) fn output_excerpt_has_missing_file_evidence(output: &str) -> bool {
     let has_path_batch_shape = value.get("action").and_then(|v| v.as_str())
         == Some("path_batch_facts")
         || path_facts.is_some();
-    has_path_batch_shape
+    if has_path_batch_shape
         && path_facts.is_some_and(|facts| {
             facts.iter().any(|fact| {
                 fact.get("exists").and_then(|v| v.as_bool()) == Some(false)
@@ -362,6 +481,18 @@ pub(crate) fn output_excerpt_has_missing_file_evidence(output: &str) -> bool {
                         .is_some_and(|path| !path.trim().is_empty())
             })
         })
+    {
+        return true;
+    }
+
+    value
+        .get("extra")
+        .is_some_and(output_value_has_missing_file_evidence)
+        || value
+            .get("text")
+            .and_then(|text| text.as_str())
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+            .is_some_and(|inner| output_value_has_missing_file_evidence(&inner))
 }
 
 fn has_missing_file_search_evidence(loop_state: &LoopState) -> bool {
@@ -502,12 +633,64 @@ fn missing_path_from_path_fact(fact: &serde_json::Value) -> Option<String> {
 
 fn missing_file_path_from_output(output: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(output).ok()?;
-    let facts = value.get("facts").and_then(|value| value.as_array())?;
-    facts.iter().find_map(|fact| {
-        (fact.get("exists").and_then(|value| value.as_bool()) == Some(false))
-            .then(|| missing_path_from_path_fact(fact))
-            .flatten()
-    })
+    missing_file_path_from_output_value(&value)
+}
+
+fn missing_file_path_from_output_value(value: &serde_json::Value) -> Option<String> {
+    let path_from_facts = value
+        .get("facts")
+        .and_then(|value| value.as_array())
+        .and_then(|facts| {
+            facts.iter().find_map(|fact| {
+                (fact.get("exists").and_then(|value| value.as_bool()) == Some(false))
+                    .then(|| missing_path_from_path_fact(fact))
+                    .flatten()
+            })
+        });
+    if path_from_facts.is_some() {
+        return path_from_facts;
+    }
+
+    let path_from_empty_locator = value
+        .get("action")
+        .and_then(|v| v.as_str())
+        .is_some_and(|action| matches!(action, "find_name" | "find_path"))
+        .then(|| {
+            let candidate = value
+                .get("patterns")
+                .and_then(|patterns| patterns.as_array())
+                .and_then(|patterns| patterns.first())
+                .and_then(|pattern| pattern.as_str())
+                .or_else(|| value.get("query").and_then(|query| query.as_str()))
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(ToString::to_string)?;
+            let root = value
+                .get("root")
+                .and_then(|root| root.as_str())
+                .map(str::trim)
+                .filter(|root| !root.is_empty());
+            Some(if let Some(root) = root {
+                Path::new(root).join(candidate).display().to_string()
+            } else {
+                candidate
+            })
+        })
+        .flatten();
+    if path_from_empty_locator.is_some() {
+        return path_from_empty_locator;
+    }
+
+    value
+        .get("extra")
+        .and_then(missing_file_path_from_output_value)
+        .or_else(|| {
+            value
+                .get("text")
+                .and_then(|text| text.as_str())
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+                .and_then(|inner| missing_file_path_from_output_value(&inner))
+        })
 }
 
 fn missing_file_path_from_loop(
@@ -1191,6 +1374,45 @@ fn observed_path_batch_file_candidates(value: &serde_json::Value) -> Option<Vec<
     (!candidates.is_empty()).then_some(candidates)
 }
 
+fn observed_find_entries_file_candidates(
+    state: &AppState,
+    value: &serde_json::Value,
+) -> Option<Vec<PathBuf>> {
+    let action = value.get("action").and_then(|value| value.as_str())?;
+    if !matches!(action, "find_entries" | "find_name") {
+        return None;
+    }
+    let root = value
+        .get("root")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state.skill_rt.workspace_root.clone());
+    let mut candidates = value
+        .get("results")
+        .and_then(|value| value.as_array())?
+        .iter()
+        .filter_map(|value| value.as_str())
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .filter_map(|path| {
+            let candidate = Path::new(path);
+            let resolved = if candidate.is_absolute() {
+                candidate.to_path_buf()
+            } else {
+                root.join(candidate)
+            };
+            resolved
+                .is_file()
+                .then(|| resolved.canonicalize().unwrap_or(resolved))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort();
+    candidates.dedup();
+    (!candidates.is_empty()).then_some(candidates)
+}
+
 fn direct_file_token_from_observed_path_batch_facts(
     loop_state: &LoopState,
     agent_run_context: Option<&AgentRunContext>,
@@ -1214,6 +1436,51 @@ fn direct_file_token_from_observed_path_batch_facts(
             continue;
         };
         let candidates = observed_path_batch_file_candidates(&value)?;
+        if candidates.len() != 1 {
+            return None;
+        }
+        return Some((
+            format!("FILE:{}", candidates[0].display()),
+            crate::task_journal::TaskJournalFinalizerSummary {
+                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                contract_ok: true,
+                completion_ok: Some(true),
+                grounded_ok: Some(true),
+                format_ok: Some(true),
+                needs_clarify: Some(false),
+                used_evidence_ids_count: 1,
+                ..Default::default()
+            },
+        ));
+    }
+    None
+}
+
+fn direct_file_token_from_observed_find_entries(
+    state: &AppState,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    if !route_requires_file_token(agent_run_context) {
+        return None;
+    }
+    for step in loop_state.executed_step_results.iter().rev() {
+        if !step.is_ok() || !matches!(step.skill.as_str(), "fs_basic" | "system_basic") {
+            continue;
+        }
+        let Some(output) = step
+            .output
+            .as_deref()
+            .map(str::trim)
+            .filter(|output| !output.is_empty())
+        else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+            continue;
+        };
+        let candidates = observed_find_entries_file_candidates(state, &value)?;
         if candidates.len() != 1 {
             return None;
         }
@@ -1321,17 +1588,12 @@ async fn enforce_delivery_output_contract(
     {
         return;
     }
-    let publishable_synthesis = loop_state
-        .last_publishable_synthesis_output
-        .as_deref()
-        .map(str::trim)
-        .filter(|text| !text.is_empty());
+    let publishable_synthesis = valid_publishable_synthesis_output(loop_state);
     let seed_text = if publishable_synthesis.is_some() {
         loop_state
-            .delivery_messages
-            .last()
-            .cloned()
-            .or_else(|| loop_state.last_publishable_synthesis_output.clone())
+            .last_publishable_synthesis_output
+            .clone()
+            .or_else(|| loop_state.delivery_messages.last().cloned())
             .or_else(|| loop_state.last_user_visible_respond.clone())
             .unwrap_or_default()
     } else {
@@ -1350,6 +1612,14 @@ async fn enforce_delivery_output_contract(
             seed_text,
             loop_state.delivery_messages.clone(),
         );
+    if publishable_synthesis.is_some() && !normalized_text.trim().is_empty() {
+        let mut rewritten_messages = normalized_messages
+            .into_iter()
+            .filter(|message| crate::finalize::is_execution_summary_message(message))
+            .collect::<Vec<_>>();
+        rewritten_messages.push(normalized_text.clone());
+        normalized_messages = rewritten_messages;
+    }
 
     // §7.1 output_contract verifier hook：在 enforce_output_contract 的"shape 整形"
     // 之后再做一层最小结构合规性判定。不要在这里用自然语言词表判断 yes/no、
@@ -2114,7 +2384,7 @@ fn latest_scalar_observed_answer_from_loop_contract(
     ))
 }
 
-fn latest_successful_observation_body(loop_state: &LoopState) -> Option<&str> {
+fn latest_successful_observation_body(loop_state: &LoopState) -> Option<String> {
     loop_state
         .executed_step_results
         .iter()
@@ -2126,6 +2396,7 @@ fn latest_successful_observation_body(loop_state: &LoopState) -> Option<&str> {
         })
         .filter(|step| step.is_ok())
         .and_then(|step| step.output.as_deref())
+        .map(crate::agent_engine::observed_output::normalized_success_body_for_direct_answer)
 }
 
 fn latest_path_observed_answer_from_loop_contract(
@@ -2141,8 +2412,8 @@ fn latest_path_observed_answer_from_loop_contract(
     ) {
         return None;
     }
-    let body = latest_successful_observation_body(loop_state)?.trim();
-    let value: serde_json::Value = serde_json::from_str(body).ok()?;
+    let body = latest_successful_observation_body(loop_state)?;
+    let value: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
     let results = value.get("results").and_then(serde_json::Value::as_array)?;
     if results.len() != 1 {
         return None;
@@ -2196,19 +2467,115 @@ fn loop_contract_observed_answer_satisfies_required_evidence(
     })
 }
 
+fn replace_delivery_with_direct_scalar_observed_answer(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    if !agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .is_some_and(route_allows_direct_scalar_observed_answer)
+    {
+        return false;
+    }
+    let Some((answer, summary)) =
+        direct_scalar_observed_answer(Some(state), loop_state, agent_run_context)
+    else {
+        return false;
+    };
+    if current_user_visible_delivery_text(loop_state)
+        .map(str::trim)
+        .is_some_and(|delivery| delivery == answer.trim())
+    {
+        loop_state.last_user_visible_respond = Some(answer);
+        *finalizer_summary = Some(summary);
+        return true;
+    }
+    let Some(current_delivery) = current_user_visible_delivery_text(loop_state) else {
+        return false;
+    };
+    if !delivery_message_is_json_container(current_delivery)
+        && !looks_like_structured_machine_output(current_delivery)
+    {
+        return false;
+    }
+    loop_state
+        .delivery_messages
+        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    append_delivery_message(
+        &task.task_id,
+        &mut loop_state.delivery_messages,
+        answer.clone(),
+    );
+    loop_state.last_user_visible_respond = Some(answer);
+    *finalizer_summary = Some(summary);
+    info!(
+        "delivery replace_structured_with_direct_scalar_observed task_id={}",
+        task.task_id
+    );
+    true
+}
+
+fn replace_delivery_with_direct_structured_observed_answer(
+    state: &AppState,
+    task: &ClaimedTask,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some(route) = agent_run_context.and_then(|ctx| ctx.route_result.as_ref()) else {
+        return false;
+    };
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::ServiceStatus {
+        return false;
+    }
+    let Some((answer, summary)) =
+        direct_structured_observed_answer(Some(state), loop_state, agent_run_context)
+    else {
+        return false;
+    };
+    let answer = answer.trim();
+    if answer.is_empty()
+        || crate::finalize::parse_delivery_token(answer).is_some()
+        || crate::finalize::looks_like_planner_artifact(answer)
+        || crate::finalize::looks_like_internal_trace_artifact(answer)
+    {
+        return false;
+    }
+    if loop_state
+        .delivery_messages
+        .last()
+        .is_some_and(|message| message.trim() == answer)
+    {
+        loop_state.last_user_visible_respond = Some(answer.to_string());
+        *finalizer_summary = Some(summary);
+        return true;
+    }
+    loop_state
+        .delivery_messages
+        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    append_delivery_message(
+        &task.task_id,
+        &mut loop_state.delivery_messages,
+        answer.to_string(),
+    );
+    loop_state.last_user_visible_respond = Some(answer.to_string());
+    *finalizer_summary = Some(summary);
+    info!(
+        "delivery replace_with_direct_structured_observed task_id={}",
+        task.task_id
+    );
+    true
+}
+
 fn replace_delivery_with_loop_contract_observed_answer(
     task: &ClaimedTask,
     loop_state: &mut LoopState,
     agent_run_context: Option<&AgentRunContext>,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
-    if loop_state
-        .delivery_messages
-        .last()
-        .is_some_and(|message| delivery_message_is_json_object(message))
-    {
-        return false;
-    }
     let Some((answer, summary, answer_kind)) =
         latest_scalar_observed_answer_from_loop_contract(loop_state)
             .map(|(answer, summary)| (answer, summary, LoopContractObservedAnswerKind::Scalar))
@@ -2992,6 +3359,7 @@ fn direct_structured_observed_answer_impl(
         && route.output_contract.requires_content_evidence
         && latest_plan_requested_synthesis(loop_state)
         && route.output_contract.semantic_kind != crate::OutputSemanticKind::GitRepositoryState
+        && route.output_contract.semantic_kind != crate::OutputSemanticKind::ServiceStatus
     {
         return None;
     }
@@ -3428,7 +3796,17 @@ fn prefer_observed_answer_for_exact_contract(
     if has_prior_step_error && !allow_prior_step_error_replacement {
         return;
     }
-    if let Some((answer, summary)) = direct_raw_command_output_projection(route, loop_state) {
+    if route_expects_synthesis_over_raw_observation(route)
+        && delivery_matches_latest_publishable_synthesis(loop_state, delivery_messages)
+    {
+        info!(
+            "delivery exact_contract_keep_publishable_synthesis task_id={}",
+            task_id
+        );
+        return;
+    }
+    if let Some((answer, summary)) = direct_raw_command_output_projection(state, route, loop_state)
+    {
         if delivery_messages
             .last()
             .is_some_and(|message| message.trim() == answer.trim())
@@ -3483,6 +3861,40 @@ fn prefer_observed_answer_for_exact_contract(
             )
         );
         return;
+    }
+    if directory_entry_groups_prefers_observed_groups(route, loop_state) {
+        if let Some((answer, summary)) = matrix_grouped_name_list_observed_answer(route, loop_state)
+        {
+            let answer = answer.trim();
+            if answer.is_empty() {
+                return;
+            }
+            if delivery_messages
+                .last()
+                .map(|message| message.trim() == answer)
+                .unwrap_or(false)
+            {
+                loop_state.last_user_visible_respond = Some(answer.to_string());
+                *finalizer_summary = Some(summary);
+                return;
+            }
+            info!(
+                "delivery exact_contract_grouped_names_from_observed task_id={} previous={} observed={}",
+                task_id,
+                crate::truncate_for_log(
+                    delivery_messages
+                        .last()
+                        .map(String::as_str)
+                        .unwrap_or_default()
+                ),
+                crate::truncate_for_log(answer)
+            );
+            delivery_messages.clear();
+            delivery_messages.push(answer.to_string());
+            loop_state.last_user_visible_respond = Some(answer.to_string());
+            *finalizer_summary = Some(summary);
+            return;
+        }
     }
     if let Some(synthesis) = loop_state
         .last_publishable_synthesis_output
@@ -3576,9 +3988,6 @@ fn prefer_observed_answer_for_exact_contract(
         loop_state,
         agent_run_context,
     )
-    .or_else(|| {
-        direct_log_tail_status_answer(state, &route.resolved_intent, loop_state, agent_run_context)
-    })
     .or_else(|| direct_scalar_observed_answer(Some(state), loop_state, agent_run_context))
     .or_else(|| latest_grounded_synthesis_for_mixed_listing_contract(route, loop_state))
     .or_else(|| direct_structured_observed_answer(Some(state), loop_state, agent_run_context))
@@ -3642,7 +4051,8 @@ fn exact_contract_fallback_observed_answer(
     if raw_command_output_needs_structural_projection(route, loop_state) {
         return None;
     }
-    let body = latest_successful_observation_body(loop_state)?.trim();
+    let body_string = latest_successful_observation_body(loop_state)?;
+    let body = body_string.trim();
     if body.is_empty()
         || crate::finalize::looks_like_planner_artifact(body)
         || crate::finalize::looks_like_internal_trace_artifact(body)
@@ -4079,6 +4489,7 @@ fn looks_like_raw_command_snapshot(answer: &str) -> bool {
 }
 
 fn direct_raw_command_output_projection(
+    state: &AppState,
     route: &crate::RouteResult,
     loop_state: &LoopState,
 ) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
@@ -4103,6 +4514,23 @@ fn direct_raw_command_output_projection(
     if outputs.is_empty() {
         return None;
     }
+    if let Some(path) = latest_run_cmd_redirect_existing_file_path(state, loop_state) {
+        return Some((
+            path,
+            crate::task_journal::TaskJournalFinalizerSummary {
+                stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+                disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+                parsed: true,
+                contract_ok: true,
+                completion_ok: Some(true),
+                grounded_ok: Some(true),
+                format_ok: Some(true),
+                needs_clarify: Some(false),
+                used_evidence_ids_count: 1,
+                ..Default::default()
+            },
+        ));
+    }
     let projected = latest_raw_command_structural_projection(loop_state)
         .and_then(|projection| apply_raw_command_structural_projection(&outputs, &projection));
     let answer = projected.unwrap_or_else(|| outputs.join("\n"));
@@ -4121,6 +4549,168 @@ fn direct_raw_command_output_projection(
             ..Default::default()
         },
     ))
+}
+
+fn latest_run_cmd_redirect_existing_file_path(
+    state: &AppState,
+    loop_state: &LoopState,
+) -> Option<String> {
+    let workspace_root = state.skill_rt.workspace_root.canonicalize().ok()?;
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && step.skill == "run_cmd")
+        .find_map(|step| {
+            let output = step.output.as_deref().unwrap_or_default();
+            let plan_command = plan_step_for_execution(loop_state, step)
+                .and_then(|plan_step| raw_command_arg_from_plan_step(Some(plan_step)));
+            plan_command
+                .into_iter()
+                .chain(run_cmd_machine_command_from_output(output))
+                .find_map(|command| {
+                    shell_stdout_redirect_target_path(command).and_then(|path| {
+                        normalize_workspace_existing_file_path(&workspace_root, path)
+                    })
+                })
+        })
+}
+
+fn run_cmd_machine_command_from_output(output: &str) -> Option<&str> {
+    let line = output
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("exit=0 command="))?;
+    line.strip_prefix("exit=0 command=")
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+}
+
+fn normalize_workspace_existing_file_path(workspace_root: &Path, path: PathBuf) -> Option<String> {
+    let absolute = if path.is_absolute() {
+        path
+    } else {
+        workspace_root.join(path)
+    };
+    let canonical = absolute.canonicalize().ok()?;
+    if !canonical.is_file() || canonical.strip_prefix(workspace_root).is_err() {
+        return None;
+    }
+    Some(canonical.display().to_string())
+}
+
+fn shell_stdout_redirect_target_path(command: &str) -> Option<PathBuf> {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    for (idx, ch) in command.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if in_double && ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '\'' && !in_double {
+            in_single = !in_single;
+            continue;
+        }
+        if ch == '"' && !in_single {
+            in_double = !in_double;
+            continue;
+        }
+        if in_single || in_double || ch != '>' {
+            continue;
+        }
+        let before = command[..idx].trim_end();
+        if shell_redirect_is_non_stdout_fd(before) {
+            continue;
+        }
+        let mut rest = &command[idx + ch.len_utf8()..];
+        if rest.starts_with('>') {
+            rest = &rest[1..];
+        }
+        let rest = rest.trim_start();
+        if rest.starts_with('&') {
+            continue;
+        }
+        if let Some(word) = parse_shell_redirect_word(rest) {
+            return Some(PathBuf::from(word));
+        }
+    }
+    None
+}
+
+fn shell_redirect_is_non_stdout_fd(before: &str) -> bool {
+    let Some(last) = before.chars().last() else {
+        return false;
+    };
+    if !last.is_ascii_digit() {
+        return false;
+    }
+    if last == '1' {
+        return false;
+    }
+    let prefix = &before[..before.len() - last.len_utf8()];
+    prefix
+        .chars()
+        .last()
+        .is_none_or(|ch| ch.is_whitespace() || matches!(ch, ';' | '|' | '&'))
+}
+
+fn parse_shell_redirect_word(rest: &str) -> Option<String> {
+    let mut chars = rest.char_indices();
+    let (_, first) = chars.next()?;
+    let (word, consumed_to_end) = if first == '\'' || first == '"' {
+        parse_quoted_shell_word(rest, first)?
+    } else {
+        let end = rest
+            .char_indices()
+            .find_map(|(idx, ch)| {
+                (idx > 0 && (ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '<' | '>')))
+                    .then_some(idx)
+            })
+            .unwrap_or(rest.len());
+        (rest[..end].to_string(), end == rest.len())
+    };
+    let trimmed = word.trim();
+    if trimmed.is_empty()
+        || trimmed.contains('\0')
+        || trimmed.contains('$')
+        || trimmed.contains('`')
+        || trimmed.contains('{')
+        || trimmed.contains('}')
+    {
+        return None;
+    }
+    if !consumed_to_end {
+        return Some(trimmed.to_string());
+    }
+    Some(trimmed.to_string())
+}
+
+fn parse_quoted_shell_word(rest: &str, quote: char) -> Option<(String, bool)> {
+    let mut word = String::new();
+    let mut escaped = false;
+    for (idx, ch) in rest[quote.len_utf8()..].char_indices() {
+        if escaped {
+            word.push(ch);
+            escaped = false;
+            continue;
+        }
+        if quote == '"' && ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == quote {
+            let consumed = quote.len_utf8() + idx + ch.len_utf8();
+            let trailing = rest[consumed..].trim_start();
+            return Some((word, trailing.is_empty()));
+        }
+        word.push(ch);
+    }
+    None
 }
 
 #[derive(Debug, Clone, Default)]
@@ -4332,6 +4922,9 @@ fn route_prefers_observed_answer(route: &crate::RouteResult) -> bool {
     if output_contract_requests_exact_delivery(route) {
         return true;
     }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput {
+        return true;
+    }
     if route_path_locator_plain_act_allows_observed_listing(route) {
         return true;
     }
@@ -4513,7 +5106,9 @@ fn route_has_contract_matrix_final_shape(route: &crate::RouteResult) -> bool {
 fn route_requires_observed_semantic_projection(route: &crate::RouteResult) -> bool {
     matches!(
         route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::DirectoryNames | crate::OutputSemanticKind::QuantityComparison
+        crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::QuantityComparison
+            | crate::OutputSemanticKind::ServiceStatus
     )
 }
 
@@ -4572,6 +5167,9 @@ fn current_synthesis_satisfies_matrix_shape(
     let Some(message) = delivery_messages.last() else {
         return false;
     };
+    if directory_entry_groups_prefers_observed_groups(route, loop_state) {
+        return false;
+    }
     let task = synthetic_task_for_matrix_shape_check(task_id);
     matrix_candidate_satisfies_final_shape(
         &task,
@@ -4594,6 +5192,13 @@ fn matrix_observed_answer_candidate_for_shape(
     match shape_class {
         crate::contract_matrix::FinalAnswerShapeClass::DeliveryArtifact => {
             direct_file_token_from_observed_auto_locator_filename(loop_state, agent_run_context)
+                .or_else(|| {
+                    direct_file_token_from_observed_find_entries(
+                        state,
+                        loop_state,
+                        agent_run_context,
+                    )
+                })
                 .or_else(|| {
                     direct_file_token_from_observed_inventory(loop_state, agent_run_context)
                 })
@@ -5185,6 +5790,7 @@ fn replace_delivery_with_matrix_observed_shape_answer(
     };
     let current_answer = final_answer_text_from_delivery(delivery_messages);
     if !current_answer.trim().is_empty()
+        && !directory_entry_groups_prefers_observed_groups(route, loop_state)
         && matrix_candidate_satisfies_final_shape(
             task,
             user_text,
@@ -5272,10 +5878,17 @@ fn should_attach_execution_summary(
     if route_has_contract_matrix_final_shape(route) {
         return false;
     }
-    if route_requires_content_excerpt_evidence(route) {
+    if route.output_contract.exact_sentence_count.is_some() {
         return false;
     }
-    if route.output_contract.exact_sentence_count.is_some() {
+    if delivery_keeps_execution_summary_for_context(
+        route,
+        loop_state,
+        &loop_state.delivery_messages,
+    ) {
+        return true;
+    }
+    if route_requires_content_excerpt_evidence(route) {
         return false;
     }
     if delivery_matches_grounded_content_answer(loop_state, route, &loop_state.delivery_messages) {
@@ -5385,6 +5998,20 @@ fn loop_has_structured_listing_observation(loop_state: &LoopState) -> bool {
                     )
             })
     })
+}
+
+fn directory_entry_groups_prefers_observed_groups(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> bool {
+    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+        == Some(crate::contract_matrix::FinalAnswerShape::GroupedNameList)
+        && route.output_contract.semantic_kind == crate::OutputSemanticKind::DirectoryEntryGroups
+        && loop_has_structured_listing_observation(loop_state)
+        && !loop_state
+            .executed_step_results
+            .iter()
+            .any(step_output_is_read_range)
 }
 
 fn latest_grounded_synthesis_for_mixed_listing_contract(
@@ -5875,6 +6502,9 @@ fn delivery_contract_suppresses_execution_summary(
         let trimmed = message.trim();
         !trimmed.is_empty() && !crate::finalize::is_execution_summary_message(trimmed)
     });
+    if delivery_keeps_execution_summary_for_context(route, loop_state, delivery_messages) {
+        return false;
+    }
     if delivery_token_contract_suppresses_execution_summary(route, delivery_messages) {
         return true;
     }
@@ -5975,6 +6605,27 @@ fn delivery_messages_have_execution_summary(delivery_messages: &[String]) -> boo
         .any(|message| crate::finalize::is_execution_summary_message(message))
 }
 
+fn delivery_keeps_execution_summary_for_context(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+    delivery_messages: &[String],
+) -> bool {
+    if output_contract_requests_exact_delivery(route) || route.output_contract.delivery_required {
+        return false;
+    }
+    let Some(delivery_text) = single_publishable_delivery_message(delivery_messages) else {
+        return false;
+    };
+    if delivery_matches_latest_read_range_synthesis(loop_state, route, delivery_messages) {
+        return false;
+    }
+    if last_respond_matches_single_line_observation(loop_state, delivery_text) {
+        return true;
+    }
+    valid_publishable_synthesis_output(loop_state)
+        .is_some_and(|synthesis| synthesis == delivery_text.trim())
+}
+
 fn single_publishable_delivery_message(delivery_messages: &[String]) -> Option<&str> {
     let mut publishable = delivery_messages
         .iter()
@@ -5983,6 +6634,25 @@ fn single_publishable_delivery_message(delivery_messages: &[String]) -> Option<&
         .filter(|message| !crate::finalize::is_execution_summary_message(message));
     let first = publishable.next()?;
     publishable.next().is_none().then_some(first)
+}
+
+fn delivery_matches_latest_publishable_synthesis(
+    loop_state: &LoopState,
+    delivery_messages: &[String],
+) -> bool {
+    let Some(synthesis) = loop_state
+        .last_publishable_synthesis_output
+        .as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    else {
+        return false;
+    };
+    latest_publishable_synthesis_step_matches(loop_state)
+        && delivery_messages
+            .last()
+            .map(|message| message.trim())
+            .is_some_and(|message| message == synthesis)
 }
 
 fn delivery_matches_observed_markdown_heading_delivery(
@@ -6623,18 +7293,17 @@ fn missing_content_target_label(
 fn content_evidence_missing_target_answer(
     state: &AppState,
     _task: &ClaimedTask,
-    user_text: &str,
+    _user_text: &str,
     agent_run_context: Option<&AgentRunContext>,
     error: &str,
 ) -> String {
     let target = missing_content_target_label(agent_run_context, error);
-    if prefer_english_for_user_text(state, user_text) {
-        format!(
-            "I couldn't find `{target}`, so I didn't read any content. Please confirm the path or filename and send it again."
-        )
-    } else {
-        format!("未找到 `{target}`，所以没有读取内容。请确认路径或文件名后再发一次。")
-    }
+    crate::i18n_t_with_default_vars(
+        state,
+        "clawd.msg.content_missing_target",
+        "message_key=clawd.msg.content_missing_target target={target} content_read=false",
+        &[("target", &target)],
+    )
 }
 
 async fn content_evidence_step_failure_answer(
@@ -7107,14 +7776,6 @@ fn observed_execution_facts_for_missing_delivery(
     facts
 }
 
-fn missing_delivery_after_observation_default_message(state: &AppState, user_text: &str) -> String {
-    if prefer_english_for_user_text(state, user_text) {
-        "I have execution results, but I could not turn them into a reliable final answer. Ask me to retry from the raw results.".to_string()
-    } else {
-        "已有执行结果，但我没能整理成可靠结论。你可以让我基于原始结果重新整理一次。".to_string()
-    }
-}
-
 fn observed_execution_status_steps<'a>(
     loop_state: &'a crate::agent_engine::LoopState,
 ) -> Vec<&'a crate::executor::StepExecutionResult> {
@@ -7126,8 +7787,26 @@ fn observed_execution_status_steps<'a>(
                 step.skill.as_str(),
                 "respond" | "think" | "synthesize_answer"
             ) && output_text_from_execution_result(step).is_some()
+                && !step_error_is_contract_policy_gap(step)
         })
         .collect::<Vec<_>>()
+}
+
+fn step_error_is_contract_policy_gap(step: &crate::executor::StepExecutionResult) -> bool {
+    let Some(error) = step
+        .error
+        .as_deref()
+        .map(str::trim)
+        .filter(|error| !error.is_empty())
+    else {
+        return false;
+    };
+    crate::skills::parse_structured_skill_error(error).is_some_and(|structured| {
+        matches!(
+            structured.error_kind.as_str(),
+            "contract_action_rejected" | "contract_arg_rejected" | "contract_policy_violation"
+        )
+    })
 }
 
 fn successful_content_observation_should_precede_status_summary(
@@ -7320,15 +7999,77 @@ fn failed_execution_step_item(
     step: &crate::executor::StepExecutionResult,
     prefer_english: bool,
 ) -> String {
-    let command = plan_step_for_execution(loop_state, step)
-        .and_then(|plan_step| raw_command_arg_from_plan_step(Some(plan_step)))
-        .map(|value| truncate_with_ellipsis(&value.replace('`', "'"), 180));
+    let command = command_label_for_execution_step(loop_state, step);
     match command {
         Some(command) if prefer_english => format!("Step {} failed: `{command}`.", step_index + 1),
         Some(command) => format!("第 {} 步失败：`{command}`。", step_index + 1),
         None if prefer_english => format!("Step {} failed.", step_index + 1),
         None => format!("第 {} 步失败。", step_index + 1),
     }
+}
+
+fn command_label_for_execution_step(
+    loop_state: &crate::agent_engine::LoopState,
+    step: &crate::executor::StepExecutionResult,
+) -> Option<String> {
+    plan_step_for_execution(loop_state, step)
+        .and_then(|plan_step| raw_command_arg_from_plan_step(Some(plan_step)))
+        .map(ToOwned::to_owned)
+        .or_else(|| raw_command_arg_from_step_error(step))
+        .map(|value| truncate_with_ellipsis(&value.replace('`', "'"), 180))
+}
+
+fn execution_failed_step_status_item(
+    loop_state: &crate::agent_engine::LoopState,
+    step_index: usize,
+    step: &crate::executor::StepExecutionResult,
+    prefer_english: bool,
+) -> String {
+    let command = command_label_for_execution_step(loop_state, step);
+    let detail = output_text_from_execution_result(step)
+        .map(|value| truncate_with_ellipsis(&value.replace('\n', " ").replace('`', "'"), 180));
+    if step.is_ok() {
+        match (command, detail) {
+            (Some(command), Some(detail)) if prefer_english => {
+                format!(
+                    "Step {} succeeded: `{command}` -> {detail}.",
+                    step_index + 1
+                )
+            }
+            (Some(command), Some(detail)) => {
+                format!("第 {} 步成功：`{command}` -> {detail}。", step_index + 1)
+            }
+            (Some(command), None) if prefer_english => {
+                format!("Step {} succeeded: `{command}`.", step_index + 1)
+            }
+            (Some(command), None) => format!("第 {} 步成功：`{command}`。", step_index + 1),
+            (None, _) if prefer_english => format!("Step {} succeeded.", step_index + 1),
+            (None, _) => format!("第 {} 步成功。", step_index + 1),
+        }
+    } else {
+        match (command, detail) {
+            (Some(command), Some(detail)) if prefer_english => {
+                format!("Step {} failed: `{command}` ({detail}).", step_index + 1)
+            }
+            (Some(command), Some(detail)) => {
+                format!("第 {} 步失败：`{command}`（{detail}）。", step_index + 1)
+            }
+            _ => failed_execution_step_item(loop_state, step_index, step, prefer_english),
+        }
+    }
+}
+
+fn raw_command_arg_from_step_error(step: &crate::executor::StepExecutionResult) -> Option<String> {
+    if step.skill != "run_cmd" {
+        return None;
+    }
+    let error = step.error.as_deref()?.trim();
+    let structured = crate::skills::parse_structured_skill_error(error)?;
+    let extra = structured.extra.as_ref()?;
+    ["command", "cmd"]
+        .iter()
+        .find_map(|key| structured_extra_string(extra, key))
+        .filter(|command| !command.is_empty())
 }
 
 fn deterministic_execution_failed_step_answer(
@@ -7345,20 +8086,31 @@ fn deterministic_execution_failed_step_answer(
         return None;
     }
     let prefer_english = prefer_english_for_user_text(state, user_text);
-    let failed = steps
-        .iter()
-        .enumerate()
-        .filter(|(_, step)| !step.is_ok())
-        .map(|(idx, step)| failed_execution_step_item(loop_state, idx, step, prefer_english))
-        .collect::<Vec<_>>();
-    if failed.is_empty() {
+    let failed_count = steps.iter().filter(|step| !step.is_ok()).count();
+    if failed_count == 0 {
         return Some(if prefer_english {
-            "No step failed.".to_string()
+            "No step failed. Remaining: no unexecuted command steps.".to_string()
         } else {
-            "没有步骤失败。".to_string()
+            "没有步骤失败。剩余：没有未执行的命令步骤。".to_string()
         });
     }
-    Some(failed.join(if prefer_english { " " } else { "" }))
+    let lines = steps
+        .iter()
+        .enumerate()
+        .take(6)
+        .map(|(idx, step)| execution_failed_step_status_item(loop_state, idx, step, prefer_english))
+        .collect::<Vec<_>>();
+    let remaining = if prefer_english {
+        "Remaining: no unexecuted command steps."
+    } else {
+        "剩余：没有未执行的命令步骤。"
+    };
+    Some(format!(
+        "{}{}{}",
+        lines.join(if prefer_english { " " } else { "" }),
+        if prefer_english { " " } else { "" },
+        remaining
+    ))
 }
 
 fn deterministic_observed_execution_status_summary(
@@ -8240,6 +8992,13 @@ fn latest_delivery_preserves_observed_quantity_size_facts(
         .rev()
         .find(|message| !crate::finalize::is_execution_summary_message(message))?
         .trim();
+    let facts = observed_quantity_size_facts(loop_state);
+    if facts.len() < 2 {
+        return None;
+    }
+    if structured_quantity_json_preserves_observed_size_facts(answer, &facts) {
+        return Some(answer.to_string());
+    }
     if answer.is_empty()
         || crate::finalize::parse_delivery_token(answer).is_some()
         || crate::finalize::looks_like_planner_artifact(answer)
@@ -8249,10 +9008,6 @@ fn latest_delivery_preserves_observed_quantity_size_facts(
     {
         return None;
     }
-    let facts = observed_quantity_size_facts(loop_state);
-    if facts.len() < 2 {
-        return None;
-    }
     let matched = facts
         .iter()
         .filter(|fact| {
@@ -8260,6 +9015,88 @@ fn latest_delivery_preserves_observed_quantity_size_facts(
         })
         .count();
     (matched >= 2).then(|| answer.to_string())
+}
+
+fn structured_quantity_json_preserves_observed_size_facts(
+    answer: &str,
+    facts: &[PathSizeFact],
+) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(answer.trim()) else {
+        return false;
+    };
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+    let Some(larger_file) = obj
+        .get("larger_file")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    let Some(size_delta_bytes) = obj.get("size_delta_bytes").and_then(json_value_u64) else {
+        return false;
+    };
+    let mut sorted = facts.to_vec();
+    sorted.sort_by(|a, b| {
+        b.size_bytes
+            .cmp(&a.size_bytes)
+            .then_with(|| a.label.cmp(&b.label))
+    });
+    let Some(largest) = sorted.first() else {
+        return false;
+    };
+    let Some(runner_up) = sorted.get(1) else {
+        return false;
+    };
+    let expected_delta = largest.size_bytes.saturating_sub(runner_up.size_bytes);
+    if size_delta_bytes != expected_delta {
+        return false;
+    }
+    let largest_basename = Path::new(&largest.label)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(largest.label.as_str());
+    larger_file == largest.label || larger_file == largest_basename
+}
+
+fn json_value_u64(value: &serde_json::Value) -> Option<u64> {
+    value.as_u64().or_else(|| {
+        let value = value.as_i64()?;
+        (value >= 0).then_some(value as u64)
+    })
+}
+
+fn quantity_comparison_json_answer_from_facts(mut facts: Vec<PathSizeFact>) -> Option<String> {
+    if facts.len() < 2 {
+        return None;
+    }
+    facts.sort_by(|a, b| {
+        b.size_bytes
+            .cmp(&a.size_bytes)
+            .then_with(|| a.label.cmp(&b.label))
+    });
+    let largest = facts.first()?;
+    let runner_up = facts.get(1)?;
+    if largest.size_bytes == runner_up.size_bytes {
+        return None;
+    }
+    let delta = largest.size_bytes.saturating_sub(runner_up.size_bytes);
+    Some(
+        serde_json::json!({
+            "larger_file": largest.label,
+            "size_delta_bytes": delta,
+        })
+        .to_string(),
+    )
+}
+
+fn strict_quantity_comparison_json_answer(body: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    path_batch_size_facts(&value)
+        .or_else(|| compare_paths_size_facts(&value))
+        .and_then(quantity_comparison_json_answer_from_facts)
 }
 
 fn path_batch_size_comparison_answer_with_style(
@@ -8391,6 +9228,9 @@ fn count_inventory_size_answer_with_shape(
 }
 
 fn output_has_count_inventory_total(output: &str) -> bool {
+    let output = crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(
+        output.trim(),
+    );
     let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
         return false;
     };
@@ -8473,266 +9313,6 @@ fn path_batch_size_comparison_answer(body: &str, prefer_english: bool) -> Option
     )
 }
 
-#[derive(Debug, Clone)]
-struct TailLogObservation {
-    path: String,
-    excerpt: String,
-}
-
-fn tail_log_observation_from_step(
-    step: &crate::executor::StepExecutionResult,
-) -> Option<TailLogObservation> {
-    if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
-        return None;
-    }
-    let output = step.output.as_deref()?.trim();
-    let value = serde_json::from_str::<serde_json::Value>(output).ok()?;
-    if value.get("action").and_then(|value| value.as_str()) != Some("read_range")
-        || value.get("mode").and_then(|value| value.as_str()) != Some("tail")
-    {
-        return None;
-    }
-    let requested_n = value.get("requested_n").and_then(|value| value.as_u64())?;
-    if requested_n == 0 || requested_n > 50 {
-        return None;
-    }
-    let path = value
-        .get("path")
-        .or_else(|| value.get("resolved_path"))
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    let excerpt = value
-        .get("excerpt")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    let file_name = std::path::Path::new(path)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or(path);
-    if !file_name.to_ascii_lowercase().ends_with(".log") {
-        return None;
-    }
-    Some(TailLogObservation {
-        path: path.to_string(),
-        excerpt: excerpt.to_string(),
-    })
-}
-
-fn latest_tail_log_observation(
-    loop_state: &crate::agent_engine::LoopState,
-) -> Option<TailLogObservation> {
-    loop_state
-        .executed_step_results
-        .iter()
-        .rev()
-        .find_map(tail_log_observation_from_step)
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct LogSeverityCounts {
-    info: usize,
-    warn: usize,
-    error: usize,
-}
-
-fn log_severity_counts(excerpt: &str) -> LogSeverityCounts {
-    let mut counts = LogSeverityCounts::default();
-    for token in excerpt.split(|ch: char| !ch.is_ascii_alphanumeric()) {
-        match token {
-            "INFO" => counts.info += 1,
-            "WARN" | "WARNING" => counts.warn += 1,
-            "ERROR" | "ERR" | "FATAL" | "CRITICAL" => counts.error += 1,
-            _ => {}
-        }
-    }
-    counts
-}
-
-fn tail_log_related_name_key(path: &str) -> Option<String> {
-    let file_name = std::path::Path::new(path)
-        .file_name()
-        .and_then(|value| value.to_str())?;
-    file_name
-        .split('.')
-        .next()
-        .map(str::trim)
-        .filter(|value| value.len() >= 3)
-        .map(|value| value.to_ascii_lowercase())
-}
-
-fn collect_log_file_names_from_json(
-    value: &serde_json::Value,
-    related_key: &str,
-    names: &mut std::collections::BTreeSet<String>,
-) {
-    match value {
-        serde_json::Value::Object(map) => {
-            let kind = map.get("kind").and_then(|value| value.as_str());
-            let path = map
-                .get("path")
-                .or_else(|| map.get("name"))
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty());
-            if kind == Some("file") {
-                if let Some(path) = path {
-                    if let Some(file_name) = std::path::Path::new(path)
-                        .file_name()
-                        .and_then(|value| value.to_str())
-                    {
-                        let lower = file_name.to_ascii_lowercase();
-                        if lower.ends_with(".log") && lower.contains(related_key) {
-                            names.insert(file_name.to_string());
-                        }
-                    }
-                }
-            }
-            for child in map.values() {
-                collect_log_file_names_from_json(child, related_key, names);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_log_file_names_from_json(item, related_key, names);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn related_log_file_names(
-    loop_state: &crate::agent_engine::LoopState,
-    tail_path: &str,
-) -> Vec<String> {
-    let Some(related_key) = tail_log_related_name_key(tail_path) else {
-        return Vec::new();
-    };
-    let mut names = std::collections::BTreeSet::new();
-    for step in &loop_state.executed_step_results {
-        if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
-            continue;
-        }
-        let Some(output) = step.output.as_deref() else {
-            continue;
-        };
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) {
-            collect_log_file_names_from_json(&value, &related_key, &mut names);
-        }
-    }
-    if names.is_empty() {
-        if let Some(file_name) = std::path::Path::new(tail_path)
-            .file_name()
-            .and_then(|value| value.to_str())
-        {
-            names.insert(file_name.to_string());
-        }
-    }
-    names.into_iter().take(8).collect()
-}
-
-fn direct_log_tail_status_answer(
-    _state: &AppState,
-    _user_text: &str,
-    loop_state: &crate::agent_engine::LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
-    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
-    if route.output_contract.delivery_required
-        || !route.output_contract.requires_content_evidence
-        || matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::FileToken | crate::OutputResponseShape::Scalar
-        )
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
-    {
-        return None;
-    }
-    let observation = latest_tail_log_observation(loop_state)?;
-    let counts = log_severity_counts(&observation.excerpt);
-    let file_name = std::path::Path::new(&observation.path)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or(observation.path.as_str());
-    let names = related_log_file_names(loop_state, &observation.path);
-    let joined_names = if names.is_empty() {
-        file_name.to_string()
-    } else {
-        names.join(",")
-    };
-    let state = if counts.error > 0 {
-        "error"
-    } else if counts.warn > 0 {
-        "warning"
-    } else {
-        "ok"
-    };
-    let answer = format!(
-        "log.files={joined_names}\nlog.tail_file={file_name}\nlog.level.info={}\nlog.level.warn={}\nlog.level.error={}\nlog.state={state}",
-        counts.info, counts.warn, counts.error
-    );
-    Some((
-        answer,
-        crate::task_journal::TaskJournalFinalizerSummary {
-            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
-            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
-            parsed: true,
-            contract_ok: true,
-            completion_ok: Some(true),
-            grounded_ok: Some(true),
-            format_ok: Some(true),
-            needs_clarify: Some(false),
-            used_evidence_ids_count: 2,
-            ..Default::default()
-        },
-    ))
-}
-
-fn replace_delivery_with_direct_log_tail_status_answer(
-    state: &AppState,
-    task: &ClaimedTask,
-    user_text: &str,
-    loop_state: &mut crate::agent_engine::LoopState,
-    agent_run_context: Option<&AgentRunContext>,
-    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
-) -> bool {
-    let Some((answer, summary)) =
-        direct_log_tail_status_answer(state, user_text, loop_state, agent_run_context)
-    else {
-        return false;
-    };
-    let answer = answer.trim();
-    if answer.is_empty() {
-        return false;
-    }
-    if loop_state
-        .delivery_messages
-        .last()
-        .map(|message| message.trim() == answer)
-        .unwrap_or(false)
-    {
-        loop_state.last_user_visible_respond = Some(answer.to_string());
-        *finalizer_summary = Some(summary);
-        return true;
-    }
-    loop_state
-        .delivery_messages
-        .retain(|message| crate::finalize::is_execution_summary_message(message));
-    append_delivery_message(
-        &task.task_id,
-        &mut loop_state.delivery_messages,
-        answer.to_string(),
-    );
-    loop_state.last_user_visible_respond = Some(answer.to_string());
-    *finalizer_summary = Some(summary);
-    info!(
-        "delivery replace_with_direct_log_tail_status task_id={}",
-        task.task_id
-    );
-    true
-}
-
 fn direct_quantity_comparison_from_compare_paths(
     state: &AppState,
     user_text: &str,
@@ -8765,19 +9345,30 @@ fn direct_quantity_comparison_from_compare_paths(
                     return None;
                 }
                 let output = step.output.as_deref()?;
-                inventory_ranked_size_list_answer(output, route)
+                let output =
+                    crate::agent_engine::observed_output::normalized_success_body_for_direct_answer(
+                        output,
+                    );
+                if route.output_contract.response_shape == crate::OutputResponseShape::Strict
+                    && style != SizeComparisonAnswerStyle::DeltaOnly
+                {
+                    if let Some(answer) = strict_quantity_comparison_json_answer(&output) {
+                        return Some(answer);
+                    }
+                }
+                inventory_ranked_size_list_answer(&output, route)
                     .or_else(|| {
                         count_inventory_size_answer_with_shape(
-                            output,
+                            &output,
                             prefer_english,
                             route.output_contract.response_shape,
                         )
                     })
                     .or_else(|| {
-                        compare_paths_size_ratio_answer_with_style(output, prefer_english, style)
+                        compare_paths_size_ratio_answer_with_style(&output, prefer_english, style)
                     })
                     .or_else(|| {
-                        path_batch_size_comparison_answer_with_style(output, prefer_english, style)
+                        path_batch_size_comparison_answer_with_style(&output, prefer_english, style)
                     })
             })
     }?;
@@ -8867,6 +9458,483 @@ fn direct_directory_purpose_summary_from_size_facts(
     ))
 }
 
+#[derive(Clone, Debug)]
+struct InventoryDocumentFile {
+    name: String,
+    path: String,
+    size_bytes: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+struct ReadRangeObservation {
+    path: String,
+    excerpt: String,
+}
+
+fn direct_directory_purpose_summary_from_listing_content(
+    loop_state: &crate::agent_engine::LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+    {
+        return None;
+    }
+    let files = latest_inventory_document_files(loop_state)?;
+    if files.len() < 2 {
+        return None;
+    }
+    let reads = read_range_observations(loop_state);
+    let relevant = select_relevant_inventory_document_file(&files, &reads)?;
+    let excerpt = reads
+        .iter()
+        .find(|read| inventory_read_path_matches_file(read.path.as_str(), &relevant))
+        .map(|read| compact_directory_purpose_excerpt(read.excerpt.as_str()));
+    let file_count = files.len();
+    let file_names = files
+        .iter()
+        .map(|file| file.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut fields = vec![
+        format!("documentation.files.count={file_count}"),
+        format!("documentation.files={file_names}"),
+        format!("relevant.name={}", relevant.name),
+        format!("relevant.path={}", relevant.path),
+        format!(
+            "relevant.subject={}",
+            schema_subject_from_path_label(relevant.name.as_str())
+        ),
+    ];
+    if let Some(size_bytes) = relevant.size_bytes {
+        fields.push(format!("relevant.size_bytes={size_bytes}"));
+    }
+    if let Some(excerpt) = excerpt.filter(|excerpt| !excerpt.is_empty()) {
+        fields.push(format!("relevant.content_excerpt={excerpt}"));
+    }
+    Some((
+        fields.join("\n"),
+        crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: if reads.is_empty() { 1 } else { 2 },
+            ..Default::default()
+        },
+    ))
+}
+
+fn latest_inventory_document_files(
+    loop_state: &crate::agent_engine::LoopState,
+) -> Option<Vec<InventoryDocumentFile>> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && matches!(step.skill.as_str(), "system_basic" | "fs_basic"))
+        .filter_map(|step| step.output.as_deref())
+        .flat_map(structured_json_values_from_output)
+        .find_map(|value| inventory_document_files_from_value(&value))
+}
+
+fn inventory_document_files_from_value(
+    value: &serde_json::Value,
+) -> Option<Vec<InventoryDocumentFile>> {
+    if value.get("action").and_then(|value| value.as_str()) != Some("inventory_dir") {
+        return None;
+    }
+    let entries = value.get("entries").and_then(|value| value.as_array())?;
+    let files = entries
+        .iter()
+        .filter(|entry| {
+            entry
+                .get("kind")
+                .and_then(|value| value.as_str())
+                .is_none_or(|kind| kind == "file")
+        })
+        .filter_map(|entry| {
+            let name = entry
+                .get("name")
+                .or_else(|| entry.get("path"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|name| !name.is_empty())?;
+            if !document_file_extension_is_supported(name) {
+                return None;
+            }
+            let path = entry
+                .get("path")
+                .or_else(|| entry.get("resolved_path"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .unwrap_or(name);
+            Some(InventoryDocumentFile {
+                name: name.to_string(),
+                path: path.to_string(),
+                size_bytes: entry.get("size_bytes").and_then(|value| value.as_u64()),
+            })
+        })
+        .collect::<Vec<_>>();
+    (!files.is_empty()).then_some(files)
+}
+
+fn read_range_observations(
+    loop_state: &crate::agent_engine::LoopState,
+) -> Vec<ReadRangeObservation> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.is_ok() && matches!(step.skill.as_str(), "system_basic" | "fs_basic"))
+        .filter_map(|step| step.output.as_deref())
+        .flat_map(structured_json_values_from_output)
+        .filter_map(read_range_observation_from_value)
+        .collect()
+}
+
+fn read_range_observation_from_value(value: serde_json::Value) -> Option<ReadRangeObservation> {
+    if !matches!(
+        value.get("action").and_then(|value| value.as_str()),
+        Some("read_range" | "read_text_range")
+    ) {
+        return None;
+    }
+    let path = value
+        .get("resolved_path")
+        .or_else(|| value.get("path"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|path| !path.is_empty())?
+        .to_string();
+    let excerpt = value
+        .get("excerpt")
+        .or_else(|| value.get("content"))
+        .and_then(|value| value.as_str())
+        .map(normalize_directory_purpose_read_excerpt)
+        .filter(|excerpt| !excerpt.trim().is_empty())?;
+    Some(ReadRangeObservation { path, excerpt })
+}
+
+fn select_relevant_inventory_document_file(
+    files: &[InventoryDocumentFile],
+    reads: &[ReadRangeObservation],
+) -> Option<InventoryDocumentFile> {
+    files
+        .iter()
+        .filter(|file| {
+            reads
+                .iter()
+                .any(|read| inventory_read_path_matches_file(read.path.as_str(), file))
+        })
+        .max_by_key(|file| file.size_bytes.unwrap_or(0))
+        .cloned()
+        .or_else(|| {
+            files
+                .iter()
+                .max_by_key(|file| file.size_bytes.unwrap_or(0))
+                .cloned()
+        })
+}
+
+fn inventory_read_path_matches_file(read_path: &str, file: &InventoryDocumentFile) -> bool {
+    let read_path = normalize_path_for_directory_purpose(read_path);
+    let file_path = normalize_path_for_directory_purpose(file.path.as_str());
+    let file_name = normalize_path_for_directory_purpose(file.name.as_str());
+    !read_path.is_empty()
+        && (!file_path.is_empty() && read_path.ends_with(file_path.as_str())
+            || !file_name.is_empty() && read_path.ends_with(file_name.as_str()))
+}
+
+fn normalize_path_for_directory_purpose(path: &str) -> String {
+    path.trim()
+        .trim_matches('`')
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_string()
+}
+
+fn normalize_directory_purpose_read_excerpt(excerpt: &str) -> String {
+    excerpt
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim();
+            trimmed
+                .split_once('|')
+                .filter(|(prefix, _)| prefix.chars().all(|ch| ch.is_ascii_digit()))
+                .map(|(_, tail)| tail.trim())
+                .unwrap_or(trimmed)
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn compact_directory_purpose_excerpt(excerpt: &str) -> String {
+    const MAX_CHARS: usize = 480;
+    let mut compact = excerpt
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string();
+    if compact.chars().count() > MAX_CHARS {
+        compact = compact.chars().take(MAX_CHARS).collect::<String>();
+        compact.push_str("...");
+    }
+    compact
+}
+
+fn document_file_extension_is_supported(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|extension| extension.trim().to_ascii_lowercase())
+        .is_some_and(|extension| {
+            matches!(
+                extension.as_str(),
+                "md" | "markdown"
+                    | "txt"
+                    | "json"
+                    | "toml"
+                    | "yaml"
+                    | "yml"
+                    | "pdf"
+                    | "doc"
+                    | "docx"
+                    | "rtf"
+                    | "html"
+                    | "htm"
+            )
+        })
+}
+
+fn delivery_mentions_unobserved_document_file(
+    loop_state: &crate::agent_engine::LoopState,
+    delivery: &str,
+) -> bool {
+    let Some(files) = latest_inventory_document_files(loop_state) else {
+        return false;
+    };
+    let observed = files
+        .iter()
+        .flat_map(|file| {
+            [
+                normalize_path_for_directory_purpose(file.name.as_str()),
+                normalize_path_for_directory_purpose(file.path.as_str()),
+            ]
+        })
+        .collect::<Vec<_>>();
+    candidate_document_file_tokens(delivery)
+        .into_iter()
+        .any(|token| {
+            !observed.iter().any(|item| {
+                !item.is_empty() && (token == *item || token.ends_with(&format!("/{item}")))
+            })
+        })
+}
+
+fn candidate_document_file_tokens(text: &str) -> Vec<String> {
+    text.split(|ch: char| {
+        ch.is_whitespace()
+            || matches!(
+                ch,
+                '(' | ')'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '<'
+                    | '>'
+                    | '"'
+                    | '\''
+                    | '`'
+                    | ','
+                    | '，'
+                    | ';'
+                    | '；'
+                    | ':'
+                    | '：'
+                    | '。'
+                    | '、'
+                    | '!'
+                    | '?'
+                    | '？'
+                    | '！'
+            )
+    })
+    .map(normalize_path_for_directory_purpose)
+    .filter(|token| !token.is_empty() && document_file_extension_is_supported(token))
+    .collect()
+}
+
+fn inventory_top_level_dirs_from_value(value: &serde_json::Value) -> Option<Vec<String>> {
+    if value.get("action").and_then(|value| value.as_str()) != Some("inventory_dir") {
+        return None;
+    }
+    let mut dirs = Vec::<String>::new();
+    if let Some(names) = value
+        .get("names_by_kind")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|names_by_kind| names_by_kind.get("dirs"))
+        .and_then(serde_json::Value::as_array)
+    {
+        for name in names {
+            if let Some(name) = name.as_str() {
+                push_unique_inventory_dir_name(name, &mut dirs);
+            }
+        }
+    }
+    if let Some(entries) = value.get("entries").and_then(serde_json::Value::as_array) {
+        for entry in entries {
+            if !entry
+                .get("kind")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("dir"))
+            {
+                continue;
+            }
+            if let Some(name) = entry.get("name").and_then(serde_json::Value::as_str) {
+                push_unique_inventory_dir_name(name, &mut dirs);
+            }
+        }
+    }
+    (!dirs.is_empty()).then_some(dirs)
+}
+
+fn push_unique_inventory_dir_name(raw: &str, dirs: &mut Vec<String>) {
+    let name = raw.trim().trim_matches('`').trim();
+    if name.is_empty() || matches!(name, "." | "..") {
+        return;
+    }
+    if dirs
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(name))
+    {
+        return;
+    }
+    dirs.push(name.to_string());
+}
+
+fn observed_current_workspace_top_level_dirs(loop_state: &LoopState) -> Option<Vec<String>> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find_map(|step| {
+            if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+                return None;
+            }
+            let output = step.output.as_deref()?;
+            structured_json_values_from_output(output)
+                .iter()
+                .find_map(inventory_top_level_dirs_from_value)
+        })
+}
+
+fn direct_current_workspace_top_level_dirs_overview_answer(
+    _state: &AppState,
+    _user_text: &str,
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<(String, crate::task_journal::TaskJournalFinalizerSummary)> {
+    let route = agent_run_context.and_then(|ctx| ctx.route_result.as_ref())?;
+    if route.output_contract.locator_kind != crate::OutputLocatorKind::CurrentWorkspace
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Free
+                | crate::OutputResponseShape::Scalar
+                | crate::OutputResponseShape::FileToken
+                | crate::OutputResponseShape::OneSentence
+        )
+        || !matches!(
+            route.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None | crate::OutputSemanticKind::WorkspaceProjectSummary
+        )
+        || loop_state
+            .executed_step_results
+            .iter()
+            .any(step_output_is_read_range)
+    {
+        return None;
+    }
+    let dirs = observed_current_workspace_top_level_dirs(loop_state)?;
+    let answer = format!(
+        "workspace.top_level_dirs.count={}\nworkspace.top_level_dirs={}\nworkspace.overview.kind=repository_sections_by_purpose\nworkspace.overview.section_hints=docs,config,code,scripts,runtime_data,build_output",
+        dirs.len(),
+        dirs.join(",")
+    );
+    Some((
+        answer,
+        crate::task_journal::TaskJournalFinalizerSummary {
+            stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+            disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+            parsed: true,
+            contract_ok: true,
+            completion_ok: Some(true),
+            grounded_ok: Some(true),
+            format_ok: Some(true),
+            needs_clarify: Some(false),
+            used_evidence_ids_count: 1,
+            ..Default::default()
+        },
+    ))
+}
+
+fn replace_delivery_with_deterministic_current_workspace_dirs_overview_answer(
+    state: &AppState,
+    task: &ClaimedTask,
+    user_text: &str,
+    loop_state: &mut LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+    finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
+) -> bool {
+    let Some((answer, summary)) = direct_current_workspace_top_level_dirs_overview_answer(
+        state,
+        user_text,
+        loop_state,
+        agent_run_context,
+    ) else {
+        return false;
+    };
+    if loop_state
+        .delivery_messages
+        .last()
+        .is_some_and(|message| message.trim() == answer.trim())
+    {
+        loop_state.last_user_visible_respond = Some(answer);
+        *finalizer_summary = Some(summary);
+        return true;
+    }
+    loop_state
+        .delivery_messages
+        .retain(|message| crate::finalize::is_execution_summary_message(message));
+    append_delivery_message(
+        &task.task_id,
+        &mut loop_state.delivery_messages,
+        answer.clone(),
+    );
+    loop_state.last_user_visible_respond = Some(answer);
+    *finalizer_summary = Some(summary);
+    info!(
+        "delivery replace_with_deterministic_current_workspace_dirs_overview task_id={}",
+        task.task_id
+    );
+    true
+}
+
 fn schema_subject_from_path_label(label: &str) -> String {
     let file_name = Path::new(label)
         .file_name()
@@ -8894,12 +9962,25 @@ fn replace_delivery_with_deterministic_directory_purpose_answer(
     agent_run_context: Option<&AgentRunContext>,
     finalizer_summary: &mut Option<crate::task_journal::TaskJournalFinalizerSummary>,
 ) -> bool {
-    let Some((answer, summary)) = direct_directory_purpose_summary_from_size_facts(
-        state,
-        user_text,
-        loop_state,
-        agent_run_context,
-    ) else {
+    let current_delivery = loop_state
+        .delivery_messages
+        .last()
+        .map(String::as_str)
+        .unwrap_or_default();
+    let listing_content_answer =
+        delivery_mentions_unobserved_document_file(loop_state, current_delivery)
+            .then(|| {
+                direct_directory_purpose_summary_from_listing_content(loop_state, agent_run_context)
+            })
+            .flatten();
+    let Some((answer, summary)) = listing_content_answer.or_else(|| {
+        direct_directory_purpose_summary_from_size_facts(
+            state,
+            user_text,
+            loop_state,
+            agent_run_context,
+        )
+    }) else {
         return false;
     };
     if loop_state
@@ -8947,9 +10028,26 @@ fn replace_delivery_with_deterministic_quantity_comparison_answer(
     if let Some(existing_answer) =
         latest_delivery_preserves_observed_quantity_size_facts(loop_state)
     {
-        loop_state.last_user_visible_respond = Some(existing_answer);
-        *finalizer_summary = Some(summary);
-        return true;
+        let strict_response = agent_run_context
+            .and_then(|ctx| ctx.route_result.as_ref())
+            .is_some_and(|route| {
+                route.output_contract.response_shape == crate::OutputResponseShape::Strict
+            });
+        if strict_response {
+            let facts = observed_quantity_size_facts(loop_state);
+            if !structured_quantity_json_preserves_observed_size_facts(&existing_answer, &facts) {
+                // A prose answer can be factually grounded but still violate a strict JSON
+                // contract, so allow the deterministic strict answer below to replace it.
+            } else {
+                loop_state.last_user_visible_respond = Some(existing_answer);
+                *finalizer_summary = Some(summary);
+                return true;
+            }
+        } else {
+            loop_state.last_user_visible_respond = Some(existing_answer);
+            *finalizer_summary = Some(summary);
+            return true;
+        }
     }
     if loop_state
         .delivery_messages
@@ -9730,6 +10828,14 @@ async fn missing_delivery_after_observation_message(
     ) {
         return answer;
     }
+    if let Some((answer, _summary)) = direct_current_workspace_top_level_dirs_overview_answer(
+        state,
+        user_text,
+        loop_state,
+        agent_run_context,
+    ) {
+        return answer;
+    }
     if let Some(answer) = deterministic_structured_container_summary_answer(
         state,
         user_text,
@@ -9752,7 +10858,6 @@ async fn missing_delivery_after_observation_message(
     ) {
         return answer;
     }
-    let default_text = missing_delivery_after_observation_default_message(state, user_text);
     let language_hint = crate::language_policy::task_response_language_hint(state, task, user_text);
     let contract = crate::fallback::UserResponseContract::tool_failure(
         "final_answer_missing_after_observed_execution",
@@ -9771,12 +10876,11 @@ async fn missing_delivery_after_observation_message(
         "brief_failure_with_next_step",
         &language_hint,
     );
-    crate::fallback::compose_user_response_from_contract_with_default(
+    crate::fallback::compose_user_response_from_contract(
         state,
         task,
         &contract,
         crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
-        &default_text,
     )
     .await
 }
@@ -9804,6 +10908,14 @@ async fn observed_execution_without_publishable_delivery_reply(
             .or_else(|| direct_rustclaw_config_risk_answer(state, user_text, loop_state))
             .or_else(|| {
                 direct_quantity_comparison_from_compare_paths(
+                    state,
+                    user_text,
+                    loop_state,
+                    agent_run_context,
+                )
+            })
+            .or_else(|| {
+                direct_current_workspace_top_level_dirs_overview_answer(
                     state,
                     user_text,
                     loop_state,
@@ -9840,6 +10952,51 @@ async fn observed_execution_without_publishable_delivery_reply(
                 )
                 .map(|answer| (answer, status_summary()))
             });
+    let has_deterministic_answer = deterministic_answer.is_some();
+    if !has_deterministic_answer
+        && finalizer_summary
+            .as_ref()
+            .and_then(|summary| summary.needs_clarify)
+            .unwrap_or(false)
+    {
+        let clarify = crate::intent_router::generate_or_reuse_clarify_question(
+            state,
+            task,
+            user_text,
+            clarify_reason,
+            None,
+            preferred_route_clarify_question(agent_run_context),
+            crate::intent_router::ClarifyQuestionPolicy::SafeFallback,
+            crate::fallback::ClarifyFallbackSource::SynthesisEmpty,
+        )
+        .await;
+        let mut delivery_messages = Vec::new();
+        if !delivery_contract_suppresses_execution_summary(
+            loop_state,
+            agent_run_context,
+            std::slice::from_ref(&clarify),
+        ) {
+            delivery_messages.extend(execution_summaries);
+        }
+        delivery_messages.push(clarify.clone());
+        let delivery_consistent =
+            crate::task_journal::delivery_payload_consistent(&clarify, &delivery_messages);
+        let journal = build_loop_journal(
+            task,
+            user_text,
+            loop_state,
+            agent_run_context,
+            finalizer_summary,
+            delivery_consistent,
+            &clarify,
+            crate::task_journal::TaskJournalFinalStatus::Clarify,
+        );
+        return Some(
+            AskReply::non_llm(clarify.clone())
+                .with_messages(delivery_messages)
+                .with_task_journal(journal),
+        );
+    }
     let message = missing_delivery_after_observation_message(
         state,
         task,
@@ -10258,6 +11415,13 @@ pub(crate) async fn finalize_loop_reply(
                     direct_file_token_from_observed_path_batch_facts(&loop_state, agent_run_context)
                 })
                 .or_else(|| {
+                    direct_file_token_from_observed_find_entries(
+                        state,
+                        &loop_state,
+                        agent_run_context,
+                    )
+                })
+                .or_else(|| {
                     direct_file_token_from_observed_inventory(&loop_state, agent_run_context)
                 })
         {
@@ -10418,6 +11582,7 @@ pub(crate) async fn finalize_loop_reply(
         .await;
     replace_placeholder_delivery_with_synthesis(task, &mut loop_state);
     replace_raw_read_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
+    replace_raw_observation_delivery_with_synthesis(task, &mut loop_state, agent_run_context);
     let replaced_grounded_terminal_respond =
         replace_structured_delivery_with_grounded_terminal_respond(
             task,
@@ -10450,9 +11615,58 @@ pub(crate) async fn finalize_loop_reply(
         } else {
             false
         };
+    let replaced_current_workspace_dirs = if !replaced_grounded_terminal_respond
+        && !replaced_quantity_comparison
+        && !replaced_directory_purpose
+    {
+        replace_delivery_with_deterministic_current_workspace_dirs_overview_answer(
+            state,
+            task,
+            user_text,
+            &mut loop_state,
+            agent_run_context,
+            &mut finalizer_summary,
+        )
+    } else {
+        false
+    };
+    let replaced_direct_scalar = if !replaced_grounded_terminal_respond
+        && !replaced_quantity_comparison
+        && !replaced_directory_purpose
+        && !replaced_current_workspace_dirs
+    {
+        replace_delivery_with_direct_scalar_observed_answer(
+            state,
+            task,
+            &mut loop_state,
+            agent_run_context,
+            &mut finalizer_summary,
+        )
+    } else {
+        false
+    };
+    let replaced_direct_structured = if !replaced_grounded_terminal_respond
+        && !replaced_quantity_comparison
+        && !replaced_directory_purpose
+        && !replaced_current_workspace_dirs
+        && !replaced_direct_scalar
+    {
+        replace_delivery_with_direct_structured_observed_answer(
+            state,
+            task,
+            &mut loop_state,
+            agent_run_context,
+            &mut finalizer_summary,
+        )
+    } else {
+        false
+    };
     let replaced_contract_answer = if !replaced_grounded_terminal_respond
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
+        && !replaced_current_workspace_dirs
+        && !replaced_direct_scalar
+        && !replaced_direct_structured
     {
         replace_delivery_with_loop_contract_observed_answer(
             task,
@@ -10466,6 +11680,9 @@ pub(crate) async fn finalize_loop_reply(
     let replaced_failed_step = if !replaced_grounded_terminal_respond
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
+        && !replaced_current_workspace_dirs
+        && !replaced_direct_scalar
+        && !replaced_direct_structured
         && !replaced_contract_answer
     {
         replace_delivery_with_deterministic_execution_failed_step_answer(
@@ -10479,29 +11696,14 @@ pub(crate) async fn finalize_loop_reply(
     } else {
         false
     };
-    let replaced_log_tail_status = if !replaced_grounded_terminal_respond
-        && !replaced_quantity_comparison
-        && !replaced_directory_purpose
-        && !replaced_contract_answer
-        && !replaced_failed_step
-    {
-        replace_delivery_with_direct_log_tail_status_answer(
-            state,
-            task,
-            user_text,
-            &mut loop_state,
-            agent_run_context,
-            &mut finalizer_summary,
-        )
-    } else {
-        false
-    };
     if !replaced_grounded_terminal_respond
         && !replaced_quantity_comparison
         && !replaced_directory_purpose
+        && !replaced_current_workspace_dirs
+        && !replaced_direct_scalar
+        && !replaced_direct_structured
         && !replaced_contract_answer
         && !replaced_failed_step
-        && !replaced_log_tail_status
         && !delivery_is_content_answer_candidate(
             agent_run_context,
             &loop_state,
@@ -10516,7 +11718,7 @@ pub(crate) async fn finalize_loop_reply(
             &mut finalizer_summary,
         );
     }
-    if !replaced_grounded_terminal_respond && !replaced_log_tail_status {
+    if !replaced_grounded_terminal_respond {
         replace_delivery_with_latest_tail_read_range_answer(
             state,
             task,
@@ -10622,11 +11824,7 @@ pub(crate) async fn finalize_loop_reply(
             .with_task_journal(journal));
     }
 
-    let synthesis_is_publishable = loop_state
-        .last_publishable_synthesis_output
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|text| !text.is_empty());
+    let synthesis_is_publishable = valid_publishable_synthesis_output(&loop_state).is_some();
     let priority_last_respond = if synthesis_is_publishable {
         None
     } else {

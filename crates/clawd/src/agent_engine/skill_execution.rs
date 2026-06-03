@@ -636,6 +636,20 @@ fn matrix_admitted_external_evidence_output(
     Some(Value::Object(payload).to_string())
 }
 
+fn structured_extra_evidence_output(out: &str, structured_extra: Option<&Value>) -> Option<String> {
+    let extra = structured_extra?;
+    if extra.is_null() {
+        return None;
+    }
+    Some(
+        json!({
+            "text": out,
+            "extra": extra,
+        })
+        .to_string(),
+    )
+}
+
 fn admitted_extra_field_exists(extra: &Value, field: &str) -> bool {
     let mut field = field.trim();
     if field.is_empty() {
@@ -1392,6 +1406,7 @@ async fn handle_skill_step_success(
         out,
         structured_extra,
     )
+    .or_else(|| structured_extra_evidence_output(out, structured_extra))
     .map(|evidence_output| crate::executor::StepExecutionResult {
         output: Some(evidence_output),
         ..step_execution.clone()

@@ -1,8 +1,13 @@
 use super::{
-    apply_self_contained_payload_direct_answer_contract_repair, normalizer_output_from_fallback,
-    parse_execution_recipe_hint, ClarifyQuestionPolicy, IntentExecutionRecipeOut,
-    IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind, OutputResponseShape,
-    OutputSemanticKind, RouteDecision, ScheduleKind, TargetTaskPolicy, TurnType,
+    apply_active_file_basename_answer_candidate_direct_repair,
+    apply_current_turn_structural_contract_repair,
+    apply_self_contained_payload_direct_answer_contract_repair,
+    direct_answer_decision_should_be_overridden_by_executable_contract,
+    normalizer_output_from_fallback, parse_execution_recipe_hint,
+    structured_execution_signal_for_effective_route, ClarifyQuestionPolicy,
+    IntentExecutionRecipeOut, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
+    OutputResponseShape, OutputSemanticKind, RouteDecision, ScheduleKind, TargetTaskPolicy,
+    TurnType,
 };
 use crate::{
     execution_recipe::{ExecutionRecipeKind, ExecutionRecipeProfile, ExecutionRecipeTargetScope},
@@ -99,6 +104,50 @@ fn inline_json_transform_repair_keeps_planner_contract() {
 }
 
 #[test]
+fn current_workspace_generic_summary_contract_repair_uses_workspace_project_summary() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let request = "Produce the requested workspace-grounded summary.";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::None,
+        locator_hint: String::new(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = apply_current_turn_structural_contract_repair(
+        &mut contract,
+        request,
+        &surface,
+        &state.skill_rt.workspace_root,
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(
+        repair,
+        Some("current_workspace_summary_semantic_contract_repair")
+    );
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::WorkspaceProjectSummary
+    );
+    assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+    assert_eq!(
+        contract.locator_hint,
+        state.skill_rt.workspace_root.display().to_string()
+    );
+    assert!(contract.requires_content_evidence);
+    assert!(!contract.delivery_required);
+}
+
+#[test]
 fn inline_json_transform_direct_answer_candidate_promotes_to_planner_contract() {
     let request = r#"把这个 JSON 数组按 score 从高到低排序，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]"#;
     let surface = crate::intent::surface_signals::analyze_prompt_surface(request);
@@ -192,6 +241,32 @@ fn normalizer_schema_normalization_preserves_planner_and_direct_decisions() {
 }
 
 #[test]
+fn normalizer_schema_normalization_preserves_filesystem_mutation_result_contract() {
+    let raw = r#"{"resolved_user_intent":"create the target directory and report the result","needs_clarify":false,"decision":"planner_execute","output_contract":{"response_shape":"free","requires_content_evidence":true,"delivery_required":false,"locator_kind":"path","delivery_intent":"none","semantic_kind":"filesystem_mutation_result","locator_hint":"document/nl_skill_tmp"}}"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/output_contract/semantic_kind")
+            .and_then(|value| value.as_str()),
+        Some("filesystem_mutation_result")
+    );
+    assert_eq!(
+        value
+            .pointer("/output_contract/response_shape")
+            .and_then(|value| value.as_str()),
+        Some("one_sentence")
+    );
+    assert_eq!(
+        value
+            .pointer("/output_contract/delivery_required")
+            .and_then(|value| value.as_bool()),
+        Some(false)
+    );
+}
+
+#[test]
 fn normalizer_schema_normalization_preserves_object_resolved_intent() {
     let raw = r#"{"resolved_user_intent":{"test_id":"client-like-continuous-123"},"needs_clarify":false,"decision":"direct_answer"}"#;
     let normalized = super::normalize_intent_normalizer_raw_for_schema(raw, "fallback");
@@ -269,6 +344,48 @@ fn normalizer_schema_normalization_recovers_minimax_output_contract_only_payload
             .and_then(|v| v.as_bool()),
         Some(true)
     );
+}
+
+#[test]
+fn normalizer_schema_normalization_rewrites_free_directory_groups_to_purpose_summary() {
+    let raw = r#"{
+          "resolved_user_intent": "List documentation files under document/ and explain which one is most relevant",
+          "needs_clarify": false,
+          "reason": "directory listing plus explanation",
+          "confidence": 0.85,
+          "decision": "planner_execute",
+          "output_contract": {
+            "response_shape": "free",
+            "requires_content_evidence": true,
+            "delivery_required": false,
+            "locator_kind": "path",
+            "delivery_intent": "none",
+            "semantic_kind": "directory_entry_groups",
+            "locator_hint": "document/"
+          }
+        }"#;
+    let normalized = super::normalize_intent_normalizer_raw_for_schema(
+        raw,
+        "list documentation files under document/ and explain what the most relevant one is for",
+    );
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+    let contract = value
+        .get("output_contract")
+        .and_then(|value| value.as_object())
+        .expect("output contract");
+    assert_eq!(
+        contract.get("response_shape").and_then(|v| v.as_str()),
+        Some("free")
+    );
+    assert_eq!(
+        contract.get("semantic_kind").and_then(|v| v.as_str()),
+        Some("directory_purpose_summary")
+    );
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
 }
 
 #[test]
@@ -516,6 +633,52 @@ fn scalar_runtime_tool_recipe_name_alias_preserves_status_query_patch() {
 }
 
 #[test]
+fn scalar_runtime_tool_recipe_kernel_alias_preserves_status_query_patch() {
+    let raw = r#"{
+          "resolved_user_intent":"current system kernel release",
+          "answer_candidate":"",
+          "needs_clarify":false,
+          "decision":"planner_execute",
+          "output_contract":{
+            "response_shape":"scalar",
+            "requires_content_evidence":true,
+            "delivery_required":false,
+            "locator_kind":"none",
+            "delivery_intent":"none",
+            "semantic_kind":"none",
+            "locator_hint":""
+          },
+          "execution_recipe":{
+            "kind":"tool",
+            "name":"system_basic",
+            "params":{"operation":"uname_r"}
+          },
+          "turn_type":"status_query"
+        }"#;
+    let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+        raw,
+        "return current kernel release only",
+    );
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/output_contract/semantic_kind")
+            .and_then(|v| v.as_str()),
+        Some("raw_command_output")
+    );
+    assert_eq!(
+        value
+            .pointer("/state_patch/runtime_status_query/kind")
+            .and_then(|v| v.as_str()),
+        Some("kernel_release")
+    );
+    assert!(report
+        .detail_csv()
+        .contains("execution_recipe_scalar_runtime_tool_observation"));
+}
+
+#[test]
 fn scalar_run_cmd_args_recipe_preserves_status_query_patch() {
     let raw = r#"{
           "resolved_user_intent":"获取当前系统用户名",
@@ -558,6 +721,163 @@ fn scalar_run_cmd_args_recipe_preserves_status_query_patch() {
     assert!(report
         .detail_csv()
         .contains("execution_recipe_scalar_runtime_tool_observation"));
+}
+
+#[test]
+fn normalizer_schema_normalization_maps_file_basename_semantic() {
+    let raw = r#"{
+          "resolved_user_intent":"Return only the basename of the active file target.",
+          "needs_clarify":false,
+          "decision":"direct_answer",
+          "output_contract":{
+            "response_shape":"scalar",
+            "requires_content_evidence":false,
+            "delivery_required":false,
+            "locator_kind":"none",
+            "delivery_intent":"none",
+            "semantic_kind":"single_file_basename",
+            "locator_hint":""
+          },
+          "execution_recipe":{"kind":"none","profile":"none","target_scope":"none"}
+        }"#;
+    let (normalized, report) = super::normalize_intent_normalizer_raw_for_schema_with_report(
+        raw,
+        "only return the active file target basename",
+    );
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value.get("decision").and_then(|v| v.as_str()),
+        Some("direct_answer")
+    );
+    assert_eq!(
+        value
+            .pointer("/output_contract/semantic_kind")
+            .and_then(|v| v.as_str()),
+        Some("file_basename")
+    );
+    assert_eq!(
+        value
+            .pointer("/output_contract/response_shape")
+            .and_then(|v| v.as_str()),
+        Some("scalar")
+    );
+    assert!(report.source_csv().contains("enum_alias"));
+}
+
+#[test]
+fn active_delivery_basename_candidate_keeps_direct_answer_contract() {
+    let workspace = make_temp_workspace_with_child("active_delivery_basename", "docs");
+    let target = workspace.join("docs").join("release_checklist.md");
+    std::fs::write(&target, "# release\n").expect("write target file");
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = workspace.clone();
+    state.skill_rt.default_locator_search_dir = workspace.clone();
+    let session = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            op_kind: crate::followup_frame::FollowupOpKind::Delivery,
+            bound_target: Some(target.display().to_string()),
+            source_task_id: "task-1".to_string(),
+            updated_at_ts: 1,
+            expires_at_ts: crate::now_ts_u64() + 300,
+            ..Default::default()
+        }),
+        active_observed_facts: Some(crate::observed_facts::ObservedFacts {
+            bound_target: Some(target.display().to_string()),
+            delivery_targets: vec![target.display().to_string()],
+            output_shape: Some(OutputResponseShape::FileToken.as_str().to_string()),
+            ..Default::default()
+        }),
+        active_clarify_state: None,
+    };
+    let mut decision = FirstLayerDecision::DirectAnswer;
+    let mut finalize = ActFinalizeStyle::ChatWrapped;
+    let mut wants_file_delivery = false;
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::None,
+        ..Default::default()
+    };
+
+    let repair = apply_active_file_basename_answer_candidate_direct_repair(
+        &state,
+        Some(&session),
+        "release_checklist.md",
+        false,
+        &mut decision,
+        &mut finalize,
+        &mut wants_file_delivery,
+        &mut contract,
+    );
+
+    assert_eq!(repair, Some("active_file_basename_answer_candidate_direct"));
+    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+    assert_eq!(finalize, ActFinalizeStyle::Plain);
+    assert!(!wants_file_delivery);
+    assert!(!contract.requires_content_evidence);
+    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::FileBasename);
+    assert!(contract.locator_hint.is_empty());
+    let _ = std::fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn basename_answer_candidate_repair_blocks_executable_contract_override() {
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Scalar,
+        semantic_kind: OutputSemanticKind::FileBasename,
+        ..Default::default()
+    };
+
+    assert!(
+        direct_answer_decision_should_be_overridden_by_executable_contract(
+            false,
+            FirstLayerDecision::DirectAnswer,
+            &contract,
+            false,
+            ScheduleKind::None,
+            None,
+            None,
+        )
+    );
+    assert!(
+        !direct_answer_decision_should_be_overridden_by_executable_contract(
+            false,
+            FirstLayerDecision::DirectAnswer,
+            &contract,
+            false,
+            ScheduleKind::None,
+            None,
+            Some("active_file_basename_answer_candidate_direct"),
+        )
+    );
+    assert!(!structured_execution_signal_for_effective_route(
+        &contract,
+        false,
+        ScheduleKind::None,
+        None,
+        Some("active_file_basename_answer_candidate_direct"),
+    ));
+
+    contract.semantic_kind = OutputSemanticKind::None;
+    contract.requires_content_evidence = true;
+    assert!(
+        direct_answer_decision_should_be_overridden_by_executable_contract(
+            false,
+            FirstLayerDecision::DirectAnswer,
+            &contract,
+            false,
+            ScheduleKind::None,
+            None,
+            None,
+        )
+    );
 }
 
 #[test]
@@ -648,6 +968,114 @@ fn unobserved_runtime_status_answer_candidate_promotes_to_evidence_query() {
     );
     assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(finalize_style, ActFinalizeStyle::Plain);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(turn_type, Some(TurnType::StatusQuery));
+    assert_eq!(target_policy, Some(TargetTaskPolicy::Standalone));
+    assert!(answer_candidate.is_empty());
+    assert_eq!(
+        state_patch
+            .as_ref()
+            .and_then(|value| value.pointer("/runtime_status_query/kind"))
+            .and_then(Value::as_str),
+        Some("current_user")
+    );
+}
+
+#[test]
+fn planner_runtime_status_answer_candidate_promotes_to_state_patch() {
+    let Some(current_user) = ["USER", "LOGNAME", "USERNAME"]
+        .iter()
+        .find_map(|key| std::env::var(key).ok())
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return;
+    };
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        ..IntentOutputContract::default()
+    };
+    let mut answer_candidate = current_user.trim().to_string();
+    let mut state_patch = None;
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = ActFinalizeStyle::Plain;
+    let mut turn_type = Some(TurnType::StatusQuery);
+    let mut target_policy = None;
+
+    let reason = super::apply_unobserved_runtime_status_answer_candidate_repair(
+        &mut contract,
+        &mut answer_candidate,
+        &mut state_patch,
+        false,
+        false,
+        ScheduleKind::None,
+        Some(crate::execution_recipe::ExecutionRecipeSpec::default()),
+        &mut decision,
+        &mut finalize_style,
+        &mut turn_type,
+        &mut target_policy,
+    );
+
+    assert_eq!(
+        reason,
+        Some("unobserved_runtime_status_answer_candidate_requires_evidence")
+    );
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(turn_type, Some(TurnType::StatusQuery));
+    assert_eq!(target_policy, Some(TargetTaskPolicy::Standalone));
+    assert!(answer_candidate.is_empty());
+    assert_eq!(
+        state_patch
+            .as_ref()
+            .and_then(|value| value.pointer("/runtime_status_query/kind"))
+            .and_then(Value::as_str),
+        Some("current_user")
+    );
+}
+
+#[test]
+fn planner_runtime_status_unobserved_answer_candidate_requires_evidence() {
+    let Some(current_user) = ["USER", "LOGNAME", "USERNAME"]
+        .iter()
+        .find_map(|key| std::env::var(key).ok())
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return;
+    };
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Scalar,
+        requires_content_evidence: false,
+        ..IntentOutputContract::default()
+    };
+    let mut answer_candidate = current_user.trim().to_string();
+    let mut state_patch = None;
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = ActFinalizeStyle::Plain;
+    let mut turn_type = None;
+    let mut target_policy = None;
+
+    let reason = super::apply_unobserved_runtime_status_answer_candidate_repair(
+        &mut contract,
+        &mut answer_candidate,
+        &mut state_patch,
+        false,
+        false,
+        ScheduleKind::None,
+        Some(crate::execution_recipe::ExecutionRecipeSpec::default()),
+        &mut decision,
+        &mut finalize_style,
+        &mut turn_type,
+        &mut target_policy,
+    );
+
+    assert_eq!(
+        reason,
+        Some("unobserved_runtime_status_answer_candidate_requires_evidence")
+    );
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
     assert!(contract.requires_content_evidence);
     assert_eq!(turn_type, Some(TurnType::StatusQuery));
@@ -1378,6 +1806,41 @@ fn current_turn_anchor_drift_repair_preserves_raw_command_contract() {
 }
 
 #[test]
+fn current_turn_anchor_drift_repair_preserves_execution_failed_step_contract() {
+    let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        semantic_kind: OutputSemanticKind::ExecutionFailedStep,
+        locator_hint: "/tmp/rustclaw-anchor-test/README.md".to_string(),
+        ..Default::default()
+    };
+
+    let repair = super::apply_current_turn_anchor_drift_repair(
+        &mut contract,
+        "Execute a structured command sequence and report the failed step.",
+        "/tmp/rustclaw-anchor-test/scripts",
+        workspace,
+    );
+
+    assert_eq!(
+        repair,
+        Some("current_turn_anchor_overrides_contextual_target")
+    );
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert!(contract.requires_content_evidence);
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::ExecutionFailedStep
+    );
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
 fn current_turn_anchor_drift_repair_preserves_quantity_comparison_contract() {
     let workspace = std::path::Path::new("/tmp/rustclaw-anchor-test");
     let mut contract = IntentOutputContract {
@@ -1868,6 +2331,85 @@ fn contract_repair_judge_preserves_structured_config_key_contract() {
 }
 
 #[test]
+fn contract_repair_judge_preserves_structured_scalar_field_contract() {
+    let mut out = super::IntentNormalizerOut {
+        resolved_user_intent: "extract a scalar field value from a structured file".to_string(),
+        answer_candidate: String::new(),
+        resume_behavior: "none".to_string(),
+        schedule_kind: "none".to_string(),
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "normalizer chose structured scalar field contract".to_string(),
+        confidence: 0.95,
+        decision: "planner_execute".to_string(),
+        schedule_intent: None,
+        output_contract: Some(super::IntentOutputContractOut {
+            response_shape: "scalar".to_string(),
+            exact_sentence_count: None,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: "path".to_string(),
+            delivery_intent: "none".to_string(),
+            semantic_kind: "none".to_string(),
+            locator_hint: "scripts/nl_tests/fixtures/device_local/package.json".to_string(),
+            self_extension: None,
+        }),
+        execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+        turn_type: "task_request".to_string(),
+        target_task_policy: "standalone".to_string(),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+    let repair = super::ContractRepairJudgeOut {
+        apply: true,
+        reason: "single_path_generic_contract_needs_semantic_shape_review".to_string(),
+        confidence: 0.95,
+        decision: "planner_execute".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        resolved_user_intent: "extract a scalar field value from a structured file".to_string(),
+        output_contract: Some(super::IntentOutputContractOut {
+            response_shape: "scalar".to_string(),
+            exact_sentence_count: None,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: "path".to_string(),
+            delivery_intent: "none".to_string(),
+            semantic_kind: "content_excerpt_summary".to_string(),
+            locator_hint: "scripts/nl_tests/fixtures/device_local/package.json".to_string(),
+            self_extension: None,
+        }),
+        execution_recipe: Some(super::IntentExecutionRecipeOut {
+            kind: "none".to_string(),
+            profile: "none".to_string(),
+            target_scope: "unknown".to_string(),
+        }),
+        turn_type: "task_request".to_string(),
+        target_task_policy: "standalone".to_string(),
+        state_patch: None,
+    };
+
+    assert!(super::apply_contract_repair_judge_output(&mut out, repair));
+
+    let contract = super::parse_output_contract(out.output_contract, false);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(
+        contract.locator_hint,
+        "scripts/nl_tests/fixtures/device_local/package.json"
+    );
+    assert!(out
+        .reason
+        .contains("structured_scalar_field_contract_preserved"));
+}
+
+#[test]
 fn contract_repair_judge_missing_turn_binding_forces_missing_locator_clarify() {
     let mut out = super::IntentNormalizerOut {
         resolved_user_intent: "read remembered log alias".to_string(),
@@ -2052,8 +2594,109 @@ fn semantic_suspect_flags_chat_with_observable_contract() {
     };
 
     assert_eq!(
-        super::semantic_suspect_detail_for_normalizer_output(&out, None),
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            None,
+            "",
+            std::path::Path::new("/tmp/rustclaw")
+        ),
         Some("chat_route_requires_content_evidence")
+    );
+}
+
+#[test]
+fn semantic_suspect_reviews_workspace_identity_free_chat_route() {
+    let req = "Write a long article about RustClaw";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let out = super::IntentNormalizerOut {
+        resolved_user_intent: req.to_string(),
+        answer_candidate: String::new(),
+        resume_behavior: "none".to_string(),
+        schedule_kind: "none".to_string(),
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: String::new(),
+        confidence: 0.8,
+        decision: "direct_answer".to_string(),
+        schedule_intent: None,
+        output_contract: Some(super::IntentOutputContractOut {
+            response_shape: "free".to_string(),
+            exact_sentence_count: None,
+            requires_content_evidence: false,
+            delivery_required: false,
+            locator_kind: "none".to_string(),
+            delivery_intent: "none".to_string(),
+            semantic_kind: "none".to_string(),
+            locator_hint: String::new(),
+            self_extension: None,
+        }),
+        execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+        turn_type: String::new(),
+        target_task_policy: String::new(),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert_eq!(
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            Some(&surface),
+            req,
+            std::path::Path::new("/tmp/rustclaw")
+        ),
+        Some("workspace_identity_chat_route_needs_semantic_review")
+    );
+}
+
+#[test]
+fn semantic_suspect_keeps_workspace_identity_one_sentence_chat_route() {
+    let req = "你好，用一句话说明 RustClaw 适合帮我做什么";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let out = super::IntentNormalizerOut {
+        resolved_user_intent: req.to_string(),
+        answer_candidate: String::new(),
+        resume_behavior: "none".to_string(),
+        schedule_kind: "none".to_string(),
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: String::new(),
+        confidence: 0.8,
+        decision: "direct_answer".to_string(),
+        schedule_intent: None,
+        output_contract: Some(super::IntentOutputContractOut {
+            response_shape: "one_sentence".to_string(),
+            exact_sentence_count: Some(Value::from(1)),
+            requires_content_evidence: false,
+            delivery_required: false,
+            locator_kind: "none".to_string(),
+            delivery_intent: "none".to_string(),
+            semantic_kind: "none".to_string(),
+            locator_hint: String::new(),
+            self_extension: None,
+        }),
+        execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+        turn_type: String::new(),
+        target_task_policy: String::new(),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert_eq!(
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            Some(&surface),
+            req,
+            std::path::Path::new("/tmp/rustclaw")
+        ),
+        None
     );
 }
 
@@ -2094,7 +2737,12 @@ fn semantic_suspect_reviews_planner_file_names_contract() {
     };
 
     assert_eq!(
-        super::semantic_suspect_detail_for_normalizer_output(&out, None),
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            None,
+            "",
+            std::path::Path::new("/tmp/rustclaw")
+        ),
         Some("file_names_contract_needs_semantic_shape_review")
     );
 }
@@ -2137,8 +2785,161 @@ fn semantic_suspect_reviews_planner_file_paths_contract() {
         };
 
     assert_eq!(
-        super::semantic_suspect_detail_for_normalizer_output(&out, None),
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            None,
+            "",
+            std::path::Path::new("/tmp/rustclaw")
+        ),
         Some("file_paths_contract_needs_semantic_shape_review")
+    );
+}
+
+#[test]
+fn semantic_suspect_reviews_raw_command_output_with_locator_without_command_payload() {
+    let req = "Read plan/missing.md; if it is missing, search the plan directory and return matching paths.";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let out = super::IntentNormalizerOut {
+        resolved_user_intent: req.to_string(),
+        answer_candidate: String::new(),
+        resume_behavior: "none".to_string(),
+        schedule_kind: "none".to_string(),
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: String::new(),
+        confidence: 0.8,
+        decision: "planner_execute".to_string(),
+        schedule_intent: None,
+        output_contract: Some(super::IntentOutputContractOut {
+            response_shape: "strict".to_string(),
+            exact_sentence_count: None,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: "path".to_string(),
+            delivery_intent: "none".to_string(),
+            semantic_kind: "raw_command_output".to_string(),
+            locator_hint: "plan/missing.md".to_string(),
+            self_extension: None,
+        }),
+        execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+        turn_type: String::new(),
+        target_task_policy: String::new(),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert_eq!(
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            Some(&surface),
+            req,
+            std::path::Path::new("/tmp/rustclaw")
+        ),
+        Some("raw_command_output_locator_needs_semantic_review")
+    );
+}
+
+#[test]
+fn semantic_suspect_keeps_raw_command_output_with_active_execution_recipe() {
+    let req = "Run the requested command and return its output.";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let out = super::IntentNormalizerOut {
+        resolved_user_intent: req.to_string(),
+        answer_candidate: String::new(),
+        resume_behavior: "none".to_string(),
+        schedule_kind: "none".to_string(),
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: String::new(),
+        confidence: 0.8,
+        decision: "planner_execute".to_string(),
+        schedule_intent: None,
+        output_contract: Some(super::IntentOutputContractOut {
+            response_shape: "strict".to_string(),
+            exact_sentence_count: None,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: "path".to_string(),
+            delivery_intent: "none".to_string(),
+            semantic_kind: "raw_command_output".to_string(),
+            locator_hint: "plan".to_string(),
+            self_extension: None,
+        }),
+        execution_recipe: Some(super::IntentExecutionRecipeOut {
+            kind: "ops_closed_loop".to_string(),
+            profile: "none".to_string(),
+            target_scope: "unknown".to_string(),
+        }),
+        turn_type: String::new(),
+        target_task_policy: String::new(),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert_eq!(
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            Some(&surface),
+            req,
+            std::path::Path::new("/tmp/rustclaw")
+        ),
+        None
+    );
+}
+
+#[test]
+fn semantic_suspect_reviews_planner_directory_entry_groups_contract() {
+    let out = super::IntentNormalizerOut {
+        resolved_user_intent:
+            "List documentation files in document and explain which one is most relevant."
+                .to_string(),
+        answer_candidate: String::new(),
+        resume_behavior: "none".to_string(),
+        schedule_kind: "none".to_string(),
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: String::new(),
+        confidence: 0.8,
+        decision: "planner_execute".to_string(),
+        schedule_intent: None,
+        output_contract: Some(super::IntentOutputContractOut {
+            response_shape: "strict".to_string(),
+            exact_sentence_count: None,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: "path".to_string(),
+            delivery_intent: "none".to_string(),
+            semantic_kind: "directory_entry_groups".to_string(),
+            locator_hint: "document/".to_string(),
+            self_extension: None,
+        }),
+        execution_recipe: Some(super::IntentExecutionRecipeOut::default()),
+        turn_type: String::new(),
+        target_task_policy: String::new(),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+
+    assert_eq!(
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            None,
+            "",
+            std::path::Path::new("/tmp/rustclaw")
+        ),
+        Some("directory_entry_groups_contract_needs_semantic_shape_review")
     );
 }
 
@@ -2179,7 +2980,12 @@ fn semantic_suspect_reviews_planner_existence_summary_contract() {
     };
 
     assert_eq!(
-        super::semantic_suspect_detail_for_normalizer_output(&out, None),
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            None,
+            "",
+            std::path::Path::new("/tmp/rustclaw")
+        ),
         Some("existence_summary_contract_needs_semantic_shape_review")
     );
 }
@@ -2223,7 +3029,12 @@ fn semantic_suspect_reviews_planner_multi_path_generic_contract() {
     };
 
     assert_eq!(
-        super::semantic_suspect_detail_for_normalizer_output(&out, Some(&surface)),
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            Some(&surface),
+            req,
+            std::path::Path::new("/tmp/rustclaw")
+        ),
         Some("multi_path_generic_contract_needs_semantic_shape_review")
     );
 }
@@ -2267,7 +3078,12 @@ fn semantic_suspect_reviews_planner_multi_path_generic_contract_before_evidence_
     };
 
     assert_eq!(
-        super::semantic_suspect_detail_for_normalizer_output(&out, Some(&surface)),
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            Some(&surface),
+            req,
+            std::path::Path::new("/tmp/rustclaw")
+        ),
         Some("multi_path_generic_contract_needs_semantic_shape_review")
     );
 }
@@ -2310,7 +3126,12 @@ fn semantic_suspect_reviews_planner_single_path_generic_metadata_contract() {
     };
 
     assert_eq!(
-        super::semantic_suspect_detail_for_normalizer_output(&out, Some(&surface)),
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            Some(&surface),
+            req,
+            std::path::Path::new("/tmp/rustclaw")
+        ),
         Some("single_path_generic_contract_needs_semantic_shape_review")
     );
 }
@@ -2353,7 +3174,12 @@ fn semantic_suspect_reviews_planner_single_path_generic_free_contract() {
     };
 
     assert_eq!(
-        super::semantic_suspect_detail_for_normalizer_output(&out, Some(&surface)),
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            Some(&surface),
+            req,
+            std::path::Path::new("/tmp/rustclaw")
+        ),
         Some("single_path_generic_contract_needs_semantic_shape_review")
     );
 }
@@ -2396,7 +3222,12 @@ fn semantic_suspect_reviews_planner_single_path_scalar_count_contract() {
     };
 
     assert_eq!(
-        super::semantic_suspect_detail_for_normalizer_output(&out, Some(&surface)),
+        super::semantic_suspect_detail_for_normalizer_output(
+            &out,
+            Some(&surface),
+            req,
+            std::path::Path::new("/tmp/rustclaw")
+        ),
         Some("single_path_scalar_count_contract_needs_semantic_shape_review")
     );
 }
@@ -3557,6 +4388,41 @@ fn normalizer_schema_normalization_recovers_file_names_only_contract() {
 }
 
 #[test]
+fn normalizer_schema_normalization_maps_directory_entry_names_to_entry_groups() {
+    let raw = r#"{
+          "resolved_user_intent":"list direct child entry names for docs",
+          "needs_clarify":false,
+          "reason":"directory inventory",
+          "confidence":0.9,
+          "decision":"planner_execute",
+          "output_contract":{
+            "response_shape":"strict",
+            "requires_content_evidence":true,
+            "delivery_required":false,
+            "locator_kind":"path",
+            "delivery_intent":"none",
+            "semantic_kind":"directory_entry_names",
+            "locator_hint":"docs"
+          }
+        }"#;
+    let normalized =
+        super::normalize_intent_normalizer_raw_for_schema(raw, "list direct child names for docs");
+    let value = serde_json::from_str::<serde_json::Value>(&normalized).expect("json");
+
+    assert_eq!(
+        value
+            .pointer("/output_contract/semantic_kind")
+            .and_then(|v| v.as_str()),
+        Some("directory_entry_groups")
+    );
+    crate::prompt_utils::validate_against_schema::<super::IntentNormalizerOut>(
+        &normalized,
+        crate::prompt_utils::PromptSchemaId::IntentNormalizer,
+    )
+    .expect("schema validation");
+}
+
+#[test]
 fn normalizer_schema_normalization_does_not_repair_file_listing_from_recipe_text() {
     let raw = r#"{
           "resolved_user_intent":"列出 /home/guagua/rustclaw/document 目录下的所有文件名",
@@ -4381,6 +5247,30 @@ fn answer_candidate_binding_reports_memory_only_without_phrase_matching() {
         .expect("candidate should produce binding report");
     assert!(!report.is_memory_only_binding());
     assert!(report.has_current_or_recent_binding());
+}
+
+#[test]
+fn recent_execution_bound_answer_candidate_does_not_trigger_active_text_conflict() {
+    let recent_execution_bound = super::AnswerCandidateBindingReport {
+        candidate: "README.md".to_string(),
+        in_current_request: false,
+        in_recent_assistant_replies: true,
+        in_recent_turns_full: true,
+        in_last_turn_full: false,
+        in_recent_execution_context: true,
+        in_memory_context: false,
+    };
+    assert!(
+        !super::answer_candidate_can_conflict_with_active_text_followup(Some(
+            &recent_execution_bound
+        ))
+    );
+
+    let mut recent_text_only = recent_execution_bound.clone();
+    recent_text_only.in_recent_execution_context = false;
+    assert!(
+        super::answer_candidate_can_conflict_with_active_text_followup(Some(&recent_text_only))
+    );
 }
 
 #[test]
@@ -5405,6 +6295,8 @@ fn compact_normalizer_prompt_pins_output_contract_schema() {
     assert!(prompt.contains("semantic_kind=\"existence_with_path\""));
     assert!(prompt.contains("file/path metadata comparisons"));
     assert!(prompt.contains("semantic_kind=\"quantity_comparison\""));
+    assert!(prompt.contains("RECENT_OBSERVED_JUDGMENT"));
+    assert!(prompt.contains("do not turn them into fresh file_names/path lookup"));
     assert!(prompt.contains("Text drafting/composition is not file delivery by default"));
     assert!(prompt.contains("Write a long article about RustClaw"));
     assert!(prompt.contains("presence judgment is not numeric counting"));
@@ -5416,6 +6308,15 @@ fn compact_normalizer_prompt_pins_output_contract_schema() {
     assert!(prompt.contains("Use decision=\"planner_execute\" when the request inspects"));
     assert!(prompt.contains("generic baseline diagnostics"));
     assert!(prompt.contains("semantic_kind=\"service_status\""));
+    assert!(
+        prompt.contains("task_control queue/running/cancel status=>planner_execute service_status")
+    );
+    assert!(
+        prompt.contains("Do not use runtime_status_query.kind=\"approval_wait\" for task queue")
+    );
+    assert!(prompt.contains("kb.ingest=>planner_execute filesystem_mutation_result"));
+    assert!(prompt.contains("do not classify these as service_status"));
+    assert!(prompt.contains("inherit only the slice/count constraint"));
     assert!(prompt.contains("Never ask the user to paste local file contents"));
     assert!(prompt.contains("Output exactly one raw JSON object and then stop"));
     assert!(prompt.contains("Normalizer protocol is internal only"));
@@ -6031,6 +6932,172 @@ fn structural_contract_repair_routes_file_field_scalar_to_evidence() {
 }
 
 #[test]
+fn structural_contract_repair_file_paths_missing_file_locator_uses_parent_dir() {
+    let req = "Read plan/definitely_missing_20260511.md; if it is missing, search plan for matching md files and return paths.";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("workspace root");
+    assert!(workspace_root.join("plan").is_dir());
+    assert!(!workspace_root
+        .join("plan/definitely_missing_20260511.md")
+        .exists());
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::FilePaths,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "plan/definitely_missing_20260511.md".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        req,
+        &surface,
+        workspace_root,
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(
+        reason,
+        Some("file_paths_missing_file_locator_parent_dir_repair")
+    );
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::FilePaths);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(contract.locator_hint, "plan");
+}
+
+#[test]
+fn structural_contract_repair_promotes_mixed_existence_and_content_summary() {
+    let req = "Check /home/guagua/rustclaw/not_real_20260511, then use README.md to write one RustClaw project sentence.";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("workspace root");
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::ExistenceWithPath,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "/home/guagua/rustclaw/not_real_20260511".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        req,
+        &surface,
+        workspace_root,
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(
+        reason,
+        Some("existence_with_path_mixed_locator_summary_repair")
+    );
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::ExistenceWithPathSummary
+    );
+    assert!(contract.requires_content_evidence);
+}
+
+#[test]
+fn structural_contract_repair_promotes_strict_mixed_existence_and_content_summary() {
+    let req = "先检查一个不存在的路径 /home/guagua/rustclaw/not_real_20260511，然后基于真实 README.md 写一句 RustClaw 项目说明";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("workspace root");
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::ExistenceWithPath,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "/home/guagua/rustclaw/not_real_20260511".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        req,
+        &surface,
+        workspace_root,
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(
+        reason,
+        Some("existence_with_path_mixed_locator_summary_repair")
+    );
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::ExistenceWithPathSummary
+    );
+    assert!(contract.requires_content_evidence);
+}
+
+#[test]
+fn structural_contract_repair_keeps_single_existence_path_verdict() {
+    let req = "Check /home/guagua/rustclaw/README.md and answer in one sentence whether it exists.";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("workspace root");
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::OneSentence,
+        requires_content_evidence: true,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::ExistenceWithPath,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "/home/guagua/rustclaw/README.md".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        req,
+        &surface,
+        workspace_root,
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(reason, Some("semantic_contract_requires_evidence"));
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::ExistenceWithPath
+    );
+}
+
+#[test]
 fn structural_contract_repair_preserves_directory_scoped_scalar_path_lookup() {
     let req =
         "In scripts/nl_tests/fixtures/locator_smart/case_only, where's report.md? only the path";
@@ -6201,7 +7268,13 @@ fn structural_contract_repair_promotes_file_token_delivery_to_generated_artifact
 
 #[test]
 fn structural_contract_repair_downgrades_filename_only_generated_delivery_to_existing_file() {
-    let req = "把 definitely_missing_named_file_golden_001.txt 发给我";
+    let workspace = make_temp_workspace_with_child("existing_generated_delivery", "docs");
+    std::fs::write(
+        workspace.join("existing_named_file_golden_001.txt"),
+        "existing file",
+    )
+    .expect("write existing file");
+    let req = "把 existing_named_file_golden_001.txt 发给我";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
     let mut contract = IntentOutputContract {
         exact_sentence_count: None,
@@ -6219,7 +7292,7 @@ fn structural_contract_repair_downgrades_filename_only_generated_delivery_to_exi
         &mut contract,
         req,
         &surface,
-        std::path::Path::new("/workspace"),
+        &workspace,
         FirstLayerDecision::PlannerExecute,
         "",
         None,
@@ -6232,14 +7305,51 @@ fn structural_contract_repair_downgrades_filename_only_generated_delivery_to_exi
     );
     assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Filename);
-    assert_eq!(
-        contract.locator_hint,
-        "definitely_missing_named_file_golden_001.txt"
-    );
+    assert_eq!(contract.locator_hint, "existing_named_file_golden_001.txt");
     assert!(contract.delivery_required);
     assert_eq!(contract.delivery_intent, OutputDeliveryIntent::FileSingle);
     assert_eq!(contract.response_shape, OutputResponseShape::FileToken);
     assert!(contract.requires_content_evidence);
+}
+
+#[test]
+fn structural_contract_repair_keeps_new_filename_generated_delivery() {
+    let workspace = make_temp_workspace_with_child("new_generated_delivery", "docs");
+    let req = "Run pwd first, save one short line to worker_line_explicit.txt, then tell me the saved path.";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::FileToken,
+        requires_content_evidence: true,
+        delivery_required: true,
+        delivery_intent: OutputDeliveryIntent::FileSingle,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+        locator_hint: "worker_line_explicit.txt".to_string(),
+        self_extension: crate::SelfExtensionContract::default(),
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        req,
+        &surface,
+        &workspace,
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(reason, Some("semantic_contract_requires_evidence"));
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::GeneratedFileDelivery
+    );
+    assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+    assert_eq!(contract.locator_hint, "worker_line_explicit.txt");
+    assert!(contract.delivery_required);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::FileSingle);
+    assert_eq!(contract.response_shape, OutputResponseShape::FileToken);
 }
 
 #[test]
@@ -6504,6 +7614,45 @@ fn dotted_structured_field_repair_overrides_config_validation_contract() {
 }
 
 #[test]
+fn dotted_structured_field_repair_overrides_quantity_comparison_contract() {
+    let req = "读取 configs/config.toml 里的 tools.allow_path_outside_workspace，只输出值";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "configs/config.toml".to_string(),
+        semantic_kind: OutputSemanticKind::QuantityComparison,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        req,
+        &surface,
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root"),
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(
+        reason,
+        Some("structured_field_selector_requires_scalar_value")
+    );
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(contract.locator_hint, "configs/config.toml");
+}
+
+#[test]
 fn structured_config_keys_repair_overrides_file_names_contract() {
     let req = "读取 configs/config.toml 的顶层键名，只输出键名列表";
     let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
@@ -6615,6 +7764,86 @@ fn structured_identifier_presence_repair_overrides_config_validation_contract() 
     assert!(contract.requires_content_evidence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
     assert_eq!(contract.locator_hint, "docker/config/skills_registry.toml");
+}
+
+#[test]
+fn structured_identifier_presence_repair_overrides_content_presence_contract() {
+    let req = "Read docker/config/skills_registry.toml and answer whether fs_basic is registered.";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "docker/config/skills_registry.toml".to_string(),
+        semantic_kind: OutputSemanticKind::ContentPresenceCheck,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        req,
+        &surface,
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root"),
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(
+        reason,
+        Some("structured_identifier_presence_requires_content_evidence")
+    );
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
+    assert_eq!(contract.locator_hint, "docker/config/skills_registry.toml");
+}
+
+#[test]
+fn quoted_literal_presence_repair_overrides_path_existence_contract() {
+    let req = "Check crates/clawd/src/virtual_tools.rs for “NEEDLE_TOKEN_123”.";
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(req);
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "crates/clawd/src/virtual_tools.rs".to_string(),
+        semantic_kind: OutputSemanticKind::ExistenceWithPath,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_current_turn_structural_contract_repair(
+        &mut contract,
+        req,
+        &surface,
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .expect("workspace root"),
+        FirstLayerDecision::PlannerExecute,
+        "",
+        None,
+        None,
+    );
+
+    assert_eq!(
+        reason,
+        Some("quoted_literal_content_presence_contract_repair")
+    );
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::ContentPresenceCheck
+    );
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Path);
 }
 
 #[test]
@@ -7025,6 +8254,18 @@ fn executionless_chat_wrapped_execute_is_downgraded_to_direct_answer() {
 }
 
 #[test]
+fn parse_output_semantic_kind_accepts_command_output_summary() {
+    assert_eq!(
+        super::parse_output_semantic_kind("command_output_summary"),
+        OutputSemanticKind::CommandOutputSummary
+    );
+    assert_eq!(
+        super::parse_output_semantic_kind("command_result_summary"),
+        OutputSemanticKind::CommandOutputSummary
+    );
+}
+
+#[test]
 fn explicit_command_execution_repair_prevents_executionless_downgrade() {
     let runtime = crate::CommandIntentRuntime {
         all_result_suffixes: vec![],
@@ -7078,6 +8319,53 @@ fn explicit_command_execution_repair_prevents_executionless_downgrade() {
 }
 
 #[test]
+fn explicit_command_execution_repair_preserves_command_summary_contract() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["run ".to_string()],
+        standalone_commands: vec![],
+        default_locale: "en-US".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: Some(1),
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::None,
+        semantic_kind: OutputSemanticKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "Run whoami and pwd commands, then create one signature line from those results.",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("explicit_command_requires_command_output_summary_execution")
+    );
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::CommandOutputSummary
+    );
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
 fn explicit_command_execution_repair_preserves_failed_step_contract() {
     let runtime = crate::CommandIntentRuntime {
         all_result_suffixes: vec![],
@@ -7117,6 +8405,59 @@ fn explicit_command_execution_repair_preserves_failed_step_contract() {
     assert!(contract.requires_content_evidence);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
     assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn explicit_command_execution_repair_preserves_generated_file_delivery_contract() {
+    let runtime = crate::CommandIntentRuntime {
+        all_result_suffixes: vec![],
+        execute_prefixes: vec!["run ".to_string()],
+        standalone_commands: vec![],
+        default_locale: "en-US".to_string(),
+        verify_enforce_enabled: true,
+    };
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::FileToken,
+        requires_content_evidence: true,
+        delivery_required: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        delivery_intent: OutputDeliveryIntent::FileSingle,
+        semantic_kind: OutputSemanticKind::GeneratedFileDelivery,
+        locator_hint: "worker_line_explicit.txt".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_explicit_command_execution_contract_repair(
+        &runtime,
+        "Run pwd first, save one short line to worker_line_explicit.txt, then tell me the saved path.",
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut contract,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("explicit_command_preserves_generated_file_delivery_execution")
+    );
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::GeneratedFileDelivery
+    );
+    assert_eq!(contract.response_shape, OutputResponseShape::FileToken);
+    assert!(contract.delivery_required);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::FileSingle);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::CurrentWorkspace);
+    assert_eq!(contract.locator_hint, "worker_line_explicit.txt");
+    assert!(contract.requires_content_evidence);
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
 }
 
 #[test]
@@ -7277,6 +8618,294 @@ fn command_payload_contract_repair_clears_spurious_locatorless_clarify() {
     assert!(contract.requires_content_evidence);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::RawCommandOutput);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+}
+
+#[test]
+fn command_payload_contract_repair_preserves_command_summary_contract() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::None,
+        locator_kind: OutputLocatorKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_command_payload_contract_repair(
+        true,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("command_payload_requires_command_output_summary_execution")
+    );
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::CommandOutputSummary
+    );
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn command_payload_contract_repair_preserves_strict_command_summary_contract() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::CommandOutputSummary,
+        locator_kind: OutputLocatorKind::None,
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_command_payload_contract_repair(
+        true,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("command_payload_requires_command_output_summary_execution")
+    );
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::CommandOutputSummary
+    );
+    assert_eq!(contract.response_shape, OutputResponseShape::Strict);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::ChatWrapped);
+}
+
+#[test]
+fn command_payload_contract_repair_preserves_failed_step_contract() {
+    let mut decision = FirstLayerDecision::Clarify;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = true;
+    let mut clarify_question = "Need a path target.".to_string();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: None,
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        semantic_kind: OutputSemanticKind::ExecutionFailedStep,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "/tmp/rustclaw-anchor-test".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_command_payload_contract_repair(
+        true,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("command_payload_requires_raw_output_execution")
+    );
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert!(contract.requires_content_evidence);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::ExecutionFailedStep
+    );
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+}
+
+#[test]
+fn file_delivery_contract_repair_preserves_named_file_delivery_request() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        exact_sentence_count: Some(1),
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::ExecutionFailedStep,
+        locator_kind: OutputLocatorKind::Filename,
+        locator_hint: "definitely_missing_named_file_rustclaw_24687.md".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_file_delivery_contract_repair(
+        true,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("file_delivery_request_preserves_delivery_contract")
+    );
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(contract.response_shape, OutputResponseShape::FileToken);
+    assert!(contract.delivery_required);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::FileSingle);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::Filename);
+    assert_eq!(
+        contract.locator_hint,
+        "definitely_missing_named_file_rustclaw_24687.md"
+    );
+}
+
+#[test]
+fn file_delivery_contract_repair_preserves_archive_pack_contract() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Scalar,
+        requires_content_evidence: true,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::ArchivePack,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "scripts/skill_calls | document/skill_calls_smoke.zip".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::apply_file_delivery_contract_repair(
+        true,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(repair, None);
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::ArchivePack);
+    assert_eq!(contract.response_shape, OutputResponseShape::Scalar);
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
+    assert_eq!(
+        contract.locator_hint,
+        "scripts/skill_calls | document/skill_calls_smoke.zip"
+    );
+}
+
+#[test]
+fn declared_publishing_preview_contract_restores_after_generic_drift() {
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut wants_file_delivery = false;
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::None,
+        locator_kind: OutputLocatorKind::Path,
+        locator_hint: "/workspace/rustclaw".to_string(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::restore_declared_publishing_preview_contract(
+        OutputSemanticKind::PublishingPreview,
+        None,
+        super::ScheduleKind::None,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut wants_file_delivery,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(
+        repair,
+        Some("declared_publishing_preview_contract_preserved")
+    );
+    assert!(!needs_clarify);
+    assert!(clarify_question.is_empty());
+    assert!(!wants_file_delivery);
+    assert_eq!(decision, FirstLayerDecision::PlannerExecute);
+    assert_eq!(
+        contract.semantic_kind,
+        OutputSemanticKind::PublishingPreview
+    );
+    assert!(contract.requires_content_evidence);
+    assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+    assert!(contract.locator_hint.is_empty());
+    assert!(!contract.delivery_required);
+    assert_eq!(contract.delivery_intent, OutputDeliveryIntent::None);
+}
+
+#[test]
+fn declared_publishing_preview_restore_respects_active_text_followup_repair() {
+    let mut decision = FirstLayerDecision::DirectAnswer;
+    let mut finalize_style = crate::ActFinalizeStyle::Plain;
+    let mut needs_clarify = false;
+    let mut clarify_question = String::new();
+    let mut wants_file_delivery = false;
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: false,
+        delivery_required: false,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::None,
+        locator_kind: OutputLocatorKind::None,
+        locator_hint: String::new(),
+        ..IntentOutputContract::default()
+    };
+
+    let repair = super::restore_declared_publishing_preview_contract(
+        OutputSemanticKind::PublishingPreview,
+        Some("active_text_followup_route_repair"),
+        super::ScheduleKind::None,
+        &mut contract,
+        &mut needs_clarify,
+        &mut clarify_question,
+        &mut wants_file_delivery,
+        &mut decision,
+        &mut finalize_style,
+    );
+
+    assert_eq!(repair, None);
+    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
+    assert!(!contract.requires_content_evidence);
 }
 
 #[test]
@@ -10642,6 +12271,62 @@ fn active_task_invalid_turn_binding_context_uses_schema_tokens_not_user_phrases(
 }
 
 #[test]
+fn active_task_invalid_turn_binding_skips_recent_observed_judgment_contract() {
+    let raw = serde_json::json!({
+        "turn_type": "response",
+        "target_task_policy": "recent_result_selection",
+        "output_contract": {
+            "response_shape": "strict",
+            "requires_content_evidence": true,
+            "delivery_required": false,
+            "locator_kind": "none",
+            "delivery_intent": "none",
+            "semantic_kind": "excerpt_kind_judgment",
+            "locator_hint": ""
+        }
+    })
+    .to_string();
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(
+        "Compare the previous observed excerpts and return the selected filename.",
+    );
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: Some(crate::conversation_state::ConversationState {
+            last_primary_task_prompt: Some("Read service_notes.md first lines".to_string()),
+            last_primary_task_output: Some("# Service Notes".to_string()),
+            ..crate::conversation_state::ConversationState::default()
+        }),
+        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            op_kind: crate::followup_frame::FollowupOpKind::Read,
+            bound_target: Some("/tmp/rustclaw/docs/service_notes.md".to_string()),
+            ..crate::followup_frame::FollowupFrame::default()
+        }),
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    assert!(super::active_task_invalid_turn_binding_context(
+        &raw,
+        Some(&snapshot),
+        &surface,
+        false
+    )
+    .is_none());
+
+    let snapshot_without_anchor = crate::conversation_state::ActiveSessionSnapshot {
+        active_followup_frame: None,
+        ..snapshot
+    };
+    let context = super::active_task_invalid_turn_binding_context(
+        &raw,
+        Some(&snapshot_without_anchor),
+        &surface,
+        false,
+    )
+    .expect("missing observed anchor should keep conservative token repair");
+    assert!(context.contains("active_task_invalid_turn_binding"));
+}
+
+#[test]
 fn active_text_correction_clears_stale_workspace_evidence_contract() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: Some(crate::conversation_state::ConversationState {
@@ -10843,6 +12528,66 @@ fn observed_context_summary_followup_clears_synthesis_contract() {
     assert!(!contract.requires_content_evidence);
     assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
     assert_eq!(contract.locator_kind, OutputLocatorKind::None);
+}
+
+#[test]
+fn active_text_followup_clears_publishing_preview_for_text_rewrite() {
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: Some(crate::conversation_state::ConversationState {
+            last_primary_task_prompt: Some("Write a long article about RustClaw".to_string()),
+            last_primary_task_output: Some(
+                "RustClaw is a local Rust agent runtime with channels, tools, skills, and UI."
+                    .to_string(),
+            ),
+            ..crate::conversation_state::ConversationState::default()
+        }),
+        active_followup_frame: None,
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+    let mut turn_type = Some(TurnType::TaskScopeUpdate);
+    let mut target_task_policy = Some(TargetTaskPolicy::ReuseActive);
+    let mut decision = FirstLayerDecision::PlannerExecute;
+    let mut finalize_style = crate::ActFinalizeStyle::ChatWrapped;
+    let mut needs_clarify = false;
+    let mut wants_file_delivery = false;
+    let mut answer_candidate = String::new();
+    let mut contract = IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        delivery_required: false,
+        locator_kind: OutputLocatorKind::None,
+        delivery_intent: OutputDeliveryIntent::None,
+        semantic_kind: OutputSemanticKind::PublishingPreview,
+        ..IntentOutputContract::default()
+    };
+
+    let reason = super::apply_active_text_followup_route_repair(
+        "Change it into a thread format.",
+        Some(&snapshot),
+        &mut turn_type,
+        &mut target_task_policy,
+        false,
+        &mut decision,
+        &mut finalize_style,
+        &mut needs_clarify,
+        super::ScheduleKind::None,
+        false,
+        &mut wants_file_delivery,
+        &mut contract,
+        None,
+        false,
+        false,
+        &mut answer_candidate,
+    );
+
+    assert_eq!(reason, Some("active_text_followup_route_repair"));
+    assert_eq!(turn_type, Some(TurnType::TaskScopeUpdate));
+    assert_eq!(target_task_policy, Some(TargetTaskPolicy::ReuseActive));
+    assert_eq!(decision, FirstLayerDecision::DirectAnswer);
+    assert_eq!(finalize_style, crate::ActFinalizeStyle::Plain);
+    assert!(!contract.requires_content_evidence);
+    assert_eq!(contract.semantic_kind, OutputSemanticKind::None);
 }
 
 #[test]
@@ -12006,5 +13751,81 @@ fn parse_output_semantic_kind_prefers_last_recognized_token_in_multi_value_outpu
     assert_eq!(
         super::parse_output_semantic_kind("sqlite_table_listing|sqlite_database_kind_judgment"),
         OutputSemanticKind::SqliteDatabaseKindJudgment
+    );
+}
+
+#[test]
+fn active_ordered_scalar_path_missing_state_patch_context_reports_machine_anchor() {
+    let out = super::IntentNormalizerOut {
+        resolved_user_intent: "select an active ordered path".to_string(),
+        answer_candidate: String::new(),
+        resume_behavior: "none".to_string(),
+        schedule_kind: "none".to_string(),
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        reason: "selected item from active ordered entries".to_string(),
+        confidence: 0.8,
+        decision: "planner_execute".to_string(),
+        schedule_intent: None,
+        output_contract: Some(super::IntentOutputContractOut {
+            response_shape: "scalar".to_string(),
+            exact_sentence_count: None,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: "none".to_string(),
+            delivery_intent: "none".to_string(),
+            semantic_kind: "scalar_path_only".to_string(),
+            locator_hint: String::new(),
+            self_extension: None,
+        }),
+        execution_recipe: None,
+        turn_type: "task_scope_update".to_string(),
+        target_task_policy: "reuse_active".to_string(),
+        should_interrupt_active_run: false,
+        state_patch: None,
+        attachment_processing_required: false,
+    };
+    let snapshot = crate::conversation_state::ActiveSessionSnapshot {
+        conversation_state: None,
+        active_followup_frame: Some(crate::followup_frame::FollowupFrame {
+            source_request: "find abcd under fuzzy_top3".to_string(),
+            op_kind: crate::followup_frame::FollowupOpKind::List,
+            bound_target: Some(
+                "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3"
+                    .to_string(),
+            ),
+            ordered_entries: vec![
+                "abcd_report.md".to_string(),
+                "my_abcd.txt".to_string(),
+                "x_abcd_log.txt".to_string(),
+            ],
+            selected_entry_index: Some(1),
+            ..crate::followup_frame::FollowupFrame::default()
+        }),
+        active_clarify_state: None,
+        active_observed_facts: None,
+    };
+
+    let context =
+        super::active_ordered_scalar_path_missing_state_patch_context(&out, Some(&snapshot))
+            .expect("missing ordered-entry ref should trigger repair context");
+
+    assert!(context.contains("required_patch=state_patch.ordered_entry_ref"));
+    assert!(context.contains("active_selected_entry_index_base1=2"));
+    assert!(context.contains("active_ordered_entries=1:abcd_report.md | 2:my_abcd.txt"));
+
+    let mut already_patched = out;
+    already_patched.state_patch = Some(serde_json::json!({
+        "ordered_entry_ref": {"index": 1, "index_base": 1}
+    }));
+    assert!(
+        super::active_ordered_scalar_path_missing_state_patch_context(
+            &already_patched,
+            Some(&snapshot)
+        )
+        .is_none()
     );
 }

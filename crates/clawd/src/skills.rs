@@ -388,6 +388,21 @@ fn parse_crypto_account_access_error(err: &str) -> Option<(String, String)> {
     ))
 }
 
+fn structured_crypto_account_access_error(
+    skill_name: &str,
+    structured: &StructuredSkillError,
+) -> Option<(String, String)> {
+    let effective_skill = if structured.skill.trim().is_empty() {
+        skill_name
+    } else {
+        structured.skill.as_str()
+    };
+    if !effective_skill.eq_ignore_ascii_case("crypto") {
+        return None;
+    }
+    parse_crypto_account_access_error(&structured.error_text)
+}
+
 pub(crate) fn policy_block_default_text(
     state: &AppState,
     task: &ClaimedTask,
@@ -484,6 +499,9 @@ pub(crate) struct SkillRunOutcome {
 
 pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
     if let Some(structured) = parse_structured_skill_error(err) {
+        if structured_crypto_account_access_error(skill_name, &structured).is_some() {
+            return true;
+        }
         let effective_skill = if structured.skill.trim().is_empty() {
             skill_name
         } else {
@@ -510,6 +528,14 @@ pub(crate) fn is_recoverable_skill_error(skill_name: &str, err: &str) -> bool {
         return true;
     }
     false
+}
+
+pub(crate) fn is_crypto_account_access_error(skill_name: &str, err: &str) -> bool {
+    if let Some(structured) = parse_structured_skill_error(err) {
+        return structured_crypto_account_access_error(skill_name, &structured).is_some();
+    }
+    skill_name.eq_ignore_ascii_case("crypto")
+        && err.trim().starts_with(CRYPTO_ACCOUNT_ACCESS_ERROR_PREFIX)
 }
 
 pub(crate) fn is_missing_target_skill_error(skill_name: &str, err: &str) -> bool {
@@ -561,6 +587,14 @@ pub(crate) fn normalize_skill_error_for_user(skill_name: &str, err: &str) -> Str
         } else {
             structured.skill.as_str()
         };
+        if let Some((exchange, detail)) =
+            structured_crypto_account_access_error(skill_name, &structured)
+        {
+            if exchange.is_empty() {
+                return format!("crypto account access failed: {detail}");
+            }
+            return format!("crypto account access failed on {exchange}: {detail}");
+        }
         if structured.error_kind.starts_with("contract_") {
             return "planned tool step was not allowed for this request".to_string();
         }

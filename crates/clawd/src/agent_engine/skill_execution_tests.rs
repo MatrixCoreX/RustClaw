@@ -6,7 +6,7 @@ use super::{
     admitted_extra_field_exists, build_auto_sudo_retry_args,
     contains_unresolved_runtime_template_arg, contract_matrix_action_policy_error,
     contract_matrix_arg_policy_error, handle_skill_step_failure, handle_skill_step_success,
-    preflight_failure_metadata, skill_extra_requests_user_input,
+    preflight_failure_metadata, skill_extra_requests_user_input, structured_extra_evidence_output,
     structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
     AgentLoopGuardPolicy, LoopState,
 };
@@ -116,11 +116,15 @@ fn test_policy() -> AgentLoopGuardPolicy {
     AgentLoopGuardPolicy {
         max_steps: 16,
         max_rounds: 2,
+        max_tool_calls: 12,
         recoverable_failure_extra_rounds: 1,
         repeat_action_limit: 4,
         no_progress_limit: 1,
         multi_round_enabled: true,
         answer_verifier_retry_limit: 2,
+        fast_read: Default::default(),
+        grounded_summary: Default::default(),
+        multi_step_workspace: Default::default(),
         ops_closed_loop: Default::default(),
     }
 }
@@ -518,6 +522,31 @@ fn skill_extra_user_input_signal_uses_generic_protocol_fields() {
         &serde_json::json!({"needs_directory": true})
     )));
     assert!(!skill_extra_requests_user_input(None));
+}
+
+#[test]
+fn structured_extra_evidence_output_wraps_text_and_extra_for_journal() {
+    let extra = serde_json::json!({
+        "outputs": [{
+            "type": "image_file",
+            "path": "/tmp/rustclaw-image.png"
+        }]
+    });
+
+    let output = structured_extra_evidence_output("FILE:/tmp/rustclaw-image.png", Some(&extra))
+        .expect("journal evidence output");
+    let value: serde_json::Value = serde_json::from_str(&output).expect("json output");
+
+    assert_eq!(
+        value.get("text").and_then(serde_json::Value::as_str),
+        Some("FILE:/tmp/rustclaw-image.png")
+    );
+    assert_eq!(
+        value
+            .pointer("/extra/outputs/0/path")
+            .and_then(serde_json::Value::as_str),
+        Some("/tmp/rustclaw-image.png")
+    );
 }
 
 #[test]

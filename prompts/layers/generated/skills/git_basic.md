@@ -57,8 +57,8 @@ Action selection notes:
   - `subcommand`: string Git subcommand used; evidence role `field_value`.
   - `exit_code`: integer Git exit code; evidence role `status`.
   - `target`, `path`, `n`, or `limit`: echoed typed inputs when applicable; evidence roles `field_value` and `path`.
-  - `output`: string bounded Git observation; fallback evidence only.
-- Sensitive fields: diffs and file-at-revision output can contain source or secrets. Provider-facing traces should prefer file lists, stats, excerpts, or hashes unless content was requested.
+  - `output`: string bounded Git observation; for safe summary actions such as `log`, `status`, `branch`, `current_branch`, `changed_files`, and `rev_parse`, runtime evidence extraction may expose bounded `command_output` / `content_excerpt` plus parsed fields such as `subject`, `state`, or `git_subjects`.
+- Sensitive fields: diffs and file-at-revision output can contain source or secrets. Provider-facing traces should prefer file lists, stats, excerpts, or hashes unless content was requested; raw `diff`, `show`, and `show_file_at_rev` output remains conservative.
 - Error responses include readable `error_text`; top-level `error_kind` should be used when available.
 
 ## Request/Response Examples (from interface)

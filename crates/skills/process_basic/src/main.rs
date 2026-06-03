@@ -89,14 +89,11 @@ fn execute(args: Value) -> Result<(String, Value), String> {
         }
         "port_list" => {
             let filter = string_arg(obj, &["filter", "query", "port"]);
-            run_port_list_snapshot()
-                .map(|(command_tool, text)| {
-                    let text = filter_command_output(&text, filter.as_deref());
-                (
-                    text.clone(),
-                        json!({"action":"port_list","exit_code":0,"filter":filter,"platform":std::env::consts::OS,"command_tool":command_tool,"output":text}),
-                )
-                })
+            run_port_list_snapshot().map(|(command_tool, text)| {
+                let text = filter_command_output(&text, filter.as_deref());
+                let extra = port_list_extra(command_tool, &text, filter);
+                (text.clone(), extra)
+            })
         }
         "kill" => {
             let pid = obj
@@ -256,6 +253,259 @@ fn run_port_list_command(
     args: &[&str],
 ) -> Result<(&'static str, String), String> {
     run_command(bin, args, None).map(|text| (command_tool, text))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct PortListener {
+    local_endpoint: String,
+    local_address: String,
+    port: String,
+    bind_scope: String,
+    is_wildcard: bool,
+    is_loopback: bool,
+    process_name: Option<String>,
+    pid: Option<i64>,
+}
+
+fn port_list_extra(command_tool: &'static str, text: &str, filter: Option<String>) -> Value {
+    let listeners = parse_port_listeners(command_tool, text);
+    let listener_count = listeners.len();
+    let public_listener_count = listeners
+        .iter()
+        .filter(|listener| listener.is_wildcard)
+        .count();
+    let localhost_listener_count = listeners
+        .iter()
+        .filter(|listener| listener.is_loopback)
+        .count();
+    let listener_sample = prioritized_listener_sample(&listeners, 64);
+    let public_listener_sample = prioritized_listener_sample(
+        &listeners
+            .iter()
+            .filter(|listener| listener.is_wildcard)
+            .cloned()
+            .collect::<Vec<_>>(),
+        32,
+    );
+
+    json!({
+        "action": "port_list",
+        "exit_code": 0,
+        "filter": filter,
+        "platform": std::env::consts::OS,
+        "command_tool": command_tool,
+        "output": text,
+        "listener_count": listener_count,
+        "public_listener_count": public_listener_count,
+        "localhost_listener_count": localhost_listener_count,
+        "ports": unique_ports(&listeners),
+        "public_ports": unique_ports(
+            &listeners
+                .iter()
+                .filter(|listener| listener.is_wildcard)
+                .cloned()
+                .collect::<Vec<_>>()
+        ),
+        "listeners": listener_sample,
+        "listeners_truncated": listener_count > 64,
+        "public_listeners": public_listener_sample,
+        "public_listeners_truncated": public_listener_count > 32,
+    })
+}
+
+fn parse_port_listeners(command_tool: &str, text: &str) -> Vec<PortListener> {
+    text.lines()
+        .filter_map(|line| match command_tool {
+            "ss" => parse_ss_listener_line(line),
+            "lsof" => parse_lsof_listener_line(line),
+            "netstat" => parse_netstat_listener_line(line),
+            _ => None,
+        })
+        .collect()
+}
+
+fn parse_ss_listener_line(line: &str) -> Option<PortListener> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with("LISTEN") {
+        return None;
+    }
+    let parts = trimmed.split_whitespace().collect::<Vec<_>>();
+    let local_endpoint = parts.get(3)?;
+    let process_text = if parts.len() > 5 {
+        parts[5..].join(" ")
+    } else {
+        String::new()
+    };
+    listener_from_endpoint(local_endpoint, &process_text)
+}
+
+fn parse_netstat_listener_line(line: &str) -> Option<PortListener> {
+    let trimmed = line.trim();
+    if !(trimmed.starts_with("tcp") || trimmed.starts_with("udp")) || !trimmed.contains("LISTEN") {
+        return None;
+    }
+    let parts = trimmed.split_whitespace().collect::<Vec<_>>();
+    let local_endpoint = parts.get(3)?;
+    let process_text = parts
+        .iter()
+        .position(|part| *part == "LISTEN")
+        .and_then(|idx| parts.get(idx + 1..))
+        .map(|tail| tail.join(" "))
+        .unwrap_or_default();
+    listener_from_endpoint(local_endpoint, &process_text)
+}
+
+fn parse_lsof_listener_line(line: &str) -> Option<PortListener> {
+    let trimmed = line.trim();
+    if trimmed.starts_with("COMMAND") || !trimmed.contains("(LISTEN)") {
+        return None;
+    }
+    let parts = trimmed.split_whitespace().collect::<Vec<_>>();
+    let command = parts.first().copied().unwrap_or_default();
+    let pid = parts.get(1).and_then(|part| part.parse::<i64>().ok());
+    let endpoint = parts
+        .iter()
+        .position(|part| *part == "TCP" || *part == "UDP")
+        .and_then(|idx| parts.get(idx + 1))
+        .copied()?;
+    let mut listener = listener_from_endpoint(endpoint, command)?;
+    listener.pid = pid.or(listener.pid);
+    if listener.process_name.is_none() && !command.is_empty() {
+        listener.process_name = Some(command.to_string());
+    }
+    Some(listener)
+}
+
+fn listener_from_endpoint(endpoint: &str, process_text: &str) -> Option<PortListener> {
+    let clean_endpoint = endpoint.trim().trim_end_matches(',');
+    let (local_address, port) = split_local_addr_port(clean_endpoint)?;
+    let (bind_scope, is_wildcard, is_loopback) = classify_bind_scope(&local_address);
+    Some(PortListener {
+        local_endpoint: clean_endpoint.to_string(),
+        local_address,
+        port,
+        bind_scope,
+        is_wildcard,
+        is_loopback,
+        process_name: process_name_from_text(process_text),
+        pid: pid_from_text(process_text),
+    })
+}
+
+fn split_local_addr_port(endpoint: &str) -> Option<(String, String)> {
+    let endpoint = endpoint.trim();
+    if endpoint.is_empty() {
+        return None;
+    }
+    if let Some(rest) = endpoint.strip_prefix('[') {
+        if let Some((addr, port)) = rest.rsplit_once("]:") {
+            return clean_addr_port(addr, port);
+        }
+    }
+    let (addr, port) = endpoint.rsplit_once(':')?;
+    clean_addr_port(addr, port)
+}
+
+fn clean_addr_port(addr: &str, port: &str) -> Option<(String, String)> {
+    let addr = addr.trim().trim_matches(['[', ']']);
+    let port = port
+        .trim()
+        .trim_matches(|ch: char| ch == ',' || ch == ')' || ch == '(');
+    if addr.is_empty() || port.is_empty() || port == "*" {
+        return None;
+    }
+    Some((addr.to_string(), port.to_string()))
+}
+
+fn classify_bind_scope(addr: &str) -> (String, bool, bool) {
+    let base_addr = addr.split('%').next().unwrap_or(addr).trim();
+    let is_wildcard = matches!(base_addr, "0.0.0.0" | "::" | "*" | ":::");
+    let is_loopback = base_addr == "::1"
+        || base_addr.eq_ignore_ascii_case("localhost")
+        || base_addr == "127.0.0.1"
+        || base_addr.starts_with("127.");
+    let bind_scope = if is_wildcard {
+        "all_interfaces"
+    } else if is_loopback {
+        "localhost"
+    } else {
+        "specific_address"
+    };
+    (bind_scope.to_string(), is_wildcard, is_loopback)
+}
+
+fn process_name_from_text(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed == "-" {
+        return None;
+    }
+    if let Some(start) = trimmed.find('"') {
+        let rest = &trimmed[start + 1..];
+        if let Some(end) = rest.find('"') {
+            let name = rest[..end].trim();
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+    }
+    trimmed
+        .split_whitespace()
+        .next()
+        .map(|value| value.trim_matches(['"', ',']).to_string())
+        .filter(|value| !value.is_empty() && value != "-")
+}
+
+fn pid_from_text(text: &str) -> Option<i64> {
+    let marker = "pid=";
+    let start = text.find(marker)? + marker.len();
+    let digits = text[start..]
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse::<i64>().ok()
+}
+
+fn prioritized_listener_sample(listeners: &[PortListener], limit: usize) -> Vec<PortListener> {
+    let mut sample = listeners.to_vec();
+    sample.sort_by(|a, b| {
+        listener_priority(a)
+            .cmp(&listener_priority(b))
+            .then_with(|| port_sort_key(&a.port).cmp(&port_sort_key(&b.port)))
+            .then_with(|| a.local_endpoint.cmp(&b.local_endpoint))
+    });
+    sample.truncate(limit);
+    sample
+}
+
+fn listener_priority(listener: &PortListener) -> u8 {
+    if listener.is_wildcard {
+        0
+    } else if !listener.is_loopback {
+        1
+    } else {
+        2
+    }
+}
+
+fn unique_ports(listeners: &[PortListener]) -> Vec<String> {
+    let mut ports = listeners
+        .iter()
+        .map(|listener| listener.port.clone())
+        .collect::<Vec<_>>();
+    ports.sort_by(|a, b| {
+        port_sort_key(a)
+            .cmp(&port_sort_key(b))
+            .then_with(|| a.cmp(b))
+    });
+    ports.dedup();
+    ports
+}
+
+fn port_sort_key(port: &str) -> u32 {
+    port.parse::<u32>().unwrap_or(u32::MAX)
 }
 
 #[cfg(target_os = "macos")]
