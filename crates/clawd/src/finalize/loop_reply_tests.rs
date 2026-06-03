@@ -16,9 +16,10 @@ use super::{
     delivery_contract_suppresses_execution_summary, delivery_is_content_answer_candidate,
     deterministic_missing_observed_target_answer, deterministic_observed_execution_status_answer,
     deterministic_structured_file_validation_from_read_range, direct_config_edit_observed_answer,
-    direct_db_basic_observed_answer, direct_directory_purpose_summary_from_size_facts,
+    direct_current_workspace_top_level_dirs_overview_answer, direct_db_basic_observed_answer,
+    direct_directory_purpose_summary_from_size_facts,
     direct_file_token_from_observed_auto_locator_filename,
-    direct_file_token_from_observed_inventory, direct_log_tail_status_answer,
+    direct_file_token_from_observed_find_entries, direct_file_token_from_observed_inventory,
     direct_non_builtin_skill_raw_answer, direct_path_from_active_bound_inventory,
     direct_publishable_observed_answer, direct_quantity_comparison_from_compare_paths,
     direct_rustclaw_config_risk_answer, direct_scalar_observed_answer,
@@ -27,19 +28,21 @@ use super::{
     discard_raw_passthrough_delivery_when_structured_answer_available,
     ensure_requested_success_marker_visible, execution_recipe_closeout_note,
     final_answer_text_from_delivery, finalize_loop_reply, finalizer_requires_clarify,
-    has_missing_file_search_evidence, latest_file_delivery_observation_is_missing,
-    looks_like_raw_command_snapshot, looks_like_structured_machine_output,
-    markdown_heading_from_read_output, missing_requested_success_marker,
+    has_missing_file_search_evidence, latest_delivery_preserves_observed_quantity_size_facts,
+    latest_file_delivery_observation_is_missing, looks_like_raw_command_snapshot,
+    looks_like_structured_machine_output, markdown_heading_from_read_output,
+    missing_file_path_from_output, missing_requested_success_marker,
     normalize_file_token_delivery_from_auto_locator,
     normalize_file_token_delivery_from_observed_paths,
     observed_execution_without_publishable_delivery_outcome,
     observed_execution_without_publishable_delivery_reply, observed_synthesis_unavailable_reply,
     path_batch_size_comparison_answer, prefer_observed_answer_for_exact_contract,
+    replace_delivery_with_deterministic_current_workspace_dirs_overview_answer,
     replace_delivery_with_deterministic_directory_purpose_answer,
     replace_delivery_with_deterministic_execution_failed_step_answer,
     replace_delivery_with_deterministic_observed_execution_status_answer,
+    replace_delivery_with_deterministic_quantity_comparison_answer,
     replace_delivery_with_deterministic_rustclaw_config_risk_answer,
-    replace_delivery_with_direct_log_tail_status_answer,
     replace_delivery_with_latest_tail_read_range_answer,
     replace_delivery_with_observed_markdown_heading_scalar,
     resolve_file_token_from_auto_locator_answer, should_attach_execution_summary,
@@ -324,6 +327,131 @@ fn directory_purpose_summary_replaces_wrong_synthesis_largest_file() {
 }
 
 #[test]
+fn current_workspace_dirs_overview_reads_wrapped_inventory_dir_output() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\",\"counts\":{\"dirs\":2,\"files\":1,\"total\":3},\"names_by_kind\":{\"dirs\":[\"configs\",\"docs\"],\"files\":[\"README.md\"],\"other\":[]},\"path\":\"workspace\"}","error_text":null,"extra":{"action":"inventory_dir","counts":{"dirs":2,"files":1,"total":3},"names_by_kind":{"dirs":["configs","docs"],"files":["README.md"],"other":[]},"path":"workspace"}}"#,
+    ));
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let (answer, summary) = direct_current_workspace_top_level_dirs_overview_answer(
+        &state,
+        "先看看当前目录有哪些顶层文件夹，再用一句适合新手的话解释这个仓库大概怎么组织",
+        &loop_state,
+        Some(&ctx),
+    )
+    .expect("current workspace dirs overview answer");
+
+    assert!(answer.contains("configs"));
+    assert!(answer.contains("docs"));
+    assert!(answer.contains("workspace.top_level_dirs.count=2"));
+    assert!(answer.contains("workspace.overview.kind=repository_sections_by_purpose"));
+    assert_eq!(summary.completion_ok, Some(true));
+}
+
+#[test]
+fn current_workspace_dirs_overview_replaces_incomplete_generic_synthesis() {
+    let state = test_state();
+    let task = claimed_task("task-current-workspace-dirs-overview");
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\",\"counts\":{\"dirs\":4,\"files\":1,\"total\":5},\"names_by_kind\":{\"dirs\":[\"UI\",\"configs\",\"crates\",\"docs\"],\"files\":[\"README.md\"],\"other\":[]},\"path\":\"workspace\"}","error_text":null,"extra":{"action":"inventory_dir","counts":{"dirs":4,"files":1,"total":5},"names_by_kind":{"dirs":["UI","configs","crates","docs"],"files":["README.md"],"other":[]},"path":"workspace"}}"#,
+    ));
+    let incomplete = "这是一个标准的 Rust 项目，根目录包含 UI、configs、crates 等目录。";
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        incomplete,
+    ));
+    loop_state.delivery_messages.push(incomplete.to_string());
+    loop_state.last_user_visible_respond = Some(incomplete.to_string());
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut summary = None;
+
+    assert!(
+        replace_delivery_with_deterministic_current_workspace_dirs_overview_answer(
+            &state,
+            &task,
+            "先看看当前目录有哪些顶层文件夹，再用一句适合新手的话解释这个仓库大概怎么组织",
+            &mut loop_state,
+            Some(&ctx),
+            &mut summary,
+        )
+    );
+
+    let answer = loop_state.delivery_messages.join("\n");
+    assert!(answer.contains("UI"));
+    assert!(answer.contains("configs"));
+    assert!(answer.contains("crates"));
+    assert!(answer.contains("docs"));
+    assert!(answer.contains("workspace.top_level_dirs.count=4"));
+    assert!(answer.contains("workspace.overview.section_hints="));
+    assert!(!answer.contains("标准的 Rust 项目"));
+    assert!(summary.is_some());
+}
+
+#[test]
+fn current_workspace_dirs_overview_does_not_replace_freeform_project_article() {
+    let state = test_state();
+    let task = claimed_task("task-current-workspace-project-article");
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"request_id":"req-1","status":"ok","text":"{\"action\":\"inventory_dir\",\"counts\":{\"dirs\":4,\"files\":1,\"total\":5},\"names_by_kind\":{\"dirs\":[\"UI\",\"configs\",\"crates\",\"docs\"],\"files\":[\"README.md\"],\"other\":[]},\"path\":\"workspace\"}","error_text":null,"extra":{"action":"inventory_dir","counts":{"dirs":4,"files":1,"total":5},"names_by_kind":{"dirs":["UI","configs","crates","docs"],"files":["README.md"],"other":[]},"path":"workspace"}}"#,
+    ));
+    let article = "RustClaw 是一个多渠道本地智能体运行时，本文将从架构、技能和部署展开。";
+    loop_state.delivery_messages.push(article.to_string());
+    loop_state.last_user_visible_respond = Some(article.to_string());
+    let mut route = free_route_result();
+    route.output_contract.semantic_kind = OutputSemanticKind::WorkspaceProjectSummary;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut summary = None;
+
+    assert!(
+        !replace_delivery_with_deterministic_current_workspace_dirs_overview_answer(
+            &state,
+            &task,
+            "帮我写一篇关于 RustClaw 的长文",
+            &mut loop_state,
+            Some(&ctx),
+            &mut summary,
+        )
+    );
+
+    assert_eq!(loop_state.delivery_messages, vec![article.to_string()]);
+    assert!(summary.is_none());
+}
+
+#[test]
 fn direct_quantity_comparison_from_count_inventory_prefers_total_size() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(1);
@@ -374,12 +502,12 @@ fn direct_quantity_comparison_defers_two_count_inventory_totals_to_synthesis() {
     loop_state.executed_step_results.push(ok_step_result(
         "step_1",
         "fs_basic",
-        r#"{"action":"count_inventory","path":"scripts/nl_tests/fixtures/device_local/docs","recursive":false,"counts":{"total":3,"files":2,"dirs":1,"total_size_bytes":425}}"#,
+        r#"{"extra":{"action":"count_inventory","path":"scripts/nl_tests/fixtures/device_local/docs","recursive":false,"counts":{"total":3,"files":2,"dirs":1,"total_size_bytes":425}},"text":"{\"action\":\"count_inventory\",\"path\":\"scripts/nl_tests/fixtures/device_local/docs\",\"recursive\":false,\"counts\":{\"total\":3,\"files\":2,\"dirs\":1,\"total_size_bytes\":425}}"}"#,
     ));
     loop_state.executed_step_results.push(ok_step_result(
         "step_2",
         "fs_basic",
-        r#"{"action":"count_inventory","path":"scripts/nl_tests/fixtures/device_local/logs","recursive":false,"counts":{"total":2,"files":2,"dirs":0,"total_size_bytes":2698}}"#,
+        r#"{"extra":{"action":"count_inventory","path":"scripts/nl_tests/fixtures/device_local/logs","recursive":false,"counts":{"total":2,"files":2,"dirs":0,"total_size_bytes":2698}},"text":"{\"action\":\"count_inventory\",\"path\":\"scripts/nl_tests/fixtures/device_local/logs\",\"recursive\":false,\"counts\":{\"total\":2,\"files\":2,\"dirs\":0,\"total_size_bytes\":2698}}"}"#,
     ));
     let mut route = free_route_result();
     route.output_contract.response_shape = OutputResponseShape::OneSentence;
@@ -670,6 +798,39 @@ fn direct_quantity_comparison_scalar_shape_returns_ratio_not_byte_delta() {
 }
 
 #[test]
+fn direct_quantity_comparison_unwraps_skill_success_envelope() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","path":"Cargo.lock","resolved_path":"/tmp/Cargo.lock","size_bytes":121800},"path":"Cargo.lock"},{"exists":true,"fact":{"kind":"file","path":"Cargo.toml","resolved_path":"/tmp/Cargo.toml","size_bytes":2639},"path":"Cargo.toml"}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":2,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"file\",\"path\":\"Cargo.lock\",\"resolved_path\":\"/tmp/Cargo.lock\",\"size_bytes\":121800},\"path\":\"Cargo.lock\"},{\"exists\":true,\"fact\":{\"kind\":\"file\",\"path\":\"Cargo.toml\",\"resolved_path\":\"/tmp/Cargo.toml\",\"size_bytes\":2639},\"path\":\"Cargo.toml\"}],\"include_missing\":true}"}"#,
+    ));
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "Cargo.lock|Cargo.toml".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let (answer, _) = direct_quantity_comparison_from_compare_paths(
+        &state,
+        "比较 Cargo.lock 和 Cargo.toml 的大小，告诉我 lock 大概是 toml 的几倍",
+        &loop_state,
+        Some(&ctx),
+    )
+    .expect("wrapped path facts ratio fallback");
+
+    assert!(answer.contains("46.15"));
+    assert!(!answer.contains(r#""action":"#));
+}
+
+#[test]
 fn direct_quantity_comparison_uses_original_request_language_over_scaffold() {
     let state = test_state();
     let mut loop_state = crate::agent_engine::LoopState::new(2);
@@ -748,6 +909,110 @@ fn direct_quantity_comparison_strict_shape_returns_byte_delta() {
     assert_eq!(
         summary.disposition,
         Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
+fn direct_quantity_comparison_strict_shape_returns_json_by_default() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","path":"README.md","resolved_path":"/tmp/README.md","size_bytes":29191},"path":"README.md"},{"exists":true,"fact":{"kind":"file","path":"AGENTS.md","resolved_path":"/tmp/AGENTS.md","size_bytes":20744},"path":"AGENTS.md"}],"include_missing":true}"#,
+    ));
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let (answer, summary) = direct_quantity_comparison_from_compare_paths(
+        &state,
+        "Compare README.md and AGENTS.md by size and return structured output.",
+        &loop_state,
+        Some(&ctx),
+    )
+    .expect("strict JSON fallback");
+
+    assert_eq!(
+        answer,
+        r#"{"larger_file":"README.md","size_delta_bytes":8447}"#
+    );
+    assert_eq!(
+        summary.disposition,
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
+fn strict_quantity_comparison_replacement_does_not_preserve_prose_delivery() {
+    let state = test_state();
+    let task = claimed_task("task-strict-quantity-json");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","path":"README.md","resolved_path":"/tmp/README.md","size_bytes":29191},"path":"README.md"},{"exists":true,"fact":{"kind":"file","path":"AGENTS.md","resolved_path":"/tmp/AGENTS.md","size_bytes":20744},"path":"AGENTS.md"}],"include_missing":true}"#,
+    ));
+    loop_state
+        .delivery_messages
+        .push("README.md is larger: 29191 bytes; AGENTS.md is 20744 bytes.".to_string());
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::QuantityComparison;
+    route.output_contract.locator_kind = OutputLocatorKind::Path;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut summary = None;
+
+    assert!(
+        replace_delivery_with_deterministic_quantity_comparison_answer(
+            &state,
+            &task,
+            "Compare README.md and AGENTS.md by size and return JSON.",
+            &mut loop_state,
+            Some(&ctx),
+            &mut summary,
+        )
+    );
+
+    assert_eq!(
+        loop_state.delivery_messages,
+        vec![r#"{"larger_file":"README.md","size_delta_bytes":8447}"#.to_string()]
+    );
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(r#"{"larger_file":"README.md","size_delta_bytes":8447}"#)
+    );
+    assert!(summary.is_some());
+}
+
+#[test]
+fn quantity_comparison_preserves_structured_json_synthesis() {
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"path_batch_facts","count":2,"facts":[{"exists":true,"fact":{"kind":"file","path":"README.md","resolved_path":"/tmp/README.md","size_bytes":29191},"path":"README.md"},{"exists":true,"fact":{"kind":"file","path":"AGENTS.md","resolved_path":"/tmp/AGENTS.md","size_bytes":20744},"path":"AGENTS.md"}],"include_missing":true}"#,
+    ));
+    loop_state
+        .delivery_messages
+        .push(r#"{"larger_file":"README.md","size_delta_bytes":8447}"#.to_string());
+
+    assert_eq!(
+        latest_delivery_preserves_observed_quantity_size_facts(&loop_state).as_deref(),
+        Some(r#"{"larger_file":"README.md","size_delta_bytes":8447}"#)
     );
 }
 
@@ -2523,6 +2788,53 @@ async fn observed_execution_without_delivery_reply_attaches_raw_summary() {
     assert!(!reply.text.contains("你最想看的是哪一项"));
 }
 
+#[tokio::test]
+async fn observed_execution_without_delivery_prefers_finalizer_clarify_question() {
+    let state = test_state();
+    let task = claimed_task("task-missing-delivery-clarify");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","path":"/tmp","entries":[]}"#,
+    ));
+    let mut route = free_route_result();
+    route.needs_clarify = true;
+    route.clarify_question = "请提供压缩包路径。".to_string();
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let summary = crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::AllowFallback),
+        needs_clarify: Some(true),
+        ..Default::default()
+    };
+
+    let reply = observed_execution_without_publishable_delivery_reply(
+        &state,
+        &task,
+        "把那个压缩包解压到 /tmp/unpack_case 然后告诉我结果",
+        &loop_state,
+        Some(&ctx),
+        Some(summary),
+        "stage=observed_generic, needs_clarify=true",
+    )
+    .await
+    .expect("observed execution clarify reply");
+
+    assert!(!reply.should_fail_task);
+    assert_eq!(reply.text, "请提供压缩包路径。");
+    assert_eq!(
+        reply
+            .task_journal
+            .as_ref()
+            .and_then(|journal| journal.final_status),
+        Some(crate::task_journal::TaskJournalFinalStatus::Clarify)
+    );
+}
+
 #[test]
 fn observed_synthesis_unavailable_fails_loud_and_keeps_execution_summary() {
     let state = test_state();
@@ -3964,6 +4276,109 @@ async fn content_evidence_recoverable_crypto_account_error_is_completion() {
 }
 
 #[tokio::test]
+async fn content_evidence_wrapped_crypto_account_error_is_completion() {
+    let state = test_state();
+    let task = claimed_task("task-wrapped-crypto-account-error");
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let marker = r#"__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:{"exchange":"binance","detail":"binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"}"#;
+    let err = format!(
+        "__RC_SKILL_ERROR__:{}",
+        serde_json::json!({
+            "skill": "crypto",
+            "error_kind": "unknown",
+            "error_text": marker,
+            "extra": null
+        })
+    );
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(err_step_result("step_1", "crypto", &err));
+
+    let (answer, summary) = content_evidence_step_failure_answer(
+        &state,
+        &task,
+        "查一下我现在的持仓。",
+        &loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("wrapped recoverable crypto account error should be publishable");
+
+    assert!(answer.contains("crypto account access failed on binance"));
+    assert!(!answer.contains("__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__"));
+    assert_eq!(summary.completion_ok, Some(true));
+    assert_eq!(
+        summary.disposition,
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_treats_wrapped_crypto_account_error_as_success() {
+    let state = test_state();
+    let task = claimed_task("task-finalize-wrapped-crypto-account-error");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::MarketQuote;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let marker = r#"__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__:{"exchange":"binance","detail":"binance error status=401: {\"code\":-2015,\"msg\":\"Invalid API-key, IP, or permissions for action.\"}"}"#;
+    let err = format!(
+        "__RC_SKILL_ERROR__:{}",
+        serde_json::json!({
+            "skill": "crypto",
+            "error_kind": "unknown",
+            "error_text": marker,
+            "extra": null
+        })
+    );
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.has_recoverable_failure_context = true;
+    loop_state
+        .executed_step_results
+        .push(err_step_result("step_1", "crypto", &err));
+    loop_state.executed_step_results.push(err_step_result(
+        "step_2",
+        "synthesize_answer",
+        "account access explanation was rejected by the content-evidence contract",
+    ));
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "查一下我现在的持仓。",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should publish recoverable account access result");
+
+    assert!(!reply.should_fail_task);
+    assert!(reply
+        .text
+        .contains("crypto account access failed on binance"));
+    assert!(!reply.text.contains("__RC_CRYPTO_ACCOUNT_ACCESS_ERROR__"));
+    assert_eq!(
+        reply
+            .task_journal
+            .as_ref()
+            .and_then(|journal| journal.final_status),
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+}
+
+#[tokio::test]
 async fn content_evidence_db_query_error_is_completion() {
     let state = test_state();
     let task = claimed_task("task-db-query-error");
@@ -5261,6 +5676,77 @@ fn deterministic_execution_failed_step_contract_replaces_verbose_status() {
 }
 
 #[test]
+fn deterministic_execution_failed_step_ignores_contract_gap_errors() {
+    let state = test_state();
+    let task = claimed_task("task-deterministic-failed-step-contract-gap");
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ExecutionFailedStep;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut loop_state = crate::agent_engine::LoopState::new(4);
+    loop_state
+        .delivery_messages
+        .push("Step 1 failed. Step 3 failed: `exit0=$?`.".to_string());
+    loop_state.executed_step_results.push(err_step_result(
+        "step_1",
+        "system_basic",
+        r#"__RC_SKILL_ERROR__:{"error_kind":"contract_action_rejected","error_text":"action `system_basic.read_range` is rejected by contract `execution_failed_step`","extra":{"failure_attribution":"contract_gap"},"skill":"system_basic"}"#,
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "run_cmd", "BEFORE_BREAK\n"));
+    loop_state.executed_step_results.push(err_step_result(
+        "step_3",
+        "run_cmd",
+        &crate::skills::structured_skill_error_from_parts(
+            "run_cmd",
+            "nonzero_exit",
+            "Command failed with exit code 127",
+            Some("linux"),
+            Some(serde_json::json!({
+                "command": "definitely_missing_command_rustclaw_67890",
+                "exit_code": 127,
+                "stderr": "bash: line 1: definitely_missing_command_rustclaw_67890: command not found\n",
+                "stdout": serde_json::Value::Null,
+            })),
+        ),
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_4",
+        "run_cmd",
+        "AFTER_BREAK_67890\n",
+    ));
+    let mut finalizer_summary = None;
+
+    assert!(
+        replace_delivery_with_deterministic_execution_failed_step_answer(
+            &state,
+            &task,
+            "Execute the command sequence and identify the failed command.",
+            &mut loop_state,
+            Some(&ctx),
+            &mut finalizer_summary,
+        )
+    );
+
+    assert_eq!(loop_state.delivery_messages.len(), 1);
+    let answer = &loop_state.delivery_messages[0];
+    assert!(answer.contains("Step 2 failed"), "answer: {answer}");
+    assert!(answer.contains("definitely_missing_command_rustclaw_67890"));
+    assert!(answer.contains("Remaining:"), "answer: {answer}");
+    assert!(!answer.contains("Step 1 failed"), "answer: {answer}");
+    assert!(!answer.contains("Step 3 failed"), "answer: {answer}");
+    assert_eq!(
+        finalizer_summary.and_then(|summary| summary.completion_ok),
+        Some(true)
+    );
+}
+
+#[test]
 fn deterministic_observed_execution_status_replaces_raw_success_output() {
     let state = test_state();
     let task = claimed_task("task-deterministic-observed-status-replace-raw");
@@ -5419,6 +5905,49 @@ fn raw_command_multiline_output_replaces_reordered_synthesis() {
     assert!(finalizer_summary.is_some());
 }
 
+#[tokio::test]
+async fn finalize_loop_reply_replaces_drifted_raw_command_short_list_synthesis() {
+    let state = test_state();
+    let task = claimed_task("task-raw-command-short-list-drift");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let observed =
+        "version_info.sh\nverify_task_termination.sh\ntest_qwen_api.sh\ntest_qwen_5_channels.py\ntest_minimax_curl.sh";
+    let drifted =
+        "version_info.sh\nversion_info.sh\nverify_task_termination.sh\nverify_task_termination.sh\ntest_qwen_api.sh";
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "run_cmd", observed));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "synthesize_answer", drifted));
+    loop_state.last_publishable_synthesis_output = Some(drifted.to_string());
+    loop_state.last_user_visible_respond = Some(drifted.to_string());
+    loop_state.delivery_messages.push(drifted.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "执行 ls scripts，把结果按字母倒序排，只输出前 5 个",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should return observed raw command output");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert_eq!(reply.text.trim(), observed);
+}
+
 #[test]
 fn raw_command_projection_plan_replaces_drifted_projected_answer() {
     let state = test_state();
@@ -5517,6 +6046,142 @@ fn raw_command_projection_plan_replaces_unprojected_listing_output() {
 }
 
 #[test]
+fn shell_stdout_redirect_target_path_parses_quoted_and_unquoted_targets() {
+    assert_eq!(
+        super::shell_stdout_redirect_target_path(
+            "printf '%s' 'note' > /tmp/rustclaw-workspace-note.txt"
+        ),
+        Some(PathBuf::from("/tmp/rustclaw-workspace-note.txt"))
+    );
+    assert_eq!(
+        super::shell_stdout_redirect_target_path(r#"printf note 1> "/tmp/rustclaw note.txt""#),
+        Some(PathBuf::from("/tmp/rustclaw note.txt"))
+    );
+    assert_eq!(
+        super::shell_stdout_redirect_target_path("printf note 2> /tmp/stderr.txt"),
+        None
+    );
+}
+
+#[test]
+fn raw_command_redirect_projection_returns_existing_workspace_file_path() {
+    let mut state = test_state();
+    let tmp = TempDirGuard::new("raw_command_redirect_projection");
+    state.skill_rt.workspace_root = tmp.path().to_path_buf();
+    let output_path = tmp.path().join("workspace_note.txt");
+    fs::write(&output_path, "workspace note").expect("write output file");
+    let mut route = scalar_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let raw_snapshot = format!(
+        "exit=0 command=printf '%s' 'RustClaw workspace note' > {}",
+        output_path.display()
+    );
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "/home/guagua/rustclaw\n",
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "run_cmd", &raw_snapshot));
+    let mut delivery_messages = vec![format!("/home/guagua/rustclaw\n{raw_snapshot}")];
+    let mut finalizer_summary = None;
+
+    prefer_observed_answer_for_exact_contract(
+        &state,
+        "task-raw-command-redirect-path",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut delivery_messages,
+        &mut finalizer_summary,
+    );
+
+    assert_eq!(
+        delivery_messages,
+        vec![output_path.canonicalize().unwrap().display().to_string()]
+    );
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(
+            output_path
+                .canonicalize()
+                .unwrap()
+                .display()
+                .to_string()
+                .as_str()
+        )
+    );
+    assert!(finalizer_summary.is_some());
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_returns_redirected_file_path_for_scalar_raw_command_contract() {
+    let mut state = test_state();
+    let tmp = TempDirGuard::new("finalize_raw_command_redirect_path");
+    state.skill_rt.workspace_root = tmp.path().to_path_buf();
+    let output_path = tmp.path().join("workspace_note.txt");
+    fs::write(&output_path, "RustClaw workspace note").expect("write output file");
+    let raw_snapshot = format!(
+        "exit=0 command=printf '%s' 'RustClaw workspace note' > {}",
+        output_path.display()
+    );
+    let task = claimed_task("task-finalize-raw-command-redirect-path");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "run_cmd",
+        "/home/guagua/rustclaw\n",
+    ));
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_2", "run_cmd", &raw_snapshot));
+    loop_state.last_user_visible_respond = Some(format!("/home/guagua/rustclaw\n{raw_snapshot}"));
+    loop_state
+        .delivery_messages
+        .push(format!("/home/guagua/rustclaw\n{raw_snapshot}"));
+    let mut route = scalar_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    route.output_contract.requires_content_evidence = true;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "write workspace note and return only its absolute path",
+        loop_state,
+        Some(&ctx),
+    )
+    .await
+    .expect("finalize should succeed");
+
+    let expected = output_path.canonicalize().unwrap().display().to_string();
+    assert_eq!(reply.text, expected);
+    assert!(!reply.should_fail_task);
+    assert_eq!(
+        reply.messages.last().map(String::as_str),
+        Some(expected.as_str())
+    );
+    assert!(!reply.text.contains("exit=0"));
+}
+
+#[test]
 fn backfill_suppresses_raw_run_cmd_when_plan_declares_projection() {
     let task = claimed_task("task-backfill-raw-projection");
     let mut route = free_route_result();
@@ -5603,6 +6268,98 @@ async fn finalize_loop_reply_returns_graceful_result_for_permission_denied_conte
     assert!(!reply.should_fail_task);
     assert_eq!(reply.messages.len(), 1);
     assert_eq!(reply.messages.last(), Some(&reply.text));
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_replaces_unclear_health_check_status_synthesis() {
+    let state = test_state();
+    let task = claimed_task("task-service-status-wrapped-health-check");
+    let mut route = free_route_result();
+    route.ask_mode = crate::AskMode::planner_execute_chat_wrapped();
+    route.resolved_intent = "Show system/service status".to_string();
+    route.output_contract.response_shape = OutputResponseShape::Free;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ServiceStatus;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        user_request: Some("show status".to_string()),
+        ..Default::default()
+    };
+    let health_output = serde_json::json!({
+        "extra": {
+            "clawd_health_port_open": true,
+            "clawd_log": {
+                "exists": true,
+                "keyword_error_count": 43
+            },
+            "clawd_process_count": 1,
+            "system_health": {
+                "os_family": "linux",
+                "warnings": ["disk_root_low"]
+            },
+            "telegramd_log": {
+                "exists": true,
+                "keyword_error_count": 1
+            },
+            "telegramd_process_count": 0
+        },
+        "text": "{\"clawd_health_port_open\":true,\"clawd_process_count\":1}"
+    })
+    .to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "health_check".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(health_output),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    let bad_synthesis = "clawd status is unclear: health_check did not provide complete clawd_process_count and clawd_health_port_open fields.";
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "synthesize_answer".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(bad_synthesis.to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.last_publishable_synthesis_output = Some(bad_synthesis.to_string());
+    loop_state.last_user_visible_respond = Some(bad_synthesis.to_string());
+    loop_state.delivery_messages.push(bad_synthesis.to_string());
+    push_raw_plan_text(
+        &mut loop_state,
+        r#"{"steps":[{"action":"synthesize_answer"},{"action":"respond"}]}"#,
+    );
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "show status",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should return a structured service status answer");
+
+    assert!(!reply.should_fail_task, "reply: {}", reply.text);
+    assert!(reply.text.contains("health_check"), "reply: {}", reply.text);
+    assert!(
+        reply.text.contains("clawd_process_count=1"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(
+        reply.text.contains("clawd_health_port_open=true"),
+        "reply: {}",
+        reply.text
+    );
+    assert!(!reply.text.contains("unclear"), "reply: {}", reply.text);
 }
 
 #[tokio::test]
@@ -5852,6 +6609,114 @@ async fn finalize_loop_reply_prefers_observed_raw_scalar_after_synthesis_error()
 }
 
 #[tokio::test]
+async fn finalize_loop_reply_replaces_wrapped_runtime_status_scalar_delivery() {
+    let state = test_state();
+    let task = claimed_task("task-wrapped-runtime-status-scalar");
+    let mut route = scalar_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let wrapped = r#"{"extra":{"action":"runtime_status","command_output":"guagua","field_value":"guagua","kind":"current_user","value":"guagua"},"text":"{\"action\":\"runtime_status\",\"command_output\":\"guagua\",\"field_value\":\"guagua\",\"kind\":\"current_user\",\"value\":\"guagua\"}"}"#;
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "system_basic", wrapped));
+    loop_state.delivery_messages.push(wrapped.to_string());
+    loop_state.last_user_visible_respond = Some(wrapped.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "只输出当前用户名，不要解释",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should unwrap runtime_status scalar");
+
+    assert_eq!(reply.text, "guagua");
+    assert_eq!(reply.messages, vec!["guagua".to_string()]);
+    assert!(!reply.text.contains(r#""action":"#));
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_replaces_wrapped_scalar_path_delivery() {
+    let state = test_state();
+    let task = claimed_task("task-wrapped-scalar-path");
+    let mut route = scalar_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    route.output_contract.locator_kind = OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.locator_hint.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let wrapped = r#"{"extra":{"action":"path_batch_facts","count":1,"facts":[{"exists":true,"fact":{"kind":"dir","path":"","resolved_path":"/home/guagua/rustclaw","size_bytes":4096},"path":"/home/guagua/rustclaw"}],"include_missing":true},"text":"{\"action\":\"path_batch_facts\",\"count\":1,\"facts\":[{\"exists\":true,\"fact\":{\"kind\":\"dir\",\"path\":\"\",\"resolved_path\":\"/home/guagua/rustclaw\",\"size_bytes\":4096},\"path\":\"/home/guagua/rustclaw\"}],\"include_missing\":true}"}"#;
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "system_basic", wrapped));
+    loop_state.delivery_messages.push(wrapped.to_string());
+    loop_state.last_user_visible_respond = Some(wrapped.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "只输出当前工作目录的绝对路径，不要解释",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should unwrap scalar path");
+
+    assert_eq!(reply.text, "/home/guagua/rustclaw");
+    assert_eq!(reply.messages, vec!["/home/guagua/rustclaw".to_string()]);
+    assert!(!reply.text.contains(r#""action":"#));
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_replaces_wrapped_market_quote_scalar_delivery() {
+    let state = test_state();
+    let task = claimed_task("task-wrapped-market-quote-scalar");
+    let mut route = scalar_route_result();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::MarketQuote;
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.locator_hint.clear();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let wrapped = r#"{"extra":{"action":"quote","content_excerpt":"BTCUSDT | Price sources:\n- BINANCE $67216.010000","quote":{"exchange":"binance","price_usd":67216.01,"source":"binance_api","symbol":"BTCUSDT"}},"text":"BTCUSDT | Price sources:\n- BINANCE $67216.010000"}"#;
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_1", "crypto", wrapped));
+    loop_state.delivery_messages.push(wrapped.to_string());
+    loop_state.last_user_visible_respond = Some(wrapped.to_string());
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "What is the current BTCUSDT price? Give me the key result only.",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should unwrap market quote scalar");
+
+    assert_eq!(reply.text, "BTCUSDT $67216.01");
+    assert_eq!(reply.messages, vec!["BTCUSDT $67216.01".to_string()]);
+    assert!(!reply.text.contains(r#""quote":"#));
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_treats_missing_read_target_as_user_result() {
     let state = test_state();
     let task = claimed_task("task-missing-read-target");
@@ -5899,13 +6764,8 @@ async fn finalize_loop_reply_treats_missing_read_target_as_user_result() {
     .expect("finalize should return a missing-target answer");
 
     assert!(!reply.should_fail_task);
-    assert!(
-        reply.text.contains("不存在")
-            || reply.text.contains("未找到")
-            || reply.text.to_ascii_lowercase().contains("not found")
-            || reply.text.to_ascii_lowercase().contains("does not exist")
-            || reply.text.to_ascii_lowercase().contains("no such file")
-    );
+    assert!(reply.text.contains("clawd.msg.content_missing_target"));
+    assert!(reply.text.contains("document/missing.txt"));
     assert_eq!(reply.messages.len(), 1);
     assert_eq!(reply.messages.last(), Some(&reply.text));
     assert_eq!(
@@ -5999,7 +6859,7 @@ async fn missing_read_target_reply_prefers_original_user_language() {
     .expect("finalize should return a missing-target answer");
 
     assert!(
-        reply.text.contains("I couldn't find"),
+        reply.text.contains("./NO_SUCH_RUSTCLAW_TEST_987654.txt"),
         "text: {}",
         reply.text
     );
@@ -6060,7 +6920,7 @@ async fn missing_read_target_scalar_contract_keeps_failure_answer_not_path_only(
     .expect("finalize should return a missing-target answer");
 
     assert!(
-        reply.text.contains("I couldn't find"),
+        reply.text.contains("./NO_SUCH_RUSTCLAW_TEST_987654.txt"),
         "text: {}",
         reply.text
     );
@@ -6113,6 +6973,7 @@ async fn finalize_loop_reply_treats_read_file_not_found_marker_as_user_result() 
             || reply.text.contains("未找到")
             || reply.text.to_ascii_lowercase().contains("not found")
             || reply.text.to_ascii_lowercase().contains("does not exist")
+            || reply.text.contains("clawd.msg.content_missing_target")
     );
     assert_eq!(reply.messages.len(), 1);
     assert_eq!(reply.messages.last(), Some(&reply.text));
@@ -6681,146 +7542,6 @@ fn direct_non_builtin_raw_answer_skips_synthesized_delivery_contract() {
         Some(&agent_run_context),
     )
     .is_none());
-}
-
-#[test]
-fn direct_log_tail_status_answer_uses_log_levels_and_related_names() {
-    let state = test_state();
-    let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs".to_string();
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "system_basic",
-        r#"{"action":"tree_summary","path":"logs","tree":{"children":[{"kind":"file","path":"logs/clawd.log"},{"kind":"file","path":"logs/clawd.run.log"},{"kind":"file","path":"logs/model_io.log"}]}}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_2",
-        "system_basic",
-        r#"{"action":"read_range","mode":"tail","requested_n":3,"path":"logs/clawd.run.log","excerpt":"101|2026-05-27T08:04:44Z INFO task_call started\n102|2026-05-27T08:04:45Z INFO task_call completed\n103|2026-05-27T08:04:46Z INFO finalize_ok"}"#,
-    ));
-
-    let (answer, summary) = direct_log_tail_status_answer(
-        &state,
-        "先列出 logs 目录里和 clawd 相关的文件名，再读 clawd.run.log 最后 20 行，最后只用一句中文说服务更像正常启动还是刚遇到报错",
-        &loop_state,
-        Some(&agent_run_context),
-    )
-    .expect("log tail status answer");
-
-    assert!(answer.contains("clawd.log"));
-    assert!(answer.contains("clawd.run.log"));
-    assert!(answer.contains("log.level.info=3"));
-    assert!(answer.contains("log.level.error=0"));
-    assert!(answer.contains("log.state=ok"));
-    assert_eq!(
-        summary.disposition,
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-    );
-}
-
-#[test]
-fn log_tail_status_replaces_unverified_synthesis() {
-    let state = test_state();
-    let task = claimed_task("task-log-tail-replace");
-    let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::None;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs".to_string();
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
-    loop_state
-        .delivery_messages
-        .push("无法验证日志内容是否支持结论。".to_string());
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "system_basic",
-        r#"{"action":"tree_summary","path":"logs","tree":{"children":[{"kind":"file","path":"logs/clawd.log"},{"kind":"file","path":"logs/clawd.run.log"}]}}"#,
-    ));
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_2",
-        "system_basic",
-        r#"{"action":"read_range","mode":"tail","requested_n":2,"path":"logs/clawd.run.log","excerpt":"1|2026-05-27T08:04:44Z INFO task_call started\n2|2026-05-27T08:04:45Z INFO finalize_ok"}"#,
-    ));
-    let mut finalizer_summary = None;
-
-    assert!(replace_delivery_with_direct_log_tail_status_answer(
-        &state,
-        &task,
-        "先列出 logs 目录里和 clawd 相关的文件名，再读 clawd.run.log 最后 20 行，最后只用一句中文说服务更像正常启动还是刚遇到报错",
-        &mut loop_state,
-        Some(&agent_run_context),
-        &mut finalizer_summary,
-    ));
-
-    let answer = loop_state
-        .delivery_messages
-        .last()
-        .expect("replacement answer");
-    assert!(answer.contains("clawd.log"));
-    assert!(answer.contains("clawd.run.log"));
-    assert!(answer.contains("log.state=ok"));
-    assert_eq!(
-        finalizer_summary.and_then(|summary| summary.disposition),
-        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-    );
-}
-
-#[test]
-fn log_tail_status_does_not_replace_content_excerpt_summary() {
-    let state = test_state();
-    let task = claimed_task("task-log-tail-summary-preserve");
-    let mut route = free_route_result();
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.response_shape = OutputResponseShape::OneSentence;
-    route.output_contract.semantic_kind = crate::OutputSemanticKind::ContentExcerptSummary;
-    route.output_contract.locator_kind = OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs/model_io.log".to_string();
-    let agent_run_context = crate::agent_engine::AgentRunContext {
-        route_result: Some(route),
-        ..Default::default()
-    };
-    let mut loop_state = crate::agent_engine::LoopState::new(3);
-    let summary = "日志最后四条均为 ok 状态，表明最近调用已恢复为连续成功。";
-    loop_state.delivery_messages.push(summary.to_string());
-    loop_state.last_user_visible_respond = Some(summary.to_string());
-    loop_state.executed_step_results.push(ok_step_result(
-        "step_1",
-        "system_basic",
-        r#"{"action":"read_range","mode":"tail","requested_n":4,"path":"logs/model_io.log","excerpt":"7|{\"status\":\"ok\",\"response\":\"path resolved\"}\n8|{\"status\":\"ok\",\"response\":\"db inspected\"}\n9|{\"status\":\"ok\",\"response\":\"log tailed\"}\n10|{\"status\":\"ok\",\"response\":\"binding remembered\"}"}"#,
-    ));
-    let mut finalizer_summary = None;
-
-    assert!(direct_log_tail_status_answer(
-        &state,
-        "read the last four log lines and summarize the phenomenon",
-        &loop_state,
-        Some(&agent_run_context),
-    )
-    .is_none());
-    assert!(!replace_delivery_with_direct_log_tail_status_answer(
-        &state,
-        &task,
-        "read the last four log lines and summarize the phenomenon",
-        &mut loop_state,
-        Some(&agent_run_context),
-        &mut finalizer_summary,
-    ));
-    assert_eq!(loop_state.delivery_messages, vec![summary.to_string()]);
-    assert!(finalizer_summary.is_none());
 }
 
 #[test]
@@ -7620,6 +8341,53 @@ fn file_delivery_fallback_uses_ranked_inventory_after_placeholder_plan() {
 }
 
 #[test]
+fn file_delivery_fallback_uses_single_find_entries_result() {
+    let dir = TempDirGuard::new("find_entries_file_delivery");
+    let file = dir.path().join("patches/open-lark/CHANGELOG.md");
+    fs::create_dir_all(file.parent().expect("parent")).expect("mkdir");
+    fs::write(&file, "release notes").expect("write changelog");
+    let mut state = test_state();
+    state.skill_rt.workspace_root = dir.path().to_path_buf();
+
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        &serde_json::json!({
+            "action": "find_name",
+            "count": 1,
+            "exact": false,
+            "patterns": ["changelog"],
+            "results": ["patches/open-lark/CHANGELOG.md"],
+            "root": ""
+        })
+        .to_string(),
+    ));
+    let mut route = scalar_route_result();
+    route.wants_file_delivery = true;
+    route.output_contract.delivery_required = true;
+    route.output_contract.response_shape = OutputResponseShape::FileToken;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
+    let ctx = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let (token, summary) =
+        direct_file_token_from_observed_find_entries(&state, &loop_state, Some(&ctx))
+            .expect("single find_entries result should recover file token");
+
+    assert_eq!(
+        token,
+        format!("FILE:{}", file.canonicalize().unwrap_or(file).display())
+    );
+    assert_eq!(
+        summary.disposition,
+        Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+    );
+}
+
+#[test]
 fn file_delivery_fallback_uses_last_inventory_selection_from_placeholder_plan() {
     let dir = TempDirGuard::new("last_inventory_file_delivery");
     let first = dir.path().join("alpha.txt");
@@ -8060,6 +8828,59 @@ async fn finalize_loop_reply_uses_publishable_synthesis_output() {
 }
 
 #[tokio::test]
+async fn finalize_loop_reply_prefers_synthesis_over_raw_delivery_listing() {
+    let state = test_state();
+    let task = claimed_task("task-synth-over-raw-listing");
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    let raw_listing = "Untitled\nauth-key.sh\ncheck_no_nl_hardmatch.py\nnl_tests\n";
+    let synthesis = "该 scripts 目录主要包含用于测试、回归、代码检查和运行时验证的脚本。";
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.delivery_messages.push(raw_listing.to_string());
+    loop_state.last_user_visible_respond = Some(raw_listing.to_string());
+    loop_state.last_publishable_synthesis_output = Some(synthesis.to_string());
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "run_cmd".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(raw_listing.to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "synthesize_answer".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(synthesis.to_string()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+    let mut route = free_route_result();
+    route.output_contract.response_shape = OutputResponseShape::OneSentence;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.semantic_kind = OutputSemanticKind::RawCommandOutput;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "执行 ls scripts，然后用一句话告诉我这个目录大概放的是什么",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should succeed");
+
+    assert_eq!(reply.text, synthesis);
+    assert_eq!(reply.messages, vec![synthesis.to_string()]);
+    assert!(!reply.should_fail_task);
+}
+
+#[tokio::test]
 async fn finalize_loop_reply_replaces_raw_read_delivery_with_latest_synthesis() {
     let state = test_state();
     let task = claimed_task("task-raw-read-delivery-synthesis");
@@ -8375,6 +9196,105 @@ fn strict_scalar_count_keeps_planned_explanatory_answer() {
         Some("55 个。当前范围内共有这么多普通文件。")
     );
     assert!(finalizer_summary.is_none());
+}
+
+#[test]
+fn exact_contract_replaces_incomplete_directory_groups_synthesis_with_observed_groups() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","counts":{"dirs":2,"files":3,"total":5},"names_by_kind":{"files":["README.md","LICENSE","RustClaw.png"],"dirs":["configs","docs"],"other":[]},"path":"workspace"}"#,
+    ));
+    let incomplete = "文件夹：configs、docs\n文件：README.md";
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "synthesize_answer",
+        incomplete,
+    ));
+    loop_state.last_user_visible_respond = Some(incomplete.to_string());
+    loop_state.last_publishable_synthesis_output = Some(incomplete.to_string());
+    let mut delivery_messages = vec![incomplete.to_string()];
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    prefer_observed_answer_for_exact_contract(
+        &state,
+        "task-directory-groups-incomplete-synthesis",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut delivery_messages,
+        &mut finalizer_summary,
+    );
+
+    assert_eq!(
+        delivery_messages,
+        vec!["dirs:\n- configs\n- docs\nfiles:\n- LICENSE\n- README.md\n- RustClaw.png"]
+    );
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some("dirs:\n- configs\n- docs\nfiles:\n- LICENSE\n- README.md\n- RustClaw.png")
+    );
+    assert!(finalizer_summary.is_some());
+}
+
+#[test]
+fn exact_contract_keeps_mixed_directory_content_synthesis_with_read_evidence() {
+    let state = test_state();
+    let mut loop_state = crate::agent_engine::LoopState::new(3);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"inventory_dir","counts":{"dirs":1,"files":1,"total":2},"names_by_kind":{"files":["package.json"],"dirs":["UI"],"other":[]},"path":"workspace"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step_result(
+        "step_2",
+        "fs_basic",
+        r#"{"action":"read_range","path":"UI/package.json","excerpt":"1|{\"name\":\"react-example\"}"}"#,
+    ));
+    let answer = "UI 目录像独立前端，因为它有 package.json 且 name 为 react-example。";
+    loop_state
+        .executed_step_results
+        .push(ok_step_result("step_3", "synthesize_answer", answer));
+    loop_state.last_user_visible_respond = Some(answer.to_string());
+    loop_state.last_publishable_synthesis_output = Some(answer.to_string());
+    let mut delivery_messages = vec![answer.to_string()];
+    let mut route = free_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryEntryGroups;
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+    let mut finalizer_summary = None;
+
+    prefer_observed_answer_for_exact_contract(
+        &state,
+        "task-directory-groups-mixed-synthesis",
+        &mut loop_state,
+        Some(&agent_run_context),
+        &mut delivery_messages,
+        &mut finalizer_summary,
+    );
+
+    assert_eq!(delivery_messages, vec![answer]);
+    assert_eq!(
+        loop_state.last_user_visible_respond.as_deref(),
+        Some(answer)
+    );
 }
 
 #[test]
@@ -9679,6 +10599,39 @@ fn missing_file_search_evidence_detects_system_basic_find_path_zero_matches() {
     assert!(has_missing_file_search_evidence(&loop_state));
 }
 
+#[test]
+fn missing_file_search_evidence_detects_wrapped_fs_basic_find_name_zero_matches() {
+    let output = serde_json::json!({
+        "extra": {
+            "action": "find_name",
+            "count": 0,
+            "exact": false,
+            "patterns": ["definitely_missing_text_match_case_001.txt"],
+            "results": [],
+            "root": "document"
+        },
+        "text": "{\"action\":\"find_name\",\"count\":0,\"exact\":false,\"patterns\":[\"definitely_missing_text_match_case_001.txt\"],\"results\":[],\"root\":\"document\"}"
+    })
+    .to_string();
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(output.clone()),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+
+    assert!(has_missing_file_search_evidence(&loop_state));
+    assert!(latest_file_delivery_observation_is_missing(&loop_state));
+    assert_eq!(
+        missing_file_path_from_output(&output).as_deref(),
+        Some("document/definitely_missing_text_match_case_001.txt")
+    );
+}
+
 #[tokio::test]
 async fn finalize_loop_reply_returns_not_found_for_missing_file_delivery() {
     let state = test_state();
@@ -9736,6 +10689,87 @@ async fn finalize_loop_reply_returns_not_found_for_missing_file_delivery() {
             || reply.text.contains("not found")
     );
     assert!(reply.text.contains("definitely_missing_named_file.txt"));
+    assert_eq!(
+        reply
+            .task_journal
+            .as_ref()
+            .and_then(|journal| journal.final_status),
+        Some(crate::task_journal::TaskJournalFinalStatus::Success)
+    );
+}
+
+#[tokio::test]
+async fn finalize_loop_reply_returns_not_found_for_wrapped_fs_basic_missing_file_delivery() {
+    let state = test_state();
+    let task = claimed_task("task-wrapped-missing-file-delivery");
+    let mut route = scalar_route_result();
+    route.wants_file_delivery = true;
+    route.output_contract.response_shape = OutputResponseShape::FileToken;
+    route.output_contract.delivery_required = true;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_hint =
+        "document/definitely_missing_text_match_case_001.txt".to_string();
+    let agent_run_context = crate::agent_engine::AgentRunContext {
+        route_result: Some(route),
+        ..Default::default()
+    };
+
+    let mut loop_state = crate::agent_engine::LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "system_basic".to_string(),
+        status: StepExecutionStatus::Error,
+        output: None,
+        error: Some(
+            "__RC_SKILL_ERROR__:{\"error_kind\":\"contract_action_rejected\",\"error_text\":\"action `system_basic.path_batch_facts` is rejected by contract `file_paths`\",\"skill\":\"system_basic\"}"
+                .to_string(),
+        ),
+        started_at: 0,
+        finished_at: 0,
+    });
+    loop_state.executed_step_results.push(StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "fs_basic".to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(
+            serde_json::json!({
+                "extra": {
+                    "action": "find_name",
+                    "count": 0,
+                    "exact": false,
+                    "patterns": ["definitely_missing_text_match_case_001.txt"],
+                    "results": [],
+                    "root": "document"
+                },
+                "text": "{\"action\":\"find_name\",\"count\":0,\"exact\":false,\"patterns\":[\"definitely_missing_text_match_case_001.txt\"],\"results\":[],\"root\":\"document\"}"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 0,
+        finished_at: 0,
+    });
+
+    let reply = finalize_loop_reply(
+        &state,
+        &task,
+        "把 document/definitely_missing_text_match_case_001.txt 发给我",
+        loop_state,
+        Some(&agent_run_context),
+    )
+    .await
+    .expect("finalize should return a missing-file answer");
+
+    assert!(!reply.should_fail_task);
+    assert!(reply
+        .text
+        .contains("document/definitely_missing_text_match_case_001.txt"));
+    assert!(
+        reply.text.contains("未找到")
+            || reply.text.contains("没有找到")
+            || reply.text.contains("not found")
+    );
     assert_eq!(
         reply
             .task_journal

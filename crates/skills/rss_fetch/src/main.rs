@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// 单个 active source 的失败状态（持久化在 config 的 source_entries 中）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -48,6 +48,8 @@ struct Resp {
     request_id: String,
     status: String,
     text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra: Option<Value>,
     error_text: Option<String>,
 }
 
@@ -58,6 +60,12 @@ struct FeedItem {
     date: String,
     source: String,
     layer: String,
+}
+
+#[derive(Debug, Clone)]
+struct SkillOutput {
+    text: String,
+    extra: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -222,16 +230,18 @@ fn main() -> anyhow::Result<()> {
                         .write_fmt(format_args!("rss_fetch save_config failed: {}\n", e));
                 }
                 match result {
-                    Ok(text) => Resp {
+                    Ok(output) => Resp {
                         request_id: req.request_id,
                         status: "ok".to_string(),
-                        text,
+                        text: output.text,
+                        extra: output.extra,
                         error_text: None,
                     },
                     Err(err) => Resp {
                         request_id: req.request_id,
                         status: "error".to_string(),
                         text: String::new(),
+                        extra: None,
                         error_text: Some(err),
                     },
                 }
@@ -240,6 +250,7 @@ fn main() -> anyhow::Result<()> {
                 request_id: "unknown".to_string(),
                 status: "error".to_string(),
                 text: String::new(),
+                extra: None,
                 error_text: Some(format!("invalid input: {err}")),
             },
         };
@@ -310,7 +321,7 @@ fn direct_feed_selector_present(obj: &serde_json::Map<String, Value>) -> bool {
     false
 }
 
-fn execute(cfg: &mut RootConfig, args: Value) -> Result<String, String> {
+fn execute(cfg: &mut RootConfig, args: Value) -> Result<SkillOutput, String> {
     let mut obj = args
         .as_object()
         .cloned()
@@ -375,19 +386,51 @@ fn resolve_direct_feed_urls(obj: &serde_json::Map<String, Value>) -> Result<Vec<
     Err("fetch requires url, feed_url, or feed_urls".to_string())
 }
 
-fn fetch_direct_feeds(obj: &serde_json::Map<String, Value>) -> Result<String, String> {
+fn fetch_direct_feeds(obj: &serde_json::Map<String, Value>) -> Result<SkillOutput, String> {
     let urls = resolve_direct_feed_urls(obj)?;
     if urls.len() == 1 {
         return fetch_single_feed(obj, &urls[0]);
     }
-    let mut parts = Vec::new();
+    let mut text_parts = Vec::new();
+    let mut item_parts = Vec::new();
     for url in &urls {
-        parts.push(fetch_single_feed(obj, url)?);
+        let output = fetch_single_feed(obj, url)?;
+        text_parts.push(output.text);
+        if let Some(items) = output
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("items"))
+            .and_then(Value::as_array)
+        {
+            item_parts.extend(items.iter().cloned());
+        }
     }
-    Ok(parts.join("\n\n"))
+    let text = text_parts.join("\n\n");
+    let titles = feed_item_titles(&item_parts);
+    let extra = json!({
+        "schema_version": 1,
+        "action": "fetch",
+        "mode": "direct",
+        "source_urls": urls,
+        "source_count": text_parts.len(),
+        "item_count": item_parts.len(),
+        "field_value": {
+            "source_count": text_parts.len(),
+            "item_count": item_parts.len(),
+            "titles": titles
+        },
+        "items": item_parts.clone(),
+    });
+    Ok(SkillOutput {
+        text,
+        extra: Some(extra),
+    })
 }
 
-fn fetch_single_feed(obj: &serde_json::Map<String, Value>, url: &str) -> Result<String, String> {
+fn fetch_single_feed(
+    obj: &serde_json::Map<String, Value>,
+    url: &str,
+) -> Result<SkillOutput, String> {
     if !is_safe_feed_url(url) {
         return Err("url must start with http:// or https://".to_string());
     }
@@ -402,7 +445,34 @@ fn fetch_single_feed(obj: &serde_json::Map<String, Value>, url: &str) -> Result<
         .unwrap_or(15)
         .clamp(3, 60);
     let xml = fetch_feed_xml(url, timeout_seconds)?;
-    Ok(render_feed(&xml, limit))
+    let text = render_feed(&xml, limit);
+    let items = parse_feed_items(&xml, limit)
+        .into_iter()
+        .map(|mut item| {
+            item.source = url.to_string();
+            item.layer = "feed".to_string();
+            feed_item_extra(&item)
+        })
+        .collect::<Vec<_>>();
+    let titles = feed_item_titles(&items);
+    let extra = json!({
+        "schema_version": 1,
+        "action": "fetch",
+        "mode": "direct",
+        "source_url": url,
+        "source_count": 1,
+        "item_count": items.len(),
+        "field_value": {
+            "source_count": 1,
+            "item_count": items.len(),
+            "titles": titles
+        },
+        "items": items.clone(),
+    });
+    Ok(SkillOutput {
+        text,
+        extra: Some(extra),
+    })
 }
 
 fn now_iso_secs() -> String {
@@ -415,7 +485,7 @@ fn now_iso_secs() -> String {
 fn fetch_layered_news(
     cfg: &mut RootConfig,
     obj: &serde_json::Map<String, Value>,
-) -> Result<String, String> {
+) -> Result<SkillOutput, String> {
     let default_category = cfg
         .rss
         .default_category
@@ -581,14 +651,37 @@ fn fetch_layered_news(
         failed_count,
         items.len()
     );
+    let extra_items = items.iter().map(feed_item_extra).collect::<Vec<_>>();
+    let titles = feed_item_titles(&extra_items);
     let body = format_layered_news_output(
-        items,
+        items.clone(),
         classify,
         bilingual_summary,
         &output_i18n,
         &summary_i18n,
     );
-    Ok(header + &body)
+    let text = header + &body;
+    let extra = json!({
+        "schema_version": 1,
+        "action": "latest",
+        "category": category,
+        "mode": if is_explicit { "explicit_urls" } else { "category" },
+        "source_count": urls_with_state.len(),
+        "sources_ok": success_count,
+        "sources_failed": failed_count,
+        "item_count": extra_items.len(),
+        "field_value": {
+            "sources_ok": success_count,
+            "sources_failed": failed_count,
+            "items": extra_items.len(),
+            "titles": titles
+        },
+        "items": extra_items.clone(),
+    });
+    Ok(SkillOutput {
+        text,
+        extra: Some(extra),
+    })
 }
 
 /// 将本次运行产生的废弃项与状态更新写回 config（仅修改内存；调用方负责 save_config）。
@@ -809,6 +902,27 @@ fn format_layered_news_output(
         }
     }
     out.join("\n")
+}
+
+fn feed_item_extra(item: &FeedItem) -> Value {
+    let topic = classify_news_topic(&item.title);
+    json!({
+        "title": compact_text(&item.title),
+        "link": compact_text(&item.link),
+        "date": compact_text(&item.date),
+        "source": compact_text(&item.source),
+        "source_host": source_host(&item.source),
+        "layer": compact_text(&item.layer),
+        "topic": topic,
+    })
+}
+
+fn feed_item_titles(items: &[Value]) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(|item| item.get("title").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
 }
 
 fn format_classified_news_output(

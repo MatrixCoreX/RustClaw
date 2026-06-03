@@ -1779,6 +1779,21 @@ pub(crate) fn preferred_action_refs_for_output_contract(
         .unwrap_or_default()
 }
 
+pub(crate) fn allowed_action_refs_for_output_contract(
+    output_contract: &IntentOutputContract,
+) -> Vec<ActionRef> {
+    bundled_contract_matrix()
+        .and_then(|matrix| matrix.match_output_contract(output_contract))
+        .map(|matched| {
+            matched
+                .allowed_actions()
+                .iter()
+                .filter_map(|action| ActionRef::parse(action))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn contract_policy_action_ref(normalized_skill: &str, args: &Value) -> Option<ActionRef> {
     runtime_equivalent_virtual_action_ref(normalized_skill, args).or_else(|| {
         let canonical =

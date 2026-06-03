@@ -384,6 +384,8 @@ fn do_ingest(runtime: &KbRuntime, args: &Value) -> Result<Value> {
     Ok(json!({
         "status":"ok",
         "namespace": ingest.namespace,
+        "path": ingest.paths.first().cloned().unwrap_or_default(),
+        "paths": ingest.paths,
         "summary": format!("ingest completed: {} docs updated", ingested_docs),
         "stats": {
             "ingested_docs": ingested_docs,

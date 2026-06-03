@@ -622,6 +622,11 @@ fn route_needs_recent_execution_history(route_result: &RouteResult) -> bool {
     matches!(
         route_result.output_contract.semantic_kind,
         crate::OutputSemanticKind::QuantityComparison
+            | crate::OutputSemanticKind::ContentExcerptSummary
+            | crate::OutputSemanticKind::ContentExcerptWithSummary
+            | crate::OutputSemanticKind::ContentPresenceCheck
+            | crate::OutputSemanticKind::ExcerptKindJudgment
+            | crate::OutputSemanticKind::RecentArtifactsJudgment
     )
 }
 

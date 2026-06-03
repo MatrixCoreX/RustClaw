@@ -204,6 +204,7 @@ fn context_allows_path_outside_workspace(context: Option<&Value>) -> bool {
 fn system_info(workspace_root: &Path) -> SkillResult<String> {
     let hostname = detect_hostname();
     let current_user = detect_current_user();
+    let kernel_release = detect_kernel_release();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -221,6 +222,7 @@ fn system_info(workspace_root: &Path) -> SkillResult<String> {
     Ok(json!({
         "hostname": hostname,
         "current_user": current_user,
+        "kernel_release": kernel_release,
         "now_ts": now,
         "uptime_seconds": uptime,
         "process_rss_bytes": mem,
@@ -245,12 +247,13 @@ fn runtime_status(obj: &Map<String, Value>) -> SkillResult<String> {
     let value = match kind.as_str() {
         "current_user" => detect_current_user().unwrap_or_else(|| "-".to_string()),
         "host_name" => detect_hostname(),
+        "kernel_release" => detect_kernel_release().unwrap_or_else(|| "-".to_string()),
         "current_working_directory" => std::env::current_dir()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|_| "-".to_string()),
         _ => {
             return Err(SkillError::invalid_input(
-                "unsupported runtime_status kind; use current_user|host_name|current_working_directory",
+                "unsupported runtime_status kind; use current_user|host_name|kernel_release|current_working_directory",
             ));
         }
     };
@@ -276,6 +279,8 @@ fn normalize_runtime_status_kind(raw: &str) -> String {
         "hostname" | "host_name" | "current_hostname" | "current_host" | "machine_name" => {
             "host_name".to_string()
         }
+        "kernel" | "kernel_name" | "kernel_release" | "os_kernel" | "system_kernel" | "uname"
+        | "uname_r" => "kernel_release".to_string(),
         "pwd"
         | "cwd"
         | "current_working_directory"
@@ -303,6 +308,27 @@ fn detect_current_user() -> Option<String> {
             .filter(|name| !name.is_empty())
             .map(str::to_string)
     })
+}
+
+fn detect_kernel_release() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(value) = std::fs::read_to_string("/proc/sys/kernel/osrelease")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        {
+            return Some(value);
+        }
+    }
+    Command::new("uname")
+        .arg("-r")
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn memory_rss_bytes() -> Option<u64> {

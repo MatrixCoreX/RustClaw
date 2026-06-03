@@ -132,6 +132,9 @@ max_concurrency = 1
 max_images = 4
 max_input_bytes = 10485760
 timeout_seconds = 120
+# Explicit smoke/NL-test continuity fallback. Keep disabled in normal runtime so
+# provider failures remain visible unless an operator enables it deliberately.
+local_fallback_enabled = false
 
 # Optional dedicated provider override / 可选独立 provider 覆盖
 # Recommended / 推荐：

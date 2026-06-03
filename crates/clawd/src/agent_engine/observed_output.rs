@@ -184,7 +184,9 @@ pub(crate) fn extract_latest_generic_successful_output(
         ) {
             return false;
         }
-        let body = step.output.as_deref().map(str::trim).unwrap_or_default();
+        let raw_body = step.output.as_deref().map(str::trim).unwrap_or_default();
+        let body = normalized_success_body_for_direct_answer(raw_body);
+        let body = body.trim();
         !body.is_empty()
             && (crate::finalize::classify_observed_content_status(body)
                 == crate::finalize::ObservedContentStatus::ContentAvailable
@@ -201,6 +203,7 @@ pub(crate) fn extract_latest_generic_successful_output(
                 )
                 .is_some()
                 || structured_observed_body(&step.skill, body).is_some())
+            || market_quote_output_has_scalar_price(&step.skill, body)
             || system_basic_info_value(&step.skill, body).is_some()
             || system_basic_structured_doc_value(&step.skill, body).is_some()
             || system_basic_existence_with_path_value(&step.skill, body).is_some()
@@ -211,12 +214,58 @@ pub(crate) fn extract_latest_generic_successful_output(
         .as_deref()
         .map(str::trim)
         .filter(|text| !text.is_empty())?;
+    let body = normalized_success_body_for_direct_answer(body);
     Some(GenericObservedOutput {
         skill: step.skill.clone(),
         #[cfg(test)]
         action_label: format!("{} skill({}): success", step.step_id, step.skill),
-        body: body.to_string(),
+        body,
     })
+}
+
+pub(crate) fn normalized_success_body_for_direct_answer(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        return trimmed.to_string();
+    };
+    let Some(obj) = value.as_object() else {
+        return trimmed.to_string();
+    };
+    if let Some(extra) = obj
+        .get("extra")
+        .filter(|extra| json_object_is_direct_observation_body(extra))
+    {
+        return extra.to_string();
+    }
+    if let Some(text) = obj
+        .get("text")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        if let Ok(text_value) = serde_json::from_str::<serde_json::Value>(text) {
+            if json_object_is_direct_observation_body(&text_value) {
+                return text_value.to_string();
+            }
+        }
+    }
+    trimmed.to_string()
+}
+
+fn json_object_is_direct_observation_body(value: &serde_json::Value) -> bool {
+    let Some(obj) = value.as_object() else {
+        return false;
+    };
+    [
+        "action",
+        "field_value",
+        "command_output",
+        "clawd_process_count",
+        "clawd_health_port_open",
+        "system_health",
+    ]
+    .iter()
+    .any(|field| obj.contains_key(*field))
 }
 
 fn latest_successful_list_dir_answer_candidate(
@@ -797,6 +846,285 @@ fn count_answer_from_latest_fs_search(
     }
 }
 
+fn directory_purpose_summary_find_ext_answer_candidate(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> Option<String> {
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::DirectoryPurposeSummary
+        || route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::Strict
+        )
+    {
+        return None;
+    }
+    let (results, count, ext) = latest_find_ext_results(loop_state)?;
+    if count == 0 || results.is_empty() {
+        return None;
+    }
+
+    let mut lines = vec![
+        format!("find_ext.ext={ext}"),
+        format!("find_ext.count={count}"),
+    ];
+    lines.extend(results.iter().map(|path| format!("find_ext.result={path}")));
+    lines.extend(find_ext_representative_lines(&results));
+    Some(lines.join("\n"))
+}
+
+#[derive(Clone)]
+struct StatusJsonObservation {
+    label: String,
+    path: String,
+    status: String,
+    healthy: Option<bool>,
+    last_error: Option<String>,
+}
+
+fn multi_status_json_summary_candidate(
+    route: &crate::RouteResult,
+    loop_state: &LoopState,
+) -> Option<String> {
+    if route.output_contract.delivery_required
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar
+                | crate::OutputResponseShape::Strict
+                | crate::OutputResponseShape::FileToken
+        )
+        || route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+    {
+        return None;
+    }
+    let observations = status_json_observations(loop_state);
+    if observations.len() < 2 {
+        return None;
+    }
+    let mut lines = vec![format!("status_files.count={}", observations.len())];
+    lines.extend(
+        observations
+            .iter()
+            .enumerate()
+            .map(|(index, item)| status_json_observation_line(index, item)),
+    );
+    let notable = observations
+        .iter()
+        .find(|item| status_json_observation_is_notable(item))
+        .or_else(|| observations.first())?;
+    lines.push(format!("status_files.notable.label={}", notable.label));
+    lines.push(format!("status_files.notable.status={}", notable.status));
+    Some(lines.join("\n"))
+}
+
+fn status_json_observations(loop_state: &LoopState) -> Vec<StatusJsonObservation> {
+    let mut observations = Vec::new();
+    let mut seen_paths = std::collections::BTreeSet::new();
+    for step in &loop_state.executed_step_results {
+        if !step.is_ok() || !matches!(step.skill.as_str(), "fs_basic" | "system_basic") {
+            continue;
+        }
+        let Some(output) = step.output.as_deref() else {
+            continue;
+        };
+        let body = normalized_success_body_for_direct_answer(output);
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) else {
+            continue;
+        };
+        let Some(observation) = status_json_observation_from_read_range(&value) else {
+            continue;
+        };
+        if seen_paths.insert(observation.path.clone()) {
+            observations.push(observation);
+        }
+    }
+    observations
+}
+
+fn status_json_observation_from_read_range(
+    value: &serde_json::Value,
+) -> Option<StatusJsonObservation> {
+    if value.get("action").and_then(|value| value.as_str()) != Some("read_range") {
+        return None;
+    }
+    let path = value
+        .get("resolved_path")
+        .or_else(|| value.get("path"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_string();
+    let excerpt = value
+        .get("excerpt")
+        .or_else(|| value.get("content"))
+        .and_then(|value| value.as_str())?;
+    let normalized = normalize_read_range_excerpt(excerpt)?;
+    let status = serde_json::from_str::<serde_json::Value>(normalized.trim()).ok()?;
+    let status_text = status
+        .get("status")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .to_string();
+    Some(StatusJsonObservation {
+        label: status_json_label(&path, &status),
+        path,
+        status: status_text,
+        healthy: status.get("healthy").and_then(|value| value.as_bool()),
+        last_error: status
+            .get("last_error")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string),
+    })
+}
+
+fn status_json_label(path: &str, status: &serde_json::Value) -> String {
+    let relative_path = status_relative_path_label(path);
+    let identity = status
+        .get("scope")
+        .or_else(|| status.get("kind"))
+        .or_else(|| status.get("name"))
+        .or_else(|| status.get("account_label"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match identity {
+        Some(identity) => format!("{relative_path} ({identity})"),
+        None => relative_path,
+    }
+}
+
+fn status_relative_path_label(path: &str) -> String {
+    let normalized = path.trim().replace('\\', "/");
+    let parts = normalized
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() >= 2 {
+        return format!("{}/{}", parts[parts.len() - 2], parts[parts.len() - 1]);
+    }
+    normalized
+}
+
+fn status_json_observation_line(index: usize, item: &StatusJsonObservation) -> String {
+    let healthy = item
+        .healthy
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let mut line = format!(
+        "status_files.item.{index}=label={}; healthy={healthy}; status={}; path={}",
+        item.label, item.status, item.path
+    );
+    if let Some(last_error) = item.last_error.as_deref() {
+        line.push_str(&format!(", last_error={last_error}"));
+    }
+    line
+}
+
+fn status_json_observation_is_notable(item: &StatusJsonObservation) -> bool {
+    if item.healthy == Some(false) || item.last_error.is_some() {
+        return true;
+    }
+    let status = item.status.trim().to_ascii_lowercase();
+    !matches!(
+        status.as_str(),
+        "ok" | "running" | "active" | "healthy" | "ready" | "connected"
+    )
+}
+
+fn latest_find_ext_results(loop_state: &LoopState) -> Option<(Vec<String>, usize, String)> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.is_ok() && matches!(step.skill.as_str(), "fs_basic" | "fs_search"))
+        .filter_map(|step| step.output.as_deref())
+        .filter_map(|output| {
+            let body = normalized_success_body_for_direct_answer(output);
+            serde_json::from_str::<serde_json::Value>(&body).ok()
+        })
+        .find_map(|value| fs_search_find_ext_results(&value))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum FindExtRepresentativeKind {
+    Root,
+    Config,
+    Channel,
+    Locale,
+    Other,
+}
+
+fn find_ext_representative_kind(path: &str) -> FindExtRepresentativeKind {
+    let normalized = path.trim().replace('\\', "/");
+    if !normalized.contains('/') {
+        return FindExtRepresentativeKind::Root;
+    }
+    if normalized.starts_with("configs/channels/") {
+        return FindExtRepresentativeKind::Channel;
+    }
+    if normalized.starts_with("configs/i18n/") {
+        return FindExtRepresentativeKind::Locale;
+    }
+    if normalized.starts_with("configs/") {
+        return FindExtRepresentativeKind::Config;
+    }
+    FindExtRepresentativeKind::Other
+}
+
+fn find_ext_representative_lines(results: &[String]) -> Vec<String> {
+    let mut selected = Vec::<(String, FindExtRepresentativeKind)>::new();
+    let mut seen_kinds = std::collections::BTreeSet::new();
+    for path in results {
+        let path = path.trim();
+        if path.is_empty() {
+            continue;
+        }
+        let kind = find_ext_representative_kind(path);
+        if seen_kinds.insert(kind) {
+            selected.push((path.to_string(), kind));
+        }
+        if selected.len() >= 5 {
+            break;
+        }
+    }
+    for path in results {
+        if selected.len() >= 5 {
+            break;
+        }
+        let path = path.trim();
+        if path.is_empty()
+            || selected
+                .iter()
+                .any(|(selected_path, _)| selected_path == path)
+        {
+            continue;
+        }
+        selected.push((path.to_string(), find_ext_representative_kind(path)));
+    }
+    selected
+        .into_iter()
+        .map(|(path, kind)| {
+            format!(
+                "find_ext.representative.path={path}; kind={}",
+                find_ext_representative_kind_label(kind)
+            )
+        })
+        .collect()
+}
+
+fn find_ext_representative_kind_label(kind: FindExtRepresentativeKind) -> &'static str {
+    match kind {
+        FindExtRepresentativeKind::Root => "root",
+        FindExtRepresentativeKind::Config => "config",
+        FindExtRepresentativeKind::Channel => "channel",
+        FindExtRepresentativeKind::Locale => "locale",
+        FindExtRepresentativeKind::Other => "other",
+    }
+}
+
 fn trim_for_observed_prompt(text: &str, max_chars: usize) -> String {
     let trimmed = text.trim();
     if trimmed.chars().count() <= max_chars {
@@ -1124,7 +1452,7 @@ fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> 
                 );
             }
             if route.output_contract.response_shape == crate::OutputResponseShape::OneSentence {
-                return "Use the observed output as evidence to produce exactly one sentence. Do not answer by copying only the raw observed output; that would be an incomplete passthrough for this contract.".to_string();
+                return "Use the observed output as evidence to produce exactly one sentence. If the request has multiple deliverables, include all of them in that one sentence. Do not answer by copying only the raw observed output; that would be an incomplete passthrough for this contract.".to_string();
             }
             return "Use the observed output as evidence to produce the requested final wording. Do not answer by copying only the raw observed output; that would be an incomplete passthrough for this contract.".to_string();
         }
@@ -1168,7 +1496,7 @@ fn observed_response_style_hint(agent_run_context: Option<&AgentRunContext>) -> 
             "Return only the delivery token or delivery-marker output itself. Do not add explanation."
         }
         Some(crate::OutputResponseShape::OneSentence) => {
-            "Return exactly one sentence unless the current user request explicitly asks for another exact sentence count."
+            "Return exactly one sentence unless the current user request explicitly asks for another exact sentence count. If the request has multiple deliverables, include all of them in that one sentence."
         }
         Some(crate::OutputResponseShape::Strict) => {
             "Return exactly the format requested by the user. Do not add execution traces, headings, prefixes, suffixes, or extra explanation."
@@ -1204,6 +1532,9 @@ pub(crate) fn route_disallows_direct_observation_passthrough(route: &crate::Rout
         || route.output_contract.delivery_required
     {
         return false;
+    }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::CommandOutputSummary {
+        return true;
     }
     if !matches!(
         route.output_contract.semantic_kind,
@@ -1678,7 +2009,11 @@ fn health_check_service_status_direct_answer_candidate(
     if matches!(response_shape, Some(crate::OutputResponseShape::Scalar)) {
         return Some(status.to_string());
     }
-    if health_check_output_needs_diagnostic_synthesis(value) {
+    if matches!(
+        response_shape,
+        Some(crate::OutputResponseShape::OneSentence)
+    ) && health_check_output_needs_diagnostic_synthesis(value)
+    {
         return None;
     }
     let process_count_text = process_count
@@ -1727,6 +2062,121 @@ fn health_check_service_status_direct_answer_candidate(
             ("port_open", port_text.as_str()),
         ],
     ))
+}
+
+fn health_check_diagnostic_summary_direct_answer_candidate(
+    value: &serde_json::Value,
+    response_shape: Option<crate::OutputResponseShape>,
+) -> Option<String> {
+    if matches!(response_shape, Some(crate::OutputResponseShape::Scalar))
+        || !health_check_output_needs_diagnostic_synthesis(value)
+    {
+        return None;
+    }
+    let mut fields = Vec::new();
+    let process_count = value
+        .get("clawd_process_count")
+        .and_then(|field| field.as_i64());
+    let port_open = value
+        .get("clawd_health_port_open")
+        .and_then(|field| field.as_bool());
+    let status = match (process_count, port_open) {
+        (Some(count), Some(true)) if count > 0 => "running",
+        (Some(count), _) if count <= 0 => "not_running",
+        (Some(_), Some(false)) => "degraded",
+        (None, Some(true)) => "reachable",
+        _ => "unknown",
+    };
+    fields.push(format!("clawd.status={status}"));
+    if let Some(count) = process_count {
+        fields.push(format!("clawd_process_count={count}"));
+    }
+    if let Some(open) = port_open {
+        fields.push(format!("clawd_health_port_open={open}"));
+    }
+    if let Some(count) = value
+        .get("telegramd_process_count")
+        .and_then(|field| field.as_i64())
+    {
+        fields.push(format!("telegramd_process_count={count}"));
+    }
+    collect_health_check_log_fields(value, "clawd_log", &mut fields);
+    collect_health_check_log_fields(value, "telegramd_log", &mut fields);
+    collect_health_check_system_fields(value, &mut fields);
+    (fields.len() > 1).then(|| format!("health_check.summary: {}.", fields.join("; ")))
+}
+
+fn collect_health_check_log_fields(
+    value: &serde_json::Value,
+    field_name: &str,
+    fields: &mut Vec<String>,
+) {
+    let Some(log) = value.get(field_name).and_then(|field| field.as_object()) else {
+        return;
+    };
+    if let Some(exists) = log.get("exists").and_then(|field| field.as_bool()) {
+        fields.push(format!("{field_name}.exists={exists}"));
+    }
+    if let Some(count) = log
+        .get("keyword_error_count")
+        .and_then(|field| field.as_i64())
+    {
+        fields.push(format!("{field_name}.keyword_error_count={count}"));
+    }
+}
+
+fn collect_health_check_system_fields(value: &serde_json::Value, fields: &mut Vec<String>) {
+    let Some(system) = value
+        .get("system_health")
+        .and_then(|field| field.as_object())
+    else {
+        return;
+    };
+    for key in [
+        "os_family",
+        "service_manager",
+        "cpu_count",
+        "load_avg_1m",
+        "load_avg_5m",
+        "load_avg_15m",
+        "memory_available_bytes",
+        "memory_total_bytes",
+        "disk_root_available_bytes",
+        "disk_root_total_bytes",
+        "uptime_seconds",
+    ] {
+        let Some(field) = system.get(key) else {
+            continue;
+        };
+        if let Some(text) = health_check_scalar_field_text(field) {
+            fields.push(format!("system_health.{key}={text}"));
+        }
+    }
+    if let Some(warnings) = system
+        .get("warnings")
+        .and_then(|field| field.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::trim))
+                .filter(|item| !item.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|items| !items.is_empty())
+    {
+        fields.push(format!("system_health.warnings={}", warnings.join(",")));
+    }
+}
+
+fn health_check_scalar_field_text(value: &serde_json::Value) -> Option<String> {
+    value
+        .as_str()
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .or_else(|| value.as_i64().map(|number| number.to_string()))
+        .or_else(|| value.as_u64().map(|number| number.to_string()))
+        .or_else(|| value.as_f64().map(|number| number.to_string()))
+        .or_else(|| value.as_bool().map(|flag| flag.to_string()))
 }
 
 fn health_check_output_needs_diagnostic_synthesis(value: &serde_json::Value) -> bool {
@@ -4599,6 +5049,11 @@ fn structured_scalar_candidate(
             });
     }
     let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    if matches!(skill, "crypto" | "stock") {
+        if let Some(answer) = market_quote_scalar_candidate(route, &value) {
+            return Some(answer);
+        }
+    }
     if skill == "db_basic" {
         if let Some(route) = route {
             return match route.output_contract.semantic_kind {
@@ -4897,6 +5352,69 @@ fn structured_scalar_candidate(
         ),
         _ => None,
     }
+}
+
+fn market_quote_scalar_candidate(
+    route: Option<&crate::RouteResult>,
+    value: &serde_json::Value,
+) -> Option<String> {
+    let route = route?;
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::MarketQuote
+        || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+    {
+        return None;
+    }
+    let quote = value
+        .get("quote")
+        .or_else(|| value.pointer("/extra/quote"))
+        .filter(|quote| quote.is_object())?;
+    let price = quote
+        .get("price_usd")
+        .or_else(|| quote.get("price"))
+        .or_else(|| quote.get("last"))
+        .and_then(|value| value.as_f64())?;
+    let symbol = quote
+        .get("symbol")
+        .or_else(|| value.get("symbol"))
+        .or_else(|| value.pointer("/extra/symbol"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    Some(match symbol {
+        Some(symbol) => format!("{symbol} ${}", format_market_price(price)),
+        None => format!("${}", format_market_price(price)),
+    })
+}
+
+fn market_quote_output_has_scalar_price(skill: &str, body: &str) -> bool {
+    if !matches!(skill, "crypto" | "stock") {
+        return false;
+    }
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("quote")
+                .or_else(|| value.pointer("/extra/quote"))
+                .cloned()
+        })
+        .and_then(|quote| {
+            quote
+                .get("price_usd")
+                .or_else(|| quote.get("price"))
+                .or_else(|| quote.get("last"))
+                .and_then(|value| value.as_f64())
+        })
+        .is_some()
+}
+
+fn format_market_price(price: f64) -> String {
+    let raw = if price.abs() >= 1.0 {
+        format!("{price:.2}")
+    } else {
+        format!("{price:.8}")
+    };
+    raw.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 fn archive_basic_path_value_from_body(body: &str, labels: &[&str]) -> Option<String> {
@@ -5735,6 +6253,61 @@ fn bounded_read_range_direct_answer_candidate(body: &str, prefer_english: bool) 
         })
 }
 
+fn bounded_read_range_output_path_candidate(body: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    if value.get("action").and_then(|v| v.as_str()) != Some("read_range") {
+        return None;
+    }
+    let mode = value.get("mode").and_then(|v| v.as_str()).unwrap_or("");
+    if !matches!(mode, "head" | "tail" | "range") {
+        return None;
+    }
+    let bounded_lines = value
+        .get("requested_n")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            let start = value.get("start_line")?.as_u64()?;
+            let end = value.get("end_line")?.as_u64()?;
+            (end >= start).then_some(end - start + 1)
+        })?;
+    if bounded_lines == 0 || bounded_lines > 100 {
+        return None;
+    }
+    read_range_output_path(body)
+}
+
+fn read_range_output_path(body: &str) -> Option<String> {
+    let value = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    if value.get("action").and_then(|v| v.as_str()) != Some("read_range") {
+        return None;
+    }
+    value
+        .get("resolved_path")
+        .or_else(|| value.get("path"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(ToString::to_string)
+}
+
+fn observed_read_path_matches_target(observed_path: &str, target: &str) -> bool {
+    let observed_path = observed_path.trim();
+    let target = target.trim();
+    if observed_path.is_empty() || target.is_empty() {
+        return false;
+    }
+    if observed_path == target {
+        return true;
+    }
+    let observed = Path::new(observed_path);
+    let target = Path::new(target);
+    observed
+        .canonicalize()
+        .ok()
+        .zip(target.canonicalize().ok())
+        .is_some_and(|(observed, target)| observed == target)
+}
+
 fn latest_bounded_read_range_direct_answer(
     loop_state: &LoopState,
     prefer_english: bool,
@@ -5750,6 +6323,81 @@ fn latest_bounded_read_range_direct_answer(
             let output = step.output.as_deref()?.trim();
             bounded_read_range_direct_answer_candidate(output, prefer_english)
         })
+}
+
+fn latest_bounded_read_range_output_path(loop_state: &LoopState) -> Option<String> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .find_map(|step| {
+            if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+                return None;
+            }
+            let output = step.output.as_deref()?.trim();
+            bounded_read_range_output_path_candidate(output)
+        })
+}
+
+fn bounded_read_range_direct_answer_for_target(
+    loop_state: &LoopState,
+    prefer_english: bool,
+    target: &str,
+) -> Option<String> {
+    loop_state.executed_step_results.iter().find_map(|step| {
+        if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+            return None;
+        }
+        let output = step.output.as_deref()?.trim();
+        let path = read_range_output_path(output)?;
+        observed_read_path_matches_target(&path, target)
+            .then(|| bounded_read_range_direct_answer_candidate(output, prefer_english))
+            .flatten()
+    })
+}
+
+fn bounded_read_range_output_path_for_target(
+    loop_state: &LoopState,
+    target: &str,
+) -> Option<String> {
+    loop_state.executed_step_results.iter().find_map(|step| {
+        if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+            return None;
+        }
+        let output = step.output.as_deref()?.trim();
+        let path = bounded_read_range_output_path_candidate(output)?;
+        observed_read_path_matches_target(&path, target).then_some(path)
+    })
+}
+
+fn preferred_bounded_read_range_direct_answer(
+    loop_state: &LoopState,
+    prefer_english: bool,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    agent_run_context
+        .and_then(|ctx| ctx.auto_locator_path.as_deref())
+        .and_then(|target| {
+            bounded_read_range_direct_answer_for_target(loop_state, prefer_english, target)
+        })
+        .or_else(|| latest_bounded_read_range_direct_answer(loop_state, prefer_english))
+}
+
+fn preferred_bounded_read_range_output_path(
+    loop_state: &LoopState,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Option<String> {
+    agent_run_context
+        .and_then(|ctx| ctx.auto_locator_path.as_deref())
+        .and_then(|target| bounded_read_range_output_path_for_target(loop_state, target))
+        .or_else(|| latest_bounded_read_range_output_path(loop_state))
+}
+
+fn path_has_log_extension(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.trim().eq_ignore_ascii_case("log"))
 }
 
 fn compact_delivery_match_text(text: &str) -> String {
@@ -5769,21 +6417,42 @@ fn answer_contains_observed_excerpt(answer: &str, excerpt: &str) -> bool {
     answer.contains(&excerpt) || excerpt.lines().all(|line| answer.contains(line))
 }
 
+fn strip_observed_excerpt_prefix_from_answer(answer: &str, excerpt: &str) -> Option<String> {
+    let answer = answer.trim();
+    let excerpt = excerpt.trim();
+    if answer.is_empty() || excerpt.is_empty() || !answer.starts_with(excerpt) {
+        return None;
+    }
+    let stripped = answer[excerpt.len()..].trim();
+    (!stripped.is_empty()).then(|| stripped.to_string())
+}
+
 fn compose_content_excerpt_with_summary_answer(
     answer: &str,
     loop_state: &LoopState,
     prefer_english: bool,
-    route: Option<&crate::RouteResult>,
+    agent_run_context: Option<&AgentRunContext>,
 ) -> String {
-    if !route.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::ContentExcerptWithSummary
-    }) {
+    if !agent_run_context
+        .and_then(|ctx| ctx.route_result.as_ref())
+        .is_some_and(|route| {
+            route.output_contract.semantic_kind
+                == crate::OutputSemanticKind::ContentExcerptWithSummary
+        })
+    {
         return answer.trim().to_string();
     }
     let answer = answer.trim();
-    let Some(excerpt) = latest_bounded_read_range_direct_answer(loop_state, prefer_english) else {
+    let excerpt_path = preferred_bounded_read_range_output_path(loop_state, agent_run_context);
+    let Some(excerpt) =
+        preferred_bounded_read_range_direct_answer(loop_state, prefer_english, agent_run_context)
+    else {
         return answer.to_string();
     };
+    if excerpt_path.as_deref().is_some_and(path_has_log_extension) {
+        return strip_observed_excerpt_prefix_from_answer(answer, &excerpt)
+            .unwrap_or_else(|| answer.to_string());
+    }
     if answer_contains_observed_excerpt(answer, &excerpt) {
         answer.to_string()
     } else if answer.is_empty() {
@@ -6553,6 +7222,62 @@ fn count_inventory_observed_candidate(value: &serde_json::Value) -> Option<Strin
     (lines.len() > 1).then(|| lines.join("\n"))
 }
 
+fn count_inventory_observation_row(
+    step: &crate::executor::StepExecutionResult,
+) -> Option<(String, u64)> {
+    if !step.is_ok() || !matches!(step.skill.as_str(), "system_basic" | "fs_basic") {
+        return None;
+    }
+    let body = step.output.as_deref()?;
+    let body = normalized_success_body_for_direct_answer(body);
+    let value = serde_json::from_str::<serde_json::Value>(body.trim()).ok()?;
+    if value.get("action").and_then(|v| v.as_str()) != Some("count_inventory") {
+        return None;
+    }
+    let total = value
+        .get("counts")
+        .and_then(|counts| counts.get("total"))
+        .and_then(|v| v.as_u64())?;
+    let path = value
+        .get("resolved_path")
+        .or_else(|| value.get("path"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(step.step_id.as_str())
+        .to_string();
+    Some((path, total))
+}
+
+fn multi_count_quantity_comparison_guard_entry(
+    loop_state: &LoopState,
+    route: Option<&crate::RouteResult>,
+) -> Option<String> {
+    let route = route?;
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::QuantityComparison {
+        return None;
+    }
+    let rows = loop_state
+        .executed_step_results
+        .iter()
+        .filter_map(count_inventory_observation_row)
+        .collect::<Vec<_>>();
+    if rows.len() < 2 {
+        return None;
+    }
+    let mut lines = vec![
+        "### multi_count_quantity_comparison_guard".to_string(),
+        "delivery_constraint=cover_all_observed_count_rows".to_string(),
+        format!("observed_count_rows={}", rows.len()),
+    ];
+    for (idx, (path, total)) in rows.iter().enumerate() {
+        let row_no = idx + 1;
+        lines.push(format!("observed_count.{row_no}.path={path}"));
+        lines.push(format!("observed_count.{row_no}.count_total={total}"));
+    }
+    Some(lines.join("\n"))
+}
+
 fn validate_structured_observed_candidate(value: &serde_json::Value) -> Option<String> {
     if value.get("action").and_then(|v| v.as_str()) != Some("validate_structured") {
         return None;
@@ -6668,6 +7393,7 @@ fn extract_direct_scalar_from_generic_output_with_locator_hint_impl(
     .or_else(|| {
         allows_normalized_scalar_direct_fallback(
             &observed_output.skill,
+            route,
             route.map(|route| route.output_contract.response_shape),
         )
         .then(|| normalized_scalar_candidate(&observed_output.body))
@@ -6731,6 +7457,20 @@ fn hidden_entries_empty_direct_candidate_satisfies_contract(
 fn route_requires_matrix_grounded_direct_candidate(route: &crate::RouteResult) -> bool {
     crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
         .is_some_and(|shape| !shape.allows_model_language())
+}
+
+fn route_allows_model_language_direct_candidate(route: &crate::RouteResult) -> bool {
+    crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+        .is_some_and(|shape| shape.allows_model_language())
+}
+
+fn process_basic_port_list_should_use_llm_synthesis(
+    route: &crate::RouteResult,
+    body: &str,
+) -> bool {
+    route.output_contract.semantic_kind == crate::OutputSemanticKind::ServiceStatus
+        && route_allows_model_language_direct_candidate(route)
+        && !process_basic_port_rows(body).is_empty()
 }
 
 fn matrix_direct_candidate_satisfies_contract(
@@ -7098,6 +7838,20 @@ fn extract_direct_answer_from_generic_output_impl(
                 answer,
             );
         }
+        if let Some(answer) = directory_purpose_summary_find_ext_answer_candidate(route, loop_state)
+            .and_then(|answer| {
+                matrix_checked_direct_candidate(Some(route), loop_state, auto_locator_path, answer)
+            })
+        {
+            return Some(answer);
+        }
+        if let Some(answer) =
+            multi_status_json_summary_candidate(route, loop_state).and_then(|answer| {
+                matrix_checked_direct_candidate(Some(route), loop_state, auto_locator_path, answer)
+            })
+        {
+            return Some(answer);
+        }
     }
 
     let answer = allow_raw_listing_direct_answer
@@ -7179,12 +7933,18 @@ fn extract_direct_answer_from_generic_output_impl(
                                     == crate::OutputSemanticKind::ServiceStatus
                             })
                             .then(|| {
-                                health_check_service_status_direct_answer_candidate(
-                                    state,
+                                health_check_diagnostic_summary_direct_answer_candidate(
                                     &value,
                                     response_shape,
-                                    prefers_english_free_text,
                                 )
+                                .or_else(|| {
+                                    health_check_service_status_direct_answer_candidate(
+                                        state,
+                                        &value,
+                                        response_shape,
+                                        prefers_english_free_text,
+                                    )
+                                })
                             })
                             .flatten()
                     })
@@ -7192,20 +7952,25 @@ fn extract_direct_answer_from_generic_output_impl(
                         health_check_prefers_raw_payload.then_some(observed_output.body.clone())
                     }),
                 "http_basic" => None,
-                "process_basic" => route
-                    .is_some_and(|route| {
-                        route.output_contract.semantic_kind
-                            == crate::OutputSemanticKind::ServiceStatus
-                    })
-                    .then(|| {
-                        process_basic_service_status_direct_answer_candidate(
-                            state,
-                            &observed_output.body,
-                            response_shape,
-                            prefers_english_free_text,
-                        )
-                    })
-                    .flatten(),
+                "process_basic" => route.and_then(|route| {
+                    if process_basic_port_list_should_use_llm_synthesis(
+                        route,
+                        &observed_output.body,
+                    ) {
+                        return None;
+                    }
+                    (route.output_contract.semantic_kind
+                        == crate::OutputSemanticKind::ServiceStatus)
+                        .then(|| {
+                            process_basic_service_status_direct_answer_candidate(
+                                state,
+                                &observed_output.body,
+                                response_shape,
+                                prefers_english_free_text,
+                            )
+                        })
+                        .flatten()
+                }),
                 "service_control" => {
                     serde_json::from_str::<serde_json::Value>(&observed_output.body)
                         .ok()
@@ -7347,12 +8112,15 @@ fn extract_direct_answer_from_generic_output_impl(
                             return Some(answer);
                         }
                     }
+                    let raw_read_range_direct =
+                        route_allows_raw_read_range_direct_passthrough(route, response_shape);
                     if action == Some("read_range")
                         && (route_allows_tail_read_range_direct_passthrough(
                             route,
                             response_shape,
                             &value,
-                        ) || route_allows_read_range_direct_passthrough(route, response_shape))
+                        ) || route_allows_read_range_direct_passthrough(route, response_shape)
+                            || raw_read_range_direct)
                     {
                         value
                             .get("excerpt")
@@ -7366,10 +8134,11 @@ fn extract_direct_answer_from_generic_output_impl(
                                 )
                             })
                             .filter(|candidate| {
-                                !read_range_direct_candidate_conflicts_with_request_language(
-                                    candidate,
-                                    request_language_hint,
-                                )
+                                raw_read_range_direct
+                                    || !read_range_direct_candidate_conflicts_with_request_language(
+                                        candidate,
+                                        request_language_hint,
+                                    )
                             })
                     } else if action == Some("inventory_dir")
                         && (is_plain_act
@@ -7526,6 +8295,7 @@ fn extract_direct_answer_from_generic_output_impl(
                 (!existence_with_path_should_use_llm_synthesis
                     && allows_normalized_scalar_direct_fallback(
                         &observed_output.skill,
+                        route,
                         response_shape,
                     ))
                 .then(|| normalized_scalar_candidate(&observed_output.body))
@@ -7920,19 +8690,63 @@ fn route_allows_read_range_direct_passthrough(
         )
 }
 
+fn route_allows_raw_read_range_direct_passthrough(
+    route: Option<&crate::RouteResult>,
+    response_shape: Option<crate::OutputResponseShape>,
+) -> bool {
+    if matches!(
+        response_shape,
+        Some(crate::OutputResponseShape::OneSentence | crate::OutputResponseShape::Scalar)
+    ) {
+        return false;
+    }
+    let Some(route) = route else {
+        return false;
+    };
+    route.output_contract.semantic_kind == crate::OutputSemanticKind::RawCommandOutput
+        && route.output_contract.requires_content_evidence
+        && !route.output_contract.delivery_required
+}
+
 fn allows_normalized_scalar_direct_fallback(
     skill: &str,
+    route: Option<&crate::RouteResult>,
     response_shape: Option<crate::OutputResponseShape>,
 ) -> bool {
     match skill {
         "git_basic" => false,
         "package_manager" => false,
         "archive_basic" => false,
-        "http_basic" => !matches!(
-            response_shape,
-            Some(crate::OutputResponseShape::OneSentence)
-        ),
+        "http_basic" => {
+            !matches!(
+                response_shape,
+                Some(crate::OutputResponseShape::OneSentence)
+            ) && !route_requires_http_body_synthesis(route)
+        }
         _ => true,
+    }
+}
+
+fn route_requires_http_body_synthesis(route: Option<&crate::RouteResult>) -> bool {
+    let Some(route) = route else {
+        return false;
+    };
+    if !route.output_contract.requires_content_evidence {
+        return false;
+    }
+    let Some(shape) =
+        crate::contract_matrix::final_answer_shape_for_output_contract(&route.output_contract)
+    else {
+        return false;
+    };
+    match route.output_contract.semantic_kind {
+        crate::OutputSemanticKind::WebPageSummary => {
+            shape.class() == crate::contract_matrix::FinalAnswerShapeClass::GroundedSummary
+        }
+        crate::OutputSemanticKind::ServiceStatus => {
+            shape.class() == crate::contract_matrix::FinalAnswerShapeClass::Verdict
+        }
+        _ => false,
     }
 }
 
@@ -8110,6 +8924,55 @@ fn observed_output_entries(loop_state: &LoopState) -> Vec<String> {
         .into_iter()
         .filter_map(|idx| observed_step_entry(&loop_state.executed_step_results[idx]))
         .collect()
+}
+
+fn compound_listing_content_delivery_guard_entry(
+    loop_state: &LoopState,
+    route: Option<&crate::RouteResult>,
+) -> Option<String> {
+    let route = route?;
+    if !route.output_contract.requires_content_evidence || route.output_contract.delivery_required {
+        return None;
+    }
+    let names = latest_inventory_dir_names(loop_state)?;
+    if names.is_empty() || !has_current_task_content_excerpt_observation(loop_state) {
+        return None;
+    }
+    Some(format!(
+        "### delivery_completeness_guard\ncurrent_task_observed_listing_names: {}\ncurrent_task_observed_content_excerpt: present\nIf the original request requires both listing/candidate delivery and synthesis, judgment, summary, or comparison, the final answer must include both components in the requested response shape.",
+        names.join(", ")
+    ))
+}
+
+fn latest_inventory_dir_names(loop_state: &LoopState) -> Option<Vec<String>> {
+    loop_state
+        .executed_step_results
+        .iter()
+        .rev()
+        .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+        .filter_map(|step| step.output.as_deref())
+        .filter_map(|output| serde_json::from_str::<serde_json::Value>(output.trim()).ok())
+        .find_map(|value| inventory_dir_names(&value))
+}
+
+fn has_current_task_content_excerpt_observation(loop_state: &LoopState) -> bool {
+    loop_state
+        .executed_step_results
+        .iter()
+        .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+        .filter_map(|step| step.output.as_deref())
+        .filter_map(|output| serde_json::from_str::<serde_json::Value>(output.trim()).ok())
+        .any(|value| {
+            matches!(
+                value.get("action").and_then(|value| value.as_str()),
+                Some("read_range" | "read_text_range")
+            ) && value
+                .get("excerpt")
+                .or_else(|| value.get("content"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .is_some_and(|text| !text.is_empty())
+        })
 }
 
 fn retain_latest_observation_indices_by_supersede_key(
@@ -8330,8 +9193,20 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
     );
 
     let mut observed_entries = observed_output_entries(loop_state);
+    if let Some(guard) = multi_count_quantity_comparison_guard_entry(
+        loop_state,
+        agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
+    ) {
+        observed_entries.insert(0, guard);
+    }
     if let Some(route_facts) = route_observation_facts_entry(agent_run_context) {
         observed_entries.insert(0, route_facts);
+    }
+    if let Some(guard) = compound_listing_content_delivery_guard_entry(
+        loop_state,
+        agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
+    ) {
+        observed_entries.insert(0, guard);
     }
     if observed_entries.is_empty() {
         observed_entries = cross_turn_observed_output_entries(loop_state, agent_run_context);
@@ -8516,7 +9391,7 @@ pub(crate) async fn try_synthesize_answer_from_observed_output(
             &answer,
             loop_state,
             prefer_english,
-            agent_run_context.and_then(|ctx| ctx.route_result.as_ref()),
+            agent_run_context,
         );
     }
     // §3.4 finalize-tier: 这里属于 observed_answer_fallback 兜底路径（finalize 层

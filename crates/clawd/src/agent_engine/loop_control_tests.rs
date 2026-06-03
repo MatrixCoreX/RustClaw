@@ -803,7 +803,7 @@ fn workspace_project_summary_verifier_exhaustion_does_not_recover_unsupported_cl
 }
 
 #[test]
-fn generic_path_content_verifier_exhaustion_recovers_with_read_range_excerpt() {
+fn generic_path_content_verifier_exhaustion_does_not_recover_raw_read_range_excerpt() {
     let route = route_result(OutputResponseShape::Free);
     let mut journal =
         crate::task_journal::TaskJournal::for_task("task-read-range", "ask", "tail log");
@@ -846,18 +846,24 @@ fn generic_path_content_verifier_exhaustion_recovers_with_read_range_excerpt() {
         .with_task_journal(journal);
 
     assert!(
-        try_recover_generic_path_content_read_range_answer_verifier_gap(Some(&route), &mut reply)
+        !try_recover_generic_path_content_read_range_answer_verifier_gap(Some(&route), &mut reply)
     );
 
     assert!(!reply.should_fail_task);
-    assert_eq!(reply.text, "first log line\nsecond log line");
-    assert_eq!(reply.messages, vec!["first log line\nsecond log line"]);
+    assert_eq!(reply.text, "partial answer");
+    assert_eq!(
+        reply.messages,
+        vec![
+            "**Execution**\n1. Read the file range.".to_string(),
+            "partial answer".to_string()
+        ]
+    );
     let journal = reply.task_journal.as_ref().expect("journal");
     assert_eq!(
         journal.final_status,
         Some(crate::task_journal::TaskJournalFinalStatus::Success)
     );
-    assert!(journal.answer_verifier_summary.is_none());
+    assert!(journal.answer_verifier_summary.is_some());
 }
 
 #[test]
@@ -899,11 +905,15 @@ fn test_policy() -> AgentLoopGuardPolicy {
     AgentLoopGuardPolicy {
         max_steps: 8,
         max_rounds: 4,
+        max_tool_calls: 12,
         recoverable_failure_extra_rounds: 1,
         repeat_action_limit: 3,
         no_progress_limit: 1,
         multi_round_enabled: true,
         answer_verifier_retry_limit: 2,
+        fast_read: Default::default(),
+        grounded_summary: Default::default(),
+        multi_step_workspace: Default::default(),
         ops_closed_loop: Default::default(),
     }
 }
@@ -970,6 +980,33 @@ fn observation_only_freeform_round_can_stop_for_observed_fallback() {
     assert!(should_stop_for_observed_finalize(
         Some(&AgentRunContext {
             route_result: Some(route_result(OutputResponseShape::Free)),
+            ..Default::default()
+        }),
+        &loop_state,
+        &actions,
+    ));
+}
+
+#[test]
+fn service_status_port_observation_without_direct_candidate_does_not_stop() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "process_basic",
+        "exit=0\nState  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess\nLISTEN 0      4096         0.0.0.0:8787       0.0.0.0:*    users:((\"clawd\",pid=706551,fd=31))\nLISTEN 0      4096         0.0.0.0:22         0.0.0.0:*\n",
+    ));
+    let mut route = route_result(OutputResponseShape::Free);
+    route.output_contract.locator_kind = OutputLocatorKind::None;
+    route.output_contract.semantic_kind = OutputSemanticKind::ServiceStatus;
+    let actions = vec![AgentAction::CallSkill {
+        skill: "process_basic".to_string(),
+        args: json!({"action":"port_list"}),
+    }];
+
+    assert!(!should_stop_for_observed_finalize(
+        Some(&AgentRunContext {
+            route_result: Some(route),
             ..Default::default()
         }),
         &loop_state,

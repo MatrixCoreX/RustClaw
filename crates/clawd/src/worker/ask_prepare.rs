@@ -521,7 +521,9 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
             Some(crate::OutputSemanticKind::ContentExcerptWithSummary)
         }
         "scalar_path_only" => Some(crate::OutputSemanticKind::ScalarPathOnly),
+        "file_basename" => Some(crate::OutputSemanticKind::FileBasename),
         "raw_command_output" => Some(crate::OutputSemanticKind::RawCommandOutput),
+        "command_output_summary" => Some(crate::OutputSemanticKind::CommandOutputSummary),
         "file_names" => Some(crate::OutputSemanticKind::FileNames),
         "directory_names" => Some(crate::OutputSemanticKind::DirectoryNames),
         "directory_entry_groups" => Some(crate::OutputSemanticKind::DirectoryEntryGroups),
@@ -531,6 +533,7 @@ fn parse_clarify_state_semantic_kind(value: Option<&str>) -> Option<crate::Outpu
         "hidden_entries_check" => Some(crate::OutputSemanticKind::HiddenEntriesCheck),
         "execution_failed_step" => Some(crate::OutputSemanticKind::ExecutionFailedStep),
         "generated_file_delivery" => Some(crate::OutputSemanticKind::GeneratedFileDelivery),
+        "filesystem_mutation_result" => Some(crate::OutputSemanticKind::FilesystemMutationResult),
         "recent_scalar_equality_check" => {
             Some(crate::OutputSemanticKind::RecentScalarEqualityCheck)
         }
@@ -989,6 +992,25 @@ fn active_clarify_locator_reply_is_structured_payload(text: &str) -> bool {
         || crate::intent::surface_signals::inline_csv_record_block(text).is_some()
 }
 
+fn preserve_locator_reply_runtime_intent(
+    route_result: &mut crate::RouteResult,
+    clarify_followup_resolution: &crate::intent::continuation_resolver::ClarifyFollowupResolution,
+) {
+    let crate::intent::continuation_resolver::ClarifyFollowupResolution::LocatorReplyRewrite(hit) =
+        clarify_followup_resolution
+    else {
+        return;
+    };
+    let resolved_intent = hit.resolved_intent.trim();
+    if resolved_intent.is_empty() {
+        return;
+    }
+    route_result.resolved_intent = resolved_intent.to_string();
+    route_result
+        .route_reason
+        .push_str("; preserve_locator_reply_runtime_intent");
+}
+
 fn prior_non_file_contract_should_override_current_file_delivery(
     prior_shape: Option<crate::OutputResponseShape>,
     prior_semantic: Option<crate::OutputSemanticKind>,
@@ -1430,6 +1452,7 @@ pub(super) async fn prepare_ask_routing(
     let mut execution_recipe_hint = normalizer_out.execution_recipe_hint;
     let mut route_result =
         crate::intent_router::route_result_from_normalizer(state, task, &normalizer_out);
+    preserve_locator_reply_runtime_intent(&mut route_result, &clarify_followup_resolution);
     preserve_active_clarify_output_contract_for_locator_reply(
         &mut route_result,
         &clarify_followup_resolution,

@@ -28,6 +28,7 @@ Parse one local file and return:
 - `sections` (`id/title/level/content`)
 - `tables` (`id/header/rows`)
 - `metadata` (optional)
+- structured `extra` evidence fields for runtime verification
 - For summary/extraction/judgment requests, call `parse_doc` first, then synthesize the requested answer from the returned `text` / `sections` / `tables`.
 
 ## Parameter Contract
@@ -85,6 +86,20 @@ Returned JSON inside `text` contains:
   - `title`, `pages`, `type`, `path`, `encoding`, `truncated`, `truncation_notice`, `page_range_applied`
 - `error_code`: nullable string (`NOT_FOUND|DEPENDENCY_MISSING|UNSUPPORTED_FORMAT|PARSE_FAILED|INVALID_ACTION`)
 - `error`: nullable string
+
+Top-level `extra` contains stable machine-readable evidence:
+
+- `action`: `parse_doc`
+- `status`: `ok|error`
+- `path`: parsed document path when known, otherwise the requested path
+- `requested_path`: requested `args.path`
+- `content_excerpt`: bounded excerpt from parsed document text for evidence coverage
+- `content_excerpt_truncated`: whether `content_excerpt` was capped
+- `text_length_chars`: parsed text length in Unicode scalar values
+- `sections_count`: number of parsed sections
+- `tables_count`: number of parsed tables
+- `metadata`: compact metadata copy when available
+- `error_code`: nullable machine error code
 
 - Never fabricate content.
 - If parser dependency is missing (for PDF), return explicit error.

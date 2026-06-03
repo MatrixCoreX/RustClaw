@@ -59,6 +59,48 @@ fn ignores_plain_chat_numbered_text_as_ordered_entries() {
 }
 
 #[test]
+fn ignores_plain_chat_bullet_text_as_ordered_entries() {
+    let journal = crate::task_journal::TaskJournal::new("chat");
+    let facts = derive_observed_facts_from_ask_outcome(
+        "- Keep the intro short\n- Use concrete examples\n- End with next steps",
+        &[],
+        &journal,
+        &dummy_route_result(),
+    );
+    assert!(
+        facts.ordered_entries.is_empty(),
+        "plain generated bullet prose should not become follow-up list state"
+    );
+}
+
+#[test]
+fn derives_structural_bullet_entries_from_generic_visible_candidate_answer() {
+    let journal = crate::task_journal::TaskJournal::new("find");
+    let mut route = dummy_route_result();
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint =
+        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/fuzzy_top3".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::DirectoryPurposeSummary;
+    let facts = derive_observed_facts_from_ask_outcome(
+        "在 `fuzzy_top3` 目录下找到4个文件名包含 \"abcd\" 的文件：\n- `abcd_report.md`\n- `my_abcd.txt`\n- `x_abcd_log.txt`\n- `zz_abcd_backup.log`\n这些都是模糊匹配测试的 fixture 文件。",
+        &[],
+        &journal,
+        &route,
+    );
+    assert_eq!(
+        facts.ordered_entries,
+        vec![
+            "abcd_report.md",
+            "my_abcd.txt",
+            "x_abcd_log.txt",
+            "zz_abcd_backup.log"
+        ]
+    );
+    assert_eq!(facts.observed_entry_count, Some(4));
+}
+
+#[test]
 fn derives_delivery_targets_from_file_tokens() {
     let journal = crate::task_journal::TaskJournal::new("send");
     let facts = derive_observed_facts_from_ask_outcome(
@@ -199,6 +241,37 @@ fn uses_route_locator_hint_and_observed_entry_count_when_journal_lacks_scope() {
     );
     assert_eq!(facts.bound_target.as_deref(), Some("logs"));
     assert_eq!(facts.observed_entry_count, Some(3));
+}
+
+#[test]
+fn derives_bound_target_from_scalar_path_answer_contract() {
+    let journal = crate::task_journal::TaskJournal::new("find_path");
+    let mut route = dummy_route_result();
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::ScalarPathOnly;
+    let target =
+        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/locator_smart/case_only/Report.MD";
+
+    let facts = derive_observed_facts_from_ask_outcome(target, &[], &journal, &route);
+
+    assert_eq!(facts.bound_target.as_deref(), Some(target));
+}
+
+#[test]
+fn ignores_plain_scalar_answer_as_bound_target_without_path_contract() {
+    let journal = crate::task_journal::TaskJournal::new("chat");
+    let mut route = dummy_route_result();
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    let facts = derive_observed_facts_from_ask_outcome(
+        "/home/guagua/rustclaw/README.md",
+        &[],
+        &journal,
+        &route,
+    );
+
+    assert_eq!(facts.bound_target, None);
 }
 
 #[test]

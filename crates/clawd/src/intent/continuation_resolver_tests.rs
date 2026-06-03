@@ -127,6 +127,39 @@ fn clarify_followup_leaves_persisted_read_slice_change_to_normalizer() {
 }
 
 #[test]
+fn persisted_read_frame_reuses_prior_operation_for_locator_only_reply() {
+    let frame = crate::followup_frame::FollowupFrame {
+        source_request: "去那个配置里找 app.name，只把值给我".to_string(),
+        op_kind: crate::followup_frame::FollowupOpKind::Read,
+        bound_target: Some("/tmp/device_local/configs/app_config.toml".to_string()),
+        source_task_id: "task-1".to_string(),
+        updated_at_ts: 1,
+        expires_at_ts: 2,
+        ..crate::followup_frame::FollowupFrame::default()
+    };
+    let out = resolve_clarify_followup(
+        "scripts/nl_tests/fixtures/device_local/configs/app_config.toml",
+        Some("<none>"),
+        Some(&frame),
+        None,
+        None,
+    );
+    match out {
+        ClarifyFollowupResolution::LocatorReplyRewrite(hit) => {
+            assert_eq!(
+                hit.reason,
+                crate::clarify_followup::ClarifyRewriteReason::FollowupLocatorReply
+            );
+            assert!(hit.resolved_intent.contains("app.name"));
+            assert!(hit
+                .resolved_intent
+                .contains("scripts/nl_tests/fixtures/device_local/configs/app_config.toml"));
+        }
+        other => panic!("expected followup locator reply rewrite, got {other:?}"),
+    }
+}
+
+#[test]
 fn clarify_followup_does_not_hijack_multi_clause_followup() {
     let frame = crate::followup_frame::FollowupFrame {
         source_request: "先列出 document 目录下前 5 个文件名".to_string(),

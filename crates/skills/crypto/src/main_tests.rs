@@ -105,6 +105,15 @@ fn quote_symbol_mapping_for_new_exchanges() {
 }
 
 #[test]
+fn market_quote_extra_exposes_content_excerpt() {
+    let extra = market_quote_extra(json!({"action": "quote"}), "BTCUSDT $69587.26");
+    assert_eq!(
+        extra.get("content_excerpt").and_then(Value::as_str),
+        Some("BTCUSDT $69587.26")
+    );
+}
+
+#[test]
 fn price_alert_trigger_logic_up_down_both() {
     let up = 3.2_f64;
     let down = -3.2_f64;
