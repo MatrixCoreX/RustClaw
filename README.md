@@ -21,7 +21,7 @@ Current repository highlights:
 
 ## Planner-First Architecture
 
-RustClaw's main natural-language path is moving toward a planner-first single-loop design. The goal is to keep one authoritative runtime path for normal requests: bind the turn to session state, run the intent-normalizer LLM for routing signals and the first-layer decision, optionally use the contract-repair judge for schema-backed semantic repair, then clarify, answer directly once, or enter the planner/runtime loop for tools, skills, optional grounded synthesis, and response. Post-route policy runs before dispatch; final delivery and output-contract guards run before the result is saved.
+RustClaw's main natural-language path uses a planner-first single-loop design. The goal is to keep one authoritative runtime path for normal requests: bind the turn to session state, run the intent-normalizer LLM for routing signals and the first-layer decision, optionally use the contract-repair judge for schema-backed semantic repair, then clarify, answer directly once, or enter the planner/runtime loop for tools, skills, optional grounded synthesis, and response. Post-route policy runs before dispatch; final delivery and output-contract guards run before the result is saved.
 
 ### Runtime Flow
 
@@ -72,7 +72,8 @@ flowchart TD
     L -->|respond| M[Respond]
     L -->|synthesize_answer| SS[Grounded synthesis LLM]
     L -->|call_tool| N[Tool execution<br/>virtual tool dispatch]
-    L -->|call_skill| N1[run_skill_with_runner<br/>skill dispatch]
+    L -->|call_skill| N0[execution_adapters::run_skill<br/>shared skill entry]
+    N0 --> N1[run_skill_with_runner<br/>skill dispatch]
     RS --> N1
     N1 -->|builtin| N1B[In-process builtin skill]
     N1 -->|external| N1E[External skill adapter]
@@ -88,7 +89,7 @@ flowchart TD
     P --> EV[Evidence coverage verifier<br/>required evidence + answer shape]
     EV -->|missing evidence / repair| I
     EV -->|enough evidence| OF[Observed-output finalizer<br/>direct answer or synthesis]
-    M --> VP[User-visible message assembly<br/>execution process when present]
+    M --> VP[User-visible message assembly<br/>contract-bound body + optional sanitized messages]
     CR --> VP
     G --> VP
     OF --> VP
@@ -121,9 +122,9 @@ flowchart TD
 - `Execution prompt/context`: reuses the ask context bundle and resolved prompt for `PlannerExecute`, so memory cannot override the latest user instruction.
 - `Skill registry + generated skill docs`: planner-visible skills and capability metadata come from runtime skill views and generated interface docs, primarily `configs/skills_registry.toml`, `crates/skills/*/INTERFACE.md`, `external_skills/*/INTERFACE.md`, and `prompts/layers/generated/skills/*`. New planner-facing skills should declare `planner_capabilities` instead of adding language-specific planner branches.
 - `CapabilityResolver / PlanVerifier`: capability-level actions are resolved to concrete tools or skills before execution. The verifier and contract action gate then check visibility, allowed actions, required arguments, risk/effect boundaries, confirmation requirements, and mutation validation before any real action runs.
-- `call_skill` / direct `run_skill`: both go through `run_skill_with_runner`, which applies policy and skill switches, then dispatches by registry kind: builtins run in-process, external skills run through their external adapter, and runner skills launch `skill-runner` plus the concrete skill binary.
+- `call_skill` / direct `run_skill`: planner `call_skill` enters `execution_adapters::run_skill`, and both planner and direct task paths converge on `run_skill_with_runner`. The shared dispatcher applies policy and skill switches, then dispatches by registry kind: builtins run in-process, external skills run through their external adapter, and runner skills launch `skill-runner` plus the concrete skill binary.
 - `Loop observations`, `Evidence coverage`, and `Observed-output finalizer`: tool, skill, and synthesis outputs remain grounded evidence inside the loop. The evidence verifier checks required evidence and answer shape before publication; recoverable failures re-enter the planner with compact attempted-method history, while terminal failures finish with a grounded result. Observation-only plans can still finish through runtime-owned structured answers, with observed-answer synthesis only when runtime cannot safely format the answer.
-- `User-visible message assembly`: pure chat can remain a single answer. Execution, clarification, retry, and skill paths can attach sanitized `messages` separate from the final deliverable body, so execution stays visible without exposing raw prompts, stack traces, or secrets.
+- `User-visible message assembly`: pure chat can remain a single answer. Execution, clarification, retry, and skill paths may attach sanitized progress/status `messages` separate from the final deliverable body. Strict, scalar, and file-token contracts keep the final body contract-bound; raw prompts, stack traces, full tool JSON, and secrets must not be exposed unless the user explicitly asks and the output contract allows it.
 - `Final delivery / output-contract guard`: normalizes file tokens, `messages`, exact scalar/strict output shapes, and delivery consistency before the result is saved.
 - `Finalize result`: can emit one `text` field and a `messages` array; channel adapters send each publishable message separately when present.
 
@@ -170,7 +171,8 @@ flowchart TD
     Kv --> K{Verified step type}
     K -->|respond| L[Respond text]
     K -->|call_tool| M[Execute tool<br/>virtual tool dispatch]
-    K -->|call_skill| Ms[run_skill_with_runner<br/>skill dispatch]
+    K -->|call_skill| Ma[execution_adapters::run_skill<br/>shared skill entry]
+    Ma --> Ms[run_skill_with_runner<br/>skill dispatch]
     Ms -->|builtin| Msb[In-process builtin skill]
     Ms -->|external| Mse[External skill adapter]
     Ms -->|runner| Msr[skill-runner subprocess]
@@ -185,7 +187,7 @@ flowchart TD
     Ev --> P{Need another planner round?}
     P -->|yes / missing evidence / repair| H
     P -->|no / enough evidence| Q[Observed-output finalizer<br/>direct answer or synthesis if needed]
-    L --> VP[User-visible message assembly<br/>execution process when present]
+    L --> VP[User-visible message assembly<br/>contract-bound body + optional sanitized messages]
     Q --> VP
     Ic --> VP
     Ir --> VP
@@ -209,7 +211,7 @@ flowchart TD
 - `Execute tool or skill`: runs real operations and prevents the model from pretending that work already happened. Skill execution uses the shared dispatch layer; only runner skills spawn `skill-runner`.
 - `synthesize_answer`: an extra LLM call **scheduled inside the planner loop** when the plan includes that step—**not** always a single fixed “LLM 3 after all planning is done”; rounds can interleave execution, synthesis, and further planning.
 - `Evidence coverage / observed-output finalizer`: observations must satisfy the contract's required evidence and answer shape before publication. If a plan ends after observation steps without a terminal `respond`, runtime can still publish a grounded direct answer or run the observed-answer synthesis path. Recoverable failures are fed back to later planner rounds as attempted-method evidence instead of being hidden inside shell fallbacks.
-- `User-visible message assembly`: pure chat replies can pass through without an execution-process block. Clarifications and execution paths can include sanitized progress/process messages before final delivery.
+- `User-visible message assembly`: pure chat replies can pass through without an extra progress block. Clarification and execution paths can include sanitized progress/status messages, but the final body remains governed by the output contract and should not surface raw tool JSON, prompts, stack traces, or secrets unless explicitly requested and allowed.
 - `Final delivery / output-contract guard`: applies delivery normalization and output-contract verification before final task persistence.
 - `Finalize`: may also start background memory work after the user-visible result is saved, including long-term summary refresh and optional preference extraction controlled by `configs/memory.toml`.
 
@@ -377,7 +379,7 @@ flowchart TD
     RouteCtx --> PostRoute[Post-route policy<br/>contract + locator guards]
     PlannerCtx --> Runtime[Planner / runtime loop]
     ChatCtx --> Chat[Direct chat answer]
-    SkillPolicy --> SkillRuntime[skill-runner / builtin / external skill]
+    SkillPolicy --> SkillRuntime[Shared skill dispatch<br/>builtin / external / runner]
     PostRoute --> Runtime
     PostRoute --> Chat
     DirectSkill --> SkillRuntime
