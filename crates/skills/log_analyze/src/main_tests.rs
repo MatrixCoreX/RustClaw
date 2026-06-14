@@ -71,3 +71,35 @@ fn default_analysis_keeps_warn_latency_visible() {
     let _ = std::fs::remove_file(path);
     let _ = std::fs::remove_dir(dir);
 }
+
+#[test]
+fn analysis_keeps_recovery_lines_visible_even_when_info_level() {
+    let dir = std::env::temp_dir().join(format!(
+        "rustclaw-log-analyze-recovery-test-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let path = dir.join("app.log");
+    std::fs::write(
+        &path,
+        "2026-04-01 10:08:44 ERROR provider timeout while fetching external metadata\n2026-04-01 10:08:46 INFO provider retry succeeded on second attempt\n",
+    )
+    .expect("write log");
+    let keywords = ["error", "timeout", "retry", "succeeded"]
+        .into_iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    let analysis =
+        analyze_log_file(&path, path.display().to_string(), &keywords, 20).expect("analysis");
+
+    assert_eq!(analysis.keyword_counts.get("retry"), Some(&1));
+    assert_eq!(analysis.recovery_counts.get("retry"), Some(&1));
+    assert_eq!(analysis.recovery_counts.get("succeeded"), Some(&1));
+    assert!(analysis
+        .recent_recovery_lines
+        .iter()
+        .any(|line| line.contains("provider retry succeeded")));
+    let _ = std::fs::remove_file(path);
+    let _ = std::fs::remove_dir(dir);
+}

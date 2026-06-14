@@ -34,6 +34,7 @@
 - Non-zero subprocess exit codes are returned as `status=error` with `error_text=process command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including fields like `action`, `exit_code`, `platform`, `command_tool` for `port_list`, and `output`.
 - `port_list` additionally emits structured listener evidence in `extra.listeners`, `extra.public_listeners`, `extra.ports`, and `extra.public_ports`; use these machine fields for grounding instead of inferring ports from truncated `output` text.
+- `ps` additionally emits `extra.running`, `extra.status`, `extra.match_count`, and `extra.process_count`; use these machine fields for process status grounding instead of parsing `text` or `extra.output`.
 
 ## Structured Evidence Contract
 - Matrix admission status: built-in structured evidence only; `output` remains legacy text evidence unless a stricter parser is explicitly registered.
@@ -41,6 +42,9 @@
   - `action`: string action name; evidence role `status`.
   - `exit_code`: integer subprocess exit code; evidence role `status`.
   - `platform`: string OS/platform; evidence role `field_value`.
+  - `running`: boolean process status for `ps`; evidence role `status`.
+  - `status`: machine status enum for `ps` such as `running` or `not_running`; evidence role `status`.
+  - `match_count`, `process_count`: integer process counts for `ps`; evidence role `count`.
   - `command_tool`: string selected probe for `port_list`; evidence role `field_value`.
   - `listener_count`, `public_listener_count`, `localhost_listener_count`: integer listener counts for `port_list`; evidence role `count`.
   - `ports`, `public_ports`: sorted unique port strings observed by `port_list`; evidence role `field_value`.

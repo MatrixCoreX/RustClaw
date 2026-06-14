@@ -22,8 +22,10 @@ pub(crate) use channels::{
 };
 pub(super) use locator::{
     has_concrete_locator_hint, has_explicit_path_or_url_locator_hint,
+    has_multiple_distinct_explicit_local_path_locators,
     semantic_kind_can_bind_workspace_child_locator, try_resolve_implicit_locator_path,
-    try_resolve_workspace_child_locator_from_text, LocatorAutoResolution,
+    try_resolve_workspace_child_locator_from_text,
+    workspace_child_resolution_is_directory_scope_with_child_filename, LocatorAutoResolution,
 };
 pub(super) use run_skill_finalize::finalize_run_skill_result;
 pub(crate) use runtime_support::spawn_long_term_summary_refresh;
@@ -333,16 +335,12 @@ pub(crate) async fn process_ask_task(
             Some(trimmed.to_string())
         }
     };
-    let session_alias_bindings =
-        crate::conversation_state::load_active_conversation_state(state, task)
-            .map(|conversation_state| conversation_state.alias_bindings)
-            .unwrap_or_default();
     let agent_run_context = Some(crate::agent_engine::AgentRunContext {
         route_result: Some(prepared_flow.route_result.clone()),
         execution_recipe_hint: prepared_flow.execution_recipe_hint,
         turn_analysis: prepared_flow.turn_analysis.clone(),
         context_bundle_summary: Some(prepared_flow.context_bundle_summary.clone()),
-        session_alias_bindings,
+        session_alias_bindings: prepared_flow.session_alias_bindings.clone(),
         auto_locator_path: prepared_flow.auto_locator_path.clone(),
         has_authoritative_deictic_anchor: prepared_flow.has_authoritative_deictic_anchor,
         fuzzy_locator_suggestions: prepared_flow.fuzzy_locator_suggestions.clone(),

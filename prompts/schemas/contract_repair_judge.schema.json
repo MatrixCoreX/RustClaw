@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://rustclaw.local/prompts/schemas/contract_repair_judge.schema.json",
   "title": "ContractRepairJudgeOut",
-  "description": "Schema for the JSON object returned by prompts/contract_repair_judge_prompt.md. Mirrors ContractRepairJudgeOut in crates/clawd/src/intent_router.rs.",
+  "description": "Schema for the JSON object returned by prompts/contract_repair_judge_prompt.md. Mirrors ContractRepairJudgeOut in crates/clawd/src/intent_router.rs. The judge repairs malformed schema fields and machine contract fields; ordinary planner-loop semantic action choice remains outside this schema.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -21,7 +21,7 @@
   "properties": {
     "apply": {
       "type": "boolean",
-      "description": "True only when the malformed fields should be repaired semantically. False keeps the original conservative route."
+      "description": "True only when malformed schema or machine contract fields should be repaired. False keeps the original conservative route."
     },
     "reason": {
       "type": "string"
@@ -94,6 +94,7 @@
             "file_paths",
             "directory_purpose_summary",
             "content_excerpt_summary",
+            "document_heading",
             "web_page_summary",
             "web_search_summary",
             "weather_query",
@@ -109,6 +110,7 @@
             "quantity_comparison",
             "execution_failed_step",
             "generated_file_delivery",
+            "generated_file_path_report",
             "filesystem_mutation_result",
             "scalar_path_only",
             "file_basename",
@@ -139,6 +141,42 @@
         },
         "locator_hint": {
           "type": "string"
+        },
+        "scalar_count_filter": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "target_kind": {
+              "type": "string",
+              "enum": ["any", "file", "dir", ""]
+            },
+            "include_hidden": {
+              "type": ["boolean", "null"]
+            },
+            "recursive": {
+              "type": ["boolean", "null"]
+            }
+          }
+        },
+        "list_selector": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "target_kind": {
+              "type": "string",
+              "enum": ["any", "file", "dir", ""]
+            },
+            "limit": {
+              "type": ["integer", "string", "null"]
+            },
+            "sort_by": {
+              "type": "string",
+              "enum": ["name", "size_desc", "size_asc", "mtime_desc", "mtime_asc", ""]
+            },
+            "include_metadata": {
+              "type": ["boolean", "null"]
+            }
+          }
         },
         "self_extension": {
           "type": "object",

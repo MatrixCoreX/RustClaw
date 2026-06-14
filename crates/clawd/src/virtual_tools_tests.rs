@@ -212,6 +212,89 @@ fn fs_basic_count_entries_rewrites_to_system_basic_count_inventory() {
 }
 
 #[test]
+fn fs_basic_count_entries_filter_kind_directories_rewrites_to_dir_filter() {
+    let mut args = json!({
+        "action": "count_entries",
+        "path": "scripts/nl_tests/fixtures/device_local",
+        "filter_kind": "directories"
+    });
+
+    assert!(normalize_virtual_tool_arg_aliases("fs_basic", &mut args));
+    assert_eq!(
+        args.get("kind_filter").and_then(|v| v.as_str()),
+        Some("dir")
+    );
+    assert_eq!(args.get("count_dirs").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        args.get("count_files").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+    assert_eq!(args.get("dirs_only").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        args.get("files_only").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+    assert!(args.get("filter_kind").is_none());
+
+    let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+        .unwrap()
+        .expect("rewrite");
+    assert_eq!(rewrite.runtime_tool, "system_basic");
+    assert_eq!(
+        rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+        Some("count_inventory")
+    );
+    assert_eq!(
+        rewrite
+            .runtime_args
+            .get("kind_filter")
+            .and_then(|v| v.as_str()),
+        Some("dir")
+    );
+    assert_eq!(
+        rewrite
+            .runtime_args
+            .get("count_dirs")
+            .and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        rewrite
+            .runtime_args
+            .get("count_files")
+            .and_then(|v| v.as_bool()),
+        Some(false)
+    );
+}
+
+#[test]
+fn fs_basic_count_entries_extensions_alias_rewrites_to_ext_filter() {
+    let mut args = json!({
+        "action": "count_entries",
+        "path": "scripts/nl_tests/fixtures/device_local",
+        "extensions": ["md"]
+    });
+
+    assert!(normalize_virtual_tool_arg_aliases("fs_basic", &mut args));
+    let ext_filter = args
+        .get("ext_filter")
+        .and_then(|v| v.as_array())
+        .expect("ext_filter array");
+    assert_eq!(ext_filter, &vec![json!("md")]);
+    assert!(args.get("extensions").is_none());
+
+    let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+        .unwrap()
+        .expect("rewrite");
+    let ext_filter = rewrite
+        .runtime_args
+        .get("ext_filter")
+        .and_then(|v| v.as_array())
+        .expect("runtime ext_filter array");
+    assert_eq!(ext_filter, &vec![json!("md")]);
+}
+
+#[test]
 fn fs_basic_find_entries_by_extension_rewrites_to_fs_search_find_ext() {
     let args = json!({"action":"find_entries", "root":"scripts", "extension":"sh"});
     let rewrite = rewrite_virtual_tool_call("fs_basic", args)
@@ -379,6 +462,34 @@ fn fs_basic_find_entries_name_pattern_alias_rewrites_to_name_search() {
         rewrite.runtime_args.get("root").and_then(|v| v.as_str()),
         Some(".")
     );
+}
+
+#[test]
+fn fs_basic_find_entries_pure_glob_name_pattern_rewrites_to_ext_search() {
+    let args = json!({
+        "action": "find_entries",
+        "path": "/repo",
+        "target_kind": "file",
+        "name_pattern": "*.sh"
+    });
+    let rewrite = rewrite_virtual_tool_call("fs_basic", args)
+        .unwrap()
+        .expect("rewrite");
+
+    assert_eq!(rewrite.runtime_tool, "fs_search");
+    assert_eq!(
+        rewrite.runtime_args.get("action").and_then(|v| v.as_str()),
+        Some("find_ext")
+    );
+    assert_eq!(
+        rewrite.runtime_args.get("ext").and_then(|v| v.as_str()),
+        Some("sh")
+    );
+    assert_eq!(
+        rewrite.runtime_args.get("root").and_then(|v| v.as_str()),
+        Some("/repo")
+    );
+    assert!(rewrite.runtime_args.get("pattern").is_none());
 }
 
 #[test]

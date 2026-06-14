@@ -167,6 +167,7 @@ pub(crate) struct TaskContract {
     pub(crate) intent_kind: TaskIntentKind,
     pub(crate) targets: Vec<TargetContract>,
     pub(crate) target_object: TaskTargetObject,
+    pub(crate) structured_field_selector: Option<String>,
     pub(crate) operation: TaskOperation,
     pub(crate) evidence_required: bool,
     pub(crate) required_evidence_fields: Vec<String>,
@@ -191,6 +192,11 @@ impl TaskContract {
             },
             targets: targets_for_route(route),
             target_object: target_object_for_route(route),
+            structured_field_selector: route
+                .output_contract
+                .self_extension
+                .structured_field_selector
+                .clone(),
             operation: operation_for_route(route),
             evidence_required,
             required_evidence_fields: required_evidence_fields_for_route(route),
@@ -222,10 +228,13 @@ impl TaskContract {
             serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_string())
         };
         format!(
-            "- task_contract intent_kind={} targets={} target_object={} operation={} evidence_required={} required_evidence_fields={} delivery_shape={} missing_parameters={} failure_policy={}",
+            "- task_contract intent_kind={} targets={} target_object={} structured_field_selector={} operation={} evidence_required={} required_evidence_fields={} delivery_shape={} missing_parameters={} failure_policy={}",
             self.intent_kind.as_str(),
             targets,
             self.target_object.as_str(),
+            self.structured_field_selector
+                .as_deref()
+                .unwrap_or("none"),
             self.operation.as_str(),
             self.evidence_required,
             required_evidence,
@@ -403,6 +412,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::RecentArtifactsJudgment
         | OutputSemanticKind::ExcerptKindJudgment => TaskOperation::Summarize,
         OutputSemanticKind::GeneratedFileDelivery
+        | OutputSemanticKind::GeneratedFilePathReport
         | OutputSemanticKind::ArchivePack
         | OutputSemanticKind::FilesystemMutationResult => TaskOperation::Write,
         OutputSemanticKind::ArchiveUnpack
@@ -413,6 +423,7 @@ fn operation_for_route(route: &RouteResult) -> TaskOperation {
         | OutputSemanticKind::PublishingPreview
         | OutputSemanticKind::HiddenEntriesCheck
         | OutputSemanticKind::ContentPresenceCheck
+        | OutputSemanticKind::DocumentHeading
         | OutputSemanticKind::ScalarPathOnly
         | OutputSemanticKind::FileBasename
         | OutputSemanticKind::ExistenceWithPath
@@ -510,6 +521,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         OutputSemanticKind::ContentExcerptSummary
         | OutputSemanticKind::ContentExcerptWithSummary
         | OutputSemanticKind::ArchiveRead
+        | OutputSemanticKind::DocumentHeading
         | OutputSemanticKind::WebPageSummary
         | OutputSemanticKind::WeatherQuery
         | OutputSemanticKind::MarketQuote
@@ -533,7 +545,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
         }
         OutputSemanticKind::RecentArtifactsJudgment => {
             fields.insert("candidates");
-            fields.insert("field_value");
+            fields.insert("content_excerpt");
         }
         OutputSemanticKind::FileNames
         | OutputSemanticKind::DirectoryNames
@@ -573,6 +585,7 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
             fields.insert("count");
         }
         OutputSemanticKind::GeneratedFileDelivery
+        | OutputSemanticKind::GeneratedFilePathReport
         | OutputSemanticKind::FilesystemMutationResult
         | OutputSemanticKind::ArchivePack
         | OutputSemanticKind::ArchiveUnpack => {
@@ -595,6 +608,9 @@ pub(crate) fn fallback_required_evidence_fields_for_output_contract(
     }
     if output_contract.semantic_kind == OutputSemanticKind::ExistenceWithPathSummary {
         fields.insert("content_excerpt");
+    }
+    if output_contract.semantic_kind == OutputSemanticKind::DocumentHeading {
+        fields.insert("path");
     }
     fields.into_iter().map(str::to_string).collect()
 }

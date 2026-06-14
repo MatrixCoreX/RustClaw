@@ -9,12 +9,12 @@
 # - Cases that depend on local services or host tools are tagged `conditional`.
 
 # Builtin skills
-act|builtin_run_cmd_pwd_only|builtin,skill:run_cmd,local|执行 pwd，只输出当前工作目录的绝对路径
-act|builtin_read_file_fixture_name|builtin,skill:read_file,local|读取 scripts/nl_tests/fixtures/device_local/package.json 里的 name，只输出值
-act|builtin_list_dir_fixture_docs|builtin,skill:list_dir,local|列出 scripts/nl_tests/fixtures/device_local/docs 目录下有哪些文件，只输出文件名列表
-file|builtin_write_file_deliver|builtin,skill:write_file,local,side_effect|写一个文本文件 document/builtin_write_smoke.txt，内容是 builtin write smoke，然后把文件发给我
-chat_act|builtin_make_dir_smoke|builtin,skill:make_dir,local,side_effect|创建 document/nl_skill_tmp 目录，然后简短告诉我结果
-chat_act|builtin_remove_file_smoke|builtin,skill:remove_file,local,side_effect|删除 document/builtin_write_smoke.txt，然后简短告诉我结果
+act|builtin_run_cmd_pwd_only|builtin,builtin_skill:run_cmd,skill:run_cmd,local|执行 pwd，只输出当前工作目录的绝对路径
+act|builtin_read_file_fixture_name|builtin,builtin_skill:read_file,skill:read_file,local|读取 scripts/nl_tests/fixtures/device_local/package.json 里的 name，只输出值
+act|builtin_list_dir_fixture_docs|builtin,builtin_skill:list_dir,skill:list_dir,local|列出 scripts/nl_tests/fixtures/device_local/docs 目录下有哪些文件，只输出文件名列表
+file|builtin_write_file_deliver|builtin,builtin_skill:write_file,skill:write_file,local,side_effect|写一个文本文件 document/builtin_write_smoke.txt，内容是 builtin write smoke，然后把文件发给我
+chat_act|builtin_make_dir_smoke|builtin,builtin_skill:make_dir,skill:make_dir,local,side_effect|创建 document/nl_skill_tmp 目录，然后简短告诉我结果
+chat_act|builtin_remove_file_smoke|builtin,builtin_skill:remove_file,skill:remove_file,local,side_effect|删除 document/builtin_write_smoke.txt，然后简短告诉我结果
 
 # Runner skills: mostly local/read-only
 chat|skill_chat_brief_joke|skill:chat,local|讲一个简短冷笑话

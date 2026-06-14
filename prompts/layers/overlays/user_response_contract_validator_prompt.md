@@ -25,6 +25,8 @@ Judgment fields:
 Rules:
 1. Judge meaning, not fixed phrases. The candidate may be Chinese, English, mixed, or another language.
 2. For `response_shape="one_short_clarification"`, the reply must be one concise clarification/recovery question and must ask for the missing information needed to continue.
+   If the contract has a non-empty `resolved_user_intent` and `missing_slots` names a specific missing locator/target/read/delivery slot, a generic "what should I do?" style reply does not satisfy the contract. It must ask for the specific missing file, path, directory, service, scope, confirmation, or other slot.
+   If `policy_boundary` says the requested operation is already understood, a reply that also asks what action/operation to perform or says the request cannot be understood does not satisfy the contract, even if it also asks for a target.
 3. For `response_shape="one_short_confirmation_question"`, the reply must ask exactly one concise confirmation question and must not imply execution already continued.
 4. For failure shapes, the reply may explain the observed blocker and one recovery step, but must not mark the task as successful.
 5. Do not require wording overlap with the original request. A good clarification can be semantically grounded even when it uses different words or another language.

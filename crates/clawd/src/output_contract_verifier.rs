@@ -23,14 +23,56 @@ pub(crate) enum OutputContractVerdict {
     Pass,
     /// candidate **基本** 满足 contract，但有可程序化修复的 deviation；
     /// `reshaped` 是修复后的文本，调用方应直接用它替换原 candidate。
-    Reshape { reason: String, reshaped: String },
+    Reshape {
+        reason_code: &'static str,
+        reason: String,
+        reshaped: String,
+    },
     /// candidate **明显** 违反 contract，且无法程序化修复：
     /// scalar path/count 缺少对应结构值。
     /// 调用方应丢弃 candidate，走 §7.2 `VerifyRejected` fallback。
-    Reject { reason: String },
+    Reject {
+        reason_code: &'static str,
+        reason: String,
+    },
 }
 
 impl OutputContractVerdict {
+    pub(crate) const OWNER_LAYER: &'static str = "output_contract_verifier";
+
+    pub(crate) fn reshape(
+        reason_code: &'static str,
+        reason: impl Into<String>,
+        reshaped: impl Into<String>,
+    ) -> Self {
+        Self::Reshape {
+            reason_code,
+            reason: reason.into(),
+            reshaped: reshaped.into(),
+        }
+    }
+
+    pub(crate) fn reject(reason_code: &'static str, reason: impl Into<String>) -> Self {
+        Self::Reject {
+            reason_code,
+            reason: reason.into(),
+        }
+    }
+
+    pub(crate) fn owner_layer(&self) -> &'static str {
+        Self::OWNER_LAYER
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn reason_code(&self) -> Option<&'static str> {
+        match self {
+            Self::Pass => None,
+            Self::Reshape { reason_code, .. } | Self::Reject { reason_code, .. } => {
+                Some(*reason_code)
+            }
+        }
+    }
+
     /// 给未来 metrics counter `clawd_finalize_verify_total{verdict="..."}` 用。
     /// 当前 finalize hook 直接用 match 分支 + tracing field，未走此函数。
     #[allow(dead_code)]
@@ -150,9 +192,10 @@ fn verify_directory_names(
 ) -> OutputContractVerdict {
     let items = output_list_items(text);
     if items.is_empty() {
-        return OutputContractVerdict::Reject {
-            reason: "directory_names: empty list candidate".to_string(),
-        };
+        return OutputContractVerdict::reject(
+            "directory_names_empty_list_candidate",
+            "directory_names: empty list candidate",
+        );
     }
     let ext_hints = extension_hints_from_text(user_request);
     let file_like = items
@@ -168,15 +211,16 @@ fn verify_directory_names(
             ext_hints.contains(ext) && (item.contains('/') || item.contains('\\'))
         })
     {
-        return OutputContractVerdict::Reject {
-            reason: "directory_names: candidate contains file entries matching requested extension"
-                .to_string(),
-        };
+        return OutputContractVerdict::reject(
+            "directory_names_requested_extension_file_entries",
+            "directory_names: candidate contains file entries matching requested extension",
+        );
     }
     if items.len() >= 3 && file_like.len().saturating_mul(2) > items.len() {
-        return OutputContractVerdict::Reject {
-            reason: "directory_names: candidate mostly contains file-like entries".to_string(),
-        };
+        return OutputContractVerdict::reject(
+            "directory_names_mostly_file_like_entries",
+            "directory_names: candidate mostly contains file-like entries",
+        );
     }
     let locator_hint = contract.locator_hint.trim();
     if !locator_hint.is_empty()
@@ -184,9 +228,10 @@ fn verify_directory_names(
         && items[0].contains(locator_hint)
         && file_like.len() == 1
     {
-        return OutputContractVerdict::Reject {
-            reason: "directory_names: locator candidate is file-like".to_string(),
-        };
+        return OutputContractVerdict::reject(
+            "directory_names_locator_candidate_file_like",
+            "directory_names: locator candidate is file-like",
+        );
     }
     OutputContractVerdict::Pass
 }
@@ -206,24 +251,26 @@ fn verify_existence_with_path(
 fn verify_scalar_path_only(contract: &IntentOutputContract, text: &str) -> OutputContractVerdict {
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        return OutputContractVerdict::Reject {
-            reason: "scalar_path_only: empty candidate".to_string(),
-        };
+        return OutputContractVerdict::reject(
+            "scalar_path_only_empty_candidate",
+            "scalar_path_only: empty candidate",
+        );
     }
     if let Some(token) = first_path_like_token(trimmed) {
         if token != trimmed {
-            return OutputContractVerdict::Reshape {
-                reason: "scalar_path_only: extracted first path token".to_string(),
-                reshaped: token,
-            };
+            return OutputContractVerdict::reshape(
+                "scalar_path_only_extracted_first_path_token",
+                "scalar_path_only: extracted first path token",
+                token,
+            );
         }
         return OutputContractVerdict::Pass;
     }
     if !contains_path_or_locator(trimmed, &contract.locator_hint) {
-        return OutputContractVerdict::Reject {
-            reason: "scalar_path_only: candidate does not contain a path or locator token"
-                .to_string(),
-        };
+        return OutputContractVerdict::reject(
+            "scalar_path_only_missing_path_or_locator",
+            "scalar_path_only: candidate does not contain a path or locator token",
+        );
     }
     OutputContractVerdict::Pass
 }
@@ -233,9 +280,10 @@ fn verify_scalar_path_only(contract: &IntentOutputContract, text: &str) -> Outpu
 fn verify_scalar_count(contract: &IntentOutputContract, text: &str) -> OutputContractVerdict {
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        return OutputContractVerdict::Reject {
-            reason: "scalar_count: empty candidate".to_string(),
-        };
+        return OutputContractVerdict::reject(
+            "scalar_count_empty_candidate",
+            "scalar_count: empty candidate",
+        );
     }
     if scalar_count_candidate_is_structural_unavailable_result(trimmed, &contract.locator_hint) {
         return OutputContractVerdict::Pass;
@@ -245,18 +293,20 @@ fn verify_scalar_count(contract: &IntentOutputContract, text: &str) -> OutputCon
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>();
     let Some(first_int) = integers.first().copied() else {
-        return OutputContractVerdict::Reject {
-            reason: "scalar_count: candidate contains no integer literal".to_string(),
-        };
+        return OutputContractVerdict::reject(
+            "scalar_count_missing_integer_literal",
+            "scalar_count: candidate contains no integer literal",
+        );
     };
     if trimmed == first_int {
         return OutputContractVerdict::Pass;
     }
     if integers.iter().all(|candidate| *candidate == first_int) {
-        return OutputContractVerdict::Reshape {
-            reason: "scalar_count: extracted only unique integer from candidate".to_string(),
-            reshaped: first_int.to_string(),
-        };
+        return OutputContractVerdict::reshape(
+            "scalar_count_extracted_unique_integer",
+            "scalar_count: extracted only unique integer from candidate",
+            first_int.to_string(),
+        );
     }
     OutputContractVerdict::Pass
 }
@@ -279,9 +329,10 @@ fn verify_hidden_entries_check(
     text: &str,
 ) -> OutputContractVerdict {
     if text.trim().is_empty() {
-        return OutputContractVerdict::Reject {
-            reason: "hidden_entries_check: empty candidate".to_string(),
-        };
+        return OutputContractVerdict::reject(
+            "hidden_entries_check_empty_candidate",
+            "hidden_entries_check: empty candidate",
+        );
     }
     // 正/否和示例是否充分属于语义输出质量，交给 composer/prompt。
     OutputContractVerdict::Pass
@@ -295,9 +346,7 @@ pub(crate) fn verify_output_contract(
 ) -> OutputContractVerdict {
     let trimmed_candidate = candidate.trim();
     if trimmed_candidate.is_empty() {
-        return OutputContractVerdict::Reject {
-            reason: "candidate is empty".to_string(),
-        };
+        return OutputContractVerdict::reject("candidate_empty", "candidate is empty");
     }
 
     // 默认契约（response_shape=Free + semantic_kind=None）不强制任何形状，直接 Pass。
@@ -320,10 +369,10 @@ pub(crate) fn verify_output_contract(
             if contains_path_or_locator(trimmed_candidate, &contract.locator_hint) {
                 OutputContractVerdict::Pass
             } else {
-                OutputContractVerdict::Reject {
-                    reason: "scalar_path_only: non-scalar candidate does not contain a path or locator token"
-                        .to_string(),
-                }
+                OutputContractVerdict::reject(
+                    "scalar_path_only_non_scalar_missing_path_or_locator",
+                    "scalar_path_only: non-scalar candidate does not contain a path or locator token",
+                )
             }
         }
         OutputSemanticKind::HiddenEntriesCheck => {

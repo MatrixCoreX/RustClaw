@@ -573,6 +573,9 @@ impl LlmProvider for FixtureReplayProvider {
                         }),
                         raw_response: raw,
                         usage: rec.usage.clone(),
+                        attempts: 1,
+                        retryable_error_count: 0,
+                        last_retry_error_kind: None,
                     })
                 }
                 None => {
@@ -605,6 +608,9 @@ impl LlmProvider for FixtureReplayProvider {
                                 }),
                                 raw_response: raw,
                                 usage: rec.usage.clone(),
+                                attempts: 1,
+                                retryable_error_count: 0,
+                                last_retry_error_kind: None,
                             });
                         }
                     }

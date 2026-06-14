@@ -31,6 +31,23 @@ fn list_missing_archive_returns_structured_not_found() {
 }
 
 #[test]
+fn list_zip_archive_returns_structured_member_entries() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip")
+        .canonicalize()
+        .expect("fixture archive exists");
+
+    let listing = list_archive(&fixture).expect("list fixture archive");
+
+    assert_eq!(
+        listing.entries,
+        vec!["notes.txt".to_string(), "nested/config.ini".to_string()]
+    );
+    assert!(listing.output.contains("notes.txt"));
+    assert!(listing.output.contains("nested/config.ini"));
+}
+
+#[test]
 fn archive_member_rejects_traversal() {
     let err = normalize_archive_member("../secret.txt").expect_err("reject traversal");
     assert_eq!(err.kind, "invalid_input");

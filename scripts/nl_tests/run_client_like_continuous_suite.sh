@@ -14,16 +14,22 @@ EXTERNAL_USER_ID_VALUE="${EXTERNAL_USER_ID:-}"
 USER_KEY_VALUE="${RUSTCLAW_USER_KEY:-${USER_KEY:-}}"
 CONFIG_PATH_VALUE="${RUSTCLAW_CONFIG_PATH:-${ROOT_DIR}/configs/config.toml}"
 DB_PATH_VALUE="${RUSTCLAW_DB_PATH:-}"
-WAIT_SECONDS_VALUE="${MAX_WAIT_SECONDS:-600}"
+WAIT_SECONDS_VALUE="${MAX_WAIT_SECONDS:-1200}"
 POLL_SECONDS_VALUE="${POLL_INTERVAL_SECONDS:-1}"
+LLM_INFRA_TURN_RETRIES_VALUE="${LLM_INFRA_TURN_RETRIES:-3}"
 LOG_ROOT="${ROOT_DIR}/scripts/nl_suite_logs/client_like_continuous"
 PROMPT_REPLY_ONLY=1
 QUALITY_GUARD=0
 CASE_FILE_VALUE=""
 CASE_JSONL_VALUE=""
 CASE_LIMIT_VALUE=""
+CASE_GROUP_LIMIT_VALUE="${CASE_GROUP_LIMIT:-}"
 CASE_START_VALUE="${CASE_START:-1}"
+CASE_INCLUDE_TAGS_VALUE="${CASE_INCLUDE_TAGS:-}"
+CASE_INCLUDE_ANY_TAGS_VALUE="${CASE_INCLUDE_ANY_TAGS:-}"
 CASE_EXCLUDE_TAGS_VALUE="${CASE_EXCLUDE_TAGS:-}"
+CASE_INCLUDE_GROUPS_VALUE="${CASE_INCLUDE_GROUPS:-0}"
+CASE_INCLUDE_GROUP_CONTEXT_VALUE="${CASE_INCLUDE_GROUP_CONTEXT:-0}"
 RUN_BUILTIN_SMOKE=1
 CASE_GROUP_ISOLATION="${CASE_GROUP_ISOLATION:-1}"
 RUN_STAMP="$(date +%Y%m%d_%H%M%S)"
@@ -48,15 +54,28 @@ Options:
   --user-key KEY             RustClaw user key. Default: RUSTCLAW_USER_KEY/USER_KEY or first enabled admin key
   --config PATH              config.toml used to resolve DB path for assertions
   --db-path PATH             main SQLite DB path for assertions
-  --wait-seconds N           max wait per turn. Default: 600
+  --wait-seconds N           max wait per turn. Default: 1200
   --poll-seconds N           poll interval seconds. Default: 1
+  --llm-infra-turn-retries N retry a turn when trace shows model infra failure.
+                             Default: LLM_INFRA_TURN_RETRIES or 3
   --log-root PATH            log output root
   --case-file PATH           append prompts from a case file into the same client-like conversation
   --case-jsonl PATH          append prompts from JSONL rows with name/tags/prompt/expect fields
   --full-nl                  shorthand for --case-file scripts/nl_tests/cases/nl_cases_full.txt
   --case-limit N             max appended cases from --case-file/--full-nl
+  --case-group-limit N       max appended case groups; preserves all rows in each emitted group.
+                             When set, this is preferred over --case-limit for group-preserving runs.
   --case-start N             start from the Nth appended case. Use with --skip-smoke and the same
                              --external-chat-id/--external-user-id to resume after provider failure.
+  --include-case-tag TAG     run only appended cases whose tag string contains TAG. May be repeated;
+                             repeated values are all required.
+  --include-case-tag-any TAG run appended cases whose tag string contains any of these tags.
+                             May be repeated; combines with --include-case-tag as an additional OR filter.
+  --include-case-groups      when include tags match any row in a case group, keep the whole group.
+                             This preserves setup turns for filtered continuous cases.
+  --include-case-group-context
+                             when include tags match any row in a case group, keep matched rows plus
+                             tagged context/setup rows from that group instead of the whole group.
   --exclude-case-tag TAG     skip appended cases whose tag string contains TAG. May be repeated.
   --skip-smoke               run only the case file prompts, without the built-in 5-turn memory smoke
   --shared-case-chat         append all case-file prompts into one external_chat_id. By default,
@@ -117,6 +136,10 @@ while [[ $# -gt 0 ]]; do
       POLL_SECONDS_VALUE="${2:-}"
       shift 2
       ;;
+    --llm-infra-turn-retries)
+      LLM_INFRA_TURN_RETRIES_VALUE="${2:-}"
+      shift 2
+      ;;
     --log-root)
       LOG_ROOT="${2:-}"
       shift 2
@@ -137,9 +160,45 @@ while [[ $# -gt 0 ]]; do
       CASE_LIMIT_VALUE="${2:-}"
       shift 2
       ;;
+    --case-group-limit)
+      CASE_GROUP_LIMIT_VALUE="${2:-}"
+      shift 2
+      ;;
     --case-start)
       CASE_START_VALUE="${2:-}"
       shift 2
+      ;;
+    --include-case-tag)
+      if [[ -z "${2:-}" ]]; then
+        echo "--include-case-tag requires a value" >&2
+        exit 2
+      fi
+      if [[ -n "${CASE_INCLUDE_TAGS_VALUE:-}" ]]; then
+        CASE_INCLUDE_TAGS_VALUE="${CASE_INCLUDE_TAGS_VALUE},${2}"
+      else
+        CASE_INCLUDE_TAGS_VALUE="${2}"
+      fi
+      shift 2
+      ;;
+    --include-case-tag-any)
+      if [[ -z "${2:-}" ]]; then
+        echo "--include-case-tag-any requires a value" >&2
+        exit 2
+      fi
+      if [[ -n "${CASE_INCLUDE_ANY_TAGS_VALUE:-}" ]]; then
+        CASE_INCLUDE_ANY_TAGS_VALUE="${CASE_INCLUDE_ANY_TAGS_VALUE},${2}"
+      else
+        CASE_INCLUDE_ANY_TAGS_VALUE="${2}"
+      fi
+      shift 2
+      ;;
+    --include-case-groups)
+      CASE_INCLUDE_GROUPS_VALUE=1
+      shift
+      ;;
+    --include-case-group-context)
+      CASE_INCLUDE_GROUP_CONTEXT_VALUE=1
+      shift
       ;;
     --exclude-case-tag)
       if [[ -z "${2:-}" ]]; then
@@ -343,6 +402,7 @@ soft_markers = [
     "model is temporarily unavailable",
     "temporarily unavailable (auth/network/circuit",
     "auth/network/circuit",
+    "could not reach the model service",
     "please retry later or switch to an available model",
     "我没看出这条消息要做什么",
     "没有足够的上下文",
@@ -358,11 +418,59 @@ raise SystemExit(1)
 PY
 }
 
+result_is_retryable_llm_infra_failure() {
+  local file="$1"
+  python3 - "$file" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+
+data = obj.get("data") or {}
+result = data.get("result_json") or {}
+journal = result.get("task_journal") or {}
+summary = journal.get("summary") or {}
+trace = journal.get("trace") or {}
+
+status = str(data.get("status") or "").strip().lower()
+error_text = str(data.get("error_text") or result.get("error_text") or "").strip().lower()
+if status == "timeout":
+    raise SystemExit(0)
+if error_text.startswith("provider=") and "timeout:" in error_text:
+    raise SystemExit(0)
+if "poll timeout waiting for terminal task status" in error_text:
+    raise SystemExit(0)
+
+values = []
+for parent in (summary, trace):
+    route = (parent or {}).get("route_result") or {}
+    values.append(str(route.get("route_reason") or ""))
+    values.append(str(route.get("first_layer_decision") or ""))
+values.append(str(summary.get("final_stop_signal") or ""))
+values.append(str(trace.get("final_stop_signal") or ""))
+joined = ";".join(values)
+
+retryable_codes = {
+    "llm_failed_safe_clarify",
+    "normalizer_llm_failed",
+    "fallback_router_llm_failed",
+}
+if any(code in joined for code in retryable_codes):
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
 quality_violation_reason() {
   local file="$1"
   local prompt="${2:-}"
   local expected="${3:-}"
-  python3 - "$file" "$prompt" "$expected" <<'PY'
+  local case_tags="${4:-}"
+  python3 - "$file" "$prompt" "$expected" "$case_tags" <<'PY'
 import json
 import re
 import sys
@@ -371,13 +479,25 @@ from pathlib import Path
 obj = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 prompt = sys.argv[2]
 expected = sys.argv[3] if len(sys.argv) > 3 else ""
+case_tags = sys.argv[4] if len(sys.argv) > 4 else ""
 prompt_l = prompt.lower()
+tagset = {part.strip().lower() for part in case_tags.split(",") if part.strip()}
 data = obj.get("data") or {}
 result = data.get("result_json") or {}
 journal = result.get("task_journal") or {}
 summary = journal.get("summary") or {}
 route_result = summary.get("route_result") or {}
 needs_clarify = bool(route_result.get("needs_clarify"))
+final_status = str(summary.get("final_status") or "").strip().lower()
+final_visible = str(result.get("text") or "").strip()
+if not final_visible:
+    for item in result.get("messages") or []:
+        if isinstance(item, str) and item.strip():
+            final_visible = item.strip()
+            break
+        if isinstance(item, dict) and str(item.get("text") or "").strip():
+            final_visible = str(item.get("text") or "").strip()
+            break
 texts = [str(data.get("error_text") or ""), str(result.get("text") or "")]
 for item in result.get("messages") or []:
     if isinstance(item, str):
@@ -386,6 +506,90 @@ for item in result.get("messages") or []:
         texts.append(str(item.get("text") or ""))
 text = "\n".join(part for part in texts if part).strip()
 text_l = text.lower()
+
+internal_context_markers = [
+    "### ACTIVE_EXECUTION_ANCHOR",
+    "### ACTIVE_TASK",
+    "### ALIASES",
+    "### ANCHOR",
+    "### AUTH",
+    "### CAPABILITIES",
+    "### HINTS",
+    "### MEMORY",
+    "### RECENT",
+    "### RECENT_EXECUTION_CONTEXT",
+    "### RECENT_TURNS_FULL",
+    "### SESSION_ALIAS_BINDINGS",
+]
+if any(marker in text for marker in internal_context_markers):
+    print("internal_context_marker_visible")
+    raise SystemExit(0)
+
+try:
+    visible_json = json.loads(text)
+except Exception:
+    visible_json = None
+if isinstance(visible_json, dict) and {
+    "message_key",
+    "status_source",
+    "field_value",
+    "error_code",
+    "reason_code",
+} & set(visible_json):
+    print("runtime_structured_json_visible")
+    raise SystemExit(0)
+
+if "execution_failed_step" in tagset:
+    trace = journal.get("trace") or {}
+    contract = (
+        (trace.get("runtime_contract_snapshot") or {}).get("contract")
+        or trace.get("contract_matrix")
+        or {}
+    )
+    if str(contract.get("semantic_kind") or "").strip() != "execution_failed_step":
+        print("execution_failed_step_contract_missing")
+        raise SystemExit(0)
+    step_results = trace.get("step_results") or []
+    failed_steps = [
+        item for item in step_results
+        if str((item or {}).get("status") or "").strip().lower() in {"error", "failed"}
+        and str((item or {}).get("skill") or (item or {}).get("executed_skill") or "").strip()
+        not in {"respond", "think", "synthesize_answer"}
+    ]
+    if not failed_steps:
+        print("execution_failed_step_without_failed_evidence")
+        raise SystemExit(0)
+    ok_outputs = []
+    for item in step_results:
+        item = item or {}
+        if str(item.get("status") or "").strip().lower() != "ok":
+            continue
+        skill = str(item.get("skill") or item.get("executed_skill") or "").strip()
+        if skill in {"respond", "think", "synthesize_answer"}:
+            continue
+        output = str(item.get("output_excerpt") or "").strip()
+        if output:
+            ok_outputs.append(output)
+    if final_visible and final_visible in ok_outputs:
+        print("execution_failed_step_final_is_success_output")
+        raise SystemExit(0)
+
+if "scalar" in tagset and "allow_multiline_scalar" not in tagset:
+    scalar_lines = [line.strip() for line in final_visible.splitlines() if line.strip()]
+    if len(scalar_lines) > 1:
+        print("scalar_case_multiline_reply")
+        raise SystemExit(0)
+
+clarify_allowed_tags = {
+    "allow_clarify",
+    "clarify",
+    "missing_file_graceful",
+    "suite:ask",
+    "suite:failure",
+}
+if final_status == "clarify" and not (tagset & clarify_allowed_tags):
+    print("unexpected_clarify_final_status")
+    raise SystemExit(0)
 
 if (
     "client-like-continuous-" in text
@@ -649,8 +853,9 @@ def capability_family_names(name: str) -> set[str]:
         "make_dir": {"make_dir", "fs_basic"},
         # Directory inventory/listing may be served by the structured system tool.
         "list_dir": {"list_dir", "system_basic", "fs_basic"},
-        # Legacy system_basic filesystem probes may now be planned through fs_basic.
-        "system_basic": {"system_basic", "fs_basic"},
+        # Legacy system_basic filesystem/runtime probes may now be planned through
+        # fs_basic for filesystem facts or health_check for host/system snapshots.
+        "system_basic": {"system_basic", "fs_basic", "health_check"},
         # Repository/file search now commonly uses fs_basic.find_entries.
         "fs_search": {"fs_search", "fs_basic"},
         # Read-only service status may be answered through process inventory.
@@ -820,9 +1025,13 @@ submit_turn() {
   local submit_attempt submit_status submit_extract
   local max_submit_attempts="${SUBMIT_RETRIES:-5}"
   local submit_retry_sleep_seconds="${SUBMIT_RETRY_SLEEP_SECONDS:-30}"
+  local infra_retry_count="${7:-0}"
+  local max_infra_retries="${LLM_INFRA_TURN_RETRIES_VALUE:-0}"
 
   [[ "$max_submit_attempts" =~ ^[0-9]+$ ]] || max_submit_attempts=1
   [[ "$submit_retry_sleep_seconds" =~ ^[0-9]+$ ]] || submit_retry_sleep_seconds=30
+  [[ "$infra_retry_count" =~ ^[0-9]+$ ]] || infra_retry_count=0
+  [[ "$max_infra_retries" =~ ^[0-9]+$ ]] || max_infra_retries=0
   if [[ "$max_submit_attempts" -lt 1 ]]; then
     max_submit_attempts=1
   fi
@@ -918,17 +1127,27 @@ PY
   if [[ "$status" != "succeeded" ]]; then
     echo "Turn ${turn} did not succeed: status=${status} error=${error}" >&2
     print_log_hints "$task_id" >&2
+    if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then
+      echo "[TURN ${turn}] retry_llm_infra retry=$((infra_retry_count + 1))/${max_infra_retries}" >&2
+      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))"
+      return $?
+    fi
     return 1
   fi
   if result_has_bad_fallback "$out_file" "$prompt"; then
     echo "Turn ${turn} returned bad fallback/unavailable text." >&2
     print_log_hints "$task_id" >&2
+    if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then
+      echo "[TURN ${turn}] retry_llm_infra retry=$((infra_retry_count + 1))/${max_infra_retries}" >&2
+      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))"
+      return $?
+    fi
     return 1
   fi
   if [[ "$QUALITY_GUARD" -eq 1 ]]; then
     local quality_reason quality_status
     quality_status=0
-    quality_reason="$(quality_violation_reason "$out_file" "$prompt" "$expected_marker" 2>&1)" || quality_status=$?
+    quality_reason="$(quality_violation_reason "$out_file" "$prompt" "$expected_marker" "$case_tags" 2>&1)" || quality_status=$?
     if [[ "$quality_status" -ne 0 ]]; then
       echo "Turn ${turn} quality guard crashed." >&2
       echo "  checker_output=${quality_reason:-<empty>}" >&2
@@ -939,6 +1158,11 @@ PY
       echo "Turn ${turn} failed quality guard: ${quality_reason}" >&2
       echo "  reply=${text:-${error:-<empty>}}" >&2
       print_log_hints "$task_id" >&2
+      if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then
+        echo "[TURN ${turn}] retry_llm_infra retry=$((infra_retry_count + 1))/${max_infra_retries}" >&2
+        submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))"
+        return $?
+      fi
       return 1
     fi
     local skill_guard_reason
@@ -949,10 +1173,25 @@ PY
       return 1
     fi
   fi
+  local case_tags_l=",${case_tags,,},"
+  if [[ -n "$expected_marker" && "$case_tags_l" == *",expect_exact_scalar,"* ]]; then
+    local scalar_reason
+    if ! scalar_reason="$(assert_reply_scalar_equals "$out_file" "$expected_marker" 2>&1)"; then
+      echo "Turn ${turn} failed exact scalar expectation: ${scalar_reason}" >&2
+      echo "  reply=${text:-${error:-<empty>}}" >&2
+      print_log_hints "$task_id" >&2
+      return 1
+    fi
+  fi
   if [[ -n "$expected_marker" ]] && ! result_text_contains "$out_file" "$expected_marker"; then
     echo "Turn ${turn} did not include expected marker: ${expected_marker}" >&2
     echo "  reply=${text:-${error:-<empty>}}" >&2
     print_log_hints "$task_id" >&2
+    if result_is_retryable_llm_infra_failure "$out_file" && [[ "$infra_retry_count" -lt "$max_infra_retries" ]]; then
+      echo "[TURN ${turn}] retry_llm_infra retry=$((infra_retry_count + 1))/${max_infra_retries}" >&2
+      submit_turn "$turn" "$prompt" "$out_file" "$expected_marker" "$case_tags" "$turn_external_chat_id" "$((infra_retry_count + 1))"
+      return $?
+    fi
     return 1
   fi
 }
@@ -962,7 +1201,12 @@ load_case_rows() {
   local case_limit="$2"
   local case_start="$3"
   local exclude_tags="$4"
-  python3 - "$case_file" "$case_limit" "$case_start" "$exclude_tags" <<'PY'
+  local include_tags="$5"
+  local include_groups="$6"
+  local group_limit="$7"
+  local include_group_context="$8"
+  local include_any_tags="$9"
+  python3 - "$case_file" "$case_limit" "$case_start" "$exclude_tags" "$include_tags" "$include_groups" "$group_limit" "$include_group_context" "$include_any_tags" <<'PY'
 import hashlib
 import re
 import sys
@@ -972,24 +1216,66 @@ case_file = Path(sys.argv[1])
 limit_raw = sys.argv[2].strip()
 start_raw = sys.argv[3].strip()
 exclude_tags = [token.strip() for token in sys.argv[4].split(",") if token.strip()]
+include_tags = [token.strip() for token in sys.argv[5].split(",") if token.strip()]
+include_groups = sys.argv[6].strip() in {"1", "true", "yes"}
+group_limit_raw = sys.argv[7].strip()
+include_group_context = sys.argv[8].strip() in {"1", "true", "yes"}
+include_any_tags = [token.strip() for token in sys.argv[9].split(",") if token.strip()]
 limit = int(limit_raw) if limit_raw else 0
+group_limit = int(group_limit_raw) if group_limit_raw else 0
 start = int(start_raw) if start_raw else 1
 if start < 1:
     raise SystemExit(f"case_start must be >= 1, got {start}")
+if group_limit < 0:
+    raise SystemExit(f"case_group_limit must be >= 0, got {group_limit}")
 seen = 0
 emitted = 0
+emitted_groups = set()
 row_sep = "\x1f"
-def case_group_for_name(name: str) -> str:
+
+def explicit_group_from_tags(tags: str) -> str:
+    for raw in tags.split(","):
+        token = raw.strip()
+        if token.startswith("group:"):
+            return token[len("group:") :].strip()
+        if token.startswith("group="):
+            return token[len("group=") :].strip()
+    return ""
+
+def tag_tokens(tags: str) -> set[str]:
+    return {token.strip() for token in tags.split(",") if token.strip()}
+
+def row_is_context_setup(tags: str) -> bool:
+    tokens = tag_tokens(tags)
+    return bool(tokens & {"alias", "correction", "context_setup"})
+
+def row_matches_include_filter(tags: str) -> bool:
+    tokens = tag_tokens(tags)
+    if include_tags and not all(token in tokens for token in include_tags):
+        return False
+    if include_any_tags and not any(token in tokens for token in include_any_tags):
+        return False
+    return True
+
+def row_matches_exclude_filter(tags: str) -> bool:
+    tokens = tag_tokens(tags)
+    return bool(exclude_tags and any(token in tokens for token in exclude_tags))
+
+def case_group_for_name(name: str, tags: str) -> str:
+    explicit = explicit_group_from_tags(tags)
+    if explicit:
+        return explicit
     base = name.strip() or "unnamed_case"
     stripped = re.sub(r"_turn[0-9]+$", "", base)
     return stripped or base
 
-def group_key_for_name(name: str) -> str:
-    group = case_group_for_name(name)
+def group_key_for_name(name: str, tags: str) -> str:
+    group = case_group_for_name(name, tags)
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", group).strip("-")[:72]
     digest = hashlib.sha1(group.encode("utf-8")).hexdigest()[:12]
     return f"{safe or 'case'}-{digest}"
 
+rows = []
 for raw in case_file.read_text(encoding="utf-8").splitlines():
     line = raw.strip()
     if not line or line.startswith("#"):
@@ -1004,20 +1290,72 @@ for raw in case_file.read_text(encoding="utf-8").splitlines():
         prompt, expect = prompt.rsplit(expect_marker, 1)
         expect = expect.strip()
     seen += 1
-    if exclude_tags and any(token in tags for token in exclude_tags):
+    group_key = group_key_for_name(name, tags)
+    rows.append({
+        "seen": seen,
+        "suite": suite,
+        "name": name,
+        "tags": tags,
+        "prompt": prompt,
+        "expect": expect,
+        "group_key": group_key,
+    })
+
+selected_groups = set()
+matched_group_max_seen = {}
+if (include_tags or include_any_tags) and (include_groups or include_group_context):
+    for row in rows:
+        if row["seen"] < start:
+            continue
+        tags = row["tags"]
+        if row_matches_exclude_filter(tags):
+            continue
+        if row_matches_include_filter(tags):
+            group_key = row["group_key"]
+            selected_groups.add(group_key)
+            matched_group_max_seen[group_key] = max(
+                row["seen"], matched_group_max_seen.get(group_key, 0)
+            )
+
+for row in rows:
+    if row["seen"] < start:
         continue
-    if seen < start:
+    suite = row["suite"]
+    name = row["name"]
+    tags = row["tags"]
+    prompt = row["prompt"]
+    expect = row["expect"]
+    group_key = row["group_key"]
+    if row_matches_exclude_filter(tags):
         continue
+    if include_tags or include_any_tags:
+        if include_groups:
+            if group_key not in selected_groups:
+                continue
+        elif include_group_context:
+            if group_key not in selected_groups:
+                continue
+            row_matches = row_matches_include_filter(tags)
+            context_setup = row_is_context_setup(tags) and row["seen"] <= matched_group_max_seen.get(group_key, 0)
+            if not row_matches and not context_setup:
+                continue
+        elif not row_matches_include_filter(tags):
+            continue
+    if group_limit and group_key not in emitted_groups:
+        if len(emitted_groups) >= group_limit:
+            break
+        emitted_groups.add(group_key)
     emitted += 1
+    emitted_tags = ",".join(part for part in [f"suite:{suite.strip()}", tags] if part)
     print(row_sep.join([
-        str(seen),
-        group_key_for_name(name),
+        str(row["seen"]),
+        group_key,
         name.replace("\t", " ").replace(row_sep, " "),
-        tags.replace("\t", " ").replace(row_sep, " "),
+        emitted_tags.replace("\t", " ").replace(row_sep, " "),
         prompt.replace("\t", " ").replace(row_sep, " "),
         expect.replace("\t", " ").replace(row_sep, " "),
     ]))
-    if limit and emitted >= limit:
+    if not group_limit and limit and emitted >= limit:
         break
 PY
 }
@@ -1027,7 +1365,12 @@ load_case_rows_jsonl() {
   local case_limit="$2"
   local case_start="$3"
   local exclude_tags="$4"
-  python3 - "$case_jsonl" "$case_limit" "$case_start" "$exclude_tags" <<'PY'
+  local include_tags="$5"
+  local include_groups="$6"
+  local group_limit="$7"
+  local include_group_context="$8"
+  local include_any_tags="$9"
+  python3 - "$case_jsonl" "$case_limit" "$case_start" "$exclude_tags" "$include_tags" "$include_groups" "$group_limit" "$include_group_context" "$include_any_tags" <<'PY'
 import hashlib
 import json
 import re
@@ -1038,21 +1381,60 @@ case_file = Path(sys.argv[1])
 limit_raw = sys.argv[2].strip()
 start_raw = sys.argv[3].strip()
 exclude_tags = [token.strip() for token in sys.argv[4].split(",") if token.strip()]
+include_tags = [token.strip() for token in sys.argv[5].split(",") if token.strip()]
+include_groups = sys.argv[6].strip() in {"1", "true", "yes"}
+group_limit_raw = sys.argv[7].strip()
+include_group_context = sys.argv[8].strip() in {"1", "true", "yes"}
+include_any_tags = [token.strip() for token in sys.argv[9].split(",") if token.strip()]
 limit = int(limit_raw) if limit_raw else 0
+group_limit = int(group_limit_raw) if group_limit_raw else 0
 start = int(start_raw) if start_raw else 1
 if start < 1:
     raise SystemExit(f"case_start must be >= 1, got {start}")
+if group_limit < 0:
+    raise SystemExit(f"case_group_limit must be >= 0, got {group_limit}")
 seen = 0
 emitted = 0
+emitted_groups = set()
 row_sep = "\x1f"
 
-def group_key_for_name(name: str) -> str:
+def explicit_group_from_tags(tags: str) -> str:
+    for raw in tags.split(","):
+        token = raw.strip()
+        if token.startswith("group:"):
+            return token[len("group:") :].strip()
+        if token.startswith("group="):
+            return token[len("group=") :].strip()
+    return ""
+
+def tag_tokens(tags: str) -> set[str]:
+    return {token.strip() for token in tags.split(",") if token.strip()}
+
+def row_is_context_setup(tags: str) -> bool:
+    tokens = tag_tokens(tags)
+    return bool(tokens & {"alias", "correction", "context_setup"})
+
+def row_matches_include_filter(tags: str) -> bool:
+    tokens = tag_tokens(tags)
+    if include_tags and not all(token in tokens for token in include_tags):
+        return False
+    if include_any_tags and not any(token in tokens for token in include_any_tags):
+        return False
+    return True
+
+def row_matches_exclude_filter(tags: str) -> bool:
+    tokens = tag_tokens(tags)
+    return bool(exclude_tags and any(token in tokens for token in exclude_tags))
+
+def group_key_for_name(name: str, tags: str) -> str:
+    explicit = explicit_group_from_tags(tags)
     base = name.strip() or "unnamed_case"
-    stripped = re.sub(r"_turn[0-9]+$", "", base) or base
+    stripped = explicit or re.sub(r"_turn[0-9]+$", "", base) or base
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", stripped).strip("-")[:72]
     digest = hashlib.sha1(stripped.encode("utf-8")).hexdigest()[:12]
     return f"{safe or 'case'}-{digest}"
 
+rows = []
 for lineno, raw in enumerate(case_file.read_text(encoding="utf-8").splitlines(), 1):
     line = raw.strip()
     if not line or line.startswith("#"):
@@ -1070,20 +1452,68 @@ for lineno, raw in enumerate(case_file.read_text(encoding="utf-8").splitlines(),
         tags = str(tags)
     expect = row.get("expect") or ""
     seen += 1
-    if exclude_tags and any(token in tags for token in exclude_tags):
+    group_key = group_key_for_name(name, tags)
+    rows.append({
+        "seen": seen,
+        "suite": suite,
+        "name": name,
+        "tags": tags,
+        "prompt": prompt,
+        "expect": str(expect),
+        "group_key": group_key,
+    })
+
+selected_groups = set()
+matched_group_max_seen = {}
+if (include_tags or include_any_tags) and (include_groups or include_group_context):
+    for row in rows:
+        if row["seen"] < start:
+            continue
+        tags = row["tags"]
+        if row_matches_exclude_filter(tags):
+            continue
+        if row_matches_include_filter(tags):
+            group_key = row["group_key"]
+            selected_groups.add(group_key)
+            matched_group_max_seen[group_key] = max(
+                row["seen"], matched_group_max_seen.get(group_key, 0)
+            )
+
+for row in rows:
+    if row["seen"] < start:
         continue
-    if seen < start:
+    tags = row["tags"]
+    if row_matches_exclude_filter(tags):
         continue
+    if include_tags or include_any_tags:
+        if include_groups:
+            if row["group_key"] not in selected_groups:
+                continue
+        elif include_group_context:
+            group_key = row["group_key"]
+            if group_key not in selected_groups:
+                continue
+            row_matches = row_matches_include_filter(tags)
+            context_setup = row_is_context_setup(tags) and row["seen"] <= matched_group_max_seen.get(group_key, 0)
+            if not row_matches and not context_setup:
+                continue
+        elif not row_matches_include_filter(tags):
+            continue
+    if group_limit and row["group_key"] not in emitted_groups:
+        if len(emitted_groups) >= group_limit:
+            break
+        emitted_groups.add(row["group_key"])
     emitted += 1
+    emitted_tags = ",".join(part for part in [f"suite:{row['suite'].strip()}", tags] if part)
     print(row_sep.join([
-        str(seen),
-        group_key_for_name(name),
-        name.replace("\t", " ").replace(row_sep, " "),
-        tags.replace("\t", " ").replace(row_sep, " "),
-        json.dumps(prompt, ensure_ascii=False),
-        json.dumps(str(expect), ensure_ascii=False),
+        str(row["seen"]),
+        row["group_key"],
+        row["name"].replace("\t", " ").replace(row_sep, " "),
+        emitted_tags.replace("\t", " ").replace(row_sep, " "),
+        json.dumps(row["prompt"], ensure_ascii=False),
+        json.dumps(row["expect"], ensure_ascii=False),
     ]))
-    if limit and emitted >= limit:
+    if not group_limit and limit and emitted >= limit:
         break
 PY
 }
@@ -1171,9 +1601,10 @@ for group_user_id, group_chat_id in conversation_keys:
         "SELECT COUNT(*) FROM user_preferences WHERE chat_id = ? AND user_id = ?",
         (group_chat_id, group_user_id),
     )
-    if memories_count <= 0:
+    require_group_memory = require_test_id_memory or tasks_count > 1
+    if require_group_memory and memories_count <= 0:
         raise SystemExit(f"expected memories for effective_chat_id={group_chat_id}")
-    if conversation_states_count <= 0:
+    if require_group_memory and conversation_states_count <= 0:
         raise SystemExit(f"expected conversation_states for effective_chat_id={group_chat_id}")
     total_tasks_count += tasks_count
     total_memories_count += memories_count
@@ -1486,10 +1917,16 @@ echo "log_dir=${RUN_DIR}"
 echo "case_file=${CASE_FILE_VALUE:-<none>}"
 echo "case_jsonl=${CASE_JSONL_VALUE:-<none>}"
 echo "case_limit=${CASE_LIMIT_VALUE:-<none>}"
+echo "case_group_limit=${CASE_GROUP_LIMIT_VALUE:-<none>}"
 echo "case_start=${CASE_START_VALUE:-1}"
+echo "include_case_tags=${CASE_INCLUDE_TAGS_VALUE:-<none>}"
+echo "include_case_any_tags=${CASE_INCLUDE_ANY_TAGS_VALUE:-<none>}"
+echo "include_case_groups=${CASE_INCLUDE_GROUPS_VALUE}"
+echo "include_case_group_context=${CASE_INCLUDE_GROUP_CONTEXT_VALUE}"
 echo "exclude_case_tags=${CASE_EXCLUDE_TAGS_VALUE:-<none>}"
 echo "case_group_isolation=${CASE_GROUP_ISOLATION}"
 echo "quality_guard=${QUALITY_GUARD}"
+echo "llm_infra_turn_retries=${LLM_INFRA_TURN_RETRIES_VALUE}"
 
 read -r -d '' HEAVY_CONTEXT_PROMPT <<'EOF' || true
 请记住下面这段较长的上下文，后续我会基于它继续问问题。不要执行外部工具，只需要用中文确认已收到。
@@ -1529,10 +1966,10 @@ fi
 
 if [[ -n "${CASE_FILE_VALUE:-}" || -n "${CASE_JSONL_VALUE:-}" ]]; then
   if [[ -n "${CASE_JSONL_VALUE:-}" ]]; then
-    case_row_loader=(load_case_rows_jsonl "$CASE_JSONL_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE" "$CASE_EXCLUDE_TAGS_VALUE")
+    case_row_loader=(load_case_rows_jsonl "$CASE_JSONL_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE" "$CASE_EXCLUDE_TAGS_VALUE" "$CASE_INCLUDE_TAGS_VALUE" "$CASE_INCLUDE_GROUPS_VALUE" "$CASE_GROUP_LIMIT_VALUE" "$CASE_INCLUDE_GROUP_CONTEXT_VALUE" "$CASE_INCLUDE_ANY_TAGS_VALUE")
     resume_case_arg="--case-jsonl ${CASE_JSONL_VALUE}"
   else
-    case_row_loader=(load_case_rows "$CASE_FILE_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE" "$CASE_EXCLUDE_TAGS_VALUE")
+    case_row_loader=(load_case_rows "$CASE_FILE_VALUE" "$CASE_LIMIT_VALUE" "$CASE_START_VALUE" "$CASE_EXCLUDE_TAGS_VALUE" "$CASE_INCLUDE_TAGS_VALUE" "$CASE_INCLUDE_GROUPS_VALUE" "$CASE_GROUP_LIMIT_VALUE" "$CASE_INCLUDE_GROUP_CONTEXT_VALUE" "$CASE_INCLUDE_ANY_TAGS_VALUE")
     resume_case_arg="--case-file ${CASE_FILE_VALUE}"
   fi
   while IFS=$'\x1f' read -r case_index case_group_key case_name case_tags case_prompt case_expect; do
@@ -1559,7 +1996,31 @@ if [[ -n "${CASE_FILE_VALUE:-}" || -n "${CASE_JSONL_VALUE:-}" ]]; then
       if [[ "$CASE_GROUP_ISOLATION" -eq 0 ]]; then
         shared_chat_arg=" --shared-case-chat"
       fi
-      echo "RESUME_HINT bash scripts/nl_tests/run_client_like_continuous_suite.sh ${resume_case_arg} --case-start ${case_index} --skip-smoke --external-user-id ${EXTERNAL_USER_ID_VALUE} --external-chat-id ${EXTERNAL_CHAT_ID_VALUE} --prompt-reply-only${quality_guard_arg}${shared_chat_arg}" >&2
+      include_tag_args=""
+      if [[ -n "${CASE_INCLUDE_TAGS_VALUE:-}" ]]; then
+        IFS=',' read -r -a include_tag_parts <<<"${CASE_INCLUDE_TAGS_VALUE}"
+        for tag in "${include_tag_parts[@]}"; do
+          [[ -n "${tag:-}" ]] && include_tag_args="${include_tag_args} --include-case-tag ${tag}"
+        done
+      fi
+      include_any_tag_args=""
+      if [[ -n "${CASE_INCLUDE_ANY_TAGS_VALUE:-}" ]]; then
+        IFS=',' read -r -a include_any_tag_parts <<<"${CASE_INCLUDE_ANY_TAGS_VALUE}"
+        for tag in "${include_any_tag_parts[@]}"; do
+          [[ -n "${tag:-}" ]] && include_any_tag_args="${include_any_tag_args} --include-case-tag-any ${tag}"
+        done
+      fi
+      group_filter_args=""
+      if [[ "$CASE_INCLUDE_GROUPS_VALUE" -eq 1 ]]; then
+        group_filter_args="${group_filter_args} --include-case-groups"
+      fi
+      if [[ "$CASE_INCLUDE_GROUP_CONTEXT_VALUE" -eq 1 ]]; then
+        group_filter_args="${group_filter_args} --include-case-group-context"
+      fi
+      if [[ -n "${CASE_GROUP_LIMIT_VALUE:-}" ]]; then
+        group_filter_args="${group_filter_args} --case-group-limit ${CASE_GROUP_LIMIT_VALUE}"
+      fi
+      echo "RESUME_HINT bash scripts/nl_tests/run_client_like_continuous_suite.sh ${resume_case_arg} --case-start ${case_index} --skip-smoke --external-user-id ${EXTERNAL_USER_ID_VALUE} --external-chat-id ${EXTERNAL_CHAT_ID_VALUE} --prompt-reply-only${quality_guard_arg}${shared_chat_arg}${include_tag_args}${include_any_tag_args}${group_filter_args}" >&2
       exit 1
     fi
   done < <("${case_row_loader[@]}")

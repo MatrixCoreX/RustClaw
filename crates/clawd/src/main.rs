@@ -12,7 +12,7 @@ use claw_core::types::{
     HealthResponse, SubmitTaskRequest, SubmitTaskResponse, TaskQueryResponse,
 };
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use tokio::sync::Semaphore;
 use tower_http::cors::{Any, CorsLayer};
@@ -67,6 +67,7 @@ mod semantic_judge;
 mod skill_availability;
 mod skills;
 mod system_health;
+mod task_admin_routes;
 mod task_context_builder;
 mod task_contract;
 mod task_journal;
@@ -106,10 +107,10 @@ pub(crate) use log_utils::{
 pub(crate) use memory::dynamic_chat_memory_budget_chars;
 pub(crate) use output_paths::ensure_default_file_path;
 pub(crate) use pipeline_types::{
-    plan_step_from_agent_action, IntentOutputContract, OutputDeliveryIntent, OutputLocatorKind,
-    OutputResponseShape, OutputSemanticKind, PlanKind, PlanResult, PlanStep, ResumeBehavior,
-    RiskCeiling, RouteResult, ScheduleKind, SelfExtensionContract, SelfExtensionMode,
-    SelfExtensionTrigger,
+    plan_step_from_agent_action, IntentOutputContract, OutputDeliveryIntent, OutputListSelector,
+    OutputLocatorKind, OutputResponseShape, OutputScalarCountFilter, OutputScalarCountTargetKind,
+    OutputSemanticKind, PlanKind, PlanResult, PlanStep, ResumeBehavior, RiskCeiling, RouteResult,
+    ScheduleKind, SelfExtensionContract, SelfExtensionMode, SelfExtensionTrigger,
 };
 pub(crate) use prompt_utils::{
     extract_first_json_value_any, log_prompt_render, log_prompt_render_with_version,
@@ -141,6 +142,7 @@ pub(crate) use repo::{
     SubmitTaskAccessError, SubmitTaskContextError, SubmitTaskLimitError, TaskViewerAccessError,
 };
 use repo::{ensure_bootstrap_admin_key, ensure_key_auth_schema, seed_channel_bindings};
+use task_admin_routes::{cancel_one_task, cancel_tasks, list_active_tasks};
 pub(crate) use task_contract::TaskContract;
 // Phase 3.2 Stage B：AskMode 已经被 RouteResult/PreparedAskRouting 消费；
 // ChatEntryStrategy/ActFinalizeStyle 在 Stage C 切换 match 时才会被显式 import。
@@ -1416,20 +1418,6 @@ async fn classify_direct(
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct CancelTasksRequest {
-    user_id: i64,
-    chat_id: i64,
-    exclude_task_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ActiveTasksRequest {
-    user_id: i64,
-    chat_id: i64,
-    exclude_task_id: Option<String>,
-}
-
 #[derive(Debug, Serialize)]
 struct ActiveTaskItem {
     index: usize,
@@ -1438,191 +1426,6 @@ struct ActiveTaskItem {
     status: String,
     summary: String,
     age_seconds: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct CancelOneTaskRequest {
-    user_id: i64,
-    chat_id: i64,
-    index: usize,
-    exclude_task_id: Option<String>,
-}
-
-fn authorize_task_admin_request(
-    state: &AppState,
-    headers: &HeaderMap,
-    requested_user_id: i64,
-) -> Result<i64, (StatusCode, Json<ApiResponse<serde_json::Value>>)> {
-    let provided_key = headers
-        .get("x-rustclaw-key")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|v| !v.is_empty());
-    if let Some(raw_key) = provided_key {
-        match resolve_auth_identity_by_key(state, raw_key) {
-            Ok(Some(identity)) => return Ok(identity.user_id),
-            Ok(None) => {
-                return Err(api_err::<serde_json::Value>(
-                    StatusCode::UNAUTHORIZED,
-                    "Invalid user_key",
-                ));
-            }
-            Err(err) => {
-                error!("Resolve task admin actor failed: {}", err);
-                return Err(api_err::<serde_json::Value>(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Auth lookup failed",
-                ));
-            }
-        }
-    }
-    if is_user_allowed(state, requested_user_id) {
-        Ok(requested_user_id)
-    } else {
-        Err(api_err::<serde_json::Value>(
-            StatusCode::FORBIDDEN,
-            "Unauthorized user",
-        ))
-    }
-}
-
-async fn list_active_tasks(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(req): Json<ActiveTasksRequest>,
-) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
-    let effective_user_id = match authorize_task_admin_request(&state, &headers, req.user_id) {
-        Ok(user_id) => user_id,
-        Err(resp) => return resp,
-    };
-    match list_active_tasks_internal(
-        &state,
-        effective_user_id,
-        req.chat_id,
-        req.exclude_task_id.as_deref(),
-    ) {
-        Ok(tasks) => api_ok(json!({
-            "count": tasks.len(),
-            "tasks": tasks,
-        })),
-        Err(err) => {
-            error!("List active tasks failed: {}", err);
-            api_err::<serde_json::Value>(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "List active tasks failed",
-            )
-        }
-    }
-}
-
-async fn cancel_tasks(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(req): Json<CancelTasksRequest>,
-) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
-    let effective_user_id = match authorize_task_admin_request(&state, &headers, req.user_id) {
-        Ok(user_id) => user_id,
-        Err(resp) => return resp,
-    };
-
-    let result = cancel_tasks_for_user_chat(
-        &state,
-        effective_user_id,
-        req.chat_id,
-        req.exclude_task_id.as_deref(),
-    );
-
-    match result {
-        Ok(count) => {
-            info!(
-                "cancel_tasks: user_id={} chat_id={} canceled={}",
-                effective_user_id, req.chat_id, count
-            );
-            api_ok(json!({ "canceled": count }))
-        }
-        Err(err) => {
-            error!("Cancel tasks failed: {}", err);
-            api_err::<serde_json::Value>(StatusCode::INTERNAL_SERVER_ERROR, "Cancel tasks failed")
-        }
-    }
-}
-
-async fn cancel_one_task(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(req): Json<CancelOneTaskRequest>,
-) -> (StatusCode, Json<ApiResponse<serde_json::Value>>) {
-    let effective_user_id = match authorize_task_admin_request(&state, &headers, req.user_id) {
-        Ok(user_id) => user_id,
-        Err(resp) => return resp,
-    };
-    if req.index == 0 {
-        return api_err::<serde_json::Value>(
-            StatusCode::BAD_REQUEST,
-            i18n_t_with_default(
-                &state,
-                "clawd.msg.cancel_one_index_invalid",
-                "index must be >= 1",
-            ),
-        );
-    }
-    let tasks = match list_active_tasks_internal(
-        &state,
-        effective_user_id,
-        req.chat_id,
-        req.exclude_task_id.as_deref(),
-    ) {
-        Ok(tasks) => tasks,
-        Err(err) => {
-            error!("Cancel one task list failed: {}", err);
-            return api_err::<serde_json::Value>(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                i18n_t_with_default(
-                    &state,
-                    "clawd.msg.cancel_one_failed",
-                    "Cancel one task failed",
-                ),
-            );
-        }
-    };
-    let Some(target) = tasks.into_iter().find(|t| t.index == req.index) else {
-        return api_err::<serde_json::Value>(
-            StatusCode::NOT_FOUND,
-            i18n_t_with_default_vars(
-                &state,
-                "clawd.msg.active_task_index_not_found",
-                "Active task index {index} not found",
-                &[("index", &req.index.to_string())],
-            ),
-        );
-    };
-    let result =
-        cancel_one_task_for_user_chat(&state, effective_user_id, req.chat_id, &target.task_id);
-    match result {
-        Ok(count) if count > 0 => api_ok(json!({
-            "canceled": count,
-            "task": target,
-        })),
-        Ok(_) => api_err::<serde_json::Value>(
-            StatusCode::NOT_FOUND,
-            i18n_t_with_default(
-                &state,
-                "clawd.msg.target_task_no_longer_active",
-                "Target task is no longer active",
-            ),
-        ),
-        Err(err) => {
-            error!("Cancel one task failed: {}", err);
-            api_err::<serde_json::Value>(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                i18n_t_with_default(
-                    &state,
-                    "clawd.msg.cancel_one_failed",
-                    "Cancel one task failed",
-                ),
-            )
-        }
-    }
 }
 
 /// Phase 4: 重载 skill 视图。POST /v1/admin/reload-skills。与现有管理接口一致：需 x-rustclaw-key 鉴权。

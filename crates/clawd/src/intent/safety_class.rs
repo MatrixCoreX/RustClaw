@@ -53,9 +53,13 @@ pub(crate) fn classify_route_risk_ceiling(
         };
     }
 
-    if route_result.output_contract.delivery_required
-        && route_result.output_contract.semantic_kind
-            == crate::OutputSemanticKind::GeneratedFileDelivery
+    if matches!(
+        route_result.output_contract.semantic_kind,
+        crate::OutputSemanticKind::GeneratedFileDelivery
+            | crate::OutputSemanticKind::GeneratedFilePathReport
+    ) && (route_result.output_contract.delivery_required
+        || route_result.output_contract.semantic_kind
+            == crate::OutputSemanticKind::GeneratedFilePathReport)
     {
         return SafetyClassDecision {
             risk_ceiling: RiskCeiling::High,

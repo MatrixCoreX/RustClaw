@@ -81,6 +81,23 @@ fn generated_file_delivery_route_is_high_risk() {
 }
 
 #[test]
+fn generated_file_path_report_route_is_high_risk() {
+    let mut route = base_route(crate::AskMode::planner_execute_plain());
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
+    route.output_contract.delivery_required = false;
+    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::None;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
+    route.output_contract.locator_hint = "pwd_line_abs.txt".to_string();
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFilePathReport;
+
+    let out = classify_route_risk_ceiling(&route, None);
+
+    assert_eq!(out.risk_ceiling, RiskCeiling::High);
+    assert_eq!(out.reason, "generated_file_delivery_route");
+}
+
+#[test]
 fn config_mutation_route_is_high_risk_even_with_locator_evidence() {
     let mut route = base_route(crate::AskMode::planner_execute_plain());
     route.output_contract.requires_content_evidence = true;
@@ -100,6 +117,9 @@ fn self_extension_is_high_risk() {
         mode: SelfExtensionMode::PermanentExtension,
         trigger: SelfExtensionTrigger::ExplicitUserRequest,
         execute_now: false,
+        scalar_count_filter: Default::default(),
+        list_selector: Default::default(),
+        structured_field_selector: None,
     };
     let out = classify_route_risk_ceiling(&route, None);
     assert_eq!(out.risk_ceiling, RiskCeiling::High);

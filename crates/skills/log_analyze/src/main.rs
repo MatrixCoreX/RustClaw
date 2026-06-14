@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const MATCH_LINE_MAX_CHARS: usize = 240;
+const RECOVERY_KEYWORDS: &[&str] = &["retry", "recover", "recovered", "succeeded", "success"];
 
 #[derive(Debug, Deserialize)]
 struct Req {
@@ -32,6 +33,8 @@ struct LogAnalysis {
     recent_matches: Vec<String>,
     level_counts: BTreeMap<String, usize>,
     recent_notable_lines: Vec<String>,
+    recovery_counts: BTreeMap<String, usize>,
+    recent_recovery_lines: Vec<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -95,6 +98,10 @@ fn execute(args: Value) -> Result<String, String> {
         "latency",
         "queue full",
         "unauthorized",
+        "retry",
+        "recovered",
+        "succeeded",
+        "success",
     ];
     let keywords: Vec<String> = obj
         .get("keywords")
@@ -116,7 +123,9 @@ fn execute(args: Value) -> Result<String, String> {
         "keyword_counts": analysis.keyword_counts,
         "recent_matches": analysis.recent_matches,
         "level_counts": analysis.level_counts,
-        "recent_notable_lines": analysis.recent_notable_lines
+        "recent_notable_lines": analysis.recent_notable_lines,
+        "recovery_counts": analysis.recovery_counts,
+        "recent_recovery_lines": analysis.recent_recovery_lines
     })
     .to_string())
 }
@@ -233,6 +242,8 @@ fn analyze_log_file(
     let mut level_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut matches = Vec::new();
     let mut notable_lines = Vec::new();
+    let mut recovery_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut recovery_lines = Vec::new();
     for (idx, line) in text.lines().enumerate() {
         let lower = line.to_ascii_lowercase();
         let mut hit = false;
@@ -259,12 +270,30 @@ fn analyze_log_file(
                 sanitize_match_line(line, MATCH_LINE_MAX_CHARS)
             ));
         }
+        let mut recovery_hit = false;
+        for key in RECOVERY_KEYWORDS {
+            if lower.contains(key) {
+                *recovery_counts.entry((*key).to_string()).or_insert(0) += 1;
+                recovery_hit = true;
+            }
+        }
+        if recovery_hit {
+            recovery_lines.push(format!(
+                "{}: {}",
+                idx + 1,
+                sanitize_match_line(line, MATCH_LINE_MAX_CHARS)
+            ));
+        }
     }
     if matches.len() > max_matches {
         matches = matches[matches.len().saturating_sub(max_matches)..].to_vec();
     }
     if notable_lines.len() > max_matches {
         notable_lines = notable_lines[notable_lines.len().saturating_sub(max_matches)..].to_vec();
+    }
+    if recovery_lines.len() > max_matches {
+        recovery_lines =
+            recovery_lines[recovery_lines.len().saturating_sub(max_matches)..].to_vec();
     }
     Ok(LogAnalysis {
         requested_path,
@@ -274,6 +303,8 @@ fn analyze_log_file(
         recent_matches: matches,
         level_counts,
         recent_notable_lines: notable_lines,
+        recovery_counts,
+        recent_recovery_lines: recovery_lines,
     })
 }
 

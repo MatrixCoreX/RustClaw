@@ -3,9 +3,18 @@ use serde_json::{json, Value};
 use super::{
     delivery_payload_consistent, evidence_coverage_for_route, observed_evidence_from_output,
     TaskJournal, TaskJournalFinalStatus, TaskJournalFinalizerFallback, TaskJournalFinalizerStage,
-    TaskJournalFinalizerSummary, TaskJournalRoundTrace, TaskJournalStepTrace,
-    TaskJournalVerifyIssue, TaskJournalVerifySummary,
+    TaskJournalFinalizerSummary, TaskJournalRolloutAttribution, TaskJournalRoundTrace,
+    TaskJournalStepTrace, TaskJournalVerifyIssue, TaskJournalVerifySummary,
 };
+
+#[path = "task_journal_tests/observed_evidence_core_tests.rs"]
+mod observed_evidence_core;
+
+#[path = "task_journal_tests/skill_output_evidence_tests.rs"]
+mod skill_output_evidence;
+
+#[path = "task_journal_tests/contract_coverage_tests.rs"]
+mod contract_coverage;
 
 fn route_for_semantic(semantic_kind: crate::OutputSemanticKind) -> crate::RouteResult {
     crate::RouteResult {
@@ -55,6 +64,9 @@ fn summary_json_includes_finalizer_and_task_metrics() {
                 mode: crate::SelfExtensionMode::PermanentExtension,
                 trigger: crate::SelfExtensionTrigger::ExplicitUserRequest,
                 execute_now: true,
+                scalar_count_filter: Default::default(),
+                list_selector: Default::default(),
+                structured_field_selector: None,
             },
             ..Default::default()
         },
@@ -81,6 +93,15 @@ fn summary_json_includes_finalizer_and_task_metrics() {
         crate::LlmPromptBucket {
             count: 1,
             elapsed_ms: 42,
+            provider_attempt_count: 3,
+            provider_retry_count: 2,
+            provider_retryable_error_count: 2,
+            provider_final_error_count: 0,
+            provider_last_retry_error_kinds: std::collections::BTreeMap::from([(
+                "timeout".to_string(),
+                1,
+            )]),
+            provider_final_error_kinds: std::collections::BTreeMap::new(),
             prompt_truncation_count: 1,
             prompt_bytes_before_max: Some(157_037),
             prompt_bytes_budget_min: Some(125_200),
@@ -170,6 +191,15 @@ fn summary_json_includes_finalizer_and_task_metrics() {
             .get("task_metrics")
             .and_then(|v| v.get("by_prompt"))
             .and_then(|v| v.get("normalizer"))
+            .and_then(|v| v.get("provider_attempt_count"))
+            .and_then(Value::as_u64),
+        Some(3)
+    );
+    assert_eq!(
+        summary
+            .get("task_metrics")
+            .and_then(|v| v.get("by_prompt"))
+            .and_then(|v| v.get("normalizer"))
             .and_then(|v| v.get("prompt_bytes_before_max"))
             .and_then(Value::as_u64),
         Some(157_037)
@@ -198,6 +228,420 @@ fn summary_json_includes_finalizer_and_task_metrics() {
             .and_then(Value::as_bool),
         Some(true)
     );
+}
+
+#[test]
+fn agent_decides_shadow_attribution_is_machine_readable() {
+    let mut route = route_for_semantic(crate::OutputSemanticKind::FileNames);
+    route.output_contract.requires_content_evidence = true;
+    let attribution = TaskJournalRolloutAttribution::agent_decides_shadow_snapshot(
+        &route,
+        "fast_read",
+        Some(json!({"schema_version":1,"owner_layer":"boundary_layer"})),
+    );
+    let mut journal = TaskJournal::for_task("task-agent-decides", "ask", "prompt");
+    journal.record_rollout_attribution(attribution);
+    let summary = journal.to_summary_json();
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/switch_name")
+            .and_then(Value::as_str),
+        Some("agent_decides_semantic_route")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/old_first_layer_decision")
+            .and_then(Value::as_str),
+        Some("planner_execute")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/agent_decision")
+            .and_then(Value::as_str),
+        Some("not_evaluated")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/owner_layer")
+            .and_then(Value::as_str),
+        Some("agent_loop_shadow")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision")
+            .and_then(Value::as_str),
+        Some("planner_execute")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/risk_level")
+            .and_then(Value::as_str),
+        Some("Unknown")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/output_contract_ref")
+            .and_then(Value::as_str),
+        Some(
+            "semantic:file_names|shape:free|locator:current_workspace|delivery:none|content_evidence:true"
+        )
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/required_evidence")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/agent_required_evidence")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/budget_profile")
+            .and_then(Value::as_str),
+        Some("fast_read")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/boundary_context/owner_layer")
+            .and_then(Value::as_str),
+        Some("boundary_layer")
+    );
+}
+
+#[test]
+fn agent_decides_first_action_attribution_is_machine_readable() {
+    let route = route_for_semantic(crate::OutputSemanticKind::FileNames);
+    let attribution = TaskJournalRolloutAttribution::agent_decides_shadow_first_action(
+        &route,
+        "fast_read",
+        &[crate::AgentAction::CallCapability {
+            capability: "fs.read_text_range".to_string(),
+            args: json!({"path": "README.md"}),
+        }],
+        Some(json!({"schema_version":1,"owner_layer":"boundary_layer"})),
+    );
+    let mut journal = TaskJournal::for_task("task-agent-decides-action", "ask", "prompt");
+    journal.record_rollout_attribution(attribution);
+    let summary = journal.to_summary_json();
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/event")
+            .and_then(Value::as_str),
+        Some("agent_decides_shadow_first_action")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/agent_decision")
+            .and_then(Value::as_str),
+        Some("call_capability")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_delta")
+            .and_then(Value::as_str),
+        Some("same_gate")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/capability_delta")
+            .and_then(Value::as_str),
+        Some("agent_capability_ref")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision")
+            .and_then(Value::as_str),
+        Some("call_capability")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/capability_ref")
+            .and_then(Value::as_str),
+        Some("fs.read_text_range")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/missing_slots")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/output_contract_ref")
+            .and_then(Value::as_str),
+        Some(
+            "semantic:file_names|shape:free|locator:current_workspace|delivery:none|content_evidence:false"
+        )
+    );
+    assert_eq!(
+        summary.pointer("/rollout_attribution/0/agent_required_evidence"),
+        summary.pointer("/rollout_attribution/0/old_required_evidence")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/boundary_context/owner_layer")
+            .and_then(Value::as_str),
+        Some("boundary_layer")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/schema_version")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/source")
+            .and_then(Value::as_str),
+        Some("planner_first_action_shadow")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/initial_hint_ref")
+            .and_then(Value::as_str),
+        Some("planner_execute")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/semantic_authority")
+            .and_then(Value::as_str),
+        Some("planner_loop_shadow")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/fallback_gate_policy")
+            .and_then(Value::as_str),
+        Some("fallback_safety_check_only")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/decision")
+            .and_then(Value::as_str),
+        Some("call_capability")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/reason_code")
+            .and_then(Value::as_str),
+        Some("agent_loop_first_action_call_capability")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/validation_status")
+            .and_then(Value::as_str),
+        Some("valid")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/validation_reason_code")
+            .and_then(Value::as_str),
+        Some("agent_loop_decision_shadow_valid")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/capability_ref")
+            .and_then(Value::as_str),
+        Some("fs.read_text_range")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/language_rendering_policy")
+            .and_then(Value::as_str),
+        Some("defer_until_observation")
+    );
+}
+
+#[test]
+fn agent_loop_decision_envelope_maps_clarify_route_respond_to_clarify() {
+    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
+    route.set_first_layer_decision(crate::FirstLayerDecision::Clarify);
+    let attribution = TaskJournalRolloutAttribution::agent_decides_shadow_first_action(
+        &route,
+        "fast_read",
+        &[crate::AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        }],
+        None,
+    );
+    let mut journal = TaskJournal::for_task("task-agent-decides-clarify", "ask", "prompt");
+    journal.record_rollout_attribution(attribution);
+    let summary = journal.to_summary_json();
+
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/decision")
+            .and_then(Value::as_str),
+        Some("clarify")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/reason_code")
+            .and_then(Value::as_str),
+        Some("agent_loop_first_action_clarify")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/validation_status")
+            .and_then(Value::as_str),
+        Some("shadow_invalid")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/validation_reason_code")
+            .and_then(Value::as_str),
+        Some("clarify_missing_structured_slots")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/language_rendering_policy")
+            .and_then(Value::as_str),
+        Some("finalizer_llm_i18n")
+    );
+}
+
+#[test]
+fn agent_loop_decision_envelope_flags_respond_without_required_evidence() {
+    let mut route = route_for_semantic(crate::OutputSemanticKind::ContentExcerptSummary);
+    route.output_contract.requires_content_evidence = true;
+    let attribution = TaskJournalRolloutAttribution::agent_decides_shadow_first_action(
+        &route,
+        "grounded_summary",
+        &[crate::AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        }],
+        None,
+    );
+    let mut journal = TaskJournal::for_task("task-agent-decides-respond", "ask", "prompt");
+    journal.record_rollout_attribution(attribution);
+    let summary = journal.to_summary_json();
+
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/decision")
+            .and_then(Value::as_str),
+        Some("respond")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/validation_status")
+            .and_then(Value::as_str),
+        Some("shadow_invalid")
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollout_attribution/0/decision_envelope/validation_reason_code")
+            .and_then(Value::as_str),
+        Some("respond_requires_evidence_observation")
+    );
+}
+
+#[test]
+fn agent_loop_decision_envelope_schema_drift() {
+    const SCHEMA_RAW: &str =
+        include_str!("../../../prompts/schemas/agent_loop_decision_envelope.schema.json");
+    let schema: Value =
+        serde_json::from_str(SCHEMA_RAW).expect("agent_loop_decision_envelope schema json");
+    assert_eq!(
+        schema.get("additionalProperties").and_then(Value::as_bool),
+        Some(false)
+    );
+    let properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .expect("schema properties");
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .expect("schema required");
+    let fields = [
+        "schema_version",
+        "source",
+        "initial_hint_ref",
+        "semantic_authority",
+        "fallback_gate_policy",
+        "decision",
+        "reason_code",
+        "validation_status",
+        "validation_reason_code",
+        "confidence",
+        "missing_slots",
+        "capability_ref",
+        "output_contract_ref",
+        "required_evidence",
+        "risk_level",
+        "delivery_required",
+        "language_rendering_policy",
+    ];
+    for field in fields {
+        assert!(
+            properties.contains_key(field),
+            "schema missing field `{field}`"
+        );
+        assert!(
+            required.iter().any(|value| value.as_str() == Some(field)),
+            "schema required missing `{field}`"
+        );
+    }
+    let decisions = properties
+        .get("decision")
+        .and_then(|value| value.get("enum"))
+        .and_then(Value::as_array)
+        .expect("decision enum");
+    for token in ["respond", "clarify", "call_capability", "synthesize_answer"] {
+        assert!(
+            decisions.iter().any(|value| value.as_str() == Some(token)),
+            "decision enum missing `{token}`"
+        );
+    }
+    let rendering_policies = properties
+        .get("language_rendering_policy")
+        .and_then(|value| value.get("enum"))
+        .and_then(Value::as_array)
+        .expect("language rendering enum");
+    for token in ["defer_until_observation", "finalizer_llm_i18n"] {
+        assert!(
+            rendering_policies
+                .iter()
+                .any(|value| value.as_str() == Some(token)),
+            "language_rendering_policy enum missing `{token}`"
+        );
+    }
+    let validation_statuses = properties
+        .get("validation_status")
+        .and_then(|value| value.get("enum"))
+        .and_then(Value::as_array)
+        .expect("validation status enum");
+    for token in ["valid", "shadow_invalid"] {
+        assert!(
+            validation_statuses
+                .iter()
+                .any(|value| value.as_str() == Some(token)),
+            "validation_status enum missing `{token}`"
+        );
+    }
+    let semantic_authorities = properties
+        .get("semantic_authority")
+        .and_then(|value| value.get("enum"))
+        .and_then(Value::as_array)
+        .expect("semantic authority enum");
+    assert!(semantic_authorities
+        .iter()
+        .any(|value| value.as_str() == Some("planner_loop_shadow")));
+    let fallback_policies = properties
+        .get("fallback_gate_policy")
+        .and_then(|value| value.get("enum"))
+        .and_then(Value::as_array)
+        .expect("fallback gate policy enum");
+    assert!(fallback_policies
+        .iter()
+        .any(|value| value.as_str() == Some("fallback_safety_check_only")));
 }
 
 #[test]
@@ -406,8 +850,27 @@ fn trace_json_includes_verifier_issue_failure_attribution() {
         Some("ContractActionRejected")
     );
     assert_eq!(
+        issue.get("reason_code").and_then(Value::as_str),
+        Some("verify_contract_action_rejected")
+    );
+    assert_eq!(
+        issue.get("owner_layer").and_then(Value::as_str),
+        Some("plan_verifier")
+    );
+    assert_eq!(
         issue.get("failure_attribution").and_then(Value::as_str),
         Some("contract_gap")
+    );
+    let verify = trace
+        .pointer("/rounds/0/verify_result")
+        .expect("verify result should be present");
+    assert_eq!(
+        verify.get("blocked_reason_code").and_then(Value::as_str),
+        Some("verify_contract_action_rejected")
+    );
+    assert_eq!(
+        verify.get("owner_layer").and_then(Value::as_str),
+        Some("plan_verifier")
     );
 }
 
@@ -703,6 +1166,10 @@ fn final_error_text_records_failure_attribution() {
             "wechat send status=500 body={\"err\":\"bad gateway\"}",
             "delivery_error",
         ),
+        (
+            r#"{"message_key":"answer_verifier_required_evidence_block","reason_code":"answer_verifier_required_evidence_block","missing_evidence_fields":["field_value"]}"#,
+            "contract_gap",
+        ),
     ] {
         let mut journal =
             TaskJournal::for_task(format!("task-{expected}"), "ask", "trigger final error");
@@ -720,3864 +1187,68 @@ fn final_error_text_records_failure_attribution() {
 }
 
 #[test]
-fn trace_json_includes_redacted_observed_evidence_for_json_output() {
-    let mut journal = TaskJournal::for_task("task-observed-evidence", "ask", "读取配置");
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "config_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "read_fields",
-                "count": 2,
-                "extra": {
-                    "field_value": "enabled",
-                    "api_key": "sk-test-super-secret-token-value-1234567890"
-                }
-            })
+fn rollout_attribution_serializes_machine_fields() {
+    let mut journal = TaskJournal::for_task("task-rollout-attribution", "ask", "读取字段");
+    let verifier = crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["field_value".to_string()],
+        answer_incomplete_reason: "human-language reason should stay out of attribution"
             .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let trace = journal.to_trace_json();
-    let observed = trace
-        .get("step_results")
-        .and_then(Value::as_array)
-        .and_then(|steps| steps.first())
-        .and_then(|step| step.get("observed_evidence"))
-        .expect("observed evidence should be present");
-    assert_eq!(observed.get("format").and_then(Value::as_str), Some("json"));
-    assert_eq!(
-        observed.pointer("/extractor/kind").and_then(Value::as_str),
-        Some("structured_json")
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/extractor_ref")
-            .and_then(Value::as_str),
-        Some("config_basic.read_fields.structured_json_v1")
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/source_action_ref")
-            .and_then(Value::as_str),
-        Some("config_basic.read_fields")
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/strict_shape_eligible")
-            .and_then(Value::as_bool),
-        Some(true)
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/fallback")
-            .and_then(Value::as_bool),
-        Some(false)
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/provider_safety/provider_evidence_view")
-            .and_then(Value::as_str),
-        Some("provider_safe_redacted")
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/provider_safety/raw_excerpt_policy")
-            .and_then(Value::as_str),
-        Some("no_full_raw_excerpt")
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/provider_safety/sensitive_field_policy")
-            .and_then(Value::as_str),
-        Some("redact_sensitive_keys_and_secret_like_values")
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/observation_source")
-            .and_then(Value::as_str),
-        Some("step_output")
-    );
-    assert_eq!(
-        observed.get("storage").and_then(Value::as_str),
-        Some("redacted_excerpt_hash")
-    );
-
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items should be present");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("extra.field_value")
-            && item.get("excerpt").and_then(Value::as_str) == Some("enabled")
-            && item.get("hash").and_then(Value::as_str).is_some()
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("extra.api_key")
-            && item.get("redacted").and_then(Value::as_bool) == Some(true)
-            && item.get("excerpt").is_none()
-    }));
-    assert!(!serde_json::to_string(observed)
-        .expect("serialize observed evidence")
-        .contains("sk-test-super-secret-token-value"));
-}
-
-#[test]
-fn image_generate_extra_outputs_path_counts_as_structured_path_evidence() {
-    let mut journal = TaskJournal::for_task("task-image-extra-evidence", "ask", "生成图片");
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "image_generate".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "text": "FILE:/tmp/rustclaw-image.png",
-                "extra": {
-                    "provider": "local_fallback",
-                    "model": "local-placeholder",
-                    "model_kind": "local_fallback",
-                    "outputs": [{
-                        "type": "image_file",
-                        "path": "/tmp/rustclaw-image.png"
-                    }]
-                }
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let trace = journal.to_trace_json();
-    let observed = trace
-        .get("step_results")
-        .and_then(Value::as_array)
-        .and_then(|steps| steps.first())
-        .and_then(|step| step.get("observed_evidence"))
-        .expect("observed evidence should be present");
-    assert_eq!(
-        observed
-            .pointer("/extractor/extractor_ref")
-            .and_then(Value::as_str),
-        Some("image_generate.structured_json_v1")
-    );
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items should be present");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("extra.outputs[0].path")
-            && item.get("excerpt").and_then(Value::as_str) == Some("/tmp/rustclaw-image.png")
-    }));
-
-    let route = route_for_semantic(crate::OutputSemanticKind::GeneratedFileDelivery);
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(
-        coverage.missing_evidence.is_empty(),
-        "{:?}",
-        coverage.missing_evidence
-    );
-}
-
-#[test]
-fn rss_fetch_extra_field_value_counts_as_structured_rss_evidence() {
-    let mut journal = TaskJournal::for_task("task-rss-extra-evidence", "ask", "抓取 RSS 新闻");
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "rss_fetch".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "text": "sources_ok=2 sources_failed=0 items=3\n1. Example item",
-                "extra": {
-                    "schema_version": 1,
-                    "action": "latest",
-                    "category": "general",
-                    "source_count": 2,
-                    "sources_ok": 2,
-                    "sources_failed": 0,
-                    "item_count": 3,
-                    "field_value": {
-                        "sources_ok": 2,
-                        "sources_failed": 0,
-                        "items": 3,
-                        "titles": [
-                            "Example item",
-                            "Second item",
-                            "Third item"
-                        ]
-                    },
-                    "items": [{
-                        "title": "Example item",
-                        "link": "https://example.com/news/1",
-                        "source_host": "example.com"
-                    }]
-                }
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let trace = journal.to_trace_json();
-    let observed = trace
-        .get("step_results")
-        .and_then(Value::as_array)
-        .and_then(|steps| steps.first())
-        .and_then(|step| step.get("observed_evidence"))
-        .expect("observed evidence should be present");
-    assert_eq!(
-        observed
-            .pointer("/extractor/extractor_ref")
-            .and_then(Value::as_str),
-        Some("rss_fetch.structured_json_v1")
-    );
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items should be present");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("extra.field_value")
-            && item
-                .get("keys")
-                .and_then(Value::as_array)
-                .is_some_and(|keys| keys.iter().any(|key| key.as_str() == Some("titles")))
-    }));
-
-    let route = route_for_semantic(crate::OutputSemanticKind::RssNewsFetch);
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(
-        coverage.missing_evidence.is_empty(),
-        "{:?}",
-        coverage.missing_evidence
-    );
-}
-
-#[test]
-fn trace_json_includes_observed_evidence_for_text_output() {
-    let mut journal = TaskJournal::for_task("task-observed-text", "ask", "运行命令");
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "run_cmd".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("first line\nsecond line".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let trace = journal.to_trace_json();
-    let observed = trace
-        .get("step_results")
-        .and_then(Value::as_array)
-        .and_then(|steps| steps.first())
-        .and_then(|step| step.get("observed_evidence"))
-        .expect("observed evidence should be present");
-    assert_eq!(observed.get("format").and_then(Value::as_str), Some("text"));
-    assert_eq!(
-        observed.pointer("/extractor/kind").and_then(Value::as_str),
-        Some("text_legacy")
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/extractor_ref")
-            .and_then(Value::as_str),
-        Some("run_cmd.text_legacy_v1")
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/source_action_ref")
-            .and_then(Value::as_str),
-        Some("run_cmd")
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/fallback")
-            .and_then(Value::as_bool),
-        Some(false)
-    );
-    assert!(observed
-        .get("items")
-        .and_then(Value::as_array)
-        .is_some_and(|items| {
-            items.iter().any(|item| {
-                item.get("field").and_then(Value::as_str) == Some("text_excerpt")
-                    && item.get("excerpt").and_then(Value::as_str) == Some("first line second line")
-                    && item.get("hash").and_then(Value::as_str).is_some()
-            })
-        }));
-}
-
-#[test]
-fn explicit_extractor_registry_canonicalizes_virtual_tool_outputs() {
-    let mut journal = TaskJournal::for_task("task-explicit-extractor", "ask", "列出文件");
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "inventory_dir",
-                "names": ["Cargo.toml"]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let trace = journal.to_trace_json();
-    let extractor = trace
-        .pointer("/step_results/0/observed_evidence/extractor")
-        .expect("observed evidence extractor");
-    assert_eq!(
-        extractor.get("extractor_ref").and_then(Value::as_str),
-        Some("fs_basic.list_dir.structured_json_v1")
-    );
-    assert_eq!(
-        extractor.get("source_action_ref").and_then(Value::as_str),
-        Some("fs_basic.list_dir")
-    );
-    assert!(extractor
-        .get("provided_evidence")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("candidates"))));
-    assert!(extractor
-        .get("provided_evidence")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items
-            .iter()
-            .any(|item| item.as_str() == Some("modified_ts"))));
-    assert!(extractor
-        .get("provided_evidence")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("sort_by"))));
-}
-
-#[test]
-fn matrix_admitted_external_marker_enables_strict_structured_evidence() {
-    let mut journal =
-        TaskJournal::for_task("task-external-admission-evidence", "ask", "external count");
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "external_counter".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "count",
-                "text": "3",
-                "extra": {
-                    "action": "count",
-                    "count": 3,
-                    "results": ["a", "b", "c"]
-                },
-                "_matrix_admission": {
-                    "schema_version": 1,
-                    "source": "skills_registry",
-                    "skill": "external_counter",
-                    "eligible": true,
-                    "extractor_kind": "structured_json",
-                    "required_extra_fields": ["extra.count"]
-                }
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let trace = journal.to_trace_json();
-    let observed = trace
-        .pointer("/step_results/0/observed_evidence")
-        .expect("observed evidence");
-    assert_eq!(
-        observed
-            .pointer("/extractor/extractor_ref")
-            .and_then(Value::as_str),
-        Some("matrix_admitted_external.structured_json_v1")
-    );
-    assert_eq!(
-        observed
-            .pointer("/extractor/strict_shape_eligible")
-            .and_then(Value::as_bool),
-        Some(true)
-    );
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("extra.count")
-            && item.get("excerpt").and_then(Value::as_str) == Some("3")
-    }));
-    assert!(!items.iter().any(|item| {
-        item.get("field")
-            .and_then(Value::as_str)
-            .is_some_and(|field| field.starts_with("_matrix_admission"))
-    }));
-}
-
-#[test]
-fn text_observed_evidence_extracts_count_path_and_candidates() {
-    let archive_listing = "exit=0\nArchive: /tmp/test.zip\n  Length Name\n  22 notes.txt\n  20 nested/config.ini\n  42 2 files";
-    let observed = observed_evidence_from_output(Some(archive_listing))
-        .expect("text evidence should be present");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("count")
-            && item.get("excerpt").and_then(Value::as_str) == Some("2")
-    }));
-
-    let observed = observed_evidence_from_output(Some("/home/guagua/rustclaw/Cargo.toml"))
-        .expect("path evidence should be present");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("path evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("path")
-            && item.get("source").and_then(Value::as_str) == Some("text_output.extractor")
-    }));
-    let observed = observed_evidence_from_output(Some(
-        "written 40 bytes to /home/guagua/rustclaw/document/pwd_line.txt",
-    ))
-    .expect("path token evidence should be present");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("path token evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("path")
-            && item.get("excerpt").and_then(Value::as_str)
-                == Some("/home/guagua/rustclaw/document/pwd_line.txt")
-    }));
-    let observed = observed_evidence_from_output(Some(
-        "archive_path=/home/guagua/rustclaw/tmp/bundle.zip\nexit=0\n  adding: /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/docs/service_notes.md (deflated 32%)",
-    ))
-    .expect("labeled archive path evidence should be present");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("labeled path evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("path")
-            && item.get("excerpt").and_then(Value::as_str)
-                == Some("/home/guagua/rustclaw/tmp/bundle.zip")
-    }));
-
-    let mut git_journal =
-        TaskJournal::for_task("task-text-git-subject", "ask", "latest git subject");
-    git_journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "git_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("exit=0\n09342a6a fix: expose nl execution and locator flows\n".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    let observed = git_journal
-        .to_trace_json()
-        .pointer("/step_results/0/observed_evidence")
-        .cloned()
-        .expect("git subject evidence should be present");
-    assert_eq!(
-        observed
-            .pointer("/extractor/extractor_ref")
-            .and_then(Value::as_str),
-        Some("git_basic.text_legacy_v1")
-    );
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("git subject evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("subject")
-            && item.get("excerpt").and_then(Value::as_str)
-                == Some("fix: expose nl execution and locator flows")
-    }));
-
-    let mut git_json_journal =
-        TaskJournal::for_task("task-json-git-subjects", "ask", "write a release note");
-    git_json_journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "git_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "extra": {
-                    "action": "log",
-                    "exit_code": 0,
-                    "output": "exit=0\nf77577da Tighten NL verifier recovery\na30c49fb Tighten grounded channel setup rewrites\n",
-                    "raw_action": "log",
-                    "subcommand": "log"
-                },
-                "text": "exit=0\nf77577da Tighten NL verifier recovery\na30c49fb Tighten grounded channel setup rewrites\n"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    let observed = git_json_journal
-        .to_trace_json()
-        .pointer("/step_results/0/observed_evidence")
-        .cloned()
-        .expect("structured git log evidence should be present");
-    assert_eq!(
-        observed
-            .pointer("/extractor/extractor_ref")
-            .and_then(Value::as_str),
-        Some("git_basic.structured_json_v1")
-    );
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("structured git log evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("content_excerpt")
-            && item
-                .get("excerpt")
-                .and_then(Value::as_str)
-                .is_some_and(|excerpt| excerpt.contains("Tighten NL verifier recovery"))
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("subject")
-            && item.get("excerpt").and_then(Value::as_str) == Some("Tighten NL verifier recovery")
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("git_subjects")
-            && item
-                .get("excerpt")
-                .and_then(Value::as_str)
-                .is_some_and(|excerpt| excerpt.contains("Tighten grounded channel setup rewrites"))
-    }));
-
-    let mut journal = TaskJournal::for_task("task-text-candidates", "ask", "列出文件名");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
+        should_retry: true,
+        retry_instruction: String::new(),
+        confidence: 0.91,
     };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("Cargo.toml\nREADME.md".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete());
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("count"));
-
-    let observed = observed_evidence_from_output(Some(".git\nREADME.md\n.env\nsrc\n"))
-        .expect("hidden list evidence should be present");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("hidden list evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("hidden_count")
-            && item.get("excerpt").and_then(Value::as_str) == Some("2")
-    }));
-}
-
-#[test]
-fn generic_path_content_list_dir_candidates_satisfy_directory_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-generic-path-directory",
-        "ask",
-        "summarize selected directory entries",
+    journal.record_rollout_attribution(
+        TaskJournalRolloutAttribution::answer_verifier_required_evidence_block(Some(&verifier)),
     );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "list_dir",
-                "path": "prompts/schemas",
-                "count": 1,
-                "entries": [
-                    {
-                        "name": "intent_normalizer.schema.json",
-                        "kind": "file",
-                        "size_bytes": 13124
-                    }
-                ]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(coverage.observed_canonical.contains("candidates"));
-}
-
-#[test]
-fn generic_path_content_find_entries_result_path_satisfies_path_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-generic-path-find-entry",
-        "ask",
-        "return the matching path",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.response_shape = crate::OutputResponseShape::Scalar;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "find_name",
-                "root": "scripts/nl_tests/fixtures/locator_smart/stem_unique",
-                "patterns": ["abcd"],
-                "count": 1,
-                "results": ["scripts/nl_tests/fixtures/locator_smart/stem_unique/ABCD.txt"]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(coverage.observed_canonical.contains("candidates"));
-}
-
-#[test]
-fn file_names_content_search_paths_satisfy_candidate_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-file-names-grep-candidates",
-        "ask",
-        "search workspace content and list matching files",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::FileNames);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    journal.record_route_result(&route);
-    journal.step_results.push(TaskJournalStepTrace::ok(
-        "step_1",
-        "fs_basic",
-        json!({
-            "action": "grep_text",
-            "query": "FirstLayerDecision",
-            "count": 2,
-            "match_count": 3,
-            "matches": [
-                {"path": "README.md", "line": 54, "text": "FirstLayerDecision"},
-                {"path": "crates/clawd/src/intent_router.rs", "line": 14, "text": "FirstLayerDecision"}
-            ]
-        })
-        .to_string(),
-    ));
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("content_match"));
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(coverage
-        .observed_extractors
-        .contains("fs_basic.grep_text.structured_json_v1"));
-}
-
-#[test]
-fn file_paths_content_search_paths_satisfy_candidate_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-file-paths-grep-candidates",
-        "ask",
-        "search workspace content and list matching paths",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::FilePaths);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    journal.record_route_result(&route);
-    journal.step_results.push(TaskJournalStepTrace::ok(
-        "step_1",
-        "fs_basic",
-        json!({
-            "action": "grep_text",
-            "query": "FirstLayerDecision",
-            "count": 2,
-            "match_count": 3,
-            "matches": [
-                {"path": "README.md", "line": 54, "text": "FirstLayerDecision"},
-                {"path": "crates/clawd/src/intent_router.rs", "line": 14, "text": "FirstLayerDecision"}
-            ]
-        })
-        .to_string(),
-    ));
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("content_match"));
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(coverage
-        .observed_extractors
-        .contains("fs_basic.grep_text.structured_json_v1"));
-}
-
-#[test]
-fn content_excerpt_summary_directory_inventory_can_complete_from_listing_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-content-summary-listing",
-        "ask",
-        "summarize repository layout from directory counts",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ContentExcerptSummary);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "list_dir",
-                "path": "crates",
-                "counts": {"total": 3, "files": 0, "dirs": 3},
-                "entries": [
-                    {"name": "clawd", "kind": "dir"},
-                    {"name": "skills", "kind": "dir"},
-                    {"name": "skill-runner", "kind": "dir"}
-                ]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("count"));
-}
-
-#[test]
-fn excerpt_kind_judgment_directory_counts_can_complete_from_count_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-excerpt-kind-counts",
-        "ask",
-        "judge repository layout from directory counts",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ExcerptKindJudgment);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::CurrentWorkspace;
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "count_entries",
-                "path": "crates",
-                "count": 3
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_2".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "count_entries",
-                "path": "crates/skills",
-                "count": 8
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 3,
-        finished_at: 4,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("count"));
-}
-
-#[test]
-fn generic_path_content_directory_counts_can_complete_from_count_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-generic-path-counts",
-        "ask",
-        "compare direct directory entry counts",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.delivery_required = false;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.response_shape = crate::OutputResponseShape::OneSentence;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "count_entries",
-                "path": "crates",
-                "count": 3
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_2".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "count_entries",
-                "path": "crates/skills",
-                "count": 8
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 3,
-        finished_at: 4,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("count"));
-    assert!(coverage.observed_canonical.contains("path"));
-}
-
-#[test]
-fn directory_purpose_tree_summary_children_satisfy_candidates_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-directory-purpose-tree-summary",
-        "ask",
-        "summarize relevant documentation entries",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::DirectoryPurposeSummary);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.response_shape = crate::OutputResponseShape::Free;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "system_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "tree_summary",
-                "path": "document",
-                "tree": {
-                    "children": [
-                        {
-                            "kind": "file",
-                            "path": "document/README.md",
-                            "size_bytes": 128
-                        }
-                    ]
-                }
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage
-        .observed_extractors
-        .contains("system_basic.tree_summary.structured_json_v1"));
-}
-
-#[test]
-fn system_basic_info_without_action_uses_info_extractor() {
-    let mut journal =
-        TaskJournal::for_task("task-system-info", "ask", "return current workspace path");
-    let route = route_for_semantic(crate::OutputSemanticKind::ScalarPathOnly);
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "system_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "hostname": "devbox",
-                "os": "linux",
-                "arch": "x86_64",
-                "cwd": "/home/guagua/rustclaw",
-                "workspace_root": "/home/guagua/rustclaw"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage
-        .observed_extractors
-        .contains("system_basic.info.structured_json_v1"));
-}
-
-#[test]
-fn docker_unavailable_text_counts_as_field_value_evidence() {
-    let mut journal =
-        TaskJournal::for_task("task-docker-unavailable", "ask", "检查 Docker 是否可用");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::DockerContainerLifecycle,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "docker_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("docker unavailable: No such file or directory (os error 2)".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-
-    assert!(coverage.observed_canonical.contains("command_output"));
-}
-
-#[test]
-fn generic_delivery_missing_find_count_satisfies_negative_delivery_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-missing-delivery",
-        "ask",
-        "send definitely_missing_named_file_golden_001.txt",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "find_name",
-                "count": 0,
-                "patterns": ["definitely_missing_named_file_golden_001.txt"],
-                "results": [],
-                "root": ""
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("count"));
-}
-
-#[test]
-fn generated_file_delivery_wrapped_missing_find_name_supplies_checked_path_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-generated-missing-delivery",
-        "ask",
-        "send definitely_missing_named_file_golden_001.txt",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::GeneratedFileDelivery);
-    route.wants_file_delivery = true;
-    route.output_contract.delivery_required = true;
-    route.output_contract.delivery_intent = crate::OutputDeliveryIntent::FileSingle;
-    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "extra": {
-                    "action": "find_name",
-                    "count": 0,
-                    "exact": false,
-                    "patterns": ["definitely_missing_named_file_golden_001.txt"],
-                    "results": [],
-                    "root": ""
-                },
-                "text": "{\"action\":\"find_name\",\"count\":0,\"exact\":false,\"patterns\":[\"definitely_missing_named_file_golden_001.txt\"],\"results\":[],\"root\":\"\"}"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(coverage.observed_canonical.contains("exists_false"));
-}
-
-#[test]
-fn docker_success_exit_text_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-docker-version", "ask", "检查 Docker 是否可用");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::DockerContainerLifecycle,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "docker_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("exit=0\nClient: Docker Engine".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage.observed_canonical.contains("command_output"));
-
-    let trace = journal.to_trace_json();
-    let items = trace
-        .get("step_results")
-        .and_then(Value::as_array)
-        .and_then(|steps| steps.first())
-        .and_then(|step| step.get("observed_evidence"))
-        .and_then(|observed| observed.get("items"))
-        .and_then(Value::as_array)
-        .expect("observed evidence items should be present");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("exit")
-            && item.get("excerpt").and_then(Value::as_str) == Some("0")
-    }));
-}
-
-#[test]
-fn package_manager_key_value_text_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-package-manager", "ask", "检测包管理器");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::PackageManagerDetection,
-        locator_kind: crate::OutputLocatorKind::None,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "package_manager".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("package_manager=apt-get".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-
-    let observed = observed_evidence_from_output(Some("package_manager=apt-get"))
-        .expect("machine key/value evidence should be present");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("package_manager")
-            && item.get("excerpt").and_then(Value::as_str) == Some("apt-get")
-    }));
-}
-
-#[test]
-fn docker_unavailable_text_counts_as_list_candidate_evidence() {
-    let mut journal =
-        TaskJournal::for_task("task-docker-images-unavailable", "ask", "列出 Docker 镜像");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::DockerImages,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "docker_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("docker unavailable: No such file or directory (os error 2)".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
-
-    assert!(coverage.observed_canonical.contains("command_output"));
-}
-
-#[test]
-fn structured_keys_array_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-structured-keys", "ask", "列出配置键");
-    let route = route_for_semantic(crate::OutputSemanticKind::StructuredKeys);
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "config_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "structured_keys",
-                "exists": true,
-                "keys": ["app", "features", "paths"],
-                "count": 3
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-}
-
-#[test]
-fn docker_command_not_found_text_counts_as_docker_contract_evidence() {
-    for (semantic_kind, expected_canonical) in [
-        (
-            crate::OutputSemanticKind::DockerContainerLifecycle,
-            "field_value",
-        ),
-        (crate::OutputSemanticKind::DockerLogs, "candidates"),
-    ] {
-        let mut journal =
-            TaskJournal::for_task("task-docker-command-not-found", "ask", "检查 Docker");
-        let route = route_for_semantic(semantic_kind);
-        journal.record_route_result(&route);
-        journal.push_step_result(&crate::executor::StepExecutionResult {
-            step_id: "step_1".to_string(),
-            skill: "run_cmd".to_string(),
-            status: crate::executor::StepExecutionStatus::Ok,
-            output: Some("bash: line 1: docker: command not found\n".to_string()),
-            error: None,
-            started_at: 1,
-            finished_at: 2,
-        });
-
-        let coverage = evidence_coverage_for_route(&route, &journal);
-        assert!(coverage.is_complete(), "coverage: {coverage:?}");
-        assert!(coverage.observed_canonical.contains(expected_canonical));
-    }
-}
-
-#[test]
-fn scalar_count_json_value_counts_as_count_evidence() {
-    let mut journal = TaskJournal::for_task("task-scalar-count", "ask", "输出数量");
-    let route = route_for_semantic(crate::OutputSemanticKind::ScalarCount);
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "run_cmd".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("3\n".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("count"));
-}
-
-#[test]
-fn log_analyze_output_counts_as_content_excerpt_evidence() {
-    let mut journal = TaskJournal::for_task("task-log-summary", "ask", "总结日志异常");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ContentExcerptSummary);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "logs".to_string();
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "log_analyze".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            serde_json::json!({
-                "path": "logs/clawd.log",
-                "level_counts": {"error": 1},
-                "recent_notable_lines": ["ERROR sample"]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("content_excerpt"));
-}
-
-#[test]
-fn browser_web_output_counts_as_content_excerpt_evidence() {
-    let mut journal = TaskJournal::for_task("task-web-summary", "ask", "总结网页");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::WebPageSummary);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Url;
-    route.output_contract.locator_hint = "https://example.com".to_string();
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "browser_web".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            serde_json::json!({
-                "items": [{
-                    "url": "https://example.com",
-                    "title": "Example Domain",
-                    "content_excerpt": "Example Domain is for documentation examples."
-                }],
-                "summary": "Extracted 1 page(s) using browser"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(coverage
-        .observed_extractors
-        .contains("browser_web.structured_json_v1"));
-
-    let trace = journal.to_trace_json();
-    let items = trace
-        .get("step_results")
-        .and_then(Value::as_array)
-        .and_then(|steps| steps.first())
-        .and_then(|step| step.get("observed_evidence"))
-        .and_then(|evidence| evidence.get("items"))
-        .and_then(Value::as_array)
-        .expect("browser observed evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("items[0].title")
-            && item.get("excerpt").and_then(Value::as_str) == Some("Example Domain")
-            && item.get("redacted").is_none()
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("items[0].content_excerpt")
-            && item
-                .get("excerpt")
-                .and_then(Value::as_str)
-                .is_some_and(|excerpt| excerpt.contains("documentation examples"))
-            && item.get("redacted").is_none()
-    }));
-}
-
-#[test]
-fn web_search_extract_output_counts_as_candidates_evidence() {
-    let mut journal = TaskJournal::for_task("task-web-search-summary", "ask", "总结搜索结果");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::WebSearchSummary);
-    route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "web_search_extract".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            serde_json::json!({
-                "status": "ok",
-                "items": [{
-                    "title": "Rust Async",
-                    "url": "https://example.com",
-                    "snippet": "Async Rust tutorial"
-                }],
-                "extract_urls": ["https://example.com"],
-                "summary": "1 result"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage
-        .observed_extractors
-        .contains("web_search_extract.structured_json_v1"));
-}
-
-#[test]
-fn web_search_extract_empty_candidates_count_as_candidates_evidence() {
-    let mut journal = TaskJournal::for_task("task-web-search-empty", "ask", "总结搜索结果");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::WebSearchSummary);
-    route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "web_search_extract".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            serde_json::json!({
-                "text": "{\"status\":\"ok\",\"items\":[],\"summary\":\"No results found\"}",
-                "extra": {
-                    "schema_version": 1,
-                    "action": "search",
-                    "status": "ok",
-                    "backend": "duckduckgo_html",
-                    "backend_connected": true,
-                    "field_value": {
-                        "status": "ok",
-                        "result_count": 0,
-                        "summary": "No results found"
-                    },
-                    "items": [],
-                    "candidates": [],
-                    "extract_urls": [],
-                    "citations": []
-                }
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage
-        .observed_extractors
-        .contains("web_search_extract.structured_json_v1"));
-}
-
-#[test]
-fn weather_output_counts_as_content_excerpt_evidence() {
-    let mut journal = TaskJournal::for_task("task-weather-query", "ask", "查天气");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::WeatherQuery);
-    route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "weather".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            serde_json::json!({
-                "status": "ok",
-                "text": "Beijing current weather: clear, 22 C.",
-                "extra": {"action": "query", "mode": "current", "locale": "en-US"},
-                "error_text": null
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(coverage
-        .observed_extractors
-        .contains("weather.structured_json_v1"));
-}
-
-#[test]
-fn market_quote_output_counts_as_content_excerpt_evidence() {
-    let mut journal = TaskJournal::for_task("task-market-quote", "ask", "查行情");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::MarketQuote);
-    route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "stock".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            serde_json::json!({
-                "status": "ok",
-                "text": "【SH600519】贵州茅台 现价 1688.00",
-                "error_text": null
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(coverage
-        .observed_extractors
-        .contains("stock.structured_json_v1"));
-}
-
-#[test]
-fn crypto_quote_extra_content_excerpt_counts_as_market_quote_evidence() {
-    let mut journal = TaskJournal::for_task("task-crypto-quote", "ask", "查 BTCUSDT 价格");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::MarketQuote);
-    route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "crypto".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            serde_json::json!({
-                "text": "BTCUSDT | 价格来源：- 币安(BINANCE) $69587.260000",
-                "extra": {
-                    "action": "quote",
-                    "content_excerpt": "BTCUSDT | 价格来源：- 币安(BINANCE) $69587.260000",
-                    "quote": {
-                        "symbol": "BTCUSDT",
-                        "price_usd": 69587.26,
-                        "exchange": "binance",
-                        "source": "binance_api"
-                    }
-                }
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(coverage
-        .observed_extractors
-        .contains("crypto.structured_json_v1"));
-}
-
-#[test]
-fn image_vision_output_counts_as_content_excerpt_evidence() {
-    let mut journal = TaskJournal::for_task("task-image-understanding", "ask", "描述图片");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ImageUnderstanding);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Url;
-    route.output_contract.locator_hint = "https://example.com/image.png".to_string();
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "image_vision".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            serde_json::json!({
-                "status": "ok",
-                "text": "The image shows a Rust logo.",
-                "extra": {"action": "describe"},
-                "error_text": null
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(coverage
-        .observed_extractors
-        .contains("image_vision.structured_json_v1"));
-}
-
-#[test]
-fn x_preview_output_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-publishing-preview", "ask", "预览发布文案");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::PublishingPreview);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::None;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "x".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("x skill dry_run=1, preview post: RustClaw release notes".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage.observed_extractors.contains("x.text_legacy_v1"));
-}
-
-#[test]
-fn scalar_path_only_results_array_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-scalar-path", "ask", "找到路径");
-    let route = route_for_semantic(crate::OutputSemanticKind::ScalarPathOnly);
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "find_name",
-                "count": 1,
-                "results": ["scripts/nl_tests/fixtures/device_local/package.json"]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-}
-
-#[test]
-fn json_observed_evidence_prioritizes_complete_candidate_names_before_entry_details() {
-    let output = r#"{
-        "action": "inventory_dir",
-        "counts": {"dirs": 1, "files": 2, "hidden": 0, "total": 3},
-        "dirs_only": false,
-        "entries": [
-            {"hidden": false, "kind": "dir", "modified_ts": 1, "name": "archive", "path": "docs/archive", "size_bytes": 0},
-            {"hidden": false, "kind": "file", "modified_ts": 1, "name": "release_checklist.md", "path": "docs/release_checklist.md", "size_bytes": 153},
-            {"hidden": false, "kind": "file", "modified_ts": 1, "name": "service_notes.md", "path": "docs/service_notes.md", "size_bytes": 272}
-        ],
-        "names": ["archive", "release_checklist.md", "service_notes.md"],
-        "names_by_kind": {
-            "dirs": ["archive"],
-            "files": ["release_checklist.md", "service_notes.md"],
-            "other": []
-        }
-    }"#;
-
-    let observed = observed_evidence_from_output(Some(output))
-        .expect("json output should produce observed evidence");
-    assert_eq!(
-        observed.get("truncated").and_then(Value::as_bool),
-        Some(true)
-    );
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("names[2]")
-            && item.get("excerpt").and_then(Value::as_str) == Some("service_notes.md")
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("names_by_kind.files[1]")
-            && item.get("excerpt").and_then(Value::as_str) == Some("service_notes.md")
-    }));
-}
-
-#[test]
-fn json_read_range_excerpt_preserves_provider_safe_line_evidence() {
-    let output = json!({
-        "action": "read_range",
-        "mode": "tail",
-        "path": "logs/clawd.run.log",
-        "excerpt": "1695|INFO task_call: [ASK_STATE] ask_state_transition state_from=none state_to=finalizing\n1696|INFO task_call: answer_verifier_skipped_structural_satisfaction\n1697|INFO task_call: task_call_end kind=ask status=success path=normal"
-    })
-    .to_string();
-
-    let observed = observed_evidence_from_output(Some(&output))
-        .expect("json read_range output should produce observed evidence");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items");
-
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("content_excerpt")
-            && item.get("origin_field").and_then(Value::as_str) == Some("excerpt")
-            && item
-                .get("excerpt")
-                .and_then(Value::as_str)
-                .is_some_and(|excerpt| {
-                    excerpt.contains("task_call_end") && excerpt.contains("status=success")
-                })
-    }));
-}
-
-#[test]
-fn json_observed_evidence_prioritizes_health_check_process_counts() {
-    let output = json!({
-        "clawd_health_port_open": true,
-        "clawd_log": {"exists": true, "keyword_error_count": 43, "modified_ts": 1779824680, "size_bytes": 1046356},
-        "clawd_process_count": 1,
-        "log_dir": "/home/guagua/rustclaw/logs",
-        "system_health": {
-            "arch": "x86_64",
-            "cpu_count": 8,
-            "disk_root_available_bytes": 17418850304u64,
-            "disk_root_total_bytes": 156546629632u64,
-            "hostname": "ThinkPad-X1",
-            "kernel_release": "6.17.0-29-generic",
-            "load_avg_15m": 1.26,
-            "load_avg_1m": 0.15,
-            "load_avg_5m": 0.56,
-            "memory_available_bytes": 10011176960u64,
-            "memory_total_bytes": 15937286144u64,
-            "os_family": "linux",
-            "service_manager": "systemd",
-            "uptime_seconds": 485924,
-            "warnings": []
-        },
-        "telegramd_log": {"exists": true, "keyword_error_count": 1, "modified_ts": 1779821271, "size_bytes": 942},
-        "telegramd_process_count": 0,
-        "workspace_root": "/home/guagua/rustclaw"
-    });
-
-    let observed = observed_evidence_from_output(Some(&output.to_string()))
-        .expect("json output should produce observed evidence");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("telegramd_process_count")
-            && item.get("excerpt").and_then(Value::as_str) == Some("0")
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("clawd_process_count")
-            && item.get("excerpt").and_then(Value::as_str) == Some("1")
-    }));
-}
-
-#[test]
-fn text_observed_evidence_parses_status_prefixed_json_body() {
-    let output = concat!(
-        "status=200\n",
-        "{\"ok\":true,\"data\":{\"version\":\"0.1.7\",\"worker_state\":\"running\",\"uptime_seconds\":95,\"telegramd_process_count\":0},\"error\":null}"
+    journal.record_rollout_attribution(
+        TaskJournalRolloutAttribution::answer_verifier_required_evidence_block(Some(&verifier)),
     );
 
-    let observed = observed_evidence_from_output(Some(output))
-        .expect("status-prefixed json output should produce observed evidence");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("status")
-            && item.get("excerpt").and_then(Value::as_str) == Some("200")
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("body.ok")
-            && item.get("excerpt").and_then(Value::as_str) == Some("true")
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("body.data.worker_state")
-            && item.get("excerpt").and_then(Value::as_str) == Some("running")
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("body.data.telegramd_process_count")
-            && item.get("excerpt").and_then(Value::as_str) == Some("0")
-    }));
-}
-
-#[test]
-fn text_observed_evidence_keeps_safe_file_tokens_while_redacting_secret_tokens() {
-    let output = concat!(
-        "The files are builtin_write_smoke.txt, full_suite_trace_note.txt, gen-1778122040.png, ",
-        "and hello.sh; secret sk-123456789012345678901234 should not be exposed."
-    );
-
-    let observed = observed_evidence_from_output(Some(output))
-        .expect("text output should produce observed evidence");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items");
-    let text_excerpt = items
-        .iter()
-        .find(|item| item.get("field").and_then(Value::as_str) == Some("text_excerpt"))
-        .and_then(|item| item.get("excerpt"))
-        .and_then(Value::as_str)
-        .expect("text excerpt");
-
-    assert!(text_excerpt.contains("full_suite_trace_note.txt"));
-    assert!(text_excerpt.contains("gen-1778122040.png"));
-    assert!(text_excerpt.contains("hello.sh"));
-    assert!(text_excerpt.contains("[redacted]"));
-    assert!(!text_excerpt.contains("sk-123456789012345678901234"));
-}
-
-#[test]
-fn json_observed_evidence_array_items_include_provider_safe_sample_values() {
-    let names = vec![
-        "builtin_write_smoke.txt",
-        "full_suite_trace_note.txt",
-        "gen-1778122040.png",
-        "gen-1778122536.png",
-        "hello.sh",
-        "hello_from_manual_test.sh",
-        "hello_from_p2_smoke.sh",
-        "hello_from_p2_smoke_v2.sh",
-        "hello_world.sh",
-        "manual_fixture_note.txt",
-        "manual_meta.json",
-        "manual_meta_variant.json",
-        "manual_note.txt",
-        "manual_note_variant.txt",
-        "minimax_pwd_line.txt",
-        "natural_manual_note.txt",
-    ];
-    let output = json!({
-        "action": "inventory_dir",
-        "names": names,
-        "names_by_kind": {
-            "files": names,
-            "dirs": [],
-            "other": []
-        },
-        "path": "document"
-    });
-
-    let observed = observed_evidence_from_output(Some(&output.to_string()))
-        .expect("json output should produce observed evidence");
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items");
-    let names_item = items
-        .iter()
-        .find(|item| item.get("field").and_then(Value::as_str) == Some("names"))
-        .expect("names array evidence item");
-    let sample_values = names_item
-        .get("sample_values")
-        .and_then(Value::as_array)
-        .expect("names array should expose sample_values");
-    assert!(sample_values
-        .iter()
-        .any(|item| item.as_str() == Some("manual_note_variant.txt")));
-}
-
-#[test]
-fn recent_artifacts_judgment_content_excerpt_satisfies_field_value_requirement() {
-    let mut journal = TaskJournal::for_task(
-        "task-recent-artifacts-content",
-        "ask",
-        "list docs and explain the most relevant one",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::RecentArtifactsJudgment);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "document".to_string();
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "inventory_dir",
-                "names": ["manual_note.txt", "manual_fixture_note.txt"],
-                "names_by_kind": {
-                    "files": ["manual_note.txt", "manual_fixture_note.txt"],
-                    "dirs": [],
-                    "other": []
-                },
-                "path": "document"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_2".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "read_range",
-                "path": "document/manual_note.txt",
-                "excerpt": "1|RustClaw manual test note",
-                "start_line": 1,
-                "end_line": 1
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 3,
-        finished_at: 4,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(coverage.observed_canonical.contains("field_value"));
-}
-
-#[test]
-fn large_inventory_dir_observed_evidence_preserves_mtime_metadata_when_truncated() {
-    let entries = (0..68)
-        .map(|idx| {
-            json!({
-                "hidden": false,
-                "kind": if idx % 2 == 0 { "file" } else { "dir" },
-                "modified_ts": 1780000000_u64 - idx,
-                "name": format!("entry_{idx}.txt"),
-                "path": format!("entry_{idx}.txt"),
-                "size_bytes": 100 + idx
-            })
-        })
-        .collect::<Vec<_>>();
-    let names = (0..68)
-        .map(|idx| format!("entry_{idx}.txt"))
-        .collect::<Vec<_>>();
-    let output = json!({
-        "action": "inventory_dir",
-        "counts": {"dirs": 34, "files": 34, "hidden": 0, "total": 68},
-        "entries": entries,
-        "names": names,
-        "names_by_kind": {
-            "dirs": ["entry_1.txt", "entry_3.txt", "entry_5.txt"],
-            "files": ["entry_0.txt", "entry_2.txt", "entry_4.txt"],
-            "other": []
-        },
-        "path": "/home/guagua/rustclaw",
-        "sort_by": "mtime_desc"
-    });
-    let output_text = output.to_string();
-
-    let observed = observed_evidence_from_output(Some(&output_text))
-        .expect("json output should produce observed evidence");
-    assert_eq!(
-        observed.get("truncated").and_then(Value::as_bool),
-        Some(true)
-    );
-    let items = observed
-        .get("items")
-        .and_then(Value::as_array)
-        .expect("observed evidence items");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("sort_by")
-            && item.get("excerpt").and_then(Value::as_str) == Some("mtime_desc")
-    }));
-    let entries_item = items
-        .iter()
-        .find(|item| item.get("field").and_then(Value::as_str) == Some("entries"))
-        .expect("entries array evidence item");
-    let sample_keys = entries_item
-        .get("sample_keys")
-        .and_then(Value::as_array)
-        .expect("array object sample keys");
-    assert!(sample_keys
-        .iter()
-        .any(|item| item.as_str() == Some("modified_ts")));
-    assert!(sample_keys
-        .iter()
-        .any(|item| item.as_str() == Some("size_bytes")));
-
-    let mut journal = TaskJournal::for_task("task-large-mtime-dir", "ask", "list recent entries");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::DirectoryEntryGroups);
-    route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(output_text),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("modified_ts"));
-    assert!(coverage.observed_canonical.contains("sort_by"));
-}
-
-#[test]
-fn service_status_health_check_fields_count_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-service-status", "ask", "检查 clawd 服务状态");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ServiceStatus,
-        locator_kind: crate::OutputLocatorKind::None,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "health_check".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(r#"{"clawd_health_port_open":true,"clawd_process_count":1}"#.to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-}
-
-#[test]
-fn doc_parse_metadata_path_counts_as_required_path_before_truncation() {
-    let mut journal =
-        TaskJournal::for_task("task-doc-parse-path", "ask", "读 README 并用三句话总结");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::None);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Filename;
-    route.output_contract.locator_hint = "README.md".to_string();
-    journal.record_route_result(&route);
-    let sections = (0..32)
-        .map(|idx| {
-            json!({
-                "id": format!("sec_{idx}"),
-                "title": format!("Section {idx}"),
-                "level": 2,
-                "content": "long section body"
-            })
-        })
-        .collect::<Vec<_>>();
-    let output = json!({
-        "text": "RustClaw is a local Rust agent runtime.",
-        "sections": sections,
-        "metadata": {
-            "path": "/home/guagua/rustclaw/README.md",
-            "type": "md"
-        },
-        "status": "ok"
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "doc_parse".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(output.to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(coverage.observed_canonical.contains("content_excerpt"));
-}
-
-#[test]
-fn service_status_run_cmd_output_counts_as_field_value_evidence() {
-    let mut journal =
-        TaskJournal::for_task("task-service-status-run-cmd", "ask", "检查 clawd 服务状态");
-    let route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "run_cmd".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            "154421 clawd /home/guagua/rustclaw/target/release/clawd --config /home/guagua/rustclaw/configs/config.toml\n"
-                .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage.observed_canonical.contains("command_output"));
-}
-
-#[test]
-fn service_status_http_basic_text_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-service-status-http-basic",
-        "ask",
-        "检查本地 health 接口",
-    );
-    let route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "http_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("status=200\n{\"ok\":true,\"service\":\"clawd\"}\n".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage.observed_canonical.contains("command_output"));
-}
-
-#[test]
-fn service_status_http_basic_json_wrapper_extracts_embedded_body_status_fields() {
-    let mut journal = TaskJournal::for_task(
-        "task-service-status-http-basic-json",
-        "ask",
-        "observe local health endpoint",
-    );
-    let route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
-    journal.record_route_result(&route);
-    let body = json!({
-        "ok": true,
-        "data": {
-            "version": "0.1.7",
-            "worker_state": "running",
-            "uptime_seconds": 53,
-            "channel_gateway_healthy": false,
-            "telegram_bot_statuses": [
-                {
-                    "name": "primary",
-                    "healthy": false,
-                    "status": "stale"
-                }
-            ]
-        },
-        "error": null
-    })
-    .to_string();
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "http_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "extra": {
-                    "action": "get",
-                    "url": "http://127.0.0.1:8787/v1/health",
-                    "status_code": 200,
-                    "success_status": true,
-                    "body_preview": body.clone(),
-                },
-                "text": format!("status=200\n{body}")
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage
-        .observed_extractors
-        .contains("http_basic.structured_json_v1"));
-    assert!(coverage
-        .observed_fields
-        .contains("body.data.channel_gateway_healthy"));
-    assert!(coverage.observed_fields.contains("body.data.version"));
-    assert!(coverage
-        .observed_fields
-        .contains("body.data.uptime_seconds"));
-    assert!(coverage
-        .observed_fields
-        .contains("body.data.telegram_bot_statuses[0].name"));
-    assert!(coverage
-        .observed_fields
-        .contains("body.data.telegram_bot_statuses[0].status"));
-}
-
-#[test]
-fn web_page_summary_http_basic_json_wrapper_body_counts_as_content_excerpt_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-web-summary-http-basic-json",
-        "ask",
-        "summarize local health endpoint",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::WebPageSummary);
-    route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
-    let body = json!({
-        "ok": true,
-        "data": {
-            "version": "0.1.7",
-            "worker_state": "running",
-            "uptime_seconds": 53,
-            "channel_gateway_healthy": false,
-            "telegram_bot_statuses": [
-                {
-                    "name": "primary",
-                    "healthy": false,
-                    "status": "stale"
-                }
-            ]
-        }
-    })
-    .to_string();
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "http_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "extra": {
-                    "action": "get",
-                    "url": "http://127.0.0.1:8787/v1/health",
-                    "status_code": 200,
-                    "success_status": true,
-                    "body_preview": body.clone(),
-                },
-                "text": format!("status=200\n{body}")
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(coverage
-        .observed_fields
-        .contains("body.data.channel_gateway_healthy"));
-    assert!(coverage.observed_fields.contains("body.data.version"));
-    assert!(coverage
-        .observed_fields
-        .contains("body.data.uptime_seconds"));
-}
-
-#[test]
-fn raw_command_output_http_basic_text_counts_as_command_output_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-raw-command-http-basic",
-        "ask",
-        "请求 http://127.0.0.1:8787/v1/health",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::RawCommandOutput);
-    route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "http_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("status=200\n{\"ok\":true,\"service\":\"clawd\"}\n".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("command_output"));
-}
-
-#[test]
-fn raw_command_output_file_read_excerpt_counts_as_command_output_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-raw-command-file-read",
-        "ask",
-        "读取 README.md 前 4 行",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::RawCommandOutput);
-    route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            r#"{"action":"read_range","path":"/tmp/README.md","excerpt":"1|# Demo\n2|body"}"#
-                .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert!(coverage.observed_canonical.contains("command_output"));
-}
-
-#[test]
-fn git_status_text_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-git-state", "ask", "检查仓库状态");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::GitRepositoryState,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "git_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            "exit=0\n## main...origin/main\n M crates/clawd/src/task_journal.rs\n".to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-
-    let trace = journal.to_trace_json();
-    let items = trace
-        .get("step_results")
-        .and_then(Value::as_array)
-        .and_then(|steps| steps.first())
-        .and_then(|step| step.get("observed_evidence"))
-        .and_then(|observed| observed.get("items"))
-        .and_then(Value::as_array)
-        .expect("observed evidence items should be present");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("state")
-            && item.get("excerpt").and_then(Value::as_str) == Some("dirty")
-    }));
-}
-
-#[test]
-fn git_subject_plain_text_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-git-subject", "ask", "最近一次 git 提交标题");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::GitCommitSubject,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "run_cmd".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some("Harden contract matrix execution coverage\n".to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-}
-
-#[test]
-fn git_status_text_ignores_non_ascii_summary_without_panic() {
-    assert_eq!(
-        super::text_git_state_evidence(
-            "exit=0\n## main...origin/main\n执行 cat /definitely_missing_rustclaw_contract_case 失败\n"
-        ),
-        Some("clean")
-    );
-}
-
-#[test]
-fn config_validation_evidence_coverage_accepts_valid_flag() {
-    let mut journal = TaskJournal::for_task("task-config-validation", "ask", "验证配置");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ConfigValidation,
-        requires_content_evidence: true,
-        locator_kind: crate::OutputLocatorKind::Path,
-        locator_hint: "configs/config.toml".to_string(),
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "config_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "validate_structured",
-                "path": "configs/config.toml",
-                "format": "toml",
-                "valid": true,
-                "root_type": "object",
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-}
-
-#[test]
-fn config_mutation_plan_change_evidence_counts_as_valid_plan_proof() {
-    let mut journal = TaskJournal::for_task("task-config-plan", "ask", "preview config change");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ConfigMutation);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "configs/config.toml".to_string();
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "config_edit".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "extra": {
-                    "action": "plan_config_change",
-                    "path": "configs/config.toml",
-                    "resolved_path": "/repo/configs/config.toml",
-                    "field_path": "skills.skill_switches.example",
-                    "old_value": null,
-                    "new_value": true,
-                    "would_change": true,
-                    "requires_confirmation": true
-                },
-                "text": "{\"action\":\"plan_config_change\",\"path\":\"configs/config.toml\",\"field_path\":\"skills.skill_switches.example\",\"new_value\":true,\"would_change\":true,\"requires_confirmation\":true}"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(coverage.observed_canonical.contains("valid"));
-}
-
-#[test]
-fn config_mutation_apply_validated_flag_counts_as_valid_evidence() {
-    let mut journal = TaskJournal::for_task("task-config-apply", "ask", "apply config change");
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ConfigMutation);
-    route.output_contract.requires_content_evidence = true;
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.locator_hint = "configs/config.toml".to_string();
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "config_edit".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "apply_config_change",
-                "path": "configs/config.toml",
-                "resolved_path": "/repo/configs/config.toml",
-                "field_path": "skills.skill_switches.example",
-                "old_value": null,
-                "new_value": true,
-                "applied": true,
-                "validated": true
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(coverage.observed_canonical.contains("valid"));
-}
-
-#[test]
-fn sqlite_database_kind_uses_db_structure_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-sqlite-kind", "ask", "判断 sqlite 数据库类型");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::SqliteDatabaseKindJudgment,
-        requires_content_evidence: true,
-        locator_kind: crate::OutputLocatorKind::Path,
-        locator_hint: "data/test_contract.sqlite".to_string(),
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "db_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "columns": ["name"],
-                "rows": [
-                    {"name": "orders"},
-                    {"name": "service_logs"},
-                    {"name": "users"}
-                ]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("field_value"));
-}
-
-#[test]
-fn quantity_comparison_size_bytes_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task("task-quantity-comparison", "ask", "比较两个文件大小");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::QuantityComparison,
-        locator_kind: crate::OutputLocatorKind::Path,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "path_batch_facts",
-                "facts": [
-                    {
-                        "path": "release_checklist.md",
-                        "exists": true,
-                        "fact": {
-                            "kind": "file",
-                            "size_bytes": 153
-                        }
-                    },
-                    {
-                        "path": "package.json",
-                        "exists": true,
-                        "fact": {
-                            "kind": "file",
-                            "size_bytes": 246
-                        }
-                    }
-                ]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage.observed_canonical.contains("size_bytes"));
-}
-
-#[test]
-fn quantity_comparison_inventory_dir_entry_keys_count_as_size_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-quantity-comparison-inventory-dir",
-        "ask",
-        "find largest file by size",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::QuantityComparison);
-    route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "inventory_dir",
-                "counts": {"dirs": 0, "files": 22, "hidden": 0, "total": 22},
-                "dirs_only": false,
-                "entries": (0..22)
-                    .map(|idx| {
-                        json!({
-                            "hidden": false,
-                            "kind": "file",
-                            "modified_ts": 1,
-                            "name": format!("schema_{idx}.json"),
-                            "path": format!("prompts/schemas/schema_{idx}.json"),
-                            "size_bytes": 100 + idx
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-                "names": (0..22)
-                    .map(|idx| format!("schema_{idx}.json"))
-                    .collect::<Vec<_>>(),
-                "names_by_kind": {
-                    "dirs": [],
-                    "files": (0..22)
-                        .map(|idx| format!("schema_{idx}.json"))
-                        .collect::<Vec<_>>(),
-                    "other": []
-                }
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage.observed_canonical.contains("size_bytes"));
-}
-
-#[test]
-fn quantity_comparison_text_size_bytes_counts_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-quantity-comparison-text",
-        "ask",
-        "compare two file sizes",
-    );
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::QuantityComparison,
-        locator_kind: crate::OutputLocatorKind::Path,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "run_cmd".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            "path=release_checklist.md size_bytes=153\npath=package.json size_bytes=246"
-                .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage.observed_canonical.contains("size_bytes"));
-}
-
-#[test]
-fn quantity_comparison_count_inventory_total_size_counts_as_size_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-quantity-comparison-count-inventory-size",
-        "ask",
-        "check directory size",
-    );
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::QuantityComparison,
-        locator_kind: crate::OutputLocatorKind::Path,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "count_inventory",
-                "path": "target",
-                "resolved_path": "/tmp/repo/target",
-                "recursive": true,
-                "counts": {
-                    "total": 129116,
-                    "files": 121355,
-                    "dirs": 7761,
-                    "total_size_bytes": 57263840032u64
-                }
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-    assert!(coverage.observed_canonical.contains("size_bytes"));
-}
-
-#[test]
-fn trace_json_reports_required_vs_observed_evidence_coverage() {
-    let mut journal = TaskJournal::for_task("task-evidence-coverage", "ask", "列出文件名");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({"action": "list_dir", "names": ["Cargo.toml", "README.md"]}).to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let trace = journal.to_trace_json();
-    let coverage = trace
-        .get("evidence_coverage")
-        .expect("evidence coverage should be present");
-    assert_eq!(
-        coverage
-            .get("required_evidence")
-            .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(vec!["candidates"])
-    );
-    assert_eq!(
-        coverage
-            .get("missing_evidence")
-            .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(Vec::<&str>::new())
-    );
-    assert!(coverage
-        .get("observed_canonical")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items.iter().any(|item| item.as_str() == Some("candidates"))));
-    assert!(coverage
-        .get("observed_extractors")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items
-            .iter()
-            .any(|item| item.as_str() == Some("fs_basic.list_dir.structured_json_v1"))));
-    assert!(coverage
-        .pointer("/observed_evidence_sources/candidates")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items
-            .iter()
-            .any(|item| item.as_str() == Some("fs_basic.list_dir.structured_json_v1"))));
     let summary = journal.to_summary_json();
+    let attribution = summary
+        .get("rollout_attribution")
+        .and_then(Value::as_array)
+        .expect("rollout attribution should be present");
+    assert_eq!(attribution.len(), 1);
+    let item = &attribution[0];
     assert_eq!(
-        summary
-            .get("task_outcome")
-            .and_then(|value| value.get("state"))
+        item.get("switch_name").and_then(Value::as_str),
+        Some("answer_verifier_enforce_required")
+    );
+    assert_eq!(
+        item.get("event").and_then(Value::as_str),
+        Some("answer_verifier_required_evidence_block")
+    );
+    assert_eq!(item.get("outcome").and_then(Value::as_str), Some("blocked"));
+    assert_eq!(
+        item.get("reason_code").and_then(Value::as_str),
+        Some("answer_verifier_required_evidence_block")
+    );
+    assert_eq!(
+        item.get("failure_attribution").and_then(Value::as_str),
+        Some("contract_gap")
+    );
+    assert_eq!(
+        item.get("missing_evidence_fields")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
             .and_then(Value::as_str),
-        Some("in_progress")
+        Some("field_value")
     );
-}
-
-#[test]
-fn config_risk_evidence_coverage_accepts_guard_findings() {
-    let mut journal = TaskJournal::for_task("task-config-risk-evidence", "ask", "检查配置风险");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ConfigRiskAssessment,
-        locator_kind: crate::OutputLocatorKind::Path,
-        locator_hint: "configs/config.toml".to_string(),
-        requires_content_evidence: true,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "config_edit".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "guard_config",
-                "format": "toml",
-                "path": "configs/config.toml",
-                "resolved_path": "/home/guagua/rustclaw/configs/config.toml",
-                "risk_count": 2,
-                "risks": [
-                    "tools.allow_sudo=true",
-                    "tools.allow_path_outside_workspace=true"
-                ]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    let trace = journal.to_trace_json();
-    let items = trace
-        .get("step_results")
-        .and_then(Value::as_array)
-        .and_then(|steps| steps.first())
-        .and_then(|step| step.get("observed_evidence"))
-        .and_then(|observed| observed.get("items"))
-        .and_then(Value::as_array)
-        .expect("observed evidence items should be present");
-
-    assert!(coverage.is_complete());
-    assert_eq!(coverage.required_evidence, vec!["candidates", "count"]);
-    assert!(coverage.observed_canonical.contains("candidates"));
-    assert!(coverage.observed_canonical.contains("count"));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("risks[1]")
-            && item.get("excerpt").and_then(Value::as_str)
-                == Some("tools.allow_path_outside_workspace=true")
-            && item.get("redacted").is_none()
-    }));
-}
-
-#[test]
-fn filesystem_mutation_result_accepts_kb_ingest_path_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-kb-ingest-evidence",
-        "ask",
-        "ingest README into demo_docs_nl",
+    assert_eq!(item.get("confidence").and_then(Value::as_f64), Some(0.91));
+    assert!(
+        serde_json::to_string(item)
+            .expect("serialize attribution")
+            .contains("human-language reason")
+            == false
     );
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Low,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FilesystemMutationResult,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        locator_hint: "README.md".to_string(),
-        requires_content_evidence: true,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "kb".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "ingest",
-                "status": "ok",
-                "namespace": "demo_docs_nl",
-                "path": "README.md",
-                "paths": ["README.md"],
-                "stats": {
-                    "ingested_docs": 1,
-                    "total_docs": 1,
-                    "total_chunks": 3
-                }
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    let trace = journal.to_trace_json();
-
-    assert!(coverage.is_complete());
-    assert_eq!(coverage.required_evidence, vec!["path"]);
-    assert!(coverage.observed_canonical.contains("path"));
-    assert!(trace
-        .pointer("/step_results/0/observed_evidence/extractor/extractor_ref")
-        .and_then(Value::as_str)
-        .is_some_and(|extractor| extractor == "kb.ingest.structured_json_v1"));
-}
-
-#[test]
-fn evidence_coverage_ignores_failed_and_synthesis_outputs() {
-    let mut journal = TaskJournal::for_task(
-        "task-evidence-coverage-filter",
-        "ask",
-        "summarize file content",
-    );
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        requires_content_evidence: true,
-        semantic_kind: crate::OutputSemanticKind::ContentExcerptSummary,
-        locator_kind: crate::OutputLocatorKind::Path,
-        locator_hint: "README.md".to_string(),
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_failed".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Error,
-        output: Some(json!({"content": "failed read should not count"}).to_string()),
-        error: Some("read failed".to_string()),
-        started_at: 1,
-        finished_at: 2,
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_synthesis".to_string(),
-        skill: "synthesize_answer".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({"content": "model synthesis should not count as observed content"}).to_string(),
-        ),
-        error: None,
-        started_at: 3,
-        finished_at: 4,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-
-    assert!(!coverage.is_complete());
-    assert_eq!(
-        coverage.missing_evidence,
-        vec!["any_of(candidates|content_excerpt|count|field_value)"]
-    );
-    assert!(!coverage.observed_canonical.contains("content_excerpt"));
-}
-
-#[test]
-fn raw_command_output_error_step_supplies_command_output_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-run-cmd-failure-evidence",
-        "ask",
-        "cat /definitely_missing_rustclaw_contract_case",
-    );
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ExecutionFailedStep,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "run_cmd".to_string(),
-        status: crate::executor::StepExecutionStatus::Error,
-        output: None,
-        error: Some(crate::skills::structured_skill_error_from_parts(
-            "run_cmd",
-            "nonzero_exit",
-            "Command failed with exit code 1",
-            Some("linux"),
-            Some(json!({
-                "command": "cat /definitely_missing_rustclaw_contract_case",
-                "exit_code": 1,
-                "stderr": "cat: /definitely_missing_rustclaw_contract_case: No such file or directory (os error 2)\n",
-                "stdout": Value::Null,
-            })),
-        )),
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("field_value"));
-
-    let trace = journal.to_trace_json();
-    let items = trace
-        .get("step_results")
-        .and_then(Value::as_array)
-        .and_then(|steps| steps.first())
-        .and_then(|step| step.get("observed_evidence"))
-        .and_then(|observed| observed.get("items"))
-        .and_then(Value::as_array)
-        .expect("observed evidence items should be present");
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("stderr")
-            && item
-                .get("excerpt")
-                .and_then(Value::as_str)
-                .is_some_and(|value| value.contains("No such file or directory"))
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("command_output")
-            && item
-                .get("excerpt")
-                .and_then(Value::as_str)
-                .is_some_and(|value| value.contains("command failed"))
-    }));
-    assert!(items.iter().any(|item| {
-        item.get("field").and_then(Value::as_str) == Some("field_value")
-            && item
-                .get("source")
-                .and_then(Value::as_str)
-                .is_some_and(|value| value == "structured_error.extractor")
-    }));
-}
-
-#[test]
-fn summary_json_includes_user_readable_task_outcome() {
-    let mut journal = TaskJournal::for_task("task-outcome", "ask", "列出文件名");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.record_final_status(TaskJournalFinalStatus::Success);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(json!({"names": ["Cargo.toml", "README.md"]}).to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let outcome = journal
-        .to_summary_json()
-        .get("task_outcome")
-        .cloned()
-        .expect("task outcome");
 
     assert_eq!(
-        outcome.get("state").and_then(Value::as_str),
-        Some("completed")
-    );
-    assert_eq!(
-        outcome.get("final_answer_shape").and_then(Value::as_str),
-        Some("name_list")
-    );
-    assert_eq!(
-        outcome
-            .get("missing_evidence_count")
-            .and_then(Value::as_u64),
-        Some(0)
-    );
-    assert!(outcome.get("message_zh").and_then(Value::as_str).is_some());
-    assert!(outcome
-        .get("next_step_en")
-        .and_then(Value::as_str)
-        .is_some());
-}
-
-#[test]
-fn trace_json_reports_missing_required_evidence() {
-    let mut journal = TaskJournal::for_task("task-evidence-missing", "ask", "这个路径是否存在");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
-        locator_kind: crate::OutputLocatorKind::Path,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(json!({"path": "/tmp/missing.txt", "exists": false}).to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let trace = journal.to_trace_json();
-    let coverage = trace
-        .get("evidence_coverage")
-        .expect("evidence coverage should be present");
-    assert_eq!(
-        coverage
-            .get("missing_evidence")
-            .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(vec!["kind"])
-    );
-}
-
-#[test]
-fn trace_json_uses_evidence_expression_for_confirmed_absence() {
-    let mut journal = TaskJournal::for_task("task-evidence-absence", "ask", "这个路径是否存在");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
-        locator_kind: crate::OutputLocatorKind::Path,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "path": "/tmp/missing.txt",
-                "exists": false,
-                "kind": "missing"
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete());
-    assert!(coverage.observed_canonical.contains("exists_false"));
-
-    let trace = journal.to_trace_json();
-    let coverage = trace
-        .get("evidence_coverage")
-        .expect("evidence coverage should be present");
-    assert_eq!(
-        coverage
-            .get("evidence_expression")
-            .and_then(|value| value.get("negative_evidence"))
-            .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(vec!["exists_false"])
-    );
-    assert_eq!(
-        coverage
-            .get("missing_evidence")
-            .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(Vec::<&str>::new())
-    );
-}
-
-#[test]
-fn trace_json_reports_missing_evidence_expression_alternative() {
-    let mut journal = TaskJournal::for_task("task-evidence-missing-alt", "ask", "这个路径是否存在");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
-        locator_kind: crate::OutputLocatorKind::Path,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(json!({"path": "/tmp/maybe.txt", "kind": "file"}).to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert_eq!(
-        coverage.missing_evidence,
-        vec!["one_of(exists_false|exists_true)"]
-    );
-}
-
-#[test]
-fn content_presence_accepts_excerpt_evidence_alternative() {
-    let mut journal = TaskJournal::for_task(
-        "task-content-presence-excerpt",
-        "ask",
-        "check whether the file mentions release",
-    );
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ContentPresenceCheck,
-        locator_kind: crate::OutputLocatorKind::Path,
-        requires_content_evidence: true,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.step_results.push(TaskJournalStepTrace::ok(
-        "step_1",
-        "fs_basic",
-        json!({
-            "action": "read_range",
-            "path": "/tmp/release_checklist.md",
-            "excerpt": "1|# Release Checklist"
-        })
-        .to_string(),
-    ));
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete());
-    assert!(coverage.observed_canonical.contains("content_excerpt"));
-    assert_eq!(
-        coverage
-            .evidence_expression
-            .as_ref()
-            .and_then(|value| value.get("any_of"))
-            .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(vec!["content_excerpt", "content_match"])
-    );
-}
-
-#[test]
-fn content_presence_accepts_structured_not_found_as_negative_match_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-content-presence-missing-path",
-        "ask",
-        "read /tmp/definitely_missing.md; if missing, say it is missing",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ContentPresenceCheck);
-    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
-    route.output_contract.requires_content_evidence = true;
-    journal.record_route_result(&route);
-    journal.step_results.push(TaskJournalStepTrace::new(
-        "step_1",
-        "fs_basic",
-        crate::executor::StepExecutionStatus::Error,
-        None,
-        Some(format!(
-            "__RC_SKILL_ERROR__:{}",
-            json!({
-                "skill": "system_basic",
-                "error_kind": "not_found",
-                "error_text": "metadata failed for /tmp/definitely_missing.md",
-                "extra": {
-                    "operation": "metadata",
-                    "path": "/tmp/definitely_missing.md"
-                }
-            })
-        )),
-    ));
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-    assert!(coverage.is_complete(), "coverage: {coverage:?}");
-    assert!(coverage.observed_canonical.contains("content_match"));
-    assert!(coverage.observed_canonical.contains("exists"));
-    assert!(coverage.observed_canonical.contains("path"));
-}
-
-#[test]
-fn non_content_route_ignores_read_text_observation_as_field_value_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-non-content-read-evidence",
-        "ask",
-        "current git commit subject",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::GitCommitSubject);
-    route.output_contract.requires_content_evidence = false;
-    journal.record_route_result(&route);
-    journal.step_results.push(TaskJournalStepTrace::ok(
-        "step_read",
-        "fs_basic",
-        json!({
-            "action": "read_text_range",
-            "path": "/tmp/commit-message.txt",
-            "content": "abc1234 add contract matrix tests"
-        })
-        .to_string(),
-    ));
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-
-    assert!(!coverage.is_complete());
-    assert_eq!(coverage.missing_evidence, vec!["field_value"]);
-    assert!(!coverage.observed_canonical.contains("field_value"));
-    assert!(!coverage.observed_canonical.contains("content_excerpt"));
-}
-
-#[test]
-fn non_content_route_ignores_doc_parse_observation_as_structured_evidence() {
-    let mut journal = TaskJournal::for_task(
-        "task-non-content-doc-parse-evidence",
-        "ask",
-        "service status",
-    );
-    let mut route = route_for_semantic(crate::OutputSemanticKind::ServiceStatus);
-    route.output_contract.requires_content_evidence = false;
-    journal.record_route_result(&route);
-    journal.step_results.push(TaskJournalStepTrace::ok(
-        "step_parse",
-        "doc_parse",
-        json!({
-            "action": "parse_doc",
-            "path": "/tmp/service-notes.md",
-            "status": "running",
-            "content": "operator notes say the service should be running"
-        })
-        .to_string(),
-    ));
-
-    let coverage = evidence_coverage_for_route(&route, &journal);
-
-    assert!(!coverage.is_complete());
-    assert_eq!(coverage.missing_evidence, vec!["field_value"]);
-    assert!(!coverage.observed_canonical.contains("field_value"));
-}
-
-#[test]
-fn trace_json_counts_nested_builtin_tool_evidence() {
-    let mut journal = TaskJournal::for_task("task-nested-evidence", "ask", "这个路径是否存在");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::ExistenceWithPath,
-        locator_kind: crate::OutputLocatorKind::Path,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(
-            json!({
-                "action": "path_batch_facts",
-                "facts": [{
-                    "path": "/tmp/present.txt",
-                    "exists": true,
-                    "kind": "file"
-                }]
-            })
-            .to_string(),
-        ),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let trace = journal.to_trace_json();
-    let coverage = trace
-        .get("evidence_coverage")
-        .expect("evidence coverage should be present");
-    assert_eq!(
-        coverage
-            .get("missing_evidence")
-            .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(Vec::<&str>::new())
-    );
-    assert!(coverage
-        .get("observed_fields")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items
-            .iter()
-            .any(|item| item.as_str() == Some("facts[0].path"))));
-}
-
-#[test]
-fn trace_json_includes_task_level_contract_matrix_snapshot() {
-    let mut journal = TaskJournal::for_task("task-contract-snapshot", "ask", "列出文件名");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
-        requires_content_evidence: true,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-
-    let trace = journal.to_trace_json();
-    let snapshot = trace
-        .get("contract_matrix")
-        .expect("contract matrix snapshot should be present");
-
-    assert_eq!(
-        snapshot.get("contract_match").and_then(Value::as_str),
-        Some("file_names")
-    );
-    assert_eq!(
-        snapshot
-            .get("required_evidence")
-            .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(Value::as_str).collect::<Vec<_>>()),
-        Some(vec!["candidates"])
-    );
-    assert_eq!(
-        snapshot.get("final_answer_shape").and_then(Value::as_str),
-        Some("name_list")
-    );
-    assert!(snapshot
-        .get("contract_matrix_hash")
-        .and_then(Value::as_str)
-        .is_some_and(|hash| !hash.is_empty()));
-    let runtime_snapshot = trace
-        .get("runtime_contract_snapshot")
-        .expect("runtime contract snapshot should be present");
-    assert_eq!(
-        runtime_snapshot
-            .get("contract")
-            .and_then(|value| value.get("contract_match"))
+        journal
+            .to_trace_json()
+            .pointer("/rollout_attribution/0/reason_code")
             .and_then(Value::as_str),
-        Some("file_names")
+        Some("answer_verifier_required_evidence_block")
     );
-    assert!(runtime_snapshot
-        .get("compact_contract_block")
-        .and_then(|value| value.get("hash"))
-        .and_then(Value::as_str)
-        .is_some_and(|hash| !hash.is_empty()));
-}
-
-#[test]
-fn step_trace_includes_contract_and_action_policy_for_success() {
-    let mut journal = TaskJournal::for_task("task-step-contract", "ask", "列出文件名");
-    let mut route = crate::RouteResult {
-        ask_mode: crate::AskMode::planner_execute_plain(),
-        resolved_intent: String::new(),
-        needs_clarify: false,
-        clarify_question: String::new(),
-        route_reason: String::new(),
-        route_confidence: Some(1.0),
-        visible_skill_candidates: Vec::new(),
-        risk_ceiling: crate::RiskCeiling::Unknown,
-        resume_behavior: crate::ResumeBehavior::None,
-        schedule_kind: crate::ScheduleKind::None,
-        schedule_intent: None,
-        wants_file_delivery: false,
-        should_refresh_long_term_memory: false,
-        agent_display_name_hint: String::new(),
-        output_contract: crate::IntentOutputContract::default(),
-    };
-    route.output_contract = crate::IntentOutputContract {
-        semantic_kind: crate::OutputSemanticKind::FileNames,
-        requires_content_evidence: true,
-        locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
-        ..Default::default()
-    };
-    journal.record_route_result(&route);
-    journal.record_plan_result(&crate::PlanResult {
-        goal: "list file names".to_string(),
-        missing_slots: Vec::new(),
-        needs_confirmation: false,
-        steps: vec![crate::PlanStep {
-            step_id: "step_1".to_string(),
-            action_type: "call_skill".to_string(),
-            skill: "fs_basic".to_string(),
-            args: json!({"action": "list_dir", "path": "."}),
-            depends_on: Vec::new(),
-            why: String::new(),
-        }],
-        planner_notes: String::new(),
-        plan_kind: crate::PlanKind::Single,
-        raw_plan_text: String::new(),
-    });
-    journal.push_step_result(&crate::executor::StepExecutionResult {
-        step_id: "step_1".to_string(),
-        skill: "fs_basic".to_string(),
-        status: crate::executor::StepExecutionStatus::Ok,
-        output: Some(json!({"items": [{"path": "README.md"}]}).to_string()),
-        error: None,
-        started_at: 1,
-        finished_at: 2,
-    });
-
-    let trace = journal.to_trace_json();
-    let step_contract = trace
-        .pointer("/step_results/0/contract")
-        .expect("step contract trace should be present");
-
-    assert_eq!(
-        step_contract.get("contract_match").and_then(Value::as_str),
-        Some("file_names")
-    );
-    assert_eq!(
-        step_contract
-            .get("final_answer_shape")
-            .and_then(Value::as_str),
-        Some("name_list")
-    );
-    assert_eq!(
-        step_contract
-            .get("action_policy")
-            .and_then(|value| value.get("decision"))
-            .and_then(Value::as_str),
-        Some("allowed")
-    );
-    assert_eq!(
-        step_contract
-            .get("action_policy")
-            .and_then(|value| value.get("action_ref"))
-            .and_then(Value::as_str),
-        Some("fs_basic.list_dir")
-    );
-    assert!(trace
-        .pointer("/step_results/0/observed_evidence/items")
-        .and_then(Value::as_array)
-        .is_some_and(|items| !items.is_empty()));
 }

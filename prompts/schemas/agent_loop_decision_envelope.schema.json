@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rustclaw.local/prompts/schemas/agent_loop_decision_envelope.schema.json",
+  "title": "AgentLoopDecisionEnvelope",
+  "description": "Machine envelope for planner-loop semantic decisions. It records whether the planner's first actionable step is to respond, clarify, call a capability, or synthesize an answer. Runtime must not parse user natural-language text to populate this shape.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source",
+    "initial_hint_ref",
+    "semantic_authority",
+    "fallback_gate_policy",
+    "decision",
+    "reason_code",
+    "validation_status",
+    "validation_reason_code",
+    "confidence",
+    "missing_slots",
+    "capability_ref",
+    "output_contract_ref",
+    "required_evidence",
+    "risk_level",
+    "delivery_required",
+    "language_rendering_policy"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "source": {
+      "type": "string",
+      "enum": ["planner_first_action_shadow", "planner_round_action"]
+    },
+    "initial_hint_ref": {
+      "type": "string",
+      "description": "Machine ref for the pre-agent first-layer hint. This is an initial hint, not the semantic authority."
+    },
+    "semantic_authority": {
+      "type": "string",
+      "enum": ["planner_loop_shadow", "planner_loop_runtime"],
+      "description": "Layer that owns the semantic decision envelope."
+    },
+    "fallback_gate_policy": {
+      "type": "string",
+      "enum": ["fallback_safety_check_only"],
+      "description": "Pre-agent direct-answer gate policy after planner-loop migration."
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["respond", "clarify", "call_capability", "synthesize_answer"]
+    },
+    "reason_code": {
+      "type": "string",
+      "description": "Stable machine reason code for the shadow decision."
+    },
+    "validation_status": {
+      "type": "string",
+      "enum": ["valid", "shadow_invalid"]
+    },
+    "validation_reason_code": {
+      "type": "string",
+      "description": "Stable machine reason code produced by the shadow decision validator."
+    },
+    "confidence": {
+      "type": ["number", "null"],
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "missing_slots": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "capability_ref": {
+      "type": ["string", "null"],
+      "description": "Capability, tool, or skill ref selected by the first planner action."
+    },
+    "output_contract_ref": {
+      "type": "string"
+    },
+    "required_evidence": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "risk_level": {
+      "type": "string"
+    },
+    "delivery_required": {
+      "type": "boolean"
+    },
+    "language_rendering_policy": {
+      "type": "string",
+      "enum": ["defer_until_observation", "finalizer_llm_i18n"]
+    }
+  }
+}

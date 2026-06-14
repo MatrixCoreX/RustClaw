@@ -10,6 +10,7 @@ use super::{
     synthesize_direct_fallback_would_passthrough_multiline_read_range,
     synthesize_direct_observed_fallback_answer, synthesize_failure_observed_facts,
     synthesize_failure_should_replan, synthesize_route_allows_direct_fallback,
+    synthesize_route_prefers_model_language_observed_status,
     unresolved_file_token_delivery_artifact,
 };
 use crate::agent_engine::{AgentRunContext, LoopState};
@@ -55,7 +56,7 @@ fn test_state_with_registry() -> AppState {
 }
 
 #[test]
-fn retryable_run_cmd_failure_does_not_auto_continue_when_confirmation_policy_applies() {
+fn retryable_run_cmd_failure_stops_before_remaining_tool_action() {
     let state = test_state_with_registry();
     let actions = vec![
         AgentAction::CallSkill {
@@ -78,7 +79,51 @@ fn retryable_run_cmd_failure_does_not_auto_continue_when_confirmation_policy_app
             Some(&serde_json::json!({"command":"resume_fail_cmd_001_xyz"})),
             "command not found",
         ),
-        None
+        Some("recoverable_failure_continue_round")
+    );
+}
+
+#[test]
+fn literal_run_cmd_failure_before_remaining_action_finalizes_without_replan() {
+    let state = test_state_with_registry();
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: serde_json::json!({
+                "command": "echo before",
+                "_clawd_literal_command": true
+            }),
+        },
+        AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: serde_json::json!({
+                "command": "missing_literal_cmd_for_stop",
+                "_clawd_literal_command": true
+            }),
+        },
+        AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: serde_json::json!({
+                "command": "echo after",
+                "_clawd_literal_command": true
+            }),
+        },
+    ];
+
+    assert_eq!(
+        classify_skill_failure_recovery(
+            &state,
+            &actions,
+            1,
+            8,
+            "run_cmd",
+            Some(&serde_json::json!({
+                "command": "missing_literal_cmd_for_stop",
+                "_clawd_literal_command": true
+            })),
+            "command not found",
+        ),
+        Some("recoverable_failure_finalize")
     );
 }
 
@@ -527,6 +572,55 @@ fn planner_generated_terminal_command_failure_replans_but_literal_command_finali
             &err,
         ),
         Some("recoverable_failure_continue_round")
+    );
+
+    assert_eq!(
+        classify_skill_failure_recovery(
+            &state,
+            &actions,
+            0,
+            4,
+            "run_cmd",
+            Some(&serde_json::json!({
+                "command":"missing_tool --version",
+                "_clawd_literal_command": true
+            })),
+            &err,
+        ),
+        Some("recoverable_failure_finalize")
+    );
+}
+
+#[test]
+fn literal_run_cmd_failure_before_discussion_only_tail_finalizes() {
+    let state = test_state_with_registry();
+    let actions = vec![
+        AgentAction::CallSkill {
+            skill: "run_cmd".to_string(),
+            args: serde_json::json!({
+                "command":"missing_tool --version",
+                "_clawd_literal_command": true
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["step_1".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+    let err = format!(
+        "__RC_SKILL_ERROR__:{}",
+        serde_json::json!({
+            "skill": "run_cmd",
+            "error_kind": "nonzero_exit",
+            "error_text": "Command failed with exit code 127",
+            "extra": {
+                "exit_code": 127,
+                "exit_category": "command_not_found",
+                "stderr": "missing_tool: command not found"
+            }
+        })
     );
 
     assert_eq!(
@@ -1105,6 +1199,63 @@ fn synthesize_direct_fallback_defers_multi_count_quantity_comparison_to_model() 
 }
 
 #[test]
+fn synthesize_direct_fallback_defers_multi_observation_grounded_summary_to_model() {
+    let state = test_state_with_registry();
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","counts":{"dirs":2,"files":1,"total":3},"names_by_kind":{"dirs":["UI","crates"],"files":["README.md"]},"path":"/repo","resolved_path":"/repo"},"text":"{\"action\":\"inventory_dir\",\"counts\":{\"dirs\":2,\"files\":1,\"total\":3},\"names_by_kind\":{\"dirs\":[\"UI\",\"crates\"],\"files\":[\"README.md\"]},\"path\":\"/repo\",\"resolved_path\":\"/repo\"}"}"#,
+    ));
+    loop_state.executed_step_results.push(ok_step(
+        "step_2",
+        "config_basic",
+        r#"{"extra":{"action":"extract_field","exists":true,"field_path":"name","path":"/repo/UI/package.json","resolved_path":"/repo/UI/package.json","value":"react-example","value_text":"react-example","value_type":"string"},"text":"{\"action\":\"extract_field\",\"exists\":true,\"field_path\":\"name\",\"path\":\"/repo/UI/package.json\",\"resolved_path\":\"/repo/UI/package.json\",\"value\":\"react-example\",\"value_text\":\"react-example\",\"value_type\":\"string\"}"}"#,
+    ));
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent:
+            "summarize repository layout and UI role from directory listing and package name"
+                .to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "directory purpose summary".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: Some(1),
+            response_shape: crate::OutputResponseShape::OneSentence,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::CurrentWorkspace,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::DirectoryPurposeSummary,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let ctx = AgentRunContext {
+        route_result: Some(route),
+        ..AgentRunContext::default()
+    };
+
+    assert!(synthesize_contract_matrix_direct_observed_fallback_answer(
+        &state,
+        &loop_state,
+        Some(&ctx)
+    )
+    .is_none());
+    assert!(synthesize_direct_observed_fallback_answer(&state, &loop_state, Some(&ctx)).is_none());
+}
+
+#[test]
 fn contract_matrix_synthesis_defers_multiline_content_excerpt_summary_to_model() {
     let state = test_state_with_registry();
     let mut loop_state = LoopState::new(2);
@@ -1198,6 +1349,9 @@ fn command_output_summary_contract_defers_direct_fallback_to_synthesis() {
         ..AgentRunContext::default()
     };
 
+    assert!(synthesize_route_prefers_model_language_observed_status(
+        Some(&ctx)
+    ));
     assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
     assert!(synthesize_contract_matrix_direct_observed_fallback_answer(
         &state,
@@ -1205,6 +1359,7 @@ fn command_output_summary_contract_defers_direct_fallback_to_synthesis() {
         Some(&ctx)
     )
     .is_none());
+    assert!(synthesize_direct_observed_fallback_answer(&state, &loop_state, Some(&ctx)).is_none());
 }
 
 #[test]
@@ -1461,6 +1616,47 @@ fn synthesize_route_allows_direct_fallback_for_plain_act_observed_read() {
 }
 
 #[test]
+fn synthesize_route_blocks_direct_fallback_for_failed_step_language_contract() {
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent: "Run an ordered command sequence and report only the failed step."
+            .to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "execution_failed_step_contract".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::None,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::ExecutionFailedStep,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let ctx = AgentRunContext {
+        route_result: Some(route),
+        ..AgentRunContext::default()
+    };
+
+    assert!(synthesize_route_prefers_model_language_observed_status(
+        Some(&ctx)
+    ));
+    assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
+}
+
+#[test]
 fn synthesize_route_allows_direct_fallback_for_structured_listing_contract() {
     let route = crate::RouteResult {
         ask_mode: crate::AskMode::planner_execute_plain(),
@@ -1659,4 +1855,54 @@ fn synthesize_route_uses_llm_for_strict_raw_output_contract() {
     };
 
     assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
+}
+
+#[test]
+fn strict_raw_tail_read_uses_direct_observed_fallback_before_composer() {
+    let state = test_state_with_registry();
+    let mut loop_state = LoopState::new(2);
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"action":"read_range","mode":"tail","requested_n":2,"excerpt":"98|WARN provider failed: http 401: Please carry the API secret key\n99|WARN memory preference fallback failed: http 401","path":"/tmp/clawd-dev.log"}"#,
+    ));
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::planner_execute_plain(),
+        resolved_intent: "Read the last two lines of the selected log file.".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "raw tail read".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Strict,
+            requires_content_evidence: true,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::Path,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
+            locator_hint: "/tmp/clawd-dev.log".to_string(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+    let ctx = AgentRunContext {
+        route_result: Some(route),
+        ..AgentRunContext::default()
+    };
+
+    assert!(!synthesize_route_allows_direct_fallback(Some(&ctx)));
+    assert_eq!(
+        synthesize_direct_observed_fallback_answer(&state, &loop_state, Some(&ctx)).as_deref(),
+        Some(
+            "WARN provider failed: http 401: Please carry the API secret key\nWARN memory preference fallback failed: http 401"
+        )
+    );
 }

@@ -59,7 +59,8 @@
   - `run <bin> failed: <error>`
   - `archive command failed: exit=<code>\n<stdout/stderr>`
   - On malformed stdin JSON request: `invalid input: <serde error>`
-- Successful `list`/`pack`/`unpack` command execution output is returned in `text` as `exit=<code>\n<stdout/stderr>`.
+- Successful `list` returns a single-line JSON object in `text` with `action`, `archive`, `count`, `entries`, `candidates`, and `output`.
+- Successful `pack`/`unpack` command execution output is returned in `text` as `exit=<code>\n<stdout/stderr>`.
 - Successful `read` returns a single-line JSON object in `text` with `action`, `archive`, `member`, and `content`.
 - Non-zero archive command exit codes are returned as `status=error` with `error_text=archive command failed: exit=<code>\n<stdout/stderr>`.
 - Successful responses also mirror structured metadata into `extra`, including `action`, relevant paths, and `output`.
@@ -69,7 +70,10 @@
 - `list` success `extra` fields:
   - `action`: string, always `list`; evidence role `status`.
   - `archive`: string absolute/resolved archive path; evidence role `path`.
-  - `output`: string command observation; fallback evidence only, not strict list evidence.
+  - `count`: integer member count; evidence role `count`.
+  - `entries`: array of objects with `name` and `kind`; evidence role `candidates`.
+  - `candidates`: array of archive member names; evidence role `candidates`.
+  - `output`: string command observation; fallback evidence only.
 - `read` success `extra` fields:
   - `action`: string, always `read`; evidence role `status`.
   - `archive`: string absolute/resolved archive path; evidence role `path`.
@@ -97,7 +101,7 @@ Request:
 ```
 Response:
 ```json
-{"request_id":"demo-1","status":"ok","text":"exit=0\nArchive: ...","extra":{"action":"list","archive":"/workspace/tmp/sample.zip","output":"exit=0\nArchive: ..."},"error_text":null}
+{"request_id":"demo-1","status":"ok","text":"{\"action\":\"list\",\"archive\":\"/workspace/tmp/sample.zip\",\"count\":2,\"entries\":[{\"name\":\"notes.txt\",\"kind\":\"file\"},{\"name\":\"nested/config.ini\",\"kind\":\"file\"}],\"candidates\":[\"notes.txt\",\"nested/config.ini\"],\"output\":\"exit=0\\nnotes.txt\\nnested/config.ini\"}","extra":{"action":"list","archive":"/workspace/tmp/sample.zip","count":2,"entries":[{"name":"notes.txt","kind":"file"},{"name":"nested/config.ini","kind":"file"}],"candidates":["notes.txt","nested/config.ini"],"output":"exit=0\nnotes.txt\nnested/config.ini"},"error_text":null}
 ```
 
 ### Example 2

@@ -1,4 +1,10 @@
 [agent.loop_guard.crypto]
+# DEPRECATED / 已废弃:
+# 这些领域 action-list 当前没有生产 Rust reader，仅保留为旧配置兼容说明。
+# 行为归属已迁到 `configs/skills_registry.toml` 的 planner_capabilities / semantic_tags /
+# risk_level / once_per_task / dedup_scope / idempotent 机器字段。
+# Deprecated: these domain action lists have no production Rust reader. Runtime behavior
+# is governed by skills_registry machine metadata instead.
 # 说明/Description: 以下 action 列表在运行时会统一转小写；缺失/空值/非法值会回退代码默认.
 # 建议/Recommendation: 可按技能能力扩展，但需与 crypto skill 实际 action 保持一致.
 # 风险/Risk: 配置与技能不一致会导致 guard 误判，出现漏拦截或过拦截.
@@ -28,12 +34,16 @@ trade_preview_actions = ["trade_preview"]
 trade_submit_actions = ["trade_submit"]
 
 [agent.loop_guard.fs_search]
+# DEPRECATED / 已废弃:
+# fs_search query 归类不再从这里读取；需要治理时使用 registry capability metadata。
 # 用途/Purpose: 将 fs_search 的这些 action 归类为 query 行为.
 # 建议修改/Recommended change: 可改 / Editable.
 # 风险/Risk: 归类错误会影响 dedup/收敛策略.
 query_actions = ["find_name", "find_ext", "grep_text", "find_images"]
 
 [agent.loop_guard.media]
+# DEPRECATED / 已废弃:
+# media skill 集合不再从这里读取；需要治理时使用 registry semantic_tags / output contract。
 # 用途/Purpose: 识别“图片生成技能名”集合.
 # 建议修改/Recommended change: 谨慎修改 / Change cautiously.
 # 风险/Risk: 误配会导致图片循环保护失效或误触发.
@@ -64,6 +74,29 @@ multi_round_enabled = true
 # 建议修改/Recommended change: 建议 1~2；0 表示只记录 verifier 缺口但不自动重试.
 # 风险/Risk: 过高会增加模型调用成本；仍受 max_rounds/no-progress/repeat guard 限制.
 answer_verifier_retry_limit = 2
+# 用途/Purpose: 灰度控制 Answer Verifier required-evidence 强制阻断；当前只接线读取，默认关闭.
+# 建议修改/Recommended change: 未完成 P0 attribution/500 NL canary 前保持 false.
+# 风险/Risk: 提前开启会把 verifier 误判直接放大为用户可见失败.
+answer_verifier_enforce_required = false
+# 用途/Purpose: 普通语义路由 authority 生命周期；替代单个 bool，区分 legacy/shadow/canary/default.
+# 可选值/Allowed tokens: legacy, shadow, agent_loop_canary, agent_loop_default.
+# 建议修改/Recommended change: 默认使用 agent_loop_default；需要热回滚时改为 legacy。
+# 风险/Risk: canary/default 会把 selected class 的普通语义归属推进到 agent loop；必须保留结构化审计和回滚。
+semantic_route_authority = "agent_loop_default"
+# 兼容说明/Compatibility: 旧 `agent_decides_semantic_route` bool 仍由代码读取，用于历史配置迁移；
+# 当前配置不再设置该 bool，新配置必须使用 semantic_route_authority 机器 token。
+# 用途/Purpose: agent_loop_canary 的窄范围行为类；agent_loop_default 会忽略该字段并接管所有 eligible 低风险 class.
+# 可选值/Allowed tokens: none, bound_path_summary, structured_field_read, exact_path_list, recent_artifacts_judgment, scalar_count.
+# 建议修改/Recommended change: 默认化后不配置该字段；只有回到 agent_loop_canary 调试单个 class 时再设置。
+# 风险/Risk: canary 非 none 会改变该 class 的 first-layer 语义归属；必须先有专项 canary 和回滚指标.
+# 用途/Purpose: registry 幂等/去重治理灰度开关；当前只接线读取，默认关闭.
+# 建议修改/Recommended change: 运行时消费已接入但默认关闭；500/2000 NL canary 通过前保持 false.
+# 风险/Risk: 提前开启可能改变重复动作、外部副作用和查询收敛行为.
+registry_idempotency_guard = false
+# 用途/Purpose: selected contracts 结构化证据强制门禁；当前只接线读取，默认关闭.
+# 建议修改/Recommended change: 对应 contract/verifier 单测和 NL canary 通过前保持 false.
+# 风险/Risk: 提前开启可能把可回答任务误判为证据不足.
+structured_evidence_required_for_selected_contracts = false
 # 用途/Purpose: 同一动作重复阈值（跨轮累计）.
 # 建议修改/Recommended change: 建议 3~6.
 # 风险/Risk: 过低易误杀，过高会放大重复调用.

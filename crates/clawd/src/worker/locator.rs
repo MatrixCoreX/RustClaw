@@ -16,6 +16,26 @@ pub(crate) fn has_explicit_path_or_url_locator_hint(text: &str) -> bool {
     has_explicit_path_or_url_locator(text)
 }
 
+#[cfg(test)]
+pub(crate) fn has_multiple_explicit_local_path_locators(text: &str) -> bool {
+    unique_explicit_local_path_token_count(&extract_explicit_path_like_tokens(text)) >= 2
+}
+
+pub(crate) fn has_multiple_distinct_explicit_local_path_locators(
+    state: &AppState,
+    text: &str,
+    context_hint: Option<&str>,
+) -> bool {
+    explicit_tokens_resolve_to_multiple_distinct_local_paths(
+        &state.skill_rt.workspace_root,
+        &state.skill_rt.default_locator_search_dir,
+        &extract_explicit_locator_tokens_for_distinct_resolution(text),
+        context_hint,
+        state.skill_rt.locator_scan_max_depth,
+        state.skill_rt.locator_scan_max_files,
+    )
+}
+
 #[derive(Debug)]
 pub(crate) enum LocatorAutoResolution {
     Direct(String),
@@ -31,6 +51,16 @@ pub(crate) fn try_resolve_implicit_locator_path(
 ) -> Option<LocatorAutoResolution> {
     let query_text = format!("{raw_text}\n{resolved_text}");
     let explicit_tokens = extract_explicit_path_like_tokens(&query_text);
+    if explicit_tokens_resolve_to_multiple_distinct_local_paths(
+        &state.skill_rt.workspace_root,
+        &state.skill_rt.default_locator_search_dir,
+        &extract_explicit_locator_tokens_for_distinct_resolution(&query_text),
+        context_hint,
+        state.skill_rt.locator_scan_max_depth,
+        state.skill_rt.locator_scan_max_files,
+    ) {
+        return None;
+    }
     if let Some(explicit_path) = resolve_context_aware_explicit_locator_path_from_text(
         &state.skill_rt.workspace_root,
         &state.skill_rt.default_locator_search_dir,
@@ -157,11 +187,39 @@ pub(crate) fn try_resolve_workspace_child_locator_from_text(
     {
         return None;
     }
+    if is_hidden_vcs_control_path(&path_buf) {
+        return None;
+    }
     Some(path)
+}
+
+pub(crate) fn workspace_child_resolution_is_directory_scope_with_child_filename(
+    workspace_root: &Path,
+    text: &str,
+    resolved_path: &str,
+) -> bool {
+    let path = PathBuf::from(resolved_path);
+    let normalized_path = normalize_workspace_child_candidate(&path);
+    if !normalized_path.is_dir() {
+        return false;
+    }
+    let normalized_root = normalize_workspace_child_candidate(workspace_root);
+    if !normalized_path.starts_with(normalized_root) {
+        return false;
+    }
+    let filename_tokens = extract_filename_like_tokens(text);
+    !filename_tokens.is_empty()
+        && directory_contains_filename_token(&normalized_path, &filename_tokens)
 }
 
 fn normalize_workspace_child_candidate(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn is_hidden_vcs_control_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| matches!(name, ".git" | ".hg" | ".svn"))
 }
 
 fn resolve_current_workspace_target(
@@ -461,7 +519,7 @@ fn direct_child_path_compatible_with_filename_tokens(
         return true;
     }
     if direct_path.is_dir() {
-        return false;
+        return directory_contains_filename_token(direct_path, filename_tokens);
     }
     let Some(file_name) = direct_path.file_name().and_then(|v| v.to_str()) else {
         return false;
@@ -477,6 +535,20 @@ fn direct_child_path_compatible_with_filename_tokens(
             .file_stem()
             .and_then(|v| v.to_str())
             .is_some_and(|stem| stem.eq_ignore_ascii_case(token))
+    })
+}
+
+fn directory_contains_filename_token(dir: &Path, filename_tokens: &[String]) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let Some(file_name) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+            return false;
+        };
+        filename_tokens
+            .iter()
+            .any(|token| file_name.eq_ignore_ascii_case(token))
     })
 }
 
@@ -559,6 +631,55 @@ fn extract_explicit_path_like_tokens(text: &str) -> Vec<String> {
     out
 }
 
+fn extract_explicit_locator_tokens_for_distinct_resolution(text: &str) -> Vec<String> {
+    let mut out = extract_explicit_path_like_tokens(text);
+    for token in extract_filename_like_tokens(text) {
+        if out
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(&token))
+        {
+            continue;
+        }
+        out.push(token);
+        if out.len() >= 12 {
+            break;
+        }
+    }
+    for token in extract_bare_workspace_child_locator_candidate_tokens(text) {
+        if out
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(&token))
+        {
+            continue;
+        }
+        out.push(token);
+        if out.len() >= 24 {
+            break;
+        }
+    }
+    out
+}
+
+fn extract_bare_workspace_child_locator_candidate_tokens(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw in text.split_whitespace() {
+        for token in locator_token_segments(raw) {
+            if !looks_like_bare_workspace_child_locator_token(&token)
+                || out
+                    .iter()
+                    .any(|existing: &String| existing.eq_ignore_ascii_case(&token))
+            {
+                continue;
+            }
+            out.push(token);
+            if out.len() >= 16 {
+                return out;
+            }
+        }
+    }
+    out
+}
+
 fn push_explicit_path_token_candidate(token: &str, out: &mut Vec<String>) {
     if looks_like_explicit_path_or_url_token(token) && !out.iter().any(|v| v == token) {
         out.push(token.to_string());
@@ -623,6 +744,67 @@ fn has_unresolved_explicit_local_locator_tokens(explicit_tokens: &[String]) -> b
     explicit_tokens
         .iter()
         .any(|token| is_local_explicit_locator_token(token))
+}
+
+#[cfg(test)]
+fn unique_explicit_local_path_token_count(explicit_tokens: &[String]) -> usize {
+    let mut unique = Vec::new();
+    for token in explicit_tokens {
+        if !is_local_explicit_locator_token(token) {
+            continue;
+        }
+        if unique
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(token))
+        {
+            continue;
+        }
+        unique.push(token.clone());
+        if unique.len() >= 2 {
+            return unique.len();
+        }
+    }
+    unique.len()
+}
+
+fn explicit_tokens_resolve_to_multiple_distinct_local_paths(
+    workspace_root: &Path,
+    default_locator_search_dir: &Path,
+    explicit_tokens: &[String],
+    context_hint: Option<&str>,
+    max_depth: usize,
+    max_files: usize,
+) -> bool {
+    let mut unique = Vec::new();
+    for token in explicit_tokens {
+        if !is_local_locator_token_for_distinct_resolution(token) {
+            continue;
+        }
+        let paths = resolve_context_aware_local_locator_token_candidates_for_distinct_resolution(
+            workspace_root,
+            default_locator_search_dir,
+            token,
+            context_hint,
+            max_depth,
+            max_files,
+        );
+        for path in paths {
+            if unique.iter().any(|existing: &String| existing == &path) {
+                continue;
+            }
+            unique.push(path);
+            if unique.len() >= 2 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn is_local_locator_token_for_distinct_resolution(token: &str) -> bool {
+    is_local_explicit_locator_token(token)
+        || looks_like_filename_locator(token)
+        || looks_like_bare_workspace_child_locator_token(token)
 }
 
 fn is_local_explicit_locator_token(token: &str) -> bool {
@@ -709,24 +891,110 @@ fn resolve_context_aware_explicit_locator_path_from_text(
     context_hint: Option<&str>,
 ) -> Option<String> {
     for token in explicit_tokens {
-        if is_relative_explicit_locator_token(token) {
-            let roots = context_relative_locator_roots(
-                workspace_root,
-                default_locator_search_dir,
-                context_hint,
-            );
-            if let Some(path) = resolve_relative_explicit_locator_path_token_in_roots(token, &roots)
-            {
-                return Some(path);
-            }
-        }
-        if let Some(path) =
-            resolve_explicit_locator_path_token(workspace_root, default_locator_search_dir, token)
-        {
+        if let Some(path) = resolve_context_aware_explicit_locator_path_token(
+            workspace_root,
+            default_locator_search_dir,
+            token,
+            context_hint,
+        ) {
             return Some(path);
         }
     }
     None
+}
+
+fn resolve_context_aware_explicit_locator_path_token(
+    workspace_root: &Path,
+    default_locator_search_dir: &Path,
+    token: &str,
+    context_hint: Option<&str>,
+) -> Option<String> {
+    if is_relative_explicit_locator_token(token) {
+        let roots = context_relative_locator_roots(
+            workspace_root,
+            default_locator_search_dir,
+            context_hint,
+        );
+        if let Some(path) = resolve_relative_explicit_locator_path_token_in_roots(token, &roots) {
+            return Some(path);
+        }
+    }
+    resolve_explicit_locator_path_token(workspace_root, default_locator_search_dir, token)
+}
+
+fn resolve_context_aware_local_locator_token_candidates_for_distinct_resolution(
+    workspace_root: &Path,
+    default_locator_search_dir: &Path,
+    token: &str,
+    context_hint: Option<&str>,
+    max_depth: usize,
+    max_files: usize,
+) -> Vec<String> {
+    if is_local_explicit_locator_token(token) {
+        return resolve_context_aware_explicit_locator_path_token(
+            workspace_root,
+            default_locator_search_dir,
+            token,
+            context_hint,
+        )
+        .into_iter()
+        .collect();
+    }
+    if !looks_like_filename_locator(token) {
+        if looks_like_bare_workspace_child_locator_token(token) {
+            return resolve_context_aware_bare_workspace_child_locator_candidates(
+                workspace_root,
+                default_locator_search_dir,
+                token,
+                context_hint,
+            );
+        }
+        return Vec::new();
+    }
+    let roots =
+        context_relative_locator_roots(workspace_root, default_locator_search_dir, context_hint);
+    let filename_tokens = vec![token.to_string()];
+    match try_resolve_implicit_locator_path_in_roots(
+        &roots,
+        &[],
+        &filename_tokens,
+        max_depth,
+        max_files,
+    ) {
+        Some(LocatorAutoResolution::Direct(path)) => vec![path],
+        Some(LocatorAutoResolution::Fuzzy(candidates)) => candidates,
+        None => Vec::new(),
+    }
+}
+
+fn resolve_context_aware_bare_workspace_child_locator_candidates(
+    workspace_root: &Path,
+    default_locator_search_dir: &Path,
+    token: &str,
+    context_hint: Option<&str>,
+) -> Vec<String> {
+    let roots =
+        context_relative_locator_roots(workspace_root, default_locator_search_dir, context_hint);
+    let mut out = Vec::new();
+    for root in roots {
+        if !root.is_dir() {
+            continue;
+        }
+        let direct = root.join(token);
+        let resolved = if direct.is_file() || direct.is_dir() {
+            Some(direct.canonicalize().unwrap_or(direct))
+        } else {
+            crate::delivery_utils::resolve_existing_path_under_root_case_insensitive(&root, token)
+        };
+        let Some(path) = resolved else {
+            continue;
+        };
+        let rendered = path.display().to_string();
+        if !out.iter().any(|existing| existing == &rendered) {
+            out.push(rendered);
+        }
+    }
+    out
 }
 
 fn relative_explicit_file_tokens(explicit_tokens: &[String]) -> Vec<String> {
@@ -906,6 +1174,20 @@ fn looks_like_filename_locator(token: &str) -> bool {
         return false;
     }
     ext.chars().all(|ch| ch.is_ascii_alphanumeric()) && ext.len() <= 12
+}
+
+fn looks_like_bare_workspace_child_locator_token(token: &str) -> bool {
+    let token = token.trim();
+    token.len() >= 2
+        && token.len() <= 80
+        && !token.contains('/')
+        && !token.contains('\\')
+        && !token.contains('.')
+        && !token.starts_with("http://")
+        && !token.starts_with("https://")
+        && token
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
 }
 
 fn collect_files_for_locator_scan(root: &Path, max_depth: usize, max_files: usize) -> Vec<PathBuf> {
@@ -1105,7 +1387,36 @@ fn try_resolve_direct_child_locator(search_root: &Path, keywords: &[String]) -> 
     }
     stem_matches.sort();
     stem_matches.dedup();
+    if stem_matches.len() > 1 {
+        if let Some(preferred) =
+            prefer_canonical_readme_markdown_match(&stem_matches, &normalized_keywords)
+        {
+            return Some(preferred);
+        }
+    }
     (stem_matches.len() == 1).then(|| stem_matches.into_iter().next().unwrap_or_default())
+}
+
+fn prefer_canonical_readme_markdown_match(
+    matches: &[String],
+    normalized_keywords: &[String],
+) -> Option<String> {
+    if !normalized_keywords.iter().any(|kw| kw == "readme") {
+        return None;
+    }
+    let mut candidates = matches
+        .iter()
+        .filter(|raw| {
+            Path::new(raw)
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("README.md"))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    candidates.sort();
+    candidates.dedup();
+    (candidates.len() == 1).then(|| candidates.into_iter().next().unwrap_or_default())
 }
 
 fn try_resolve_implicit_direct_child_locator(

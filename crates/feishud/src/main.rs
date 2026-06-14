@@ -3,7 +3,7 @@
 //! 文本 / 图片 / 文件 / 音频 / 视频等媒体：下载落盘（可配置目录）后提交 clawd ask。
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -13,7 +13,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use claw_core::channel_commands::ChannelCommandCatalog;
-use claw_core::channel_i18n::{text_from_path, text_with_vars_from_path};
 use claw_core::types::{
     ApiResponse, AuthIdentity, BindChannelKeyRequest, ChannelKind, DetectFeishuBindSessionRequest,
     DetectFeishuBindSessionResponse, FeishuBindSessionStatusResponse, ResolveChannelBindingRequest,
@@ -26,6 +25,12 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
+
+mod config_helpers;
+mod media_helpers;
+
+use config_helpers::*;
+use media_helpers::*;
 
 #[derive(Clone)]
 struct AppState {
@@ -96,129 +101,11 @@ struct FeishuSection {
     file_inbox_dir: String,
 }
 
-fn default_listen() -> String {
-    "0.0.0.0:8789".to_string()
-}
-fn default_clawd_base_url() -> String {
-    "http://127.0.0.1:8787".to_string()
-}
-fn default_request_timeout() -> u64 {
-    30
-}
-fn default_task_delivery_timeout() -> u64 {
-    600
-}
-fn default_text_chunk_chars() -> usize {
-    4000
-}
-
-fn default_feishu_language() -> String {
-    "zh-CN".to_string()
-}
-
-fn default_feishu_i18n_path() -> String {
-    "configs/i18n/feishud.zh-CN.toml".to_string()
-}
-
-fn default_feishu_api_base_url() -> String {
-    "https://open.feishu.cn".to_string()
-}
-
-fn default_feishu_image_inbox_dir() -> String {
-    "data/feishud/image".to_string()
-}
-
-fn default_feishu_video_inbox_dir() -> String {
-    "data/feishud/video".to_string()
-}
-
-fn default_feishu_audio_inbox_dir() -> String {
-    "data/feishud/audio".to_string()
-}
-
-fn default_feishu_file_inbox_dir() -> String {
-    "data/feishud/file".to_string()
-}
-
-fn env_non_empty(key: &str) -> Option<String> {
-    std::env::var(key)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn apply_string_env(target: &mut String, key: &str) {
-    if let Some(value) = env_non_empty(key) {
-        *target = value;
-    }
-}
-
-fn apply_env_overrides(config: &mut FeishuConfig) {
-    apply_string_env(&mut config.feishu.app_id, "FEISHU_APP_ID");
-    apply_string_env(&mut config.feishu.app_secret, "FEISHU_APP_SECRET");
-    apply_string_env(
-        &mut config.feishu.verification_token,
-        "FEISHU_VERIFICATION_TOKEN",
-    );
-    apply_string_env(&mut config.feishu.encrypt_key, "FEISHU_ENCRYPT_KEY");
-    apply_string_env(&mut config.feishu.language, "FEISHU_I18N_LANGUAGE");
-    apply_string_env(&mut config.feishu.i18n_path, "FEISHU_I18N_PATH");
-}
-
-fn resolve_i18n_path(language: &str, configured_path: &str) -> String {
-    let lang = language.trim();
-    if !lang.is_empty() {
-        let candidate = format!("configs/i18n/feishud.{lang}.toml");
-        if Path::new(&candidate).exists() {
-            return candidate;
-        }
-    }
-    configured_path.to_string()
-}
-
-fn feishu_t(config: &FeishuConfig, key: &str, fallback: &str) -> String {
-    text_from_path(&config.feishu.i18n_path, key, fallback)
-}
-
-fn feishu_t_with(
-    config: &FeishuConfig,
-    key: &str,
-    vars: &[(&str, &str)],
-    fallback: &str,
-) -> String {
-    text_with_vars_from_path(&config.feishu.i18n_path, key, vars, fallback)
-}
-
 fn current_ts_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
-}
-
-fn safe_feishu_storage_segment(raw: &str, fallback: &str) -> String {
-    let t = raw.trim();
-    if t.is_empty() {
-        return fallback.to_string();
-    }
-    let mut out = String::new();
-    for c in t.chars() {
-        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-            out.push(c);
-        } else {
-            out.push('_');
-        }
-    }
-    if out.is_empty() {
-        fallback.to_string()
-    } else {
-        out
-    }
-}
-
-fn build_feishu_inbox_rel_path(root_dir: &str, chat_id: &str, file_name: &str) -> String {
-    let seg = safe_feishu_storage_segment(chat_id, "unknown");
-    format!("{}/{}/{}", root_dir.trim_end_matches('/'), seg, file_name)
 }
 
 /// 解析 `im.message.receive_v1` 公共字段。
@@ -259,66 +146,6 @@ fn parse_im_receive_v1(body: &Value) -> Option<(String, String, String, String, 
         return None;
     }
     Some((open_id, chat_id, message_id, message_type, content))
-}
-
-/// 飞书消息资源下载：`type=image` 或 `type=file`（音频/视频/普通文件均用 file）。
-fn feishu_resource_key_and_query_type(
-    message_type: &str,
-    content: &Value,
-) -> Option<(String, &'static str)> {
-    match message_type {
-        "image" | "sticker" => {
-            let key = content.get("image_key").and_then(|v| v.as_str())?;
-            Some((key.to_string(), "image"))
-        }
-        "file" | "audio" | "media" => {
-            let key = content.get("file_key").and_then(|v| v.as_str())?;
-            Some((key.to_string(), "file"))
-        }
-        _ => None,
-    }
-}
-
-fn feishu_inbox_root_for_message_type<'a>(
-    message_type: &str,
-    section: &'a FeishuSection,
-) -> &'a str {
-    match message_type {
-        "image" | "sticker" => section.image_inbox_dir.as_str(),
-        "media" => section.video_inbox_dir.as_str(),
-        "audio" => section.audio_inbox_dir.as_str(),
-        "file" => section.file_inbox_dir.as_str(),
-        _ => section.file_inbox_dir.as_str(),
-    }
-}
-
-fn feishu_saved_file_name(message_type: &str, content: &Value, ts: u64) -> String {
-    if let Some(name) = content.get("file_name").and_then(|v| v.as_str()) {
-        let n = name.trim();
-        if !n.is_empty() && !n.contains('/') && !n.contains('\\') {
-            let safe = safe_feishu_storage_segment(n, "file");
-            return format!("{}_{}", ts, safe);
-        }
-    }
-    let ext = match message_type {
-        "image" | "sticker" => "jpg",
-        "media" => "mp4",
-        "audio" => "m4a",
-        "file" => "bin",
-        _ => "bin",
-    };
-    format!("{}.{}", ts, ext)
-}
-
-fn feishu_media_kind_label_zh(message_type: &str) -> &'static str {
-    match message_type {
-        "image" => "图片",
-        "sticker" => "表情",
-        "media" => "视频",
-        "audio" => "语音",
-        "file" => "文件",
-        _ => "媒体",
-    }
 }
 
 /// 入站媒体（图片 / 文件 / 音频 / 视频）解析结果。

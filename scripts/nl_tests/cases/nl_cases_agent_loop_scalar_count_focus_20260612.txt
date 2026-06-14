@@ -1,0 +1,128 @@
+# Focused F5 canary cases for agent-loop scalar_count.
+# These prompts cover stable fixture counts across direct children, files, directories, recursive counts,
+# extension filters, hidden entries, and current bounded paths. Do not mirror prompts into runtime phrase matching.
+
+act|sc_device_total_zh_001|act,scalar_count,count,dir,total,zh,client_like|数一下 scripts/nl_tests/fixtures/device_local 目录直接子项总数，只输出数字。|expect=7
+act|sc_device_total_en_002|act,scalar_count,count,dir,total,en,client_like|Count the direct children under scripts/nl_tests/fixtures/device_local and output only the number.|expect=7
+act|sc_device_total_ja_003|act,scalar_count,count,dir,total,ja,client_like|scripts/nl_tests/fixtures/device_local 直下の項目数だけを数字で答えてください。|expect=7
+act|sc_device_total_ko_004|act,scalar_count,count,dir,total,ko,client_like|scripts/nl_tests/fixtures/device_local 바로 아래 항목 수만 숫자로 답해 주세요.|expect=7
+
+act|sc_device_files_zh_005|act,scalar_count,count,files,zh,client_like|数一下 scripts/nl_tests/fixtures/device_local 顶层有几个文件，只输出数字。|expect=2
+act|sc_device_files_en_006|act,scalar_count,count,files,en,client_like|How many files are directly under scripts/nl_tests/fixtures/device_local? Return only the number.|expect=2
+act|sc_device_files_ja_007|act,scalar_count,count,files,ja,client_like|scripts/nl_tests/fixtures/device_local 直下のファイル数だけを数字で答えてください。|expect=2
+act|sc_device_files_ko_008|act,scalar_count,count,files,ko,client_like|scripts/nl_tests/fixtures/device_local 바로 아래 파일 개수만 숫자로 답해 주세요.|expect=2
+
+act|sc_device_dirs_zh_009|act,scalar_count,count,dirs,zh,client_like|数一下 scripts/nl_tests/fixtures/device_local 顶层有几个文件夹，只输出数字。|expect=5
+act|sc_device_dirs_en_010|act,scalar_count,count,dirs,en,client_like|How many directories are directly under scripts/nl_tests/fixtures/device_local? Return only the number.|expect=5
+act|sc_device_dirs_ja_011|act,scalar_count,count,dirs,ja,client_like|scripts/nl_tests/fixtures/device_local 直下のディレクトリ数だけを数字で答えてください。|expect=5
+act|sc_device_dirs_ko_012|act,scalar_count,count,dirs,ko,client_like|scripts/nl_tests/fixtures/device_local 바로 아래 폴더 개수만 숫자로 답해 주세요.|expect=5
+
+act|sc_docs_total_zh_013|act,scalar_count,count,dir,total,zh,client_like|数一下 scripts/nl_tests/fixtures/device_local/docs 直接子项数量，只回数字。|expect=3
+act|sc_docs_total_en_014|act,scalar_count,count,dir,total,en,client_like|Count direct entries in scripts/nl_tests/fixtures/device_local/docs and reply with only the number.|expect=3
+act|sc_docs_total_ja_015|act,scalar_count,count,dir,total,ja,client_like|scripts/nl_tests/fixtures/device_local/docs 直下の項目数だけを数字で答えてください。|expect=3
+act|sc_docs_total_ko_016|act,scalar_count,count,dir,total,ko,client_like|scripts/nl_tests/fixtures/device_local/docs 바로 아래 항목 수만 숫자로 답해 주세요.|expect=3
+
+act|sc_docs_files_zh_017|act,scalar_count,count,files,zh,client_like|scripts/nl_tests/fixtures/device_local/docs 顶层文件有几个？只输出数字。|expect=2
+act|sc_docs_files_en_018|act,scalar_count,count,files,en,client_like|How many files are directly inside scripts/nl_tests/fixtures/device_local/docs? Output only the number.|expect=2
+act|sc_docs_files_ja_019|act,scalar_count,count,files,ja,client_like|scripts/nl_tests/fixtures/device_local/docs 直下のファイル数だけを数字で答えてください。|expect=2
+act|sc_docs_files_ko_020|act,scalar_count,count,files,ko,client_like|scripts/nl_tests/fixtures/device_local/docs 바로 아래 파일 수만 숫자로 답해 주세요.|expect=2
+
+act|sc_docs_dirs_zh_021|act,scalar_count,count,dirs,zh,client_like|scripts/nl_tests/fixtures/device_local/docs 顶层文件夹有几个？只输出数字。|expect=1
+act|sc_docs_dirs_en_022|act,scalar_count,count,dirs,en,client_like|How many direct directories are in scripts/nl_tests/fixtures/device_local/docs? Output only the number.|expect=1
+act|sc_docs_dirs_ja_023|act,scalar_count,count,dirs,ja,client_like|scripts/nl_tests/fixtures/device_local/docs 直下のディレクトリ数だけを数字で答えてください。|expect=1
+act|sc_docs_dirs_ko_024|act,scalar_count,count,dirs,ko,client_like|scripts/nl_tests/fixtures/device_local/docs 바로 아래 폴더 수만 숫자로 답해 주세요.|expect=1
+
+act|sc_logs_total_zh_025|act,scalar_count,count,dir,total,zh,client_like|数一下 scripts/nl_tests/fixtures/device_local/logs 直接子项总数，只输出数字。|expect=2
+act|sc_logs_total_en_026|act,scalar_count,count,dir,total,en,client_like|Count direct entries in scripts/nl_tests/fixtures/device_local/logs and return just the number.|expect=2
+act|sc_logs_total_ja_027|act,scalar_count,count,dir,total,ja,client_like|scripts/nl_tests/fixtures/device_local/logs 直下の項目数だけを数字で答えてください。|expect=2
+act|sc_logs_total_ko_028|act,scalar_count,count,dir,total,ko,client_like|scripts/nl_tests/fixtures/device_local/logs 바로 아래 항목 수만 숫자로 답해 주세요.|expect=2
+
+act|sc_logs_files_zh_029|act,scalar_count,count,files,zh,client_like|scripts/nl_tests/fixtures/device_local/logs 顶层文件数量是多少？只输出数字。|expect=2
+act|sc_logs_files_en_030|act,scalar_count,count,files,en,client_like|How many files are directly in scripts/nl_tests/fixtures/device_local/logs? Return only the number.|expect=2
+act|sc_logs_files_ja_031|act,scalar_count,count,files,ja,client_like|scripts/nl_tests/fixtures/device_local/logs 直下のファイル数だけを数字で答えてください。|expect=2
+act|sc_logs_files_ko_032|act,scalar_count,count,files,ko,client_like|scripts/nl_tests/fixtures/device_local/logs 바로 아래 파일 수만 숫자로 답해 주세요.|expect=2
+
+act|sc_logs_dirs_zh_033|act,scalar_count,count,dirs,zh,client_like|scripts/nl_tests/fixtures/device_local/logs 顶层文件夹数量是多少？只输出数字。|expect=0
+act|sc_logs_dirs_en_034|act,scalar_count,count,dirs,en,client_like|How many direct folders are in scripts/nl_tests/fixtures/device_local/logs? Return only the number.|expect=0
+act|sc_logs_dirs_ja_035|act,scalar_count,count,dirs,ja,client_like|scripts/nl_tests/fixtures/device_local/logs 直下のディレクトリ数だけを数字で答えてください。|expect=0
+act|sc_logs_dirs_ko_036|act,scalar_count,count,dirs,ko,client_like|scripts/nl_tests/fixtures/device_local/logs 바로 아래 폴더 수만 숫자로 답해 주세요.|expect=0
+
+act|sc_tmp_total_zh_037|act,scalar_count,count,dir,total,zh,client_like|数一下 scripts/nl_tests/fixtures/device_local/tmp 直接子项总数，只输出数字。|expect=6
+act|sc_tmp_total_en_038|act,scalar_count,count,dir,total,en,client_like|Count direct entries under scripts/nl_tests/fixtures/device_local/tmp and output only the number.|expect=6
+act|sc_tmp_total_ja_039|act,scalar_count,count,dir,total,ja,client_like|scripts/nl_tests/fixtures/device_local/tmp 直下の項目数だけを数字で答えてください。|expect=6
+act|sc_tmp_total_ko_040|act,scalar_count,count,dir,total,ko,client_like|scripts/nl_tests/fixtures/device_local/tmp 바로 아래 항목 수만 숫자로 답해 주세요.|expect=6
+
+act|sc_tmp_files_zh_041|act,scalar_count,count,files,zh,client_like|scripts/nl_tests/fixtures/device_local/tmp 顶层文件有几个？只输出数字。|expect=1
+act|sc_tmp_files_en_042|act,scalar_count,count,files,en,client_like|How many files are directly under scripts/nl_tests/fixtures/device_local/tmp? Return only the number.|expect=1
+act|sc_tmp_files_ja_043|act,scalar_count,count,files,ja,client_like|scripts/nl_tests/fixtures/device_local/tmp 直下のファイル数だけを数字で答えてください。|expect=1
+act|sc_tmp_files_ko_044|act,scalar_count,count,files,ko,client_like|scripts/nl_tests/fixtures/device_local/tmp 바로 아래 파일 수만 숫자로 답해 주세요.|expect=1
+
+act|sc_tmp_dirs_zh_045|act,scalar_count,count,dirs,zh,client_like|scripts/nl_tests/fixtures/device_local/tmp 顶层文件夹有几个？只输出数字。|expect=5
+act|sc_tmp_dirs_en_046|act,scalar_count,count,dirs,en,client_like|How many direct directories are under scripts/nl_tests/fixtures/device_local/tmp? Return only the number.|expect=5
+act|sc_tmp_dirs_ja_047|act,scalar_count,count,dirs,ja,client_like|scripts/nl_tests/fixtures/device_local/tmp 直下のディレクトリ数だけを数字で答えてください。|expect=5
+act|sc_tmp_dirs_ko_048|act,scalar_count,count,dirs,ko,client_like|scripts/nl_tests/fixtures/device_local/tmp 바로 아래 폴더 수만 숫자로 답해 주세요.|expect=5
+
+act|sc_configs_total_zh_049|act,scalar_count,count,dir,total,zh,client_like|数一下 scripts/nl_tests/fixtures/device_local/configs 直接子项数量，只输出数字。|expect=1
+act|sc_configs_total_en_050|act,scalar_count,count,dir,total,en,client_like|Count direct entries in scripts/nl_tests/fixtures/device_local/configs and output only the number.|expect=1
+act|sc_configs_total_ja_051|act,scalar_count,count,dir,total,ja,client_like|scripts/nl_tests/fixtures/device_local/configs 直下の項目数だけを数字で答えてください。|expect=1
+act|sc_configs_total_ko_052|act,scalar_count,count,dir,total,ko,client_like|scripts/nl_tests/fixtures/device_local/configs 바로 아래 항목 수만 숫자로 답해 주세요.|expect=1
+
+act|sc_configs_toml_zh_053|act,scalar_count,count,extension,toml,zh,client_like|scripts/nl_tests/fixtures/device_local/configs 里有几个 toml 文件？只输出数字。|expect=1
+act|sc_configs_toml_en_054|act,scalar_count,count,extension,toml,en,client_like|How many toml files are in scripts/nl_tests/fixtures/device_local/configs? Output only the number.|expect=1
+act|sc_configs_toml_ja_055|act,scalar_count,count,extension,toml,ja,client_like|scripts/nl_tests/fixtures/device_local/configs にある toml ファイル数だけを数字で答えてください。|expect=1
+act|sc_configs_toml_ko_056|act,scalar_count,count,extension,toml,ko,client_like|scripts/nl_tests/fixtures/device_local/configs 안의 toml 파일 수만 숫자로 답해 주세요.|expect=1
+
+act|sc_data_files_zh_057|act,scalar_count,count,files,zh,client_like|scripts/nl_tests/fixtures/device_local/data 顶层文件数量是多少？只输出数字。|expect=1
+act|sc_data_files_en_058|act,scalar_count,count,files,en,client_like|How many files are directly in scripts/nl_tests/fixtures/device_local/data? Return only the number.|expect=1
+act|sc_data_files_ja_059|act,scalar_count,count,files,ja,client_like|scripts/nl_tests/fixtures/device_local/data 直下のファイル数だけを数字で答えてください。|expect=1
+act|sc_data_files_ko_060|act,scalar_count,count,files,ko,client_like|scripts/nl_tests/fixtures/device_local/data 바로 아래 파일 수만 숫자로 답해 주세요.|expect=1
+
+act|sc_archive_total_zh_061|act,scalar_count,count,dir,total,zh,client_like|数一下 scripts/nl_tests/fixtures/device_local/docs/archive 直接子项数量，只输出数字。|expect=1
+act|sc_archive_total_en_062|act,scalar_count,count,dir,total,en,client_like|Count direct entries in scripts/nl_tests/fixtures/device_local/docs/archive and output only the number.|expect=1
+act|sc_archive_total_ja_063|act,scalar_count,count,dir,total,ja,client_like|scripts/nl_tests/fixtures/device_local/docs/archive 直下の項目数だけを数字で答えてください。|expect=1
+act|sc_archive_total_ko_064|act,scalar_count,count,dir,total,ko,client_like|scripts/nl_tests/fixtures/device_local/docs/archive 바로 아래 항목 수만 숫자로 답해 주세요.|expect=1
+
+act|sc_device_recursive_files_zh_065|act,scalar_count,count,recursive,files,zh,client_like|递归数一下 scripts/nl_tests/fixtures/device_local 下面所有文件有多少个，只输出数字。|expect=26
+act|sc_device_recursive_files_en_066|act,scalar_count,count,recursive,files,en,client_like|Recursively count files under scripts/nl_tests/fixtures/device_local and return only the number.|expect=26
+act|sc_device_recursive_files_ja_067|act,scalar_count,count,recursive,files,ja,client_like|scripts/nl_tests/fixtures/device_local 配下の全ファイル数を再帰的に数え、数字だけで答えてください。|expect=26
+act|sc_device_recursive_files_ko_068|act,scalar_count,count,recursive,files,ko,client_like|scripts/nl_tests/fixtures/device_local 아래 모든 파일을 재귀적으로 세고 숫자만 답해 주세요.|expect=26
+
+act|sc_device_recursive_dirs_zh_069|act,scalar_count,count,recursive,dirs,zh,client_like|递归数一下 scripts/nl_tests/fixtures/device_local 下面的子目录数量，不包含这个根目录本身，只输出数字。|expect=46
+act|sc_device_recursive_dirs_en_070|act,scalar_count,count,recursive,dirs,en,client_like|Recursively count directories under scripts/nl_tests/fixtures/device_local, excluding that root directory itself, and output only the number.|expect=46
+act|sc_device_recursive_dirs_ja_071|act,scalar_count,count,recursive,dirs,ja,client_like|scripts/nl_tests/fixtures/device_local 配下のディレクトリ数を、根ディレクトリ自体を除いて数字だけで答えてください。|expect=46
+act|sc_device_recursive_dirs_ko_072|act,scalar_count,count,recursive,dirs,ko,client_like|scripts/nl_tests/fixtures/device_local 아래 디렉터리 수를 루트 자체는 제외하고 숫자만 답해 주세요.|expect=46
+
+act|sc_docs_recursive_files_zh_073|act,scalar_count,count,recursive,files,zh,client_like|递归数一下 scripts/nl_tests/fixtures/device_local/docs 下所有文件数量，只输出数字。|expect=3
+act|sc_docs_recursive_files_en_074|act,scalar_count,count,recursive,files,en,client_like|Recursively count files under scripts/nl_tests/fixtures/device_local/docs and output only the number.|expect=3
+act|sc_docs_recursive_files_ja_075|act,scalar_count,count,recursive,files,ja,client_like|scripts/nl_tests/fixtures/device_local/docs 配下の全ファイル数を数字だけで答えてください。|expect=3
+act|sc_docs_recursive_files_ko_076|act,scalar_count,count,recursive,files,ko,client_like|scripts/nl_tests/fixtures/device_local/docs 아래 모든 파일 수만 숫자로 답해 주세요.|expect=3
+
+act|sc_tmp_recursive_files_zh_077|act,scalar_count,count,recursive,files,zh,client_like|递归数一下 scripts/nl_tests/fixtures/device_local/tmp 下所有文件数量，只输出数字。|expect=17
+act|sc_tmp_recursive_files_en_078|act,scalar_count,count,recursive,files,en,client_like|Recursively count files under scripts/nl_tests/fixtures/device_local/tmp and output only the number.|expect=17
+act|sc_tmp_recursive_files_ja_079|act,scalar_count,count,recursive,files,ja,client_like|scripts/nl_tests/fixtures/device_local/tmp 配下の全ファイル数を数字だけで答えてください。|expect=17
+act|sc_tmp_recursive_files_ko_080|act,scalar_count,count,recursive,files,ko,client_like|scripts/nl_tests/fixtures/device_local/tmp 아래 모든 파일 수만 숫자로 답해 주세요.|expect=17
+
+act|sc_device_md_files_zh_081|act,scalar_count,count,extension,md,zh,client_like|递归数一下 scripts/nl_tests/fixtures/device_local 下有几个 md 文件，只输出数字。|expect=3
+act|sc_device_md_files_en_082|act,scalar_count,count,extension,md,en,client_like|How many md files are under scripts/nl_tests/fixtures/device_local recursively? Output only the number.|expect=3
+act|sc_device_md_files_ja_083|act,scalar_count,count,extension,md,ja,client_like|scripts/nl_tests/fixtures/device_local 配下の md ファイル数だけを数字で答えてください。|expect=3
+act|sc_device_md_files_ko_084|act,scalar_count,count,extension,md,ko,client_like|scripts/nl_tests/fixtures/device_local 아래 md 파일 수만 숫자로 답해 주세요.|expect=3
+
+act|sc_device_log_files_zh_085|act,scalar_count,count,extension,log,zh,client_like|递归数一下 scripts/nl_tests/fixtures/device_local 下有几个 log 文件，只输出数字。|expect=2
+act|sc_device_log_files_en_086|act,scalar_count,count,extension,log,en,client_like|How many log files are under scripts/nl_tests/fixtures/device_local recursively? Output only the number.|expect=2
+act|sc_device_log_files_ja_087|act,scalar_count,count,extension,log,ja,client_like|scripts/nl_tests/fixtures/device_local 配下の log ファイル数だけを数字で答えてください。|expect=2
+act|sc_device_log_files_ko_088|act,scalar_count,count,extension,log,ko,client_like|scripts/nl_tests/fixtures/device_local 아래 log 파일 수만 숫자로 답해 주세요.|expect=2
+
+act|sc_device_zip_files_zh_089|act,scalar_count,count,extension,zip,zh,client_like|递归数一下 scripts/nl_tests/fixtures/device_local 下有几个 zip 文件，只输出数字。|expect=1
+act|sc_device_zip_files_en_090|act,scalar_count,count,extension,zip,en,client_like|How many zip files are under scripts/nl_tests/fixtures/device_local recursively? Output only the number.|expect=1
+act|sc_device_zip_files_ja_091|act,scalar_count,count,extension,zip,ja,client_like|scripts/nl_tests/fixtures/device_local 配下の zip ファイル数だけを数字で答えてください。|expect=1
+act|sc_device_zip_files_ko_092|act,scalar_count,count,extension,zip,ko,client_like|scripts/nl_tests/fixtures/device_local 아래 zip 파일 수만 숫자로 답해 주세요.|expect=1
+
+act|sc_device_json_files_zh_093|act,scalar_count,count,extension,json,zh,client_like|递归数一下 scripts/nl_tests/fixtures/device_local 下有几个 json 文件，只输出数字。|expect=1
+act|sc_device_json_files_en_094|act,scalar_count,count,extension,json,en,client_like|How many json files are under scripts/nl_tests/fixtures/device_local recursively? Output only the number.|expect=1
+act|sc_device_json_files_ja_095|act,scalar_count,count,extension,json,ja,client_like|scripts/nl_tests/fixtures/device_local 配下の json ファイル数だけを数字で答えてください。|expect=1
+act|sc_device_json_files_ko_096|act,scalar_count,count,extension,json,ko,client_like|scripts/nl_tests/fixtures/device_local 아래 json 파일 수만 숫자로 답해 주세요.|expect=1
+
+act|sc_device_hidden_zh_097|act,scalar_count,count,hidden,zh,client_like|数一下 scripts/nl_tests/fixtures/device_local 顶层点开头隐藏项有几个，只输出数字。|expect=0
+act|sc_device_hidden_en_098|act,scalar_count,count,hidden,en,client_like|Count dot-prefixed hidden entries directly under scripts/nl_tests/fixtures/device_local and output only the number.|expect=0
+act|sc_device_hidden_ja_099|act,scalar_count,count,hidden,ja,client_like|scripts/nl_tests/fixtures/device_local 直下のドットで始まる隠し項目数だけを数字で答えてください。|expect=0
+act|sc_device_hidden_ko_100|act,scalar_count,count,hidden,ko,client_like|scripts/nl_tests/fixtures/device_local 바로 아래 점으로 시작하는 숨김 항목 수만 숫자로 답해 주세요.|expect=0

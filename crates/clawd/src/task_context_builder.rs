@@ -384,6 +384,24 @@ fn session_snapshot_provides_execution_state_anchor(
         || observed_facts_provide_immediate_anchor(session_snapshot.active_observed_facts.as_ref())
 }
 
+fn session_snapshot_has_primary_task_context(
+    session_snapshot: &crate::conversation_state::ActiveSessionSnapshot,
+) -> bool {
+    session_snapshot
+        .conversation_state
+        .as_ref()
+        .is_some_and(|state| {
+            state
+                .last_primary_task_prompt
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+                || state
+                    .last_primary_task_output
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty())
+        })
+}
+
 fn request_qualifies_for_anchor_only_route_context(
     user_request: &str,
     signals: &crate::intent::surface_signals::PromptSurfaceSignals,
@@ -627,6 +645,7 @@ fn route_needs_recent_execution_history(route_result: &RouteResult) -> bool {
             | crate::OutputSemanticKind::ContentPresenceCheck
             | crate::OutputSemanticKind::ExcerptKindJudgment
             | crate::OutputSemanticKind::RecentArtifactsJudgment
+            | crate::OutputSemanticKind::FileBasename
     )
 }
 
@@ -795,6 +814,7 @@ pub(crate) fn build_execution_task_context_bundle(
     route_result: &RouteResult,
     resolved_prompt: &str,
     chat_memory_budget_chars: usize,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
 ) -> TaskContextBundle {
     let planner_view = PlannerContextView {
         visible_skills: state.planner_available_skills_for_task(task),
@@ -806,9 +826,14 @@ pub(crate) fn build_execution_task_context_bundle(
         ExecutionContextBudgetTier::Full
     };
     let needs_recent_execution_history = route_needs_recent_execution_history(route_result);
+    let has_active_session_state =
+        session_snapshot_provides_execution_state_anchor(&session_snapshot);
+    let has_active_primary_task_state =
+        session_snapshot_has_primary_task_context(&session_snapshot);
+    let has_active_task_context = has_active_session_state || has_active_primary_task_state;
     let suppress_execution_text_context = route_result.is_execute_gate()
         && matches!(budget_tier, ExecutionContextBudgetTier::Full)
-        && session_snapshot_provides_execution_state_anchor(&session_snapshot)
+        && has_active_session_state
         && !needs_recent_execution_history;
     let suppress_execution_anchor_context =
         should_suppress_execution_anchor_context(route_result, &session_snapshot, budget_tier);
@@ -816,13 +841,16 @@ pub(crate) fn build_execution_task_context_bundle(
         state,
         budget_tier,
         &route_result.ask_mode,
+        planner_memory_context_hint(route_result, turn_analysis, has_active_session_state),
     );
     let chat_memory_decision = memory::use_policy::decide_chat_memory_use_policy(
         state,
         budget_tier,
         &route_result.ask_mode,
-        session_snapshot_provides_execution_state_anchor(&session_snapshot),
+        &route_result.route_reason,
+        has_active_session_state,
         chat_memory_budget_chars,
+        chat_memory_context_hint(route_result, turn_analysis, has_active_task_context),
     );
     let memory_ctx = memory::service::prepare_prompt_with_memory_for_policy(
         state,
@@ -893,6 +921,113 @@ pub(crate) fn build_execution_task_context_bundle(
         route_view: None,
         execution_view: Some(execution_view),
     }
+}
+
+fn chat_memory_context_hint(
+    route_result: &RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    has_active_session_state: bool,
+) -> memory::use_policy::ChatMemoryContextHint {
+    if active_task_context_only_memory_context(
+        route_result,
+        turn_analysis,
+        has_active_session_state,
+    ) {
+        return memory::use_policy::ChatMemoryContextHint::ActiveTaskContextOnly;
+    }
+    if current_request_only_memory_context(route_result, turn_analysis, has_active_session_state) {
+        memory::use_policy::ChatMemoryContextHint::CurrentRequestOnly
+    } else {
+        memory::use_policy::ChatMemoryContextHint::Default
+    }
+}
+
+fn planner_memory_context_hint(
+    route_result: &RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    has_active_session_state: bool,
+) -> memory::use_policy::PlannerMemoryContextHint {
+    if current_request_only_memory_context(route_result, turn_analysis, has_active_session_state) {
+        memory::use_policy::PlannerMemoryContextHint::StableFactsDisabled
+    } else {
+        memory::use_policy::PlannerMemoryContextHint::Default
+    }
+}
+
+fn active_task_context_only_memory_context(
+    route_result: &RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    has_active_session_state: bool,
+) -> bool {
+    if !has_active_session_state
+        || route_result.needs_clarify
+        || route_result.first_layer_decision() != crate::FirstLayerDecision::DirectAnswer
+        || route_result.wants_file_delivery
+        || route_result.schedule_kind != crate::ScheduleKind::None
+        || route_result.should_refresh_long_term_memory
+    {
+        return false;
+    }
+    let Some(analysis) = turn_analysis else {
+        return false;
+    };
+    if analysis.attachment_processing_required || analysis.should_interrupt_active_run {
+        return false;
+    }
+    if !matches!(
+        analysis.turn_type,
+        Some(
+            crate::intent_router::TurnType::TaskAppend
+                | crate::intent_router::TurnType::TaskCorrect
+                | crate::intent_router::TurnType::TaskReplace
+                | crate::intent_router::TurnType::TaskScopeUpdate
+        )
+    ) || !matches!(
+        analysis.target_task_policy,
+        Some(
+            crate::intent_router::TargetTaskPolicy::ReuseActive
+                | crate::intent_router::TargetTaskPolicy::ReplaceActive
+        )
+    ) {
+        return false;
+    }
+    let contract = &route_result.output_contract;
+    !contract.requires_content_evidence
+        && !contract.delivery_required
+        && contract.locator_kind == crate::OutputLocatorKind::None
+        && contract.delivery_intent == crate::OutputDeliveryIntent::None
+        && contract.semantic_kind == crate::OutputSemanticKind::None
+}
+
+fn current_request_only_memory_context(
+    route_result: &RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    has_active_session_state: bool,
+) -> bool {
+    if has_active_session_state
+        || route_result.first_layer_decision() != crate::FirstLayerDecision::DirectAnswer
+    {
+        return false;
+    }
+    if let Some(analysis) = turn_analysis {
+        if analysis.turn_type != Some(crate::intent_router::TurnType::TaskRequest)
+            || !matches!(
+                analysis.target_task_policy,
+                None | Some(crate::intent_router::TargetTaskPolicy::Standalone)
+            )
+        {
+            return false;
+        }
+    }
+    let contract = &route_result.output_contract;
+    route_result.schedule_kind == crate::ScheduleKind::None
+        && !route_result.wants_file_delivery
+        && !route_result.should_refresh_long_term_memory
+        && !contract.requires_content_evidence
+        && !contract.delivery_required
+        && contract.locator_kind == crate::OutputLocatorKind::None
+        && contract.delivery_intent == crate::OutputDeliveryIntent::None
+        && contract.semantic_kind == crate::OutputSemanticKind::None
 }
 
 pub(crate) fn set_execution_image_context(

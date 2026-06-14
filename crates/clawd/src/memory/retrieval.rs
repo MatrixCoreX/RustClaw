@@ -537,10 +537,22 @@ fn push_items_section(
 }
 
 fn should_render_memory_item_in_section(title: &str, item: &RetrievedMemoryItem) -> bool {
+    if memory_item_is_internal_test_run_fact(item) {
+        return false;
+    }
     if matches!(title, "STABLE_FACTS" | "RELEVANT_FACTS") {
         return !crate::memory::fact_uses_cross_turn_deictic_locator(&item.text);
     }
     true
+}
+
+fn memory_item_is_internal_test_run_fact(item: &RetrievedMemoryItem) -> bool {
+    matches!(item.source_label.as_deref(), Some("project_facts"))
+        && memory_text_contains_internal_nl_test_marker(&item.text)
+}
+
+fn memory_text_contains_internal_nl_test_marker(text: &str) -> bool {
+    text.contains("client-like-continuous-") || text.contains("RC-CONT-")
 }
 
 fn fetch_recent_candidates(

@@ -1,0 +1,67 @@
+# RustClaw client-like typical NL coverage.
+# Purpose: compressed gate for the 2026-06-05 agent-generalization convergence phase.
+# Keep this file small enough for routine MiniMax runs while covering representative behavior.
+# Format: suite|name|tags|prompt|expect=optional substring
+
+chat|typical_chat_intro_zh|typical,chat,zh,client_like|你好，请用一句话介绍一下你自己
+chat|typical_chat_bilingual_zh|typical,chat,bilingual,client_like|Briefly tell me 你是谁，回答用中文
+act|typical_pwd_scalar_cn|typical,act,scalar,fs,client_like|只输出当前工作目录的绝对路径，不要解释
+act|typical_hostname_scalar_cn|typical,act,scalar,system,client_like|只输出当前机器 hostname
+chat_act|typical_readme_three_sentence_zh|typical,act,file,summary,zh,client_like|读一下 README 然后用恰好三句话总结，不要多也不要少
+act|typical_readme_head_summary_zh|typical,act,file,summary,zh,client_like|扫一眼 README 前 20 行，再提炼成 3 句话
+act|typical_agents_exists_path_zh|typical,act,fs,locator,zh,client_like|仓库里有没有 AGENTS.md，回答有或没有，并给出绝对路径
+chat_act|typical_doc_md_exclusion_zh|typical,act,listing,filter,zh,client_like|列出 document 目录里所有 .md 文件，但排除 README，告诉我还剩哪些
+chat_act|typical_prompts_schema_compound_zh|typical,act,listing,compare,summary,zh,client_like|我现在需要你做这件事：先列出 prompts/schemas 目录下所有 .json 文件，然后告诉我里面哪个的体积最大，再用一句中文大白话告诉我这个最大的 schema 大概是描述什么对象的，最后顺带提醒一句这个目录的整体作用是什么，整个回答控制在 5 行以内
+chat_act|typical_repo_toml_representative_en|typical,act,listing,summary,en,client_like|find toml files in this repo and briefly mention a few representative ones
+act|typical_top_level_grouping_zh|typical,act,listing,zh,client_like|把当前仓库顶层目录和文件列出来，简单分组就行
+act|typical_hidden_files_zh|typical,act,fs,summary,zh,client_like|看一下当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
+chat_act|typical_compare_cargo_sizes_zh|typical,act,compare,summary,zh,client_like|比较 Cargo.toml 和 Cargo.lock 哪个更大，顺手用一句通俗话解释原因
+chat_act|typical_process_top_cpu_zh|typical,act,process,summary,zh,client_like|看一下当前最占 CPU 的几个进程，然后用一句话告诉我最值得注意的是哪个
+chat_act|typical_telegramd_status_en|typical,act,service,summary,en,client_like|check whether telegramd is running right now and briefly explain the status
+chat_act|typical_health_check_en|typical,act,health,summary,en,client_like|run a basic health check here and summarize only the most important findings
+single|typical_http_local_health_zh|typical,act,http,summary,zh,client_like|请求一下 http://127.0.0.1:8787/v1/health ，如果能通就简短总结结果
+single|typical_ports_brief_zh|typical,act,network,ports,summary,zh,client_like|看看这台机器现在有哪些端口在监听，然后挑最值得注意的几个简单说一下
+single|typical_log_analyze_zh|typical,act,logs,summary,zh,client_like|快速看一下 logs 目录里最近最值得注意的错误或异常，给我一个简短总结
+single|typical_git_status_zh|typical,act,git,summary,zh,client_like|看看这个仓库现在有没有未提交改动，用一句话告诉我
+single|typical_git_branch_raw_zh|typical,act,git,raw,zh,client_like|请执行 git rev-parse --abbrev-ref HEAD，只输出命令结果
+single|typical_raw_pwd_command_zh|typical,act,command,raw,zh,client_like|执行命令 pwd，直接回复执行结果，不要解释
+compound|typical_two_commands_raw_zh|typical,act,command,raw,zh,client_like|请依次执行 pwd 和 whoami，直接输出两个命令结果，每个结果一行，不要总结
+single|typical_inline_json_table_zh|typical,act,transform,zh,client_like|把这个 JSON 数组按 score 从高到低排一下，再输出成 markdown 表格：[{"name":"alpha","score":7},{"name":"beta","score":12},{"name":"gamma","score":9}]
+chat_act|typical_package_name_scalar_zh|typical,act,file,scalar,zh,client_like|去 scripts/nl_tests/fixtures/device_local/package.json 里找 name，只把值给我
+chat_act|typical_config_app_name_scalar_zh|typical,act,config,scalar,zh,client_like|去 scripts/nl_tests/fixtures/device_local/configs/app_config.toml 里找 app.name，只把值给我
+chat_act|typical_sqlite_tables_zh|typical,act,database,zh,client_like|看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 里有哪些表，只输出表名
+chat_act|typical_sqlite_schema_version_zh|typical,act,database,scalar,zh,client_like|看一下 scripts/nl_tests/fixtures/device_local/data/test_contract.sqlite 的 schema version，只输出数字
+chat_act|typical_archive_list_zh|typical,act,archive,zh,client_like|查看 scripts/nl_tests/fixtures/device_local/tmp/test_bundle.zip 里面有哪些文件，只列文件名
+compound|typical_fixture_list_then_read_zh|typical,act,listing,file,summary,zh,client_like|先列出 scripts/nl_tests/fixtures/device_local/docs 目录里的文件名，再读取 release_checklist.md 开头，最后用一句中文说它更像操作清单还是普通说明
+compound|typical_count_then_compare_zh|typical,act,listing,compare,summary,zh,client_like|先数 scripts/nl_tests/fixtures/device_local/docs 直接子项数量，再数 scripts/nl_tests/fixtures/device_local/logs 直接子项数量，最后一句中文说哪个更多
+failure|typical_missing_file_delivery_zh|typical,failure,delivery,missing_file_graceful,zh,client_like|把 definitely_missing_named_file_rustclaw_001.txt 发给我
+continuous|typical_clarify_send_file_turn1|typical,clarify,delivery,turn_chain,zh,client_like|把文件发给我
+continuous|typical_clarify_send_file_turn2|typical,clarify,delivery,turn_chain,zh,client_like|README.md
+continuous|typical_context_file_chain_turn1|typical,state,file,turn_chain,zh,client_like|先记一下，后面我说“那个文件”就是 /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/README.md
+continuous|typical_context_file_chain_turn2|typical,state,file,turn_chain,zh,client_like|把那个文件开头读 10 行
+continuous|typical_context_file_chain_turn3|typical,state,file,summary,turn_chain,zh,client_like|把它再用一句人话总结
+continuous|typical_memory_marker_turn1|typical,memory,state,turn_chain,zh,client_like|本轮连续测试里，请记住编号 RC-TYPICAL-CN-0605-A。只用一句中文确认。
+continuous|typical_memory_marker_turn2|typical,memory,state,turn_chain,zh,client_like|刚才让你记住的连续测试编号是什么？只回答编号。
+continuous|typical_alias_file_turn1|typical,alias,state,turn_chain,zh,client_like|先记一下，甲文件是 scripts/nl_tests/fixtures/device_local/docs/service_notes.md。只回复已记住。
+continuous|typical_alias_file_turn2|typical,alias,file,scalar,turn_chain,zh,client_like|读取甲文件的标题，只输出标题。
+continuous|typical_alias_file_turn3|typical,alias,correction,state,turn_chain,zh,client_like|不对，甲文件改成 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md。只回复已更新。
+continuous|typical_alias_file_turn4|typical,alias,file,scalar,turn_chain,zh,client_like|读取甲文件的标题，只输出标题。
+continuous|typical_alias_file_en_turn1|typical,alias,state,turn_chain,en,client_like|For this conversation, remember that ALPHA_DOC refers to scripts/nl_tests/fixtures/device_local/docs/service_notes.md. Reply only remembered.
+continuous|typical_alias_file_en_turn2|typical,alias,file,scalar,turn_chain,en,client_like|Read the title of ALPHA_DOC. Output only the title.
+continuous|typical_alias_file_en_turn3|typical,alias,correction,state,turn_chain,en,client_like|Correction: ALPHA_DOC now refers to scripts/nl_tests/fixtures/device_local/docs/release_checklist.md. Reply only updated.
+continuous|typical_alias_file_en_turn4|typical,alias,file,scalar,turn_chain,en,client_like|Read the title of ALPHA_DOC. Output only the title.
+continuous|typical_alias_file_ja_turn1|typical,alias,state,turn_chain,ja,client_like|この会話では、参照名「資料A」を scripts/nl_tests/fixtures/device_local/docs/service_notes.md として覚えてください。返答は「記憶しました」だけ。
+continuous|typical_alias_file_ja_turn2|typical,alias,file,scalar,turn_chain,ja,client_like|「資料A」のタイトルだけ読んで、そのタイトルだけ出力してください。
+continuous|typical_alias_file_ja_turn3|typical,alias,correction,state,turn_chain,ja,client_like|訂正です。「資料A」は scripts/nl_tests/fixtures/device_local/docs/release_checklist.md を指すことにしてください。返答は「更新しました」だけ。
+continuous|typical_alias_file_ja_turn4|typical,alias,file,scalar,turn_chain,ja,client_like|「資料A」のタイトルだけ読んで、そのタイトルだけ出力してください。
+continuous|typical_alias_file_ko_turn1|typical,alias,state,turn_chain,ko,client_like|이 대화에서는 참조 이름 "자료A"를 scripts/nl_tests/fixtures/device_local/docs/service_notes.md 로 기억해 주세요. 답장은 "기억했습니다"만 해 주세요.
+continuous|typical_alias_file_ko_turn2|typical,alias,file,scalar,turn_chain,ko,client_like|"자료A"의 제목만 읽고 제목만 출력해 주세요.
+continuous|typical_alias_file_ko_turn3|typical,alias,correction,state,turn_chain,ko,client_like|정정합니다. "자료A"는 이제 scripts/nl_tests/fixtures/device_local/docs/release_checklist.md 를 가리킵니다. 답장은 "업데이트했습니다"만 해 주세요.
+continuous|typical_alias_file_ko_turn4|typical,alias,file,scalar,turn_chain,ko,client_like|"자료A"의 제목만 읽고 제목만 출력해 주세요.
+schedule|typical_schedule_clarify_zh|typical,schedule,clarify,zh,client_like|每天早上 8 点提醒我开会
+config_edit_smoke|typical_config_edit_plan_no_write_zh|typical,act,config,mutate,dry_run,tool:config_edit,zh,client_like|只生成变更计划，不要实际修改：把 configs/config.toml 里的 skills.skill_switches.config_edit_nl_plan 设置为 true，然后告诉我会改什么并保留执行过程
+config_edit_smoke|typical_config_edit_apply_temp_zh|typical,act,config,mutate,sandbox,tool:config_edit,zh,client_like|在 run/nl_eval_tmp/config_edit_smoke/config.toml 中，把 skills.skill_switches.config_edit_nl_smoke 设置为 true；执行前先生成变更计划，执行后验证 TOML 并读回这个字段，保留执行过程
+chat_act|typical_x_draft_preview_zh|typical,network,dry_run,skill:x,zh,client_like|帮我起草一条发到 X 的短帖，内容是今天完成了 RustClaw NL typical smoke，不要真正发布，只给我预览结果
+chat_act|typical_weather_beijing_zh|typical,network,skill:weather,zh,client_like|查一下 Beijing 今天天气，简短告诉我
+chat_act|typical_stock_quote_zh|typical,network,skill:stock,zh,client_like|查一下 600519 的最新行情，简短告诉我
+chat_act|typical_crypto_quote_zh|typical,network,skill:crypto,zh,client_like|查一下 BTCUSDT 的最新价格，简短告诉我
