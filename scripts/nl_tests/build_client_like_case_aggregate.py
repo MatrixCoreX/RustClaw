@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import argparse
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 
@@ -44,6 +44,38 @@ CANONICAL_SUITES = {
 AUTH_CONTEXT_VALUES = {"user", "admin"}
 METADATA_TAG_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 
+SIDE_EFFECT_NAME_TOKENS = (
+    "absolute_saved_path",
+    "builtin_write_file_deliver",
+    "file_delivery",
+    "generate_hello_sh",
+    "mutate_write_file",
+    "saved_path",
+    "text_match_file_write_and_deliver",
+    "workspace_note_path_only",
+    "write_and_deliver",
+    "write_file_run",
+)
+
+DRY_RUN_NAME_TOKENS = (
+    "draft_preview",
+)
+
+ALLOW_CLARIFY_NAME_TOKENS = (
+    "clarify",
+    "followup_change_remaining_step",
+    "followup_continue_synonym",
+    "followup_discuss_then_continue",
+    "followup_failure_reason_synonym",
+    "followup_go_on",
+    "followup_not_that_old",
+    "followup_pick_up_from_there",
+    "followup_redo_from_start",
+    "followup_restart_not_resume",
+    "just_a_path",
+    "one_word",
+)
+
 RISKY_FILE_NAMES = {
     "nl_cases_sensitive_flows.txt",
     "nl_cases_ops_http_repair.txt",
@@ -68,6 +100,15 @@ RISKY_PROMPT_PATTERNS = [
 ]
 
 COMMENT_PREFIXES = ("#",)
+
+
+def should_preserve_expect(tags: str, expect: str, preserve_expects: bool) -> bool:
+    if not expect.strip():
+        return False
+    if preserve_expects:
+        return True
+    tagset = {part.strip().lower() for part in tags.split(",") if part.strip()}
+    return "expect_exact_scalar" in tagset
 
 
 @dataclass(frozen=True)
@@ -107,6 +148,57 @@ def sanitize_tags(value: str) -> str:
     return value or "client_like,aggregate"
 
 
+def split_tag_values(value: str) -> list[str]:
+    return [tag.strip() for tag in value.split(",") if tag.strip()]
+
+
+def append_tag(value: str, tag: str) -> str:
+    tags = split_tag_values(value)
+    lower_tags = {item.lower() for item in tags}
+    if tag.lower() not in lower_tags:
+        tags.append(tag)
+    return ",".join(tags)
+
+
+def derive_metadata_tags(row: CaseRow) -> CaseRow:
+    """Derive safety tags from harness metadata only.
+
+    The client-like aggregate intentionally avoids inspecting prompt text here:
+    prompts are user-language samples, while case names and tags are stable
+    machine metadata maintained by the NL test harness.
+    """
+
+    tags = split_tag_values(row.tags)
+    lower_tags = {tag.lower() for tag in tags}
+    lower_name = row.name.lower()
+    lower_suite = row.suite.lower()
+
+    has_side_effect = "side_effect" in lower_tags
+    has_side_effect = has_side_effect or "write_and_deliver" in lower_tags
+    has_side_effect = has_side_effect or lower_suite == "schedule"
+    has_side_effect = has_side_effect or (
+        "mutate" in lower_tags and "dry_run" not in lower_tags
+    )
+    has_side_effect = has_side_effect or any(
+        token in lower_name for token in SIDE_EFFECT_NAME_TOKENS
+    )
+
+    derived_tags = row.tags
+    if has_side_effect:
+        derived_tags = append_tag(derived_tags, "side_effect")
+    if any(token in lower_name for token in DRY_RUN_NAME_TOKENS):
+        derived_tags = append_tag(derived_tags, "dry_run")
+    if (
+        lower_suite == "ask"
+        or "clarify" in lower_tags
+        or any(token in lower_name for token in ALLOW_CLARIFY_NAME_TOKENS)
+    ):
+        derived_tags = append_tag(derived_tags, "allow_clarify")
+    if derived_tags == row.tags:
+        return row
+    return replace(row, tags=derived_tags)
+
+
 def should_skip_prompt(prompt: str, include_risky: bool) -> bool:
     if include_risky:
         return False
@@ -124,11 +216,19 @@ def split_columns(line: str) -> list[str]:
 
 
 def split_canonical(line: str) -> list[str]:
-    return [part.strip() for part in line.split("|", 4)]
+    return [part.strip() for part in line.split("|", 3)]
 
 
 def split_five_column(line: str) -> list[str]:
     return [part.strip() for part in line.split("|", 4)]
+
+
+def split_expect_suffix(prompt: str) -> tuple[str, str]:
+    marker = "|expect="
+    if marker not in prompt:
+        return prompt.strip(), ""
+    prompt_part, expect = prompt.rsplit(marker, 1)
+    return prompt_part.strip(), expect.strip()
 
 
 def looks_like_metadata_tags(value: str) -> bool:
@@ -274,13 +374,16 @@ def parse_line(source: Path, line: str, index: int, preserve_expects: bool) -> l
             )
         ]
 
-    if len(canonical) >= 4 and (
+    if len(canonical) == 4 and (
         first_norm in CANONICAL_SUITES or looks_like_metadata_tags(canonical[2])
     ):
-        suite, name, tags, prompt = canonical[:4]
-        expect = ""
-        if preserve_expects and len(canonical) >= 5 and canonical[4].strip().startswith("expect="):
-            expect = canonical[4].strip()[len("expect=") :]
+        suite, name, tags, prompt = canonical
+        prompt, stripped_expect = split_expect_suffix(prompt)
+        expect = (
+            stripped_expect
+            if should_preserve_expect(tags, stripped_expect, preserve_expects)
+            else ""
+        )
         return [
             CaseRow(
                 suite=suite.strip(),
@@ -357,6 +460,7 @@ def build_rows(
                 if should_skip_prompt(row.prompt, include_risky):
                     stats["rows_skipped_risky"] += 1
                     continue
+                row = derive_metadata_tags(row)
                 if row.suite != "continuous":
                     key = (canonical_prompt_key(row.prompt), row.expect.strip())
                     if key in seen:
@@ -467,10 +571,12 @@ def main() -> int:
     parser.add_argument(
         "--target-rows",
         type=int,
-        default=2000,
+        default=2100,
         help=(
             "Pad the aggregate to this many executable rows by replaying existing "
-            "case prompts with unique case names. Use 0 to disable padding."
+            "case prompts with unique case names. The default leaves enough "
+            "headroom for a 2000-case safe run after excluded tags. Use 0 to "
+            "disable padding."
         ),
     )
     parser.add_argument(

@@ -62,9 +62,13 @@ impl TempDirGuard {
 }
 
 #[test]
-fn delivery_message_language_follows_current_request_before_config() {
+fn delivery_message_uses_i18n_resource_or_machine_payload() {
     let mut state = AppState::test_default_with_fixture_provider();
-    state.policy.schedule.locale = "en-US".to_string();
+    state.policy.schedule.locale = "zh-CN".to_string();
+    state.policy.schedule.i18n_dict.insert(
+        "clawd.msg.delivery.rule3_file_not_found".to_string(),
+        "未找到文件。".to_string(),
+    );
 
     assert_eq!(
         localize_delivery_message_for_request(
@@ -74,6 +78,13 @@ fn delivery_message_language_follows_current_request_before_config() {
         ),
         "未找到文件。"
     );
+
+    let mut state = AppState::test_default_with_fixture_provider();
+    state.policy.schedule.locale = "en-US".to_string();
+    state.policy.schedule.i18n_dict.insert(
+        "clawd.msg.delivery.rule3_file_not_found".to_string(),
+        "File not found.".to_string(),
+    );
     assert_eq!(
         localize_delivery_message_for_request(
             &state,
@@ -81,6 +92,22 @@ fn delivery_message_language_follows_current_request_before_config() {
             "send me the missing file"
         ),
         "File not found."
+    );
+
+    let mut state = AppState::test_default_with_fixture_provider();
+    state.policy.schedule.locale = "en-US".to_string();
+    state.policy.schedule.i18n_dict.clear();
+    let text = localize_delivery_message_for_request(
+        &state,
+        DeliveryMessageKind::Rule3FileNotFound,
+        "send me the missing file",
+    );
+    let payload: serde_json::Value = serde_json::from_str(&text).expect("machine payload");
+    assert_eq!(
+        payload
+            .pointer("/message_key")
+            .and_then(|value| value.as_str()),
+        Some("clawd.msg.delivery.rule3_file_not_found")
     );
 }
 
@@ -141,6 +168,7 @@ fn test_state_with_i18n(translations: &[(&str, &str)]) -> AppState {
                 intent_prompt_source: String::new(),
                 intent_rules_template: Arc::new(RwLock::new(String::new())),
                 locale: "zh-CN".to_string(),
+                i18n_dir: "configs/i18n".to_string(),
                 i18n_dict,
             },
             ..crate::PolicyConfig::test_default()
@@ -470,10 +498,11 @@ fn file_names_contract_does_not_reexpand_single_filename_answer_as_directory_loo
 
 #[test]
 fn intercept_response_payload_localizes_missing_file_message_to_english_request() {
-    let state = test_state_with_i18n(&[(
+    let mut state = test_state_with_i18n(&[(
         "clawd.msg.delivery.rule1_both_roots_miss",
-        "在系统根目录和项目根目录都没有找到该文件",
+        "File not found under system root and project root.",
     )]);
+    state.policy.schedule.locale = "en-US".to_string();
     let contract = IntentOutputContract {
         exact_sentence_count: None,
         delivery_required: true,
@@ -491,10 +520,10 @@ fn intercept_response_payload_localizes_missing_file_message_to_english_request(
         Vec::new(),
     );
 
-    assert_eq!(text, "File not found at the provided path.");
+    assert_eq!(text, "File not found under system root and project root.");
     assert_eq!(
         messages,
-        vec!["File not found at the provided path.".to_string()]
+        vec!["File not found under system root and project root.".to_string()]
     );
 }
 
@@ -502,8 +531,9 @@ fn intercept_response_payload_localizes_missing_file_message_to_english_request(
 fn intercept_response_payload_localizes_missing_directory_message_to_english_request() {
     let mut state = test_state_with_i18n(&[(
         "clawd.msg.directory.not_found_dual_root",
-        "在系统根目录和项目根目录都没有找到该目录",
+        "Directory not found under system root and project root.",
     )]);
+    state.policy.schedule.locale = "en-US".to_string();
     // 关键：使用隔离的 workspace_root / default_locator_search_dir，
     // 避免与并发跑的其他测试在 /tmp 下产生的临时目录互相干扰。
     let isolated = TempDirGuard::new("missing_directory_isolated");
@@ -526,10 +556,13 @@ fn intercept_response_payload_localizes_missing_directory_message_to_english_req
         Vec::new(),
     );
 
-    assert_eq!(text, "Directory not found at the provided path.");
+    assert_eq!(
+        text,
+        "Directory not found under system root and project root."
+    );
     assert_eq!(
         messages,
-        vec!["Directory not found at the provided path.".to_string()]
+        vec!["Directory not found under system root and project root.".to_string()]
     );
 }
 

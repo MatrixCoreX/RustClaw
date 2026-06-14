@@ -1,0 +1,1432 @@
+use super::*;
+
+pub(super) fn answer_verifier_retry_summary<'a>(
+    reply: &'a AskReply,
+    route_result: Option<&RouteResult>,
+) -> Option<&'a crate::task_journal::TaskJournalAnswerVerifierSummary> {
+    if reply.should_fail_task || reply_final_status_is_clarify(reply) {
+        return None;
+    }
+    let summary = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())?;
+    if answer_verifier_gap_is_structurally_satisfied(reply, route_result) {
+        return None;
+    }
+    if answer_verifier_gap_requires_user_locator_disambiguation(reply, route_result, summary) {
+        return None;
+    }
+    summary.high_confidence_retry_gap().then_some(summary)
+}
+
+pub(super) fn suppress_answer_verifier_retry_if_structurally_satisfied(
+    reply: &mut AskReply,
+    route_result: Option<&RouteResult>,
+) -> bool {
+    if !answer_verifier_gap_is_structurally_satisfied(reply, route_result) {
+        return false;
+    }
+    let Some(journal) = reply.task_journal.as_mut() else {
+        return false;
+    };
+    let Some(summary) = journal.answer_verifier_summary.as_ref() else {
+        return false;
+    };
+    if !summary.high_confidence_retry_gap() {
+        return false;
+    }
+    info!(
+        "answer_verifier_retry_suppressed_structural_satisfaction reason={}",
+        crate::truncate_for_log(&summary.answer_incomplete_reason)
+    );
+    journal.answer_verifier_summary = None;
+    true
+}
+
+pub(super) fn suppress_answer_verifier_retry_if_user_locator_disambiguation(
+    reply: &mut AskReply,
+    route_result: Option<&RouteResult>,
+) -> bool {
+    let Some(summary) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+    else {
+        return false;
+    };
+    if !answer_verifier_gap_requires_user_locator_disambiguation(reply, route_result, summary) {
+        return false;
+    }
+    let reason = summary.answer_incomplete_reason.clone();
+    let Some(journal) = reply.task_journal.as_mut() else {
+        return false;
+    };
+    info!(
+        "answer_verifier_retry_suppressed_locator_disambiguation reason={}",
+        crate::truncate_for_log(&reason)
+    );
+    journal.answer_verifier_summary = None;
+    true
+}
+
+fn answer_verifier_gap_requires_user_locator_disambiguation(
+    reply: &AskReply,
+    route_result: Option<&RouteResult>,
+    summary: &crate::task_journal::TaskJournalAnswerVerifierSummary,
+) -> bool {
+    if !summary.high_confidence_retry_gap() {
+        return false;
+    }
+    if summary.missing_evidence_fields.len() != 1
+        || summary.missing_evidence_fields.first().map(String::as_str) != Some("path")
+    {
+        return false;
+    }
+    let Some(route) = route_result else {
+        return false;
+    };
+    if !route.output_contract.delivery_required
+        || route.output_contract.response_shape != crate::OutputResponseShape::FileToken
+        || route.output_contract.delivery_intent != crate::OutputDeliveryIntent::FileSingle
+    {
+        return false;
+    }
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return false;
+    };
+    journal
+        .step_results
+        .iter()
+        .any(step_has_non_unique_file_search_candidates)
+}
+
+fn step_has_non_unique_file_search_candidates(
+    step: &crate::task_journal::TaskJournalStepTrace,
+) -> bool {
+    if step.status != crate::executor::StepExecutionStatus::Ok {
+        return false;
+    }
+    let Some(output) = step.output_excerpt.as_deref().map(str::trim) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(output) else {
+        return false;
+    };
+    let payload = value.get("extra").unwrap_or(&value);
+    if payload.get("action").and_then(serde_json::Value::as_str) != Some("find_name") {
+        return false;
+    }
+    let results_len = payload
+        .get("results")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    let count = payload
+        .get("count")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|count| usize::try_from(count).ok())
+        .unwrap_or(results_len);
+    count > 1 || results_len > 1
+}
+
+pub(super) fn answer_verifier_gap_is_structurally_satisfied(
+    reply: &AskReply,
+    route_result: Option<&RouteResult>,
+) -> bool {
+    let Some(summary) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+    else {
+        return false;
+    };
+    if !summary.high_confidence_retry_gap() {
+        return false;
+    }
+    let Some(route) = route_result else {
+        return false;
+    };
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison {
+        return quantity_comparison_reply_has_derived_numeric_answer(reply);
+    }
+    if terminal_content_access_blocker_reply_satisfies_contract(reply, route) {
+        return true;
+    }
+    if let (Some(journal), Some(answer)) = (
+        reply.task_journal.as_ref(),
+        final_user_answer_candidate(reply),
+    ) {
+        return crate::answer_verifier::structurally_satisfies_answer_contract(
+            route, journal, answer,
+        );
+    }
+    false
+}
+
+pub(super) fn terminal_content_access_blocker_reply_satisfies_contract(
+    reply: &AskReply,
+    route: &RouteResult,
+) -> bool {
+    if !route.output_contract.requires_content_evidence {
+        return false;
+    }
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return false;
+    };
+    let Some(summary) = journal.finalizer_summary.as_ref() else {
+        return false;
+    };
+    if summary.disposition != Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
+        || summary.completion_ok != Some(true)
+        || summary.grounded_ok != Some(true)
+    {
+        return false;
+    }
+    journal
+        .step_results
+        .iter()
+        .rev()
+        .any(step_has_terminal_content_access_blocker)
+}
+
+pub(super) fn step_has_terminal_content_access_blocker(
+    step: &crate::task_journal::TaskJournalStepTrace,
+) -> bool {
+    if step.status != crate::executor::StepExecutionStatus::Error {
+        return false;
+    }
+    let Some(error) = step.error_excerpt.as_deref().map(str::trim) else {
+        return false;
+    };
+    if error.is_empty() {
+        return false;
+    }
+    if let Some(policy_block) = crate::skills::parse_policy_block_error(error) {
+        return matches!(
+            policy_block.reason_code.as_str(),
+            "path_outside_workspace" | "path_parent_traversal"
+        );
+    }
+    let Some(structured) = crate::skills::parse_structured_skill_error(error) else {
+        return false;
+    };
+    if structured.error_kind != "permission_denied" {
+        return false;
+    }
+    let effective_skill = if structured.skill.trim().is_empty() {
+        step.skill.as_str()
+    } else {
+        structured.skill.as_str()
+    };
+    matches!(
+        effective_skill.to_ascii_lowercase().as_str(),
+        "fs_basic" | "system_basic" | "read_file" | "list_dir"
+    )
+}
+
+pub(super) fn final_user_answer_candidate(reply: &AskReply) -> Option<&str> {
+    reply
+        .messages
+        .iter()
+        .rev()
+        .map(String::as_str)
+        .find(|message| {
+            let trimmed = message.trim();
+            !trimmed.is_empty() && !crate::finalize::is_execution_summary_message(trimmed)
+        })
+        .or_else(|| {
+            let trimmed = reply.text.trim();
+            (!trimmed.is_empty()).then_some(trimmed)
+        })
+}
+
+pub(super) fn collect_size_bytes_from_json(value: &serde_json::Value, out: &mut Vec<u64>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(size) = map
+                .get("size_bytes")
+                .or_else(|| map.get("total_size_bytes"))
+                .and_then(|value| value.as_u64())
+            {
+                out.push(size);
+            }
+            for value in map.values() {
+                collect_size_bytes_from_json(value, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for value in items {
+                collect_size_bytes_from_json(value, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub(super) fn observed_size_bytes(reply: &AskReply) -> Vec<u64> {
+    let mut sizes = Vec::new();
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return sizes;
+    };
+    for step in &journal.step_results {
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
+            collect_size_bytes_from_json(&value, &mut sizes);
+        }
+    }
+    sizes.sort_unstable();
+    sizes.dedup();
+    sizes
+}
+
+pub(super) fn numeric_literals(text: &str) -> Vec<f64> {
+    let mut values = Vec::new();
+    let mut token = String::new();
+    let mut has_digit = false;
+    for ch in text.chars() {
+        if ch.is_ascii_digit() || ch == ',' || ch == '.' {
+            if ch.is_ascii_digit() {
+                has_digit = true;
+            }
+            token.push(ch);
+            continue;
+        }
+        if has_digit {
+            push_numeric_literal(&mut values, &token);
+        }
+        token.clear();
+        has_digit = false;
+    }
+    if has_digit {
+        push_numeric_literal(&mut values, &token);
+    }
+    values
+}
+
+pub(super) fn push_numeric_literal(values: &mut Vec<f64>, token: &str) {
+    let normalized = token.trim_matches('.').replace(',', "");
+    if normalized.is_empty() || normalized == "." {
+        return;
+    }
+    if let Ok(value) = normalized.parse::<f64>() {
+        values.push(value);
+    }
+}
+
+pub(super) fn quantity_comparison_reply_has_derived_numeric_answer(reply: &AskReply) -> bool {
+    let observed_sizes = observed_size_bytes(reply);
+    if observed_sizes.len() < 2 {
+        return false;
+    }
+    let Some(answer) = final_user_answer_candidate(reply) else {
+        return false;
+    };
+    numeric_literals(answer).into_iter().any(|number| {
+        !observed_sizes
+            .iter()
+            .any(|size| (number - *size as f64).abs() < 0.000_001)
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LogAnalyzeFinding {
+    pub(super) path: String,
+    pub(super) keyword_counts: Vec<(String, u64)>,
+    pub(super) total_hits: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct StructuredSearchFinding {
+    pub(super) action: String,
+    pub(super) count: usize,
+    pub(super) results: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct StructuredCountFinding {
+    pub(super) path: Option<String>,
+    pub(super) total: u64,
+    pub(super) files: Option<u64>,
+    pub(super) dirs: Option<u64>,
+    pub(super) hidden: Option<u64>,
+    pub(super) recursive: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RssNewsItem {
+    pub(super) title: String,
+    pub(super) source_host: String,
+    pub(super) date: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct HttpHealthFinding {
+    pub(super) status_code: Option<u64>,
+    pub(super) ok: Option<bool>,
+    pub(super) version: Option<String>,
+    pub(super) uptime_seconds: Option<u64>,
+    pub(super) running_length: Option<u64>,
+    pub(super) channel_gateway_healthy: Option<bool>,
+    pub(super) telegram_bot_healthy: Option<bool>,
+    pub(super) gateway_instances: Vec<HealthGatewayInstance>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct HealthGatewayInstance {
+    pub(super) kind: String,
+    pub(super) name: String,
+    pub(super) status: String,
+    pub(super) healthy: Option<bool>,
+}
+
+pub(super) fn try_recover_log_analyze_answer_verifier_gap(
+    user_text: &str,
+    reply: &mut AskReply,
+) -> bool {
+    let findings = observed_log_analyze_findings(reply);
+    if findings.is_empty() {
+        return false;
+    }
+    let answer = deterministic_log_analyze_summary_text(user_text, &findings);
+    let messages = vec![answer.clone()];
+    if let Some(journal) = reply.task_journal.as_mut() {
+        journal.answer_verifier_summary = None;
+        journal.record_final_answer(&answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    }
+    reply.text = answer;
+    reply.messages = messages;
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    reply.is_llm_reply = false;
+    info!(
+        "answer_verifier_retry_exhausted_recovered_with_log_analyze_summary findings={}",
+        findings.len()
+    );
+    true
+}
+
+pub(super) fn try_recover_structured_count_answer_verifier_gap(
+    route_result: Option<&crate::RouteResult>,
+    user_text: &str,
+    reply: &mut AskReply,
+) -> bool {
+    if !route_result.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
+    }) {
+        return false;
+    }
+    let Some(finding) = observed_structured_count_findings(reply).into_iter().next() else {
+        return false;
+    };
+    let answer = deterministic_structured_count_summary_text(user_text, &finding);
+    let messages = vec![answer.clone()];
+    if let Some(journal) = reply.task_journal.as_mut() {
+        journal.answer_verifier_summary = None;
+        journal.record_final_answer(&answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    }
+    reply.text = answer;
+    reply.messages = messages;
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    reply.is_llm_reply = false;
+    info!(
+        "answer_verifier_retry_exhausted_recovered_with_structured_count total={}",
+        finding.total
+    );
+    true
+}
+
+pub(super) fn try_recover_structured_search_answer_verifier_gap(
+    route_result: Option<&crate::RouteResult>,
+    user_text: &str,
+    reply: &mut AskReply,
+) -> bool {
+    if !route_allows_structured_search_recovery(route_result) {
+        return false;
+    }
+    let Some(verifier) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+    else {
+        return false;
+    };
+    if !verifier.high_confidence_retry_gap() {
+        return false;
+    }
+    if !structured_search_verifier_requests_full_candidates(verifier) {
+        return false;
+    }
+    let Some(finding) = observed_structured_search_findings(reply)
+        .into_iter()
+        .max_by(|left, right| {
+            left.count
+                .cmp(&right.count)
+                .then_with(|| left.results.len().cmp(&right.results.len()))
+                .then_with(|| right.action.cmp(&left.action))
+        })
+    else {
+        return false;
+    };
+    if finding.results.is_empty() || finding.count > finding.results.len() {
+        return false;
+    }
+    let answer = deterministic_structured_search_summary_text(user_text, &finding);
+    let messages = vec![answer.clone()];
+    if let Some(journal) = reply.task_journal.as_mut() {
+        journal.answer_verifier_summary = None;
+        journal.record_final_answer(&answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    }
+    reply.text = answer;
+    reply.messages = messages;
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    reply.is_llm_reply = false;
+    info!(
+        "answer_verifier_retry_exhausted_recovered_with_structured_search_results action={} count={}",
+        finding.action, finding.count
+    );
+    true
+}
+
+pub(super) fn try_recover_rss_news_answer_verifier_gap(
+    route_result: Option<&crate::RouteResult>,
+    reply: &mut AskReply,
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RssNewsFetch {
+        return false;
+    }
+    let Some(verifier) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+    else {
+        return false;
+    };
+    if !verifier.high_confidence_retry_gap() || !rss_verifier_requests_source_grounding(verifier) {
+        return false;
+    }
+    if !reply.task_journal.as_ref().is_some_and(|journal| {
+        crate::task_journal::evidence_coverage_for_route(route, journal).is_complete()
+    }) {
+        return false;
+    }
+    let items = observed_rss_news_items(reply);
+    if items.is_empty() {
+        return false;
+    }
+    apply_rss_news_items_answer(reply, &items);
+    info!(
+        "answer_verifier_retry_exhausted_recovered_with_rss_structured_items count={}",
+        items.len()
+    );
+    true
+}
+
+pub(super) fn try_preserve_rss_source_hosts_from_structured_evidence(
+    route_result: Option<&crate::RouteResult>,
+    reply: &mut AskReply,
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::RssNewsFetch {
+        return false;
+    }
+    if !reply.task_journal.as_ref().is_some_and(|journal| {
+        journal
+            .answer_verifier_summary
+            .as_ref()
+            .is_none_or(|verifier| verifier.pass)
+            && crate::task_journal::evidence_coverage_for_route(route, journal).is_complete()
+    }) {
+        return false;
+    }
+    let items = observed_rss_news_items(reply);
+    if items.is_empty() || rss_answer_contains_observed_source_hosts(&reply.text, &items) {
+        return false;
+    }
+    apply_rss_news_items_answer(reply, &items);
+    info!(
+        "rss_source_host_fidelity_recovered_with_structured_items count={}",
+        items.len()
+    );
+    true
+}
+
+pub(super) fn apply_rss_news_items_answer(reply: &mut AskReply, items: &[RssNewsItem]) {
+    let answer = deterministic_rss_news_items_text(items);
+    let messages = vec![answer.clone()];
+    if let Some(journal) = reply.task_journal.as_mut() {
+        journal.answer_verifier_summary = None;
+        journal.record_final_answer(&answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    }
+    reply.text = answer;
+    reply.messages = messages;
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    reply.is_llm_reply = false;
+}
+
+pub(super) fn route_allows_structured_search_recovery(
+    route_result: Option<&crate::RouteResult>,
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    matches!(
+        route.output_contract.semantic_kind,
+        crate::OutputSemanticKind::FileNames
+            | crate::OutputSemanticKind::DirectoryNames
+            | crate::OutputSemanticKind::FilePaths
+    )
+}
+
+pub(super) fn try_recover_document_heading_answer_verifier_gap(
+    route_result: Option<&crate::RouteResult>,
+    reply: &mut AskReply,
+) -> bool {
+    if !route_result.is_some_and(route_allows_document_heading_recovery) {
+        return false;
+    }
+    let Some(verifier) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+    else {
+        return false;
+    };
+    if !verifier.high_confidence_retry_gap() {
+        return false;
+    }
+    if !route_result.is_some_and(|route| {
+        route.output_contract.semantic_kind == crate::OutputSemanticKind::DocumentHeading
+            || verifier
+                .missing_evidence_fields
+                .iter()
+                .any(|field| field == "output_format")
+    }) {
+        return false;
+    }
+    if !reply.task_journal.as_ref().is_some_and(|journal| {
+        route_result.is_some_and(|route| {
+            crate::task_journal::evidence_coverage_for_route(route, journal).is_complete()
+        })
+    }) {
+        return false;
+    }
+    let Some(answer) = observed_markdown_heading(reply) else {
+        return false;
+    };
+    let verifier_summary = verifier.clone();
+    let messages = vec![answer.clone()];
+    if let Some(journal) = reply.task_journal.as_mut() {
+        journal.rollout_attribution.push(
+            crate::task_journal::TaskJournalRolloutAttribution::document_heading_answer_verifier_recovery(
+                Some(&verifier_summary),
+            ),
+        );
+        journal.answer_verifier_summary = None;
+        journal.record_final_answer(&answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    }
+    reply.text = answer;
+    reply.messages = messages;
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    reply.is_llm_reply = false;
+    info!("answer_verifier_recovered_with_document_heading");
+    true
+}
+
+pub(super) fn route_allows_document_heading_recovery(route: &crate::RouteResult) -> bool {
+    if route.output_contract.response_shape != crate::OutputResponseShape::Scalar {
+        return false;
+    }
+    if route.output_contract.semantic_kind == crate::OutputSemanticKind::DocumentHeading {
+        return true;
+    }
+    route.output_contract.semantic_kind == crate::OutputSemanticKind::None
+        && route.output_contract.requires_content_evidence
+        && !route.output_contract.locator_hint.trim().is_empty()
+        && route
+            .route_reason
+            .contains("session_alias_locator_prebound_from_current_request")
+}
+
+pub(super) fn observed_markdown_heading(reply: &AskReply) -> Option<String> {
+    reply
+        .task_journal
+        .as_ref()?
+        .step_results
+        .iter()
+        .rev()
+        .filter(|step| step.status == crate::executor::StepExecutionStatus::Ok)
+        .filter_map(|step| step.output_excerpt.as_deref())
+        .find_map(markdown_heading_from_output_excerpt)
+}
+
+pub(super) fn markdown_heading_from_output_excerpt(output: &str) -> Option<String> {
+    let mut sources = Vec::new();
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
+        collect_heading_candidate_texts(&value, &mut sources);
+    }
+    sources.push(output.to_string());
+    sources
+        .into_iter()
+        .find_map(|source| markdown_heading_from_text(&source))
+}
+
+pub(super) fn collect_heading_candidate_texts(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(obj) => {
+            for key in ["excerpt", "content_excerpt", "text"] {
+                if let Some(text) = obj
+                    .get(key)
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+                {
+                    out.push(text.to_string());
+                }
+            }
+            for key in ["extra", "result", "data"] {
+                if let Some(child) = obj.get(key) {
+                    collect_heading_candidate_texts(child, out);
+                }
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_heading_candidate_texts(item, out);
+            }
+        }
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                out.push(trimmed.to_string());
+                if trimmed.starts_with('{') {
+                    if let Ok(nested) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                        collect_heading_candidate_texts(&nested, out);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+pub(super) fn markdown_heading_from_text(text: &str) -> Option<String> {
+    text.lines()
+        .filter_map(|line| markdown_heading_from_line(line.trim()))
+        .next()
+}
+
+pub(super) fn markdown_heading_from_line(line: &str) -> Option<String> {
+    let line = strip_read_range_line_prefix(line);
+    let trimmed = line.trim_start();
+    let hash_count = trimmed.chars().take_while(|ch| *ch == '#').count();
+    if !(1..=6).contains(&hash_count) {
+        return None;
+    }
+    let rest = trimmed.get(hash_count..)?.trim();
+    if rest.is_empty() {
+        return None;
+    }
+    let heading = rest
+        .trim_end_matches('#')
+        .trim()
+        .trim_matches(|ch| matches!(ch, '"' | '\'' | '`' | '“' | '”' | '‘' | '’'));
+    (!heading.is_empty()).then(|| heading.to_string())
+}
+
+pub(super) fn strip_read_range_line_prefix(line: &str) -> &str {
+    let Some((prefix, rest)) = line.split_once('|') else {
+        return line;
+    };
+    let prefix = prefix.trim();
+    if prefix.is_empty() || prefix.len() > 6 || !prefix.chars().all(|ch| ch.is_ascii_digit()) {
+        return line;
+    }
+    rest
+}
+
+pub(super) fn try_recover_content_excerpt_summary_answer_verifier_gap(
+    route_result: Option<&crate::RouteResult>,
+    reply: &mut AskReply,
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if !route_allows_synthesis_recovery(route) {
+        return false;
+    }
+    let Some(verifier) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+    else {
+        return false;
+    };
+    if !verifier.high_confidence_retry_gap() {
+        return false;
+    }
+    if !verifier.missing_evidence_fields.iter().any(|field| {
+        field == "content_excerpt" || field == "any_of(command_output|content_excerpt|field_value)"
+    }) {
+        return false;
+    }
+    if !reply.task_journal.as_ref().is_some_and(|journal| {
+        crate::task_journal::evidence_coverage_for_route(route, journal).is_complete()
+    }) {
+        return false;
+    }
+    let Some(answer) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| {
+            journal
+                .step_results
+                .iter()
+                .rev()
+                .find(|step| {
+                    step.skill == "synthesize_answer"
+                        && step.status == crate::executor::StepExecutionStatus::Ok
+                        && step
+                            .output_excerpt
+                            .as_deref()
+                            .is_some_and(|text| !text.trim().is_empty())
+                })
+                .and_then(|step| step.output_excerpt.as_deref())
+        })
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .filter(|text| !crate::finalize::looks_like_planner_artifact(text))
+        .filter(|text| !crate::finalize::looks_like_internal_trace_artifact(text))
+        .filter(|text| !crate::finalize::is_execution_summary_message(text))
+        .map(ToString::to_string)
+    else {
+        return false;
+    };
+    let messages = vec![answer.clone()];
+    if let Some(journal) = reply.task_journal.as_mut() {
+        journal.answer_verifier_summary = None;
+        journal.record_final_answer(&answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    }
+    reply.text = answer;
+    reply.messages = messages;
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    reply.is_llm_reply = false;
+    info!("answer_verifier_retry_exhausted_recovered_with_content_excerpt_summary_synthesis");
+    true
+}
+
+pub(super) fn route_allows_synthesis_recovery(route: &crate::RouteResult) -> bool {
+    if route
+        .output_contract
+        .semantic_kind
+        .is_content_excerpt_summary()
+        || route.output_contract.semantic_kind == crate::OutputSemanticKind::WorkspaceProjectSummary
+    {
+        return true;
+    }
+    false
+}
+
+pub(super) fn try_recover_generic_path_content_read_range_answer_verifier_gap(
+    route_result: Option<&crate::RouteResult>,
+    reply: &mut AskReply,
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+        || matches!(
+            route.output_contract.response_shape,
+            crate::OutputResponseShape::FileToken
+        )
+        || !matches!(
+            route.output_contract.locator_kind,
+            crate::OutputLocatorKind::Path
+                | crate::OutputLocatorKind::Filename
+                | crate::OutputLocatorKind::CurrentWorkspace
+        )
+    {
+        return false;
+    }
+    let Some(verifier) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+    else {
+        return false;
+    };
+    if !verifier.high_confidence_retry_gap()
+        || !verifier
+            .missing_evidence_fields
+            .iter()
+            .any(|field| matches!(field.as_str(), "path" | "content_excerpt"))
+    {
+        return false;
+    }
+    info!("answer_verifier_retry_exhausted_no_generic_path_content_raw_recovery");
+    false
+}
+
+pub(super) fn try_recover_structured_scalar_output_format_answer_verifier_gap(
+    route_result: Option<&crate::RouteResult>,
+    reply: &mut AskReply,
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+        || route.output_contract.response_shape != crate::OutputResponseShape::Scalar
+        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
+    {
+        return false;
+    }
+    let Some(verifier) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+    else {
+        return false;
+    };
+    if !verifier.high_confidence_retry_gap()
+        || !verifier
+            .missing_evidence_fields
+            .iter()
+            .any(|field| matches!(field.as_str(), "field_value" | "output_format"))
+    {
+        return false;
+    }
+    let observed = observed_structured_read_scalar_values(reply);
+    if observed.is_empty() {
+        return false;
+    }
+    let mut candidates = quoted_scalar_values(&verifier.retry_instruction)
+        .into_iter()
+        .filter(|candidate| observed.iter().any(|value| value == candidate))
+        .collect::<Vec<_>>();
+    candidates.sort();
+    candidates.dedup();
+    let [answer] = candidates.as_slice() else {
+        return false;
+    };
+    let answer = answer.clone();
+    if let Some(journal) = reply.task_journal.as_mut() {
+        journal.answer_verifier_summary = None;
+        journal.record_final_answer(&answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    }
+    reply.text = answer.clone();
+    reply.messages = vec![answer];
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    reply.is_llm_reply = false;
+    info!("answer_verifier_retry_exhausted_recovered_with_structured_scalar_value");
+    true
+}
+
+pub(super) fn try_recover_http_health_answer_verifier_gap(
+    route_result: Option<&crate::RouteResult>,
+    reply: &mut AskReply,
+) -> bool {
+    let Some(route) = route_result else {
+        return false;
+    };
+    if route.output_contract.semantic_kind != crate::OutputSemanticKind::WebPageSummary
+        || route.output_contract.locator_kind != crate::OutputLocatorKind::Url
+        || !route.output_contract.requires_content_evidence
+        || route.output_contract.delivery_required
+    {
+        return false;
+    }
+    let Some(verifier) = reply
+        .task_journal
+        .as_ref()
+        .and_then(|journal| journal.answer_verifier_summary.as_ref())
+    else {
+        return false;
+    };
+    if !verifier.high_confidence_retry_gap()
+        || !verifier
+            .missing_evidence_fields
+            .iter()
+            .any(|field| field == "content_excerpt")
+    {
+        return false;
+    }
+    let Some(finding) = observed_http_health_finding(reply) else {
+        return false;
+    };
+    let answer = deterministic_http_health_status_line(&finding);
+    if let Some(journal) = reply.task_journal.as_mut() {
+        journal.answer_verifier_summary = None;
+        journal.record_final_answer(&answer);
+        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
+    }
+    reply.text = answer.clone();
+    reply.messages = vec![answer];
+    reply.should_fail_task = false;
+    reply.error_text = None;
+    reply.is_llm_reply = false;
+    info!("answer_verifier_retry_exhausted_recovered_with_http_health_structured_status");
+    true
+}
+
+pub(super) fn observed_http_health_finding(reply: &AskReply) -> Option<HttpHealthFinding> {
+    reply
+        .task_journal
+        .as_ref()?
+        .step_results
+        .iter()
+        .rev()
+        .filter(|step| {
+            step.skill == "http_basic" && step.status == crate::executor::StepExecutionStatus::Ok
+        })
+        .filter_map(|step| step.output_excerpt.as_deref())
+        .find_map(parse_http_health_finding)
+}
+
+pub(super) fn parse_http_health_finding(output: &str) -> Option<HttpHealthFinding> {
+    let value = serde_json::from_str::<Value>(output).ok()?;
+    let extra = value.get("extra").and_then(Value::as_object)?;
+    let url = extra.get("url").and_then(Value::as_str)?;
+    if !url.contains("/v1/health") {
+        return None;
+    }
+    let status_code = extra.get("status_code").and_then(Value::as_u64);
+    let body = extra
+        .get("body_json")
+        .cloned()
+        .or_else(|| {
+            extra
+                .get("body_preview")
+                .and_then(Value::as_str)
+                .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        })
+        .or_else(|| {
+            value
+                .get("text")
+                .and_then(Value::as_str)
+                .and_then(http_text_body_json)
+        })?;
+    let data = body.get("data")?;
+    Some(HttpHealthFinding {
+        status_code,
+        ok: body.get("ok").and_then(Value::as_bool),
+        version: data
+            .get("version")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        uptime_seconds: data.get("uptime_seconds").and_then(Value::as_u64),
+        running_length: data.get("running_length").and_then(Value::as_u64),
+        channel_gateway_healthy: data.get("channel_gateway_healthy").and_then(Value::as_bool),
+        telegram_bot_healthy: data.get("telegram_bot_healthy").and_then(Value::as_bool),
+        gateway_instances: health_gateway_instances(data),
+    })
+}
+
+pub(super) fn http_text_body_json(text: &str) -> Option<Value> {
+    text.lines()
+        .map(str::trim)
+        .find(|line| line.starts_with('{'))
+        .and_then(|line| serde_json::from_str::<Value>(line).ok())
+}
+
+pub(super) fn health_gateway_instances(data: &Value) -> Vec<HealthGatewayInstance> {
+    data.get("gateway_instance_statuses")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    Some(HealthGatewayInstance {
+                        kind: item
+                            .get("kind")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())?
+                            .to_string(),
+                        name: item
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())?
+                            .to_string(),
+                        status: item
+                            .get("status")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())?
+                            .to_string(),
+                        healthy: item.get("healthy").and_then(Value::as_bool),
+                    })
+                })
+                .take(4)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+pub(super) fn deterministic_http_health_status_line(finding: &HttpHealthFinding) -> String {
+    let reachable = finding
+        .status_code
+        .is_some_and(|code| (200..400).contains(&code))
+        && finding.ok.unwrap_or(true);
+    let mut parts = vec![format!(
+        "http_reachability={}",
+        if reachable {
+            "reachable"
+        } else {
+            "unreachable"
+        }
+    )];
+    if let Some(status_code) = finding.status_code {
+        parts.push(format!("status_code={status_code}"));
+    }
+    if let Some(ok) = finding.ok {
+        parts.push(format!("ok={ok}"));
+    }
+    if let Some(version) = finding.version.as_deref() {
+        parts.push(format!("version={version}"));
+    }
+    if let Some(uptime_seconds) = finding.uptime_seconds {
+        parts.push(format!("uptime_seconds={uptime_seconds}"));
+    }
+    if let Some(running_length) = finding.running_length {
+        parts.push(format!("running_length={running_length}"));
+    }
+    if let Some(channel_gateway_healthy) = finding.channel_gateway_healthy {
+        parts.push(format!("channel_gateway_healthy={channel_gateway_healthy}"));
+    }
+    if let Some(telegram_bot_healthy) = finding.telegram_bot_healthy {
+        parts.push(format!("telegram_bot_healthy={telegram_bot_healthy}"));
+    }
+    if !finding.gateway_instances.is_empty() {
+        let statuses = finding
+            .gateway_instances
+            .iter()
+            .map(|item| {
+                format!(
+                    "{}:{}:{}:{}",
+                    item.kind,
+                    item.name,
+                    item.status,
+                    item.healthy
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "unknown".to_string())
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        parts.push(format!("gateway_instances={statuses}"));
+    }
+    parts.join(" ")
+}
+
+pub(super) fn quoted_scalar_values(text: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut current = String::new();
+    let mut in_quote = false;
+    let mut escaped = false;
+    for ch in text.chars() {
+        if escaped {
+            if in_quote {
+                current.push(ch);
+            }
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '"' {
+            if in_quote {
+                let value = current.trim();
+                if !value.is_empty() && value.lines().count() == 1 {
+                    values.push(value.to_string());
+                }
+                current.clear();
+            }
+            in_quote = !in_quote;
+            continue;
+        }
+        if in_quote {
+            current.push(ch);
+        }
+    }
+    values
+}
+
+pub(super) fn observed_structured_read_scalar_values(reply: &AskReply) -> Vec<String> {
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return Vec::new();
+    };
+    let mut values = Vec::new();
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            continue;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        collect_structured_read_scalar_values_from_output(output, &mut values);
+    }
+    values.sort();
+    values.dedup();
+    values
+}
+
+pub(super) fn collect_structured_read_scalar_values_from_output(
+    output: &str,
+    values: &mut Vec<String>,
+) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(output.trim()) else {
+        return;
+    };
+    let mut outputs = vec![value];
+    let mut index = 0usize;
+    while index < outputs.len() {
+        let value = &outputs[index];
+        collect_structured_read_scalar_values_from_json_output(value, values);
+        if let Some(text_value) = value.get("text").and_then(|text| text.as_str()) {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text_value.trim()) {
+                outputs.push(parsed);
+            }
+        }
+        index += 1;
+    }
+}
+
+pub(super) fn collect_structured_read_scalar_values_from_json_output(
+    value: &serde_json::Value,
+    values: &mut Vec<String>,
+) {
+    let action = value
+        .get("action")
+        .or_else(|| value.pointer("/extra/action"))
+        .and_then(|value| value.as_str())
+        .map(str::trim);
+    if !matches!(action, Some("read_range" | "read_text_range")) {
+        return;
+    }
+    for excerpt in [
+        value.get("excerpt").and_then(|value| value.as_str()),
+        value
+            .pointer("/extra/excerpt")
+            .and_then(|value| value.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let body = read_range_excerpt_without_line_prefixes(excerpt);
+        if let Ok(document) = serde_json::from_str::<serde_json::Value>(&body) {
+            collect_json_scalar_values(&document, values);
+        }
+        collect_json_line_scalar_values(&body, values);
+    }
+}
+
+pub(super) fn read_range_excerpt_without_line_prefixes(excerpt: &str) -> String {
+    excerpt
+        .lines()
+        .map(strip_read_range_line_prefix)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub(super) fn collect_json_line_scalar_values(body: &str, values: &mut Vec<String>) {
+    for line in body.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let Some((key, raw_value)) = line.split_once(':') else {
+            continue;
+        };
+        if serde_json::from_str::<serde_json::Value>(key.trim()).is_err() {
+            continue;
+        }
+        let raw_value = raw_value.trim().trim_end_matches(',');
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(raw_value) {
+            collect_json_scalar_values(&value, values);
+        }
+    }
+}
+
+pub(super) fn collect_json_scalar_values(value: &serde_json::Value, values: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(value) => {
+            let value = value.trim();
+            if !value.is_empty() && value.lines().count() == 1 {
+                values.push(value.to_string());
+            }
+        }
+        serde_json::Value::Number(value) => values.push(value.to_string()),
+        serde_json::Value::Bool(value) => values.push(value.to_string()),
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_json_scalar_values(item, values);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for item in map.values() {
+                collect_json_scalar_values(item, values);
+            }
+        }
+        serde_json::Value::Null => {}
+    }
+}
+
+pub(super) fn rss_verifier_requests_source_grounding(
+    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
+) -> bool {
+    verifier
+        .missing_evidence_fields
+        .iter()
+        .any(|field| matches!(field.as_str(), "source" | "source_host" | "field_value"))
+}
+
+pub(super) fn structured_search_verifier_requests_full_candidates(
+    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
+) -> bool {
+    verifier
+        .missing_evidence_fields
+        .iter()
+        .any(|field| matches!(field.as_str(), "candidates" | "results" | "paths" | "files"))
+}
+
+pub(super) fn observed_log_analyze_findings(reply: &AskReply) -> Vec<LogAnalyzeFinding> {
+    let mut findings = Vec::new();
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return findings;
+    };
+    for step in &journal.step_results {
+        if !step.skill.eq_ignore_ascii_case("log_analyze")
+            || step.status != crate::executor::StepExecutionStatus::Ok
+        {
+            continue;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        let Some(finding) = parse_log_analyze_finding(output) else {
+            continue;
+        };
+        findings.push(finding);
+    }
+    findings.sort_by(|left, right| {
+        right
+            .total_hits
+            .cmp(&left.total_hits)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    findings
+}
+
+pub(super) fn observed_structured_count_findings(reply: &AskReply) -> Vec<StructuredCountFinding> {
+    let mut findings = Vec::new();
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return findings;
+    };
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            continue;
+        }
+        if !matches!(step.skill.as_str(), "fs_basic" | "system_basic") {
+            continue;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        let Some(finding) = parse_structured_count_finding(output) else {
+            continue;
+        };
+        findings.push(finding);
+    }
+    findings
+}
+
+pub(super) fn observed_structured_search_findings(
+    reply: &AskReply,
+) -> Vec<StructuredSearchFinding> {
+    let mut findings = Vec::new();
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return findings;
+    };
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok {
+            continue;
+        }
+        if !matches!(
+            step.skill.as_str(),
+            "fs_basic" | "fs_search" | "system_basic"
+        ) {
+            continue;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        let Some(finding) = parse_structured_search_finding(output) else {
+            continue;
+        };
+        findings.push(finding);
+    }
+    findings
+}
+
+pub(super) fn observed_rss_news_items(reply: &AskReply) -> Vec<RssNewsItem> {
+    let mut items = Vec::new();
+    let Some(journal) = reply.task_journal.as_ref() else {
+        return items;
+    };
+    for step in &journal.step_results {
+        if step.status != crate::executor::StepExecutionStatus::Ok
+            || !step.skill.eq_ignore_ascii_case("rss_fetch")
+        {
+            continue;
+        }
+        let Some(output) = step.output_excerpt.as_deref() else {
+            continue;
+        };
+        let Some(mut parsed_items) = parse_rss_news_items(output) else {
+            continue;
+        };
+        items.append(&mut parsed_items);
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    items.retain(|item| {
+        seen.insert((
+            item.title.clone(),
+            item.source_host.clone(),
+            item.date.clone(),
+        ))
+    });
+    items
+}
+
+pub(super) fn rss_answer_contains_observed_source_hosts(
+    answer: &str,
+    items: &[RssNewsItem],
+) -> bool {
+    let hosts = items
+        .iter()
+        .map(|item| item.source_host.as_str())
+        .filter(|host| !host.trim().is_empty())
+        .collect::<std::collections::BTreeSet<_>>();
+    !hosts.is_empty() && hosts.iter().all(|host| answer.contains(host))
+}

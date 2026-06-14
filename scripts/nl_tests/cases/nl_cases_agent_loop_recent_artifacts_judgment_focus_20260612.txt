@@ -1,0 +1,129 @@
+# Focused F4 canary cases for agent-loop recent_artifacts_judgment.
+# These prompts intentionally ask for a recent/mtime-bounded listing plus a grounded artifact-style judgment.
+# They must not be implemented through runtime natural-language hard matching.
+
+act|raj_logs_recent_zh_001|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 logs 目录最近修改的 2 个文件名，再用一句中文判断它们更像运行日志还是测试残留。
+act|raj_logs_recent_en_002|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 2 most recently modified files under logs and say in one short sentence whether they look like runtime logs or test leftovers.
+act|raj_logs_recent_ja_003|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|logs ディレクトリで最近更新された2件を挙げ、実行ログかテスト残骸かを短く判断してください。
+act|raj_logs_recent_ko_004|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|logs 디렉터리에서 최근 수정된 파일 2개를 들고, 실행 로그인지 테스트 잔여물인지 짧게 판단해 주세요.
+
+act|raj_fixture_logs_recent_zh_005|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 scripts/nl_tests/fixtures/device_local/logs 最近修改的 2 个文件，并判断它们更像哪类测试材料。
+act|raj_fixture_logs_recent_en_006|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|Show the 2 newest files in scripts/nl_tests/fixtures/device_local/logs and judge what kind of fixture artifacts they are.
+act|raj_fixture_logs_recent_ja_007|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|scripts/nl_tests/fixtures/device_local/logs の最近更新2件を見て、どんなフィクスチャか判断してください。
+act|raj_fixture_logs_recent_ko_008|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|scripts/nl_tests/fixtures/device_local/logs 의 최근 수정 2개를 보고 어떤 픽스처 자료인지 판단해 주세요.
+
+act|raj_docs_recent_zh_009|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 scripts/nl_tests/fixtures/device_local/docs 最近修改的 2 个条目，并判断它们像发布文档还是运行数据。
+act|raj_docs_recent_en_010|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 2 most recently modified entries in scripts/nl_tests/fixtures/device_local/docs and judge whether they look like docs or runtime data.
+act|raj_docs_recent_ja_011|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|scripts/nl_tests/fixtures/device_local/docs の最近更新2件を挙げ、文書か実行データか判断してください。
+act|raj_docs_recent_ko_012|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|scripts/nl_tests/fixtures/device_local/docs 의 최근 수정 2개를 들고 문서인지 실행 데이터인지 판단해 주세요.
+
+act|raj_tmp_recent_zh_013|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 scripts/nl_tests/fixtures/device_local/tmp 最近修改的 3 个条目，再判断它们像临时打包材料还是正式配置。
+act|raj_tmp_recent_en_014|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest entries in scripts/nl_tests/fixtures/device_local/tmp and judge whether they look like temporary bundle artifacts or formal config.
+act|raj_tmp_recent_ja_015|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|scripts/nl_tests/fixtures/device_local/tmp の最近更新3件を見て、一時的な梱包材料か正式設定か判断してください。
+act|raj_tmp_recent_ko_016|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|scripts/nl_tests/fixtures/device_local/tmp 의 최근 수정 3개를 보고 임시 번들 자료인지 공식 설정인지 판단해 주세요.
+
+act|raj_configs_recent_zh_017|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 configs 最近修改的 3 个文件，并用一句话判断它们更像运行配置还是测试输出。
+act|raj_configs_recent_en_018|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files under configs and judge whether they look more like runtime config or test output.
+act|raj_configs_recent_ja_019|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|configs で最近更新された3件を挙げ、実行設定かテスト出力かを判断してください。
+act|raj_configs_recent_ko_020|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|configs 에서 최근 수정된 파일 3개를 들고 런타임 설정인지 테스트 출력인지 판단해 주세요.
+
+act|raj_prompt_overlays_recent_zh_021|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 prompts/layers/overlays 最近修改的 3 个文件，并判断它们更像提示词层还是程序输出。
+act|raj_prompt_overlays_recent_en_022|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files in prompts/layers/overlays and judge whether they look like prompt-layer files or program outputs.
+act|raj_prompt_overlays_recent_ja_023|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|prompts/layers/overlays の最近更新3件を挙げ、プロンプト層かプログラム出力か判断してください。
+act|raj_prompt_overlays_recent_ko_024|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|prompts/layers/overlays 의 최근 수정 3개를 들고 프롬프트 계층 파일인지 프로그램 출력인지 판단해 주세요.
+
+act|raj_generated_skills_recent_zh_025|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 prompts/layers/generated/skills 最近修改的 3 个文件，并判断它们像自动生成的技能提示词还是手写代码。
+act|raj_generated_skills_recent_en_026|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files in prompts/layers/generated/skills and judge whether they look like generated skill prompts or hand-written code.
+act|raj_generated_skills_recent_ja_027|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|prompts/layers/generated/skills の最近更新3件を挙げ、自動生成された技能プロンプトか手書きコードか判断してください。
+act|raj_generated_skills_recent_ko_028|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|prompts/layers/generated/skills 의 최근 수정 3개를 들고 자동 생성된 스킬 프롬프트인지 손으로 쓴 코드인지 판단해 주세요.
+
+act|raj_scripts_recent_zh_029|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 scripts 最近修改的 3 个文件，并判断它们更像维护脚本还是业务数据。
+act|raj_scripts_recent_en_030|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files under scripts and judge whether they look like maintenance scripts or business data.
+act|raj_scripts_recent_ja_031|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|scripts の最近更新3件を挙げ、保守スクリプトか業務データか判断してください。
+act|raj_scripts_recent_ko_032|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|scripts 의 최근 수정 파일 3개를 들고 유지보수 스크립트인지 업무 데이터인지 판단해 주세요.
+
+act|raj_nl_cases_recent_zh_033|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 scripts/nl_tests/cases 最近修改的 3 个文件，并判断它们更像 NL 测试用例还是运行日志。
+act|raj_nl_cases_recent_en_034|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files in scripts/nl_tests/cases and judge whether they look like NL test cases or runtime logs.
+act|raj_nl_cases_recent_ja_035|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|scripts/nl_tests/cases の最近更新3件を挙げ、NLテストケースか実行ログか判断してください。
+act|raj_nl_cases_recent_ko_036|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|scripts/nl_tests/cases 의 최근 수정 파일 3개를 들고 NL 테스트 케이스인지 실행 로그인지 판단해 주세요.
+
+act|raj_clawd_src_recent_zh_037|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 crates/clawd/src 最近修改的 3 个文件，并判断它们更像后端源码还是配置材料。
+act|raj_clawd_src_recent_en_038|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files under crates/clawd/src and judge whether they look like backend source files or config material.
+act|raj_clawd_src_recent_ja_039|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|crates/clawd/src の最近更新3件を挙げ、バックエンドソースか設定資料か判断してください。
+act|raj_clawd_src_recent_ko_040|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|crates/clawd/src 의 최근 수정 파일 3개를 들고 백엔드 소스인지 설정 자료인지 판단해 주세요.
+
+act|raj_ui_src_recent_zh_041|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 UI/src 最近修改的 3 个文件，并判断它们更像前端源码还是部署产物。
+act|raj_ui_src_recent_en_042|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files in UI/src and judge whether they look like frontend source or deployment artifacts.
+act|raj_ui_src_recent_ja_043|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|UI/src の最近更新3件を挙げ、フロントエンドソースかデプロイ成果物か判断してください。
+act|raj_ui_src_recent_ko_044|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|UI/src 의 최근 수정 파일 3개를 들고 프런트엔드 소스인지 배포 산출물인지 판단해 주세요.
+
+act|raj_docs_root_recent_zh_045|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 docs 最近修改的 3 个条目，并判断它们更像项目说明还是运行缓存。
+act|raj_docs_root_recent_en_046|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest entries under docs and judge whether they look like project documentation or runtime cache.
+act|raj_docs_root_recent_ja_047|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|docs の最近更新3件を挙げ、プロジェクト文書か実行キャッシュか判断してください。
+act|raj_docs_root_recent_ko_048|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|docs 의 최근 수정 항목 3개를 들고 프로젝트 문서인지 런타임 캐시인지 판단해 주세요.
+
+act|raj_root_recent_zh_049|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出当前 workspace root 最近修改的 3 个条目，并判断它们更像源码维护材料还是用户上传内容。
+act|raj_root_recent_en_050|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest entries in the current workspace root and judge whether they look like source-maintenance material or user uploads.
+
+act|raj_logs_recent_zh_001_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 logs 目录最近修改的 2 个文件名，再用一句中文判断它们更像运行日志还是测试残留。
+act|raj_logs_recent_en_002_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 2 most recently modified files under logs and say in one short sentence whether they look like runtime logs or test leftovers.
+act|raj_logs_recent_ja_003_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|logs ディレクトリで最近更新された2件を挙げ、実行ログかテスト残骸かを短く判断してください。
+act|raj_logs_recent_ko_004_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|logs 디렉터리에서 최근 수정된 파일 2개를 들고, 실행 로그인지 테스트 잔여물인지 짧게 판단해 주세요.
+
+act|raj_fixture_logs_recent_zh_005_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 scripts/nl_tests/fixtures/device_local/logs 最近修改的 2 个文件，并判断它们更像哪类测试材料。
+act|raj_fixture_logs_recent_en_006_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|Show the 2 newest files in scripts/nl_tests/fixtures/device_local/logs and judge what kind of fixture artifacts they are.
+act|raj_fixture_logs_recent_ja_007_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|scripts/nl_tests/fixtures/device_local/logs の最近更新2件を見て、どんなフィクスチャか判断してください。
+act|raj_fixture_logs_recent_ko_008_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|scripts/nl_tests/fixtures/device_local/logs 의 최근 수정 2개를 보고 어떤 픽스처 자료인지 판단해 주세요.
+
+act|raj_docs_recent_zh_009_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 scripts/nl_tests/fixtures/device_local/docs 最近修改的 2 个条目，并判断它们像发布文档还是运行数据。
+act|raj_docs_recent_en_010_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 2 most recently modified entries in scripts/nl_tests/fixtures/device_local/docs and judge whether they look like docs or runtime data.
+act|raj_docs_recent_ja_011_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|scripts/nl_tests/fixtures/device_local/docs の最近更新2件を挙げ、文書か実行データか判断してください。
+act|raj_docs_recent_ko_012_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|scripts/nl_tests/fixtures/device_local/docs 의 최근 수정 2개를 들고 문서인지 실행 데이터인지 판단해 주세요.
+
+act|raj_tmp_recent_zh_013_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 scripts/nl_tests/fixtures/device_local/tmp 最近修改的 3 个条目，再判断它们像临时打包材料还是正式配置。
+act|raj_tmp_recent_en_014_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest entries in scripts/nl_tests/fixtures/device_local/tmp and judge whether they look like temporary bundle artifacts or formal config.
+act|raj_tmp_recent_ja_015_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|scripts/nl_tests/fixtures/device_local/tmp の最近更新3件を見て、一時的な梱包材料か正式設定か判断してください。
+act|raj_tmp_recent_ko_016_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|scripts/nl_tests/fixtures/device_local/tmp 의 최근 수정 3개를 보고 임시 번들 자료인지 공식 설정인지 판단해 주세요.
+
+act|raj_configs_recent_zh_017_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 configs 最近修改的 3 个文件，并用一句话判断它们更像运行配置还是测试输出。
+act|raj_configs_recent_en_018_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files under configs and judge whether they look more like runtime config or test output.
+act|raj_configs_recent_ja_019_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|configs で最近更新された3件を挙げ、実行設定かテスト出力かを判断してください。
+act|raj_configs_recent_ko_020_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|configs 에서 최근 수정된 파일 3개를 들고 런타임 설정인지 테스트 출력인지 판단해 주세요.
+
+act|raj_prompt_overlays_recent_zh_021_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 prompts/layers/overlays 最近修改的 3 个文件，并判断它们更像提示词层还是程序输出。
+act|raj_prompt_overlays_recent_en_022_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files in prompts/layers/overlays and judge whether they look like prompt-layer files or program outputs.
+act|raj_prompt_overlays_recent_ja_023_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|prompts/layers/overlays の最近更新3件を挙げ、プロンプト層かプログラム出力か判断してください。
+act|raj_prompt_overlays_recent_ko_024_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|prompts/layers/overlays 의 최근 수정 3개를 들고 프롬프트 계층 파일인지 프로그램 출력인지 판단해 주세요.
+
+act|raj_generated_skills_recent_zh_025_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 prompts/layers/generated/skills 最近修改的 3 个文件，并判断它们像自动生成的技能提示词还是手写代码。
+act|raj_generated_skills_recent_en_026_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files in prompts/layers/generated/skills and judge whether they look like generated skill prompts or hand-written code.
+act|raj_generated_skills_recent_ja_027_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|prompts/layers/generated/skills の最近更新3件を挙げ、自動生成された技能プロンプトか手書きコードか判断してください。
+act|raj_generated_skills_recent_ko_028_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|prompts/layers/generated/skills 의 최근 수정 3개를 들고 자동 생성된 스킬 프롬프트인지 손으로 쓴 코드인지 판단해 주세요.
+
+act|raj_scripts_recent_zh_029_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 scripts 最近修改的 3 个文件，并判断它们更像维护脚本还是业务数据。
+act|raj_scripts_recent_en_030_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files under scripts and judge whether they look like maintenance scripts or business data.
+act|raj_scripts_recent_ja_031_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|scripts の最近更新3件を挙げ、保守スクリプトか業務データか判断してください。
+act|raj_scripts_recent_ko_032_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|scripts 의 최근 수정 파일 3개를 들고 유지보수 스크립트인지 업무 데이터인지 판단해 주세요.
+
+act|raj_nl_cases_recent_zh_033_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 scripts/nl_tests/cases 最近修改的 3 个文件，并判断它们更像 NL 测试用例还是运行日志。
+act|raj_nl_cases_recent_en_034_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files in scripts/nl_tests/cases and judge whether they look like NL test cases or runtime logs.
+act|raj_nl_cases_recent_ja_035_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|scripts/nl_tests/cases の最近更新3件を挙げ、NLテストケースか実行ログか判断してください。
+act|raj_nl_cases_recent_ko_036_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|scripts/nl_tests/cases 의 최근 수정 파일 3개를 들고 NL 테스트 케이스인지 실행 로그인지 판단해 주세요.
+
+act|raj_clawd_src_recent_zh_037_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 crates/clawd/src 最近修改的 3 个文件，并判断它们更像后端源码还是配置材料。
+act|raj_clawd_src_recent_en_038_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files under crates/clawd/src and judge whether they look like backend source files or config material.
+act|raj_clawd_src_recent_ja_039_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|crates/clawd/src の最近更新3件を挙げ、バックエンドソースか設定資料か判断してください。
+act|raj_clawd_src_recent_ko_040_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|crates/clawd/src 의 최근 수정 파일 3개를 들고 백엔드 소스인지 설정 자료인지 판단해 주세요.
+
+act|raj_ui_src_recent_zh_041_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 UI/src 最近修改的 3 个文件，并判断它们更像前端源码还是部署产物。
+act|raj_ui_src_recent_en_042_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest files in UI/src and judge whether they look like frontend source or deployment artifacts.
+act|raj_ui_src_recent_ja_043_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|UI/src の最近更新3件を挙げ、フロントエンドソースかデプロイ成果物か判断してください。
+act|raj_ui_src_recent_ko_044_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|UI/src 의 최근 수정 파일 3개를 들고 프런트엔드 소스인지 배포 산출물인지 판단해 주세요.
+
+act|raj_docs_root_recent_zh_045_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出 docs 最近修改的 3 个条目，并判断它们更像项目说明还是运行缓存。
+act|raj_docs_root_recent_en_046_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest entries under docs and judge whether they look like project documentation or runtime cache.
+act|raj_docs_root_recent_ja_047_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ja,client_like|docs の最近更新3件を挙げ、プロジェクト文書か実行キャッシュか判断してください。
+act|raj_docs_root_recent_ko_048_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,ko,client_like|docs 의 최근 수정 항목 3개를 들고 프로젝트 문서인지 런타임 캐시인지 판단해 주세요.
+
+act|raj_root_recent_zh_049_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,zh,client_like|列出当前 workspace root 最近修改的 3 个条目，并判断它们更像源码维护材料还是用户上传内容。
+act|raj_root_recent_en_050_repeat02|act,recent_artifacts_judgment,recent,artifacts,metadata,summary,en,client_like|List the 3 newest entries in the current workspace root and judge whether they look like source-maintenance material or user uploads.

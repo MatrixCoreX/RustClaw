@@ -137,3 +137,25 @@ fn rate_limit_retry_times_env_parser_is_bounded() {
     );
     assert_eq!(super::effective_rate_limit_retry_times(Some("bad")), 4);
 }
+
+#[test]
+fn provider_retry_metadata_is_attached_to_results() {
+    let response = super::LlmProviderResponse {
+        text: "{}".to_string(),
+        request_payload: Value::Null,
+        raw_response: "{}".to_string(),
+        usage: None,
+        attempts: 1,
+        retryable_error_count: 0,
+        last_retry_error_kind: None,
+    }
+    .with_retry_metadata(3, 2, Some("timeout"));
+    assert_eq!(response.attempts, 3);
+    assert_eq!(response.retryable_error_count, 2);
+    assert_eq!(response.last_retry_error_kind, Some("timeout"));
+
+    let error =
+        ProviderError::retryable("timeout".to_string(), Value::Null).with_retry_metadata(4, 4);
+    assert_eq!(error.attempts, 4);
+    assert_eq!(error.retryable_error_count, 4);
+}

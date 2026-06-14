@@ -194,6 +194,7 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
         }
         "count_entries" => {
             move_value_alias_if_missing(&mut obj, "path", &["root", "dir", "directory"]);
+            normalize_count_entries_filter_aliases(&mut obj);
             obj.insert(
                 "action".to_string(),
                 Value::String("count_inventory".to_string()),
@@ -263,7 +264,9 @@ fn rewrite_fs_basic_call(args: Value) -> Result<VirtualToolRewrite, String> {
                 obj.remove("limit");
             }
             promote_extension_names_to_ext(&mut obj);
-            if !explicit_name_pattern {
+            if explicit_name_pattern {
+                promote_pure_extension_pattern_to_ext(&mut obj);
+            } else {
                 promote_globish_pattern_to_ext(&mut obj);
             }
             demote_existing_directory_pattern_to_root(&mut obj);
@@ -468,11 +471,135 @@ fn normalize_fs_basic_args(args: &mut Value) -> bool {
     } else {
         changed |= move_value_alias_if_missing(obj, "max_entries", &["limit"]);
     }
+    if action.as_deref() == Some("count_entries") {
+        changed |= normalize_count_entries_filter_aliases(obj);
+    }
     if action.as_deref() == Some("grep_text") {
         changed |= promote_grep_pattern_to_query_if_missing(obj);
         changed |= move_value_alias_if_missing(obj, "query", &["text", "keyword"]);
     }
     changed
+}
+
+fn normalize_count_entries_filter_aliases(obj: &mut serde_json::Map<String, Value>) -> bool {
+    let mut changed = false;
+    let dirs_only = obj
+        .get("dirs_only")
+        .or_else(|| obj.get("dir_only"))
+        .or_else(|| obj.get("directories_only"))
+        .or_else(|| obj.get("directory_only"))
+        .or_else(|| obj.get("folders_only"))
+        .or_else(|| obj.get("folder_only"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let files_only = obj
+        .get("files_only")
+        .or_else(|| obj.get("file_only"))
+        .or_else(|| obj.get("regular_files_only"))
+        .or_else(|| obj.get("regular_file_only"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    changed |= move_value_alias_if_missing(
+        obj,
+        "kind_filter",
+        &[
+            "filter_kind",
+            "target_kind",
+            "kind",
+            "entry_kind",
+            "entry_type",
+            "item_kind",
+            "item_type",
+        ],
+    );
+    changed |= move_value_alias_if_missing(
+        obj,
+        "ext_filter",
+        &[
+            "ext",
+            "extension",
+            "extensions",
+            "file_extension",
+            "file_extensions",
+        ],
+    );
+    let kind = obj
+        .get("kind_filter")
+        .and_then(Value::as_str)
+        .map(normalize_tool_token);
+    if dirs_only || kind.as_deref().is_some_and(count_kind_is_dir) {
+        obj.insert("kind_filter".to_string(), Value::String("dir".to_string()));
+        obj.insert("count_dirs".to_string(), Value::Bool(true));
+        obj.insert("count_files".to_string(), Value::Bool(false));
+        obj.insert("dirs_only".to_string(), Value::Bool(true));
+        obj.insert("files_only".to_string(), Value::Bool(false));
+        changed = true;
+    } else if files_only || kind.as_deref().is_some_and(count_kind_is_file) {
+        obj.insert("kind_filter".to_string(), Value::String("file".to_string()));
+        obj.insert("count_files".to_string(), Value::Bool(true));
+        obj.insert("count_dirs".to_string(), Value::Bool(false));
+        obj.insert("files_only".to_string(), Value::Bool(true));
+        obj.insert("dirs_only".to_string(), Value::Bool(false));
+        changed = true;
+    }
+    for key in [
+        "filter_kind",
+        "target_kind",
+        "kind",
+        "entry_kind",
+        "entry_type",
+        "item_kind",
+        "item_type",
+        "dir_only",
+        "directories_only",
+        "directory_only",
+        "folders_only",
+        "folder_only",
+        "file_only",
+        "regular_files_only",
+        "regular_file_only",
+    ] {
+        if obj.remove(key).is_some() {
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn normalize_tool_token(raw: &str) -> String {
+    raw.trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if matches!(ch, '-' | ' ' | '.') {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect()
+}
+
+fn count_kind_is_dir(value: &str) -> bool {
+    matches!(
+        value,
+        "dir"
+            | "dirs"
+            | "directory"
+            | "directories"
+            | "folder"
+            | "folders"
+            | "subdir"
+            | "subdirs"
+            | "subdirectory"
+            | "subdirectories"
+            | "subfolder"
+            | "subfolders"
+    )
+}
+
+fn count_kind_is_file(value: &str) -> bool {
+    matches!(value, "file" | "files" | "regular_file" | "regular_files")
 }
 
 fn normalize_config_basic_args(args: &mut Value) -> bool {
@@ -756,6 +883,43 @@ fn promote_globish_pattern_to_ext(obj: &mut serde_json::Map<String, Value>) -> b
     obj.insert("ext".to_string(), Value::String(ext));
     obj.remove("pattern");
     true
+}
+
+fn promote_pure_extension_pattern_to_ext(obj: &mut serde_json::Map<String, Value>) -> bool {
+    if has_non_empty_arg(obj, "ext") {
+        return false;
+    }
+    let Some(ext) = obj
+        .get("pattern")
+        .and_then(Value::as_str)
+        .and_then(extension_from_pure_extension_filter)
+    else {
+        return false;
+    };
+    obj.insert("ext".to_string(), Value::String(ext));
+    obj.remove("pattern");
+    true
+}
+
+fn extension_from_pure_extension_filter(text: &str) -> Option<String> {
+    let cleaned = text
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .to_ascii_lowercase();
+    let ext = cleaned
+        .strip_prefix("*.")
+        .or_else(|| cleaned.strip_prefix('.'))?;
+    if ext.is_empty()
+        || ext.contains(['*', '?', '.', '/', '\\'])
+        || !ext
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+    {
+        return None;
+    }
+    Some(ext.to_string())
 }
 
 fn extension_from_globish_filter(text: &str) -> Option<String> {

@@ -172,6 +172,24 @@ fn looks_like_language_neutral_artifact_token(token: &str) -> bool {
             .all(|ch| ch.is_ascii_uppercase())
 }
 
+pub(crate) fn text_is_language_neutral_artifact_only(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let mut saw_token = false;
+    for token in trimmed.split_whitespace() {
+        if token.trim().is_empty() {
+            continue;
+        }
+        saw_token = true;
+        if !looks_like_language_neutral_artifact_token(token) {
+            return false;
+        }
+    }
+    saw_token
+}
+
 fn text_language_counts_without_neutral_artifacts(text: &str) -> TextLanguageCounts {
     let mut language_text = String::with_capacity(text.len());
     for token in text.split_whitespace() {
@@ -206,6 +224,9 @@ pub(crate) fn text_language_conflicts_with_hint(text: &str, language_hint: &str)
 pub(crate) fn request_language_hint(user_text: &str) -> &'static str {
     let trimmed = user_text.trim();
     if trimmed.is_empty() {
+        return "config_default";
+    }
+    if text_is_language_neutral_artifact_only(trimmed) {
         return "config_default";
     }
     let counts = text_language_counts(trimmed);
@@ -257,6 +278,18 @@ pub(crate) fn request_language_hint(user_text: &str) -> &'static str {
         return "mixed";
     }
     "config_default"
+}
+
+pub(crate) fn first_clear_request_language_hint<'a>(
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> Option<String> {
+    for candidate in candidates {
+        let hint = request_language_hint(candidate.trim());
+        if hint != "config_default" {
+            return Some(hint.to_string());
+        }
+    }
+    None
 }
 
 pub(crate) fn mixed_language_prefers_cjk_response(user_text: &str) -> bool {
@@ -357,7 +390,49 @@ fn looks_like_runtime_scaffold(text: &str) -> bool {
     .any(|marker| text.contains(marker))
 }
 
+fn looks_like_locator_only_clarify_reply(text: &str) -> bool {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed.contains('\n') || trimmed.chars().count() > 160 {
+        return false;
+    }
+    if text_is_language_neutral_artifact_only(trimmed) {
+        return true;
+    }
+    if trimmed.split_whitespace().count() != 1 {
+        return false;
+    }
+    let token = trim_language_neutral_token_edges(trimmed);
+    token.chars().count() >= 2
+        && token.chars().any(|ch| ch.is_ascii_alphanumeric())
+        && token
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':' | '@'))
+}
+
+#[cfg(test)]
 fn task_language_source_text<'a>(task: &'a ClaimedTask, user_text: &'a str) -> Cow<'a, str> {
+    task_language_source_text_with_active_clarify(task, user_text, None)
+}
+
+fn task_language_source_text_with_active_clarify<'a>(
+    task: &'a ClaimedTask,
+    user_text: &'a str,
+    active_clarify_source: Option<&'a str>,
+) -> Cow<'a, str> {
+    let payload_text = task_original_user_text(task);
+    if let Some(source) = active_clarify_source
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        let source_hint = request_language_hint(source);
+        let locator_only_reply = looks_like_locator_only_clarify_reply(user_text)
+            || payload_text
+                .as_deref()
+                .is_some_and(looks_like_locator_only_clarify_reply);
+        if source_hint != "config_default" && locator_only_reply {
+            return Cow::Borrowed(source);
+        }
+    }
     if let Some(payload_text) = task_original_user_text(task) {
         let payload_hint = request_language_hint(&payload_text);
         if payload_hint != "config_default" && payload_text.trim() != user_text.trim() {
@@ -397,7 +472,12 @@ pub(crate) fn task_response_language_hint(
         .conversation_state
         .as_ref()
         .and_then(|conversation_state| conversation_state.locale_hint.as_deref());
-    let language_source = task_language_source_text(task, user_text);
+    let active_clarify_source = session_snapshot
+        .active_clarify_state
+        .as_ref()
+        .map(|clarify| clarify.source_request.as_str());
+    let language_source =
+        task_language_source_text_with_active_clarify(task, user_text, active_clarify_source);
     preferred_response_language_hint(&language_source, session_locale_hint)
 }
 

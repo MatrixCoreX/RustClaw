@@ -885,6 +885,48 @@ fn inventory_dir_accepts_limit_alias_for_max_entries() {
 }
 
 #[test]
+fn inventory_dir_reports_size_summary_for_matched_files() {
+    let root = temp_root("inventory_size_summary");
+    std::fs::write(root.join("a-small.json"), b"{}").expect("write small");
+    std::fs::write(root.join("z-large.json"), b"{\"items\":[1,2,3,4,5]}").expect("write large");
+    std::fs::write(root.join("middle.txt"), b"ignored by ext filter").expect("write txt");
+    std::fs::create_dir(root.join("nested")).expect("create dir");
+
+    let mut obj = Map::new();
+    obj.insert("path".to_string(), json!("."));
+    obj.insert("files_only".to_string(), json!(true));
+    obj.insert("ext_filter".to_string(), json!("json"));
+    obj.insert("sort_by".to_string(), json!("name"));
+    obj.insert("max_entries".to_string(), json!(1));
+
+    let out = inventory_dir(&root, &obj, true).expect("inventory");
+    let value: Value = serde_json::from_str(&out).expect("json");
+    assert_eq!(
+        value
+            .pointer("/size_summary/matched_file_count")
+            .and_then(Value::as_u64),
+        Some(2)
+    );
+    assert_eq!(
+        value
+            .pointer("/size_summary/largest_file/name")
+            .and_then(Value::as_str),
+        Some("z-large.json")
+    );
+    assert_eq!(
+        value
+            .pointer("/size_summary/smallest_file/name")
+            .and_then(Value::as_str),
+        Some("a-small.json")
+    );
+    assert_eq!(
+        value.get("entries").and_then(Value::as_array).map(Vec::len),
+        Some(1)
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn ext_filter_blank_string_means_no_filter() {
     let mut obj = Map::new();
     obj.insert("ext_filter".to_string(), json!(""));

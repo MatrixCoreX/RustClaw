@@ -117,6 +117,9 @@ fn stable_fact_rendering_skips_cross_turn_deictic_locator_mapping() {
             item(
                 r#"{"deictic_reference":{"target":"unresolved_prior_object"},"locator":"/tmp/device/app.log","reason":"stale cross-turn alias"}"#,
             ),
+            item("项目别名：'那个服务' 代指 'clawd'"),
+            item("那个配置文件 maps to /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml"),
+            item("那个配置文件 refers to /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml"),
             item("默认用中文回复\nReason: durable preference"),
         ],
         ..Default::default()
@@ -128,6 +131,49 @@ fn stable_fact_rendering_skips_cross_turn_deictic_locator_mapping() {
     assert!(block.contains("默认用中文回复"));
     assert!(!block.contains("/tmp/device/app.log"));
     assert!(!block.contains("unresolved_prior_object"));
+    assert!(!block.contains("app_config.toml"));
+    assert!(!block.contains("clawd"));
+}
+
+#[test]
+fn stable_fact_rendering_skips_internal_client_like_run_ids_from_project_facts() {
+    let ctx = StructuredMemoryContext {
+        relevant_facts: vec![
+            RetrievedMemoryItem {
+                role: None,
+                text: "测试编号 client-like-continuous-20260520_031810 用于 RustClaw 客户端连续会话测试场".to_string(),
+                score: 0.91,
+                source_label: Some("project_facts".to_string()),
+            },
+            RetrievedMemoryItem {
+                role: None,
+                text: "当前连续测试标记为 RC-CONT-CN-0428-A".to_string(),
+                score: 0.905,
+                source_label: Some("project_facts".to_string()),
+            },
+            RetrievedMemoryItem {
+                role: None,
+                text: "用户保存的测试编号是 client-like-continuous-20260520_031810".to_string(),
+                score: 0.9,
+                source_label: Some("user_profile".to_string()),
+            },
+            RetrievedMemoryItem {
+                role: None,
+                text: "RustClaw workspace package version is 0.1.7".to_string(),
+                score: 0.89,
+                source_label: Some("project_facts".to_string()),
+            },
+        ],
+        ..Default::default()
+    };
+
+    let block = build_structured_memory_context_block(&ctx, MemoryContextMode::Planner, 2000);
+
+    assert!(!block.contains("[project_facts] 测试编号 client-like-continuous-20260520_031810"));
+    assert!(!block.contains("[project_facts] 当前连续测试标记为 RC-CONT-CN-0428-A"));
+    assert!(block
+        .contains("[user_profile] 用户保存的测试编号是 client-like-continuous-20260520_031810"));
+    assert!(block.contains("[project_facts] RustClaw workspace package version is 0.1.7"));
 }
 
 #[test]

@@ -42,6 +42,20 @@ pub(crate) fn ensure_task_metrics(
     }
 }
 
+fn rollout_switches_from_loop_state(loop_state: &LoopState) -> Vec<String> {
+    loop_state
+        .output_vars
+        .get("rollout_switches_enabled")
+        .map(|raw| {
+            raw.split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
 /// LOOP 层一次性构建 journal（替代原 `loop_reply::build_loop_journal`）。
 ///
 /// 字段写入顺序与值保持原实现一致：
@@ -70,6 +84,10 @@ pub(crate) fn build_from_loop_state(
         if let Some(context_summary) = ctx.context_bundle_summary.as_deref() {
             journal.record_context_bundle_summary(context_summary.to_string());
         }
+    }
+    journal.record_rollout_switches_enabled(rollout_switches_from_loop_state(loop_state));
+    for attribution in &loop_state.rollout_attribution {
+        journal.record_rollout_attribution(attribution.clone());
     }
     journal.rounds = loop_state.round_traces.clone();
     for step in &loop_state.executed_step_results {

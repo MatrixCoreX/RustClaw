@@ -103,6 +103,17 @@ fn check_repeat_action_guard(
         if repeated_successful_action_is_allowed_for_active_recipe(state, loop_state, action) {
             return None;
         }
+        if let Some(attribution) = super::registry_idempotency_guard_attribution(
+            state,
+            policy,
+            action,
+            fingerprint,
+            "registry_idempotency_repeat_completed_action",
+            Some(*success_count),
+            None,
+        ) {
+            loop_state.rollout_attribution.push(attribution);
+        }
         info!(
             "executor_result_error task_id={} round={} step={} type=guard error={}",
             task.task_id,
@@ -117,6 +128,17 @@ fn check_repeat_action_guard(
         return Some("repeat_completed_action".to_string());
     }
     if *repeat_count > policy.repeat_action_limit {
+        if let Some(attribution) = super::registry_idempotency_guard_attribution(
+            state,
+            policy,
+            action,
+            fingerprint,
+            "registry_idempotency_repeat_action_limit",
+            Some(*repeat_count),
+            Some(policy.repeat_action_limit),
+        ) {
+            loop_state.rollout_attribution.push(attribution);
+        }
         info!(
             "executor_result_error task_id={} round={} step={} type=guard error={}",
             task.task_id,
@@ -164,7 +186,7 @@ pub(super) async fn execute_actions_once(
         ensure_task_running(state, task)?;
         let step_in_round = idx + 1;
         let global_step = loop_state.total_steps_executed + 1;
-        let fingerprint = super::action_fingerprint(state, action);
+        let fingerprint = super::action_fingerprint_for_policy(state, policy, action);
         if action_counts_as_tool_call(action)
             && loop_state.tool_calls_total >= policy.max_tool_calls.max(1)
         {

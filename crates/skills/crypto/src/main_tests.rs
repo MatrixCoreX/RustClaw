@@ -208,11 +208,28 @@ fn account_access_errors_use_stable_prefix_and_safe_detail() {
         parsed.get("exchange").and_then(|v| v.as_str()),
         Some("binance")
     );
+    assert_eq!(
+        parsed.get("error_kind").and_then(|v| v.as_str()),
+        Some("account_access_failed")
+    );
+    assert_eq!(
+        parsed.get("message_key").and_then(|v| v.as_str()),
+        Some("crypto.err.account_access_failed")
+    );
     assert!(parsed
         .get("detail")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .contains("Invalid API-key"));
+    let extra = crypto_account_access_error_extra_from_text(&err).expect("structured extra");
+    assert_eq!(
+        extra.get("error_kind").and_then(|v| v.as_str()),
+        Some("account_access_failed")
+    );
+    assert_eq!(
+        extra.get("message_key").and_then(|v| v.as_str()),
+        Some("crypto.err.account_access_failed")
+    );
 }
 
 #[test]
@@ -447,7 +464,15 @@ fn execute_uses_context_locale_for_binance_not_bound_message() {
         })),
     )
     .unwrap_err();
-    assert_eq!(err, tr("crypto.err.binance_not_bound"));
+    let extra = crypto_config_error_extra_from_text(&err).expect("config error extra");
+    assert_eq!(
+        extra.get("message_key").and_then(|v| v.as_str()),
+        Some("crypto.err.binance_not_bound")
+    );
+    assert_eq!(
+        crypto_error_text_for_response(&err),
+        tr("crypto.err.binance_not_bound")
+    );
     set_current_lang("zh-CN");
 }
 
@@ -467,9 +492,15 @@ fn private_exchange_action_checks_binding_before_trade_params() {
         })),
     )
     .unwrap_err();
-    assert_eq!(err, tr("crypto.err.binance_not_bound"));
-    assert!(!err.contains("缺少 symbol"));
-    assert!(!err.contains("symbol is required"));
+    let extra = crypto_config_error_extra_from_text(&err).expect("config error extra");
+    assert_eq!(
+        extra.get("message_key").and_then(|v| v.as_str()),
+        Some("crypto.err.binance_not_bound")
+    );
+    assert_eq!(
+        extra.get("action").and_then(|v| v.as_str()),
+        Some("trade_preview")
+    );
 }
 
 #[test]
@@ -488,6 +519,14 @@ fn private_exchange_action_alias_checks_binding_first() {
         })),
     )
     .unwrap_err();
-    assert!(err.contains("OKX API is not bound"));
+    let extra = crypto_config_error_extra_from_text(&err).expect("config error extra");
+    assert_eq!(
+        extra.get("message_key").and_then(|v| v.as_str()),
+        Some("crypto.err.okx_not_bound")
+    );
+    assert_eq!(
+        extra.get("action").and_then(|v| v.as_str()),
+        Some("pending_orders")
+    );
     set_current_lang("zh-CN");
 }

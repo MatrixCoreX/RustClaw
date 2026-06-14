@@ -120,3 +120,65 @@ fn memory_fact_card_expiry_removes_retrieval_row() {
     assert_eq!(status, crate::memory::MEMORY_FACT_STATUS_EXPIRED);
     assert_eq!(index_rows, 0);
 }
+
+#[test]
+fn memory_fact_card_rejects_deictic_identifier_mapping() {
+    let db = setup_db();
+    let source_ids = [300_i64];
+    let fact = MemoryFactUpsert::from_long_term_summary(
+        "project_facts",
+        "service_alias",
+        "clawd",
+        "项目别名：'那个服务' 代指 'clawd'",
+        0.95,
+        "long_term_summary:300",
+        &source_ids,
+        "deictic alias mapping should stay session-scoped",
+        Some("project_facts:service_alias"),
+    );
+    let inserted = upsert_memory_fact_card(&db, 7, 11, "user:test", &fact, 1000)
+        .expect("upsert should not fail");
+    assert_eq!(inserted, None);
+
+    let fact_rows: i64 = db
+        .query_row("SELECT COUNT(*) FROM memory_facts", [], |row| row.get(0))
+        .expect("fact count");
+    let index_rows: i64 = db
+        .query_row("SELECT COUNT(*) FROM memory_retrieval_index", [], |row| {
+            row.get(0)
+        })
+        .expect("index count");
+    assert_eq!(fact_rows, 0);
+    assert_eq!(index_rows, 0);
+}
+
+#[test]
+fn memory_fact_card_rejects_plain_locator_alias_mapping() {
+    let db = setup_db();
+    let source_ids = [301_i64];
+    let fact = MemoryFactUpsert::from_long_term_summary(
+        "project_facts",
+        "config_alias",
+        "/home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml",
+        "那个配置文件 maps to /home/guagua/rustclaw/scripts/nl_tests/fixtures/device_local/configs/app_config.toml",
+        0.95,
+        "long_term_summary:301",
+        &source_ids,
+        "plain locator alias mapping should stay session-scoped",
+        Some("project_facts:config_alias"),
+    );
+    let inserted = upsert_memory_fact_card(&db, 7, 11, "user:test", &fact, 1000)
+        .expect("upsert should not fail");
+    assert_eq!(inserted, None);
+
+    let fact_rows: i64 = db
+        .query_row("SELECT COUNT(*) FROM memory_facts", [], |row| row.get(0))
+        .expect("fact count");
+    let index_rows: i64 = db
+        .query_row("SELECT COUNT(*) FROM memory_retrieval_index", [], |row| {
+            row.get(0)
+        })
+        .expect("index count");
+    assert_eq!(fact_rows, 0);
+    assert_eq!(index_rows, 0);
+}

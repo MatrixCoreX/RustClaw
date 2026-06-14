@@ -6,7 +6,7 @@ chat_act | chat_act_core_entries_cn | exec,no_write_file | 先查看当前目录
 act | act_health_brief_cn | exec,no_write_file | 检查一下 clawd 现在是不是健康，只给我关键结论。
 act | act_find_log_docs_cn | exec,no_write_file | 找出仓库里名字带 log 的 md 或 txt 文件，只回路径。
 act | act_hidden_logs_cn | exec,no_write_file | 看看 logs 目录里有没有隐藏文件。
-file | file_generate_logs_inventory_and_send | write_and_deliver | 查看 logs 目录，把里面的日志文件名整理到 logs_inventory.txt，然后把文件发给我。
+file | file_generate_logs_inventory_and_send | write_and_deliver ,side_effect| 查看 logs 目录，把里面的日志文件名整理到 logs_inventory.txt，然后把文件发给我。
 file | file_generate_workspace_note_path_only | exec | 执行 pwd，写一句一句话工作区说明到 workspace_note.txt，只回复该文件的绝对路径。
 failure | failure_health_then_missing_then_summary | exec,resume_context,no_post_fail_steps | 先检查 clawd 是否健康，再执行 definitely_missing_command_rustclaw_mix_24688，然后总结哪一步成功了、哪一步失败了。
 failure | failure_list_then_missing_reason_only | exec,resume_context,no_post_fail_steps | 先列出 logs 目录，再执行 definitely_missing_command_rustclaw_mix_24689，只告诉我失败点和未完成部分。

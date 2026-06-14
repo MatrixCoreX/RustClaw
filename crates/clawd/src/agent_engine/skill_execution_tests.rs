@@ -10,6 +10,7 @@ use super::{
     structured_observation_path_argument_error, unresolved_runtime_template_argument_error,
     AgentLoopGuardPolicy, LoopState,
 };
+use crate::agent_engine::support::SemanticRouteAuthority;
 use crate::{
     AgentRuntimeConfig, AppState, ClaimedTask, SkillViewsSnapshot, ToolsPolicy, DEFAULT_AGENT_ID,
 };
@@ -122,6 +123,12 @@ fn test_policy() -> AgentLoopGuardPolicy {
         no_progress_limit: 1,
         multi_round_enabled: true,
         answer_verifier_retry_limit: 2,
+        answer_verifier_enforce_required: false,
+        semantic_route_authority: SemanticRouteAuthority::Legacy,
+        agent_decides_semantic_route: false,
+        agent_decides_migration_class: "none".to_string(),
+        registry_idempotency_guard: false,
+        structured_evidence_required_for_selected_contracts: false,
         fast_read: Default::default(),
         grounded_summary: Default::default(),
         multi_step_workspace: Default::default(),
@@ -179,6 +186,13 @@ fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
         parsed
             .extra
             .as_ref()
+            .and_then(|extra| extra.get("reason_code")),
+        Some(&serde_json::json!("contract_action_rejected"))
+    );
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
             .and_then(|extra| extra.get("decision")),
         Some(&serde_json::json!("rejected_not_allowed"))
     );
@@ -196,6 +210,48 @@ fn contract_matrix_preflight_rejects_disallowed_action_for_structured_task() {
         .retry_instruction
         .contains("ContractPolicyDecision=rejected_not_allowed"));
     assert!(metadata.retry_instruction.contains("fs_basic.list_dir"));
+}
+
+#[test]
+fn contract_matrix_preflight_allows_user_named_output_path_marker() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::RawCommandOutput,
+        requires_content_evidence: true,
+        locator_kind: crate::OutputLocatorKind::None,
+        ..crate::IntentOutputContract::default()
+    });
+    let args = serde_json::json!({
+        "path": "pwd_line_abs.txt",
+        "content": "/home/guagua/rustclaw\n",
+        "_clawd_user_named_output_path": true
+    });
+
+    assert!(
+        contract_matrix_action_policy_error(&loop_state, "write_file", &args).is_none(),
+        "planner-marked user named output writes must survive execution preflight"
+    );
+}
+
+#[test]
+fn contract_matrix_preflight_allows_internal_synthesis_actions() {
+    let mut loop_state = LoopState::new(2);
+    loop_state.output_contract = Some(crate::IntentOutputContract {
+        semantic_kind: crate::OutputSemanticKind::RecentArtifactsJudgment,
+        requires_content_evidence: true,
+        ..crate::IntentOutputContract::default()
+    });
+    let args = serde_json::json!({"evidence_refs": ["last_output"]});
+
+    assert!(
+        contract_matrix_action_policy_error(&loop_state, "synthesize_answer", &args).is_none(),
+        "internal synthesis must not be rejected by observation allowed_actions"
+    );
+    assert!(
+        contract_matrix_action_policy_error(&loop_state, "respond", &serde_json::json!({}))
+            .is_none(),
+        "internal respond must not be rejected by observation allowed_actions"
+    );
 }
 
 #[test]
@@ -241,6 +297,13 @@ fn contract_matrix_preflight_rejects_missing_bound_target_arg() {
 
     assert_eq!(parsed.error_kind, "contract_arg_rejected");
     assert!(parsed.error_text.contains("expected target arg(s): path"));
+    assert_eq!(
+        parsed
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("reason_code")),
+        Some(&serde_json::json!("contract_arg_rejected"))
+    );
     assert_eq!(
         parsed
             .extra

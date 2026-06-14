@@ -1,0 +1,8 @@
+# Multilingual rendering-contract focused cases.
+# Purpose: guard deterministic fallback replies by machine contract, not fixed prose.
+# Format: suite|name|tags|prompt|expect=optional substring
+
+single|render_failed_step_contract_zh|rendering_contract,execution_failed_step,zh,client_like|请依次执行命令 `echo RC_RENDER_ZH_OK` 和命令 `definitely_missing_command_rustclaw_render_zh_0605`，只告诉我哪一步失败
+single|render_failed_step_contract_en|rendering_contract,execution_failed_step,en,client_like|Run command `echo RC_RENDER_EN_OK`, then command `definitely_missing_command_rustclaw_render_en_0605`, and only identify the failed step
+single|render_failed_step_contract_ja|rendering_contract,execution_failed_step,ja,client_like|コマンド `echo RC_RENDER_JA_OK` を実行し、次にコマンド `definitely_missing_command_rustclaw_render_ja_0605` を実行して、失敗したステップだけを特定してください
+single|render_failed_step_contract_ko|rendering_contract,execution_failed_step,ko,client_like|명령 `echo RC_RENDER_KO_OK` 을 실행하고, 다음으로 명령 `definitely_missing_command_rustclaw_render_ko_0605` 을 실행한 뒤 실패한 단계만 알려 주세요

@@ -7,6 +7,25 @@ use crate::{AppState, ClaimedTask};
 
 const MAX_SESSION_ALIAS_BINDINGS: usize = 12;
 
+#[path = "conversation_alias.rs"]
+mod conversation_alias;
+
+pub(crate) use conversation_alias::{
+    alias_bindings_mentioned_in_prompt, alias_surface_matches_prompt,
+    session_alias_bindings_from_state_patch, single_alias_binding_mentioned_in_prompt,
+    state_patch_is_alias_bindings_only, structural_alias_binding_from_memory_prompt,
+    structural_quoted_alias_binding_from_single_locator_prompt,
+    structural_quoted_alias_bindings_from_prompt,
+};
+
+use conversation_alias::{merge_alias_bindings_for_turn, turn_analysis_has_alias_only_state_patch};
+
+#[cfg(test)]
+use conversation_alias::{
+    merge_alias_bindings, structural_alias_binding_from_prompt,
+    structural_alias_rebinds_from_prompt,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub(crate) struct SessionAliasBinding {
     pub(crate) alias: String,
@@ -31,7 +50,6 @@ pub(crate) struct ConversationState {
 }
 
 pub(crate) struct ActiveSessionSnapshot {
-    #[allow(dead_code)]
     pub(crate) conversation_state: Option<ConversationState>,
     pub(crate) active_followup_frame: Option<crate::followup_frame::FollowupFrame>,
     pub(crate) active_clarify_state: Option<crate::clarify_state::ClarifyState>,
@@ -69,558 +87,6 @@ fn normalized_locale_hint(payload: Option<&Value>) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn normalize_alias_target(raw_target: &str) -> Option<String> {
-    let trimmed = raw_target
-        .trim()
-        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | '“' | '”' | '‘' | '’'))
-        .trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(trimmed);
-    crate::intent::locator_extractor::extract_explicit_locator_for_fallback(trimmed)
-        .map(|locator| locator.locator_hint)
-        .or_else(|| surface.single_filename_candidate().map(ToString::to_string))
-        .or_else(|| Some(trimmed.to_string()))
-}
-
-fn normalize_explicit_alias_target(raw_target: &str) -> Option<String> {
-    let trimmed = raw_target
-        .trim()
-        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`' | '“' | '”' | '‘' | '’'))
-        .trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(trimmed);
-    crate::intent::locator_extractor::extract_explicit_locator_for_fallback(trimmed)
-        .map(|locator| locator.locator_hint)
-        .or_else(|| surface.single_filename_candidate().map(ToString::to_string))
-}
-
-fn normalized_alias_surface_for_match(raw: &str) -> String {
-    let mut out = String::new();
-    let mut pending_space = false;
-    for ch in raw.trim().chars() {
-        let mapped = if matches!(ch, '_' | '-') { ' ' } else { ch };
-        if mapped.is_whitespace() {
-            pending_space = !out.is_empty();
-            continue;
-        }
-        if pending_space && !out.ends_with(' ') {
-            out.push(' ');
-        }
-        for lower in mapped.to_lowercase() {
-            out.push(lower);
-        }
-        pending_space = false;
-    }
-    out.trim().to_string()
-}
-
-pub(crate) fn alias_surface_matches_prompt(prompt: &str, alias: &str) -> bool {
-    let alias = normalized_alias_surface_for_match(alias);
-    if alias.is_empty() {
-        return false;
-    }
-    normalized_alias_surface_for_match(prompt).contains(&alias)
-}
-
-pub(crate) fn single_alias_binding_mentioned_in_prompt<'a>(
-    bindings: &'a [SessionAliasBinding],
-    prompt: &str,
-) -> Option<&'a SessionAliasBinding> {
-    let mut matches = alias_bindings_mentioned_in_prompt(bindings, prompt);
-    if matches.is_empty() {
-        return None;
-    }
-    let target = matches[0].target.trim();
-    if matches.len() == 1
-        || matches
-            .iter()
-            .all(|binding| binding.target.trim() == target)
-    {
-        matches.sort_by_key(|binding| {
-            std::cmp::Reverse(
-                normalized_alias_surface_for_match(&binding.alias)
-                    .chars()
-                    .count(),
-            )
-        });
-        return Some(matches.remove(0));
-    }
-    None
-}
-
-pub(crate) fn alias_bindings_mentioned_in_prompt<'a>(
-    bindings: &'a [SessionAliasBinding],
-    prompt: &str,
-) -> Vec<&'a SessionAliasBinding> {
-    let mut matches = bindings
-        .iter()
-        .filter(|binding| alias_surface_matches_prompt(prompt, &binding.alias))
-        .collect::<Vec<_>>();
-    matches.dedup_by(|left, right| left.alias == right.alias && left.target == right.target);
-    matches
-}
-
-pub(crate) fn session_alias_bindings_from_state_patch(
-    state_patch: Option<&Value>,
-) -> Vec<SessionAliasBinding> {
-    let Some(state_patch) = state_patch else {
-        return Vec::new();
-    };
-    let now_ts = crate::now_ts_u64();
-    let mut out = Vec::new();
-    if let Some(alias_bindings) = state_patch
-        .get("alias_bindings")
-        .and_then(|value| value.as_array())
-    {
-        for item in alias_bindings {
-            let Some(alias) = item
-                .get("alias")
-                .and_then(|value| value.as_str())
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            else {
-                continue;
-            };
-            let Some(target) = item
-                .get("target")
-                .and_then(|value| value.as_str())
-                .and_then(normalize_alias_target)
-            else {
-                continue;
-            };
-            if out
-                .iter()
-                .any(|existing: &SessionAliasBinding| existing.alias.eq_ignore_ascii_case(alias))
-            {
-                continue;
-            }
-            out.push(SessionAliasBinding {
-                alias: alias.to_string(),
-                target,
-                updated_at_ts: now_ts,
-            });
-            if out.len() >= MAX_SESSION_ALIAS_BINDINGS {
-                return out;
-            }
-        }
-    }
-    let Some(obj) = state_patch.as_object() else {
-        return out;
-    };
-    for (key, value) in obj {
-        let alias_and_target = compatibility_alias_key(key)
-            .and_then(|alias| {
-                compatibility_alias_target(value)
-                    .and_then(normalize_alias_target)
-                    .map(|target| (alias, target))
-            })
-            .or_else(|| {
-                direct_alias_map_key(key).and_then(|alias| {
-                    compatibility_alias_target(value)
-                        .and_then(normalize_explicit_alias_target)
-                        .map(|target| (alias, target))
-                })
-            });
-        let Some((alias, target)) = alias_and_target else {
-            continue;
-        };
-        if out
-            .iter()
-            .any(|existing: &SessionAliasBinding| existing.alias.eq_ignore_ascii_case(&alias))
-        {
-            continue;
-        }
-        out.push(SessionAliasBinding {
-            alias,
-            target,
-            updated_at_ts: now_ts,
-        });
-        if out.len() >= MAX_SESSION_ALIAS_BINDINGS {
-            break;
-        }
-    }
-    out
-}
-
-pub(crate) fn state_patch_is_alias_bindings_only(state_patch: &Value) -> bool {
-    let Some(obj) = state_patch.as_object() else {
-        return false;
-    };
-    !obj.is_empty()
-        && obj.iter().all(|(key, value)| {
-            if !json_value_is_meaningful(value) {
-                return true;
-            }
-            if key == "alias_bindings" {
-                return value.as_array().is_some_and(|items| {
-                    !items.is_empty()
-                        && items.iter().all(|item| {
-                            let alias = item
-                                .get("alias")
-                                .and_then(Value::as_str)
-                                .map(str::trim)
-                                .filter(|alias| !alias.is_empty());
-                            let target = item
-                                .get("target")
-                                .and_then(Value::as_str)
-                                .map(str::trim)
-                                .filter(|target| !target.is_empty());
-                            alias.is_some() && target.is_some()
-                        })
-                });
-            }
-            compatibility_alias_key(key).is_some()
-                && compatibility_alias_target(value)
-                    .and_then(normalize_alias_target)
-                    .is_some()
-                || direct_alias_map_key(key).is_some()
-                    && compatibility_alias_target(value)
-                        .and_then(normalize_explicit_alias_target)
-                        .is_some()
-        })
-}
-
-fn json_value_is_meaningful(value: &Value) -> bool {
-    match value {
-        Value::Null => false,
-        Value::String(text) => !text.trim().is_empty(),
-        Value::Array(items) => items.iter().any(json_value_is_meaningful),
-        Value::Object(map) => map.values().any(json_value_is_meaningful),
-        _ => true,
-    }
-}
-
-fn compatibility_alias_key(key: &str) -> Option<String> {
-    let trimmed = key.trim();
-    let alias = trimmed
-        .strip_suffix("_alias")
-        .or_else(|| trimmed.strip_suffix("Alias"))?
-        .trim_matches(|ch: char| ch == '_' || ch == '-' || ch.is_whitespace())
-        .trim();
-    (!alias.is_empty()).then(|| alias.to_string())
-}
-
-fn direct_alias_map_key(key: &str) -> Option<String> {
-    let trimmed = key.trim();
-    if trimmed.is_empty() || state_patch_schema_key(trimmed) {
-        return None;
-    }
-    Some(trimmed.to_string())
-}
-
-fn state_patch_schema_key(key: &str) -> bool {
-    matches!(
-        key,
-        "alias_bindings"
-            | "active_task_boundary"
-            | "audience"
-            | "constraints"
-            | "deictic_reference"
-            | "deliverable"
-            | "filename_only"
-            | "format"
-            | "ordered_entry_ref"
-            | "ordered_entry_reference"
-            | "output_format"
-            | "primary_task_update"
-            | "quantity_comparison"
-            | "scope"
-            | "target"
-    )
-}
-
-fn compatibility_alias_target(value: &Value) -> Option<&str> {
-    if let Some(target) = value.as_str() {
-        return Some(target);
-    }
-    value
-        .as_object()
-        .and_then(|obj| obj.get("target").or_else(|| obj.get("path")))
-        .and_then(Value::as_str)
-}
-
-fn merge_alias_bindings(
-    prior_state: Option<&ConversationState>,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-) -> Vec<SessionAliasBinding> {
-    let mut alias_bindings = prior_state
-        .map(|state| state.alias_bindings.clone())
-        .unwrap_or_default();
-    let parsed = session_alias_bindings_from_state_patch(
-        turn_analysis.and_then(|analysis| analysis.state_patch.as_ref()),
-    );
-    if parsed.is_empty() {
-        return alias_bindings;
-    }
-    for binding in parsed {
-        alias_bindings.retain(|existing| existing.alias != binding.alias);
-        alias_bindings.push(binding);
-    }
-    if alias_bindings.len() > MAX_SESSION_ALIAS_BINDINGS {
-        let start = alias_bindings.len() - MAX_SESSION_ALIAS_BINDINGS;
-        alias_bindings = alias_bindings.split_off(start);
-    }
-    alias_bindings
-}
-
-fn merge_alias_bindings_for_turn(
-    prior_state: Option<&ConversationState>,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-    prompt: &str,
-    route_result: &crate::RouteResult,
-    resolved_prompt_for_execution: &str,
-) -> Vec<SessionAliasBinding> {
-    let mut alias_bindings = merge_alias_bindings(prior_state, turn_analysis);
-    for binding in structural_alias_bindings_from_prompt(
-        prior_state,
-        turn_analysis,
-        prompt,
-        route_result,
-        resolved_prompt_for_execution,
-    ) {
-        alias_bindings.retain(|existing| existing.alias != binding.alias);
-        alias_bindings.push(binding);
-    }
-    if alias_bindings.len() > MAX_SESSION_ALIAS_BINDINGS {
-        let start = alias_bindings.len() - MAX_SESSION_ALIAS_BINDINGS;
-        alias_bindings = alias_bindings.split_off(start);
-    }
-    alias_bindings
-}
-
-fn structural_alias_bindings_from_prompt(
-    prior_state: Option<&ConversationState>,
-    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
-    prompt: &str,
-    route_result: &crate::RouteResult,
-    resolved_prompt_for_execution: &str,
-) -> Vec<SessionAliasBinding> {
-    let mut out = Vec::new();
-    if let Some(binding) =
-        structural_alias_binding_from_prompt(prompt, route_result, resolved_prompt_for_execution)
-    {
-        out.push(binding);
-    } else if turn_analysis
-        .and_then(|analysis| analysis.turn_type)
-        .is_some_and(|turn_type| {
-            matches!(
-                turn_type,
-                crate::intent_router::TurnType::PreferenceOrMemory
-            )
-        })
-    {
-        out.extend(structural_alias_bindings_from_single_locator_prefix(prompt));
-    }
-    let rebinds = structural_alias_rebinds_from_prompt(prior_state, prompt);
-    if !rebinds.is_empty() {
-        out.extend(rebinds);
-    } else if route_result.should_refresh_long_term_memory {
-        out.extend(structural_alias_bindings_from_single_locator_prefix(prompt));
-    }
-    out
-}
-
-pub(crate) fn structural_alias_rebind_from_prompt(
-    prior_state: Option<&ConversationState>,
-    prompt: &str,
-) -> Option<SessionAliasBinding> {
-    structural_alias_rebinds_from_prompt(prior_state, prompt)
-        .into_iter()
-        .next()
-}
-
-pub(crate) fn structural_alias_rebinds_from_prompt(
-    prior_state: Option<&ConversationState>,
-    prompt: &str,
-) -> Vec<SessionAliasBinding> {
-    let Some(prior) = prior_state else {
-        return Vec::new();
-    };
-    let target = match single_current_prompt_locator_target(prompt) {
-        Some(target) if !target.trim().is_empty() => target,
-        _ => return Vec::new(),
-    };
-    let now_ts = crate::now_ts_u64();
-    alias_bindings_mentioned_in_prompt(&prior.alias_bindings, prompt)
-        .into_iter()
-        .filter(|existing| existing.target != target)
-        .map(|existing| SessionAliasBinding {
-            alias: existing.alias.clone(),
-            target: target.clone(),
-            updated_at_ts: now_ts,
-        })
-        .collect()
-}
-
-fn structural_alias_bindings_from_single_locator_prefix(prompt: &str) -> Vec<SessionAliasBinding> {
-    let Some((surface, target)) = single_current_prompt_locator_surface_and_target(prompt) else {
-        return Vec::new();
-    };
-    let Some(idx) = prompt.find(&surface) else {
-        return Vec::new();
-    };
-    let prefix = prompt[..idx].trim();
-    let aliases = alias_suffix_candidates_from_prefix(prefix);
-    let now_ts = crate::now_ts_u64();
-    aliases
-        .into_iter()
-        .map(|alias| SessionAliasBinding {
-            alias,
-            target: target.clone(),
-            updated_at_ts: now_ts,
-        })
-        .collect()
-}
-
-fn single_current_prompt_locator_target(prompt: &str) -> Option<String> {
-    single_current_prompt_locator_surface_and_target(prompt).map(|(_, target)| target)
-}
-
-fn single_current_prompt_locator_surface_and_target(prompt: &str) -> Option<(String, String)> {
-    let mut locators =
-        crate::intent::locator_extractor::extract_explicit_locator_candidates_for_fallback(prompt);
-    locators.dedup_by(|left, right| left.locator_hint == right.locator_hint);
-    if locators.len() != 1 {
-        return None;
-    }
-    let surface = locators.remove(0).locator_hint;
-    let target = normalize_alias_target(&surface)?;
-    Some((surface, target))
-}
-
-fn alias_suffix_candidates_from_prefix(prefix: &str) -> Vec<String> {
-    let tokens = prefix
-        .split_whitespace()
-        .map(|token| {
-            token
-                .trim_matches(|ch: char| {
-                    ch.is_ascii_punctuation()
-                        || matches!(ch, '，' | '。' | '；' | '：' | '“' | '”' | '‘' | '’')
-                })
-                .trim()
-        })
-        .filter(|token| !token.is_empty())
-        .collect::<Vec<_>>();
-    if tokens.len() < 3 {
-        return Vec::new();
-    }
-    let base = &tokens[..tokens.len() - 1];
-    let mut out = Vec::new();
-    for len in 2..=base.len().min(4) {
-        let candidate = base[base.len() - len..].join(" ");
-        if structural_alias_candidate_is_safe(&candidate)
-            && !out
-                .iter()
-                .any(|existing: &String| existing.eq_ignore_ascii_case(&candidate))
-        {
-            out.push(candidate);
-        }
-    }
-    out
-}
-
-pub(crate) fn structural_alias_binding_from_prompt(
-    prompt: &str,
-    route_result: &crate::RouteResult,
-    resolved_prompt_for_execution: &str,
-) -> Option<SessionAliasBinding> {
-    if !route_result.is_chat_gate() || route_result.output_contract.requires_content_evidence {
-        return None;
-    }
-    let alias = single_structural_quoted_alias(prompt)?;
-    let target = single_structural_locator_target([
-        prompt,
-        resolved_prompt_for_execution,
-        route_result.resolved_intent.as_str(),
-        route_result.output_contract.locator_hint.as_str(),
-    ])?;
-    Some(SessionAliasBinding {
-        alias,
-        target,
-        updated_at_ts: crate::now_ts_u64(),
-    })
-}
-
-fn single_structural_quoted_alias(text: &str) -> Option<String> {
-    let mut candidates = Vec::new();
-    for (open, close) in [('“', '”'), ('"', '"'), ('\'', '\''), ('`', '`')] {
-        let mut inside = false;
-        let mut start = 0usize;
-        for (idx, ch) in text.char_indices() {
-            if !inside && ch == open {
-                inside = true;
-                start = idx + ch.len_utf8();
-                continue;
-            }
-            if inside && ch == close {
-                if let Some(candidate) = text
-                    .get(start..idx)
-                    .map(str::trim)
-                    .filter(|candidate| structural_alias_candidate_is_safe(candidate))
-                {
-                    candidates.push(candidate.to_string());
-                }
-                inside = false;
-            }
-        }
-    }
-    candidates.sort();
-    candidates.dedup();
-    (candidates.len() == 1).then(|| candidates.remove(0))
-}
-
-pub(crate) fn structural_alias_binding_from_memory_prompt(
-    prompt: &str,
-    route_result: &crate::RouteResult,
-    resolved_prompt_for_execution: &str,
-) -> Option<SessionAliasBinding> {
-    if let Some(binding) =
-        structural_alias_binding_from_prompt(prompt, route_result, resolved_prompt_for_execution)
-    {
-        return Some(binding);
-    }
-    if !route_result.is_chat_gate() || route_result.output_contract.requires_content_evidence {
-        return None;
-    }
-    structural_alias_bindings_from_single_locator_prefix(prompt)
-        .into_iter()
-        .next()
-}
-
-fn structural_alias_candidate_is_safe(candidate: &str) -> bool {
-    let char_count = candidate.chars().count();
-    if !(1..=80).contains(&char_count) {
-        return false;
-    }
-    let surface = crate::intent::surface_signals::analyze_prompt_surface(candidate);
-    !surface.has_concrete_locator_hint()
-        && crate::intent::locator_extractor::extract_explicit_locator_for_fallback(candidate)
-            .is_none()
-}
-
-fn single_structural_locator_target<'a>(
-    sources: impl IntoIterator<Item = &'a str>,
-) -> Option<String> {
-    let mut targets = Vec::new();
-    for source in sources {
-        let Some(target) =
-            crate::intent::locator_extractor::extract_explicit_locator_for_fallback(source)
-                .map(|locator| locator.locator_hint)
-                .and_then(|target| normalize_alias_target(&target))
-        else {
-            continue;
-        };
-        if !targets.iter().any(|existing| existing == &target) {
-            targets.push(target);
-        }
-    }
-    (targets.len() == 1).then(|| targets.remove(0))
-}
-
 fn next_last_primary_task_prompt(
     prior_state: Option<&ConversationState>,
     route_result: &crate::RouteResult,
@@ -637,6 +103,7 @@ fn next_last_primary_task_prompt(
     }
     let prior_prompt = prior_state.and_then(|state| state.last_primary_task_prompt.clone());
     if standalone_answer_candidate_request_should_not_promote(
+        prior_prompt.as_deref(),
         route_result,
         turn_analysis,
         resolved_prompt_for_execution,
@@ -859,6 +326,21 @@ fn standalone_contextual_chat_result_starts_primary_task(
     )
 }
 
+fn has_prior_primary_task(prior_state: Option<&ConversationState>) -> bool {
+    prior_state.is_some_and(|state| {
+        state
+            .last_primary_task_prompt
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+            || state
+                .last_primary_task_output
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty())
+    })
+}
+
 fn unannotated_evidence_backed_deliverable_starts_primary_task(
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
@@ -961,29 +443,246 @@ fn standalone_task_request_preserves_prior_primary(
 }
 
 fn standalone_answer_candidate_request_should_not_promote(
+    prior_primary_task_prompt: Option<&str>,
     route_result: &crate::RouteResult,
     turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
     resolved_prompt_for_execution: &str,
 ) -> bool {
-    matches!(
+    let is_standalone_task_request = matches!(
         turn_analysis.and_then(|analysis| analysis.turn_type),
         Some(crate::intent_router::TurnType::TaskRequest)
     ) && matches!(
         turn_analysis.and_then(|analysis| analysis.target_task_policy),
         Some(crate::intent_router::TargetTaskPolicy::Standalone)
+    ) && route_result.is_chat_gate();
+    if !is_standalone_task_request
+        || route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        )
+    {
+        return false;
+    }
+    if matches!(
+        route_result.output_contract.response_shape,
+        crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+    ) {
+        return true;
+    }
+    prior_primary_task_prompt
+        .map(str::trim)
+        .is_some_and(|prompt| !prompt.is_empty())
+        && !state_patch_requests_primary_task_replacement(turn_analysis)
+        && resolved_prompt_for_execution
+            .lines()
+            .any(|line| line.trim_start().starts_with("answer_candidate:"))
+}
+
+fn standalone_answer_candidate_output_should_not_promote(
+    prior_state: Option<&ConversationState>,
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    resolved_prompt_for_execution: &str,
+) -> bool {
+    standalone_answer_candidate_request_should_not_promote(
+        prior_state.and_then(|state| state.last_primary_task_prompt.as_deref()),
+        route_result,
+        turn_analysis,
+        resolved_prompt_for_execution,
+    ) || standalone_answer_candidate_request_should_not_promote(
+        prior_state.and_then(|state| state.last_primary_task_output.as_deref()),
+        route_result,
+        turn_analysis,
+        resolved_prompt_for_execution,
+    )
+}
+
+fn current_turn_answer_text(answer_text: &str, answer_messages: &[String]) -> Option<String> {
+    answer_text
+        .trim()
+        .is_empty()
+        .then(|| {
+            answer_messages
+                .iter()
+                .map(String::as_str)
+                .find(|text| !text.trim().is_empty())
+                .map(str::to_string)
+        })
+        .flatten()
+        .or_else(|| {
+            let trimmed = answer_text.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+}
+
+fn substantial_text_deliverable(answer_text: &str) -> bool {
+    let trimmed = answer_text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let char_count = trimmed.chars().count();
+    if char_count >= 180 {
+        return true;
+    }
+
+    let non_empty_line_count = trimmed
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
+    if char_count >= 80 && non_empty_line_count >= 3 {
+        return true;
+    }
+
+    let has_structural_markdown = trimmed.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with('#')
+            || line.starts_with("- ")
+            || line.starts_with("* ")
+            || line.starts_with("> ")
+            || line.starts_with("| ")
+            || line.starts_with("```")
+            || line.split_once('.').is_some_and(|(prefix, suffix)| {
+                !suffix.trim_start().is_empty()
+                    && !prefix.is_empty()
+                    && prefix.chars().all(|ch| ch.is_ascii_digit())
+            })
+    });
+    if has_structural_markdown && char_count >= 60 && non_empty_line_count >= 2 {
+        return true;
+    }
+
+    compact_sentence_deliverable(trimmed, char_count, non_empty_line_count)
+}
+
+fn compact_sentence_deliverable(
+    trimmed: &str,
+    char_count: usize,
+    non_empty_line_count: usize,
+) -> bool {
+    if !(24..=180).contains(&char_count) || non_empty_line_count != 1 {
+        return false;
+    }
+    let starts_like_machine_payload = trimmed.starts_with('{')
+        || trimmed.starts_with('[')
+        || trimmed.starts_with("FILE:")
+        || trimmed.starts_with('/')
+        || trimmed.starts_with("./")
+        || trimmed.starts_with("../");
+    if starts_like_machine_payload {
+        return false;
+    }
+    let Some(last) = trimmed.chars().last() else {
+        return false;
+    };
+    matches!(last, '.' | '!' | '。' | '！')
+}
+
+fn unannotated_chat_output_starts_primary_task(
+    prior_state: Option<&ConversationState>,
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    answer_text: &str,
+    answer_messages: &[String],
+) -> bool {
+    if turn_analysis.is_some()
+        || has_prior_primary_task(prior_state)
+        || !route_result.is_chat_gate()
+        || route_result.needs_clarify
+        || route_result.output_contract.requires_content_evidence
+        || route_result.output_contract.delivery_required
+        || !matches!(
+            route_result.output_contract.locator_kind,
+            crate::OutputLocatorKind::None
+        )
+        || !matches!(
+            route_result.output_contract.delivery_intent,
+            crate::OutputDeliveryIntent::None
+        )
+        || !matches!(
+            route_result.output_contract.semantic_kind,
+            crate::OutputSemanticKind::None
+        )
+        || matches!(
+            route_result.output_contract.response_shape,
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
+    {
+        return false;
+    }
+
+    current_turn_answer_text(answer_text, answer_messages)
+        .as_deref()
+        .is_some_and(substantial_text_deliverable)
+}
+
+fn current_turn_primary_task_prompt(
+    prompt: &str,
+    resolved_prompt_for_execution: &str,
+) -> Option<String> {
+    let user_prompt = prompt.trim();
+    let resolved_prompt = resolved_prompt_for_execution.trim();
+    let current_prompt = if user_prompt.is_empty() {
+        resolved_prompt
+    } else {
+        user_prompt
+    };
+    (!current_prompt.is_empty()).then(|| current_prompt.to_string())
+}
+
+fn unannotated_chat_primary_prompt_for_output(
+    prior_state: Option<&ConversationState>,
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+    prompt: &str,
+    resolved_prompt_for_execution: &str,
+    answer_text: &str,
+    answer_messages: &[String],
+) -> Option<String> {
+    unannotated_chat_output_starts_primary_task(
+        prior_state,
+        route_result,
+        turn_analysis,
+        answer_text,
+        answer_messages,
+    )
+    .then(|| current_turn_primary_task_prompt(prompt, resolved_prompt_for_execution))
+    .flatten()
+}
+
+fn standalone_chat_deliverable_starts_primary_task(
+    prior_state: Option<&ConversationState>,
+    route_result: &crate::RouteResult,
+    turn_analysis: Option<&crate::intent_router::TurnAnalysis>,
+) -> bool {
+    if has_prior_primary_task(prior_state)
+        && !state_patch_requests_primary_task_replacement(turn_analysis)
+    {
+        return false;
+    }
+    matches!(
+        (
+            turn_analysis.and_then(|analysis| analysis.turn_type),
+            turn_analysis.and_then(|analysis| analysis.target_task_policy),
+        ),
+        (
+            Some(crate::intent_router::TurnType::TaskRequest),
+            Some(crate::intent_router::TargetTaskPolicy::Standalone)
+        )
     ) && route_result.is_chat_gate()
+        && !route_result.needs_clarify
         && !route_result.output_contract.requires_content_evidence
         && !route_result.output_contract.delivery_required
         && matches!(
             route_result.output_contract.locator_kind,
             crate::OutputLocatorKind::None
         )
-        && (matches!(
+        && !matches!(
             route_result.output_contract.response_shape,
-            crate::OutputResponseShape::Scalar
-        ) || resolved_prompt_for_execution
-            .lines()
-            .any(|line| line.trim_start().starts_with("answer_candidate:")))
+            crate::OutputResponseShape::Scalar | crate::OutputResponseShape::FileToken
+        )
 }
 
 fn next_last_primary_task_output(
@@ -1003,7 +702,8 @@ fn next_last_primary_task_output(
     }
     if should_preserve_active_session_pointers(turn_analysis)
         || route_result.is_clarify_gate()
-        || standalone_answer_candidate_request_should_not_promote(
+        || standalone_answer_candidate_output_should_not_promote(
+            prior_state,
             route_result,
             turn_analysis,
             resolved_prompt_for_execution,
@@ -1017,77 +717,36 @@ fn next_last_primary_task_output(
     {
         if unannotated_evidence_backed_deliverable_starts_primary_task(route_result, turn_analysis)
         {
-            let latest_output = answer_text
-                .trim()
-                .is_empty()
-                .then(|| {
-                    answer_messages
-                        .iter()
-                        .map(String::as_str)
-                        .find(|text| !text.trim().is_empty())
-                        .map(str::to_string)
-                })
-                .flatten()
-                .or_else(|| {
-                    let trimmed = answer_text.trim();
-                    (!trimmed.is_empty()).then(|| trimmed.to_string())
-                });
+            let latest_output = current_turn_answer_text(answer_text, answer_messages);
             return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
         }
         if unannotated_structured_listing_starts_primary_task(route_result, turn_analysis, journal)
         {
-            let latest_output = answer_text
-                .trim()
-                .is_empty()
-                .then(|| {
-                    answer_messages
-                        .iter()
-                        .map(String::as_str)
-                        .find(|text| !text.trim().is_empty())
-                        .map(str::to_string)
-                })
-                .flatten()
-                .or_else(|| {
-                    let trimmed = answer_text.trim();
-                    (!trimmed.is_empty()).then(|| trimmed.to_string())
-                });
+            let latest_output = current_turn_answer_text(answer_text, answer_messages);
             return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
         }
         if standalone_contextual_chat_result_starts_primary_task(route_result, turn_analysis) {
-            let latest_output = answer_text
-                .trim()
-                .is_empty()
-                .then(|| {
-                    answer_messages
-                        .iter()
-                        .map(String::as_str)
-                        .find(|text| !text.trim().is_empty())
-                        .map(str::to_string)
-                })
-                .flatten()
-                .or_else(|| {
-                    let trimmed = answer_text.trim();
-                    (!trimmed.is_empty()).then(|| trimmed.to_string())
-                });
+            let latest_output = current_turn_answer_text(answer_text, answer_messages);
+            return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
+        }
+        if unannotated_chat_output_starts_primary_task(
+            prior_state,
+            route_result,
+            turn_analysis,
+            answer_text,
+            answer_messages,
+        ) {
+            let latest_output = current_turn_answer_text(answer_text, answer_messages);
+            return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
+        }
+        if standalone_chat_deliverable_starts_primary_task(prior_state, route_result, turn_analysis)
+        {
+            let latest_output = current_turn_answer_text(answer_text, answer_messages);
             return latest_output.or_else(|| prior_last_primary_task_output(prior_state));
         }
         return prior_last_primary_task_output(prior_state);
     }
-    let latest_output = answer_text
-        .trim()
-        .is_empty()
-        .then(|| {
-            answer_messages
-                .iter()
-                .map(String::as_str)
-                .find(|text| !text.trim().is_empty())
-                .map(str::to_string)
-        })
-        .flatten()
-        .or_else(|| {
-            let trimmed = answer_text.trim();
-            (!trimmed.is_empty()).then(|| trimmed.to_string())
-        });
+    let latest_output = current_turn_answer_text(answer_text, answer_messages);
     latest_output.or_else(|| prior_last_primary_task_output(prior_state))
 }
 
@@ -1194,7 +853,6 @@ fn persist_conversation_state_tx(
     Ok(())
 }
 
-#[allow(dead_code)]
 pub(crate) fn load_active_conversation_state(
     state: &AppState,
     task: &ClaimedTask,
@@ -1319,8 +977,14 @@ pub(crate) fn update_active_session_from_ask_outcome(
             return;
         }
     };
-    let preserve_active_session_pointers = should_preserve_active_session_pointers(turn_analysis)
-        || preserve_primary_task_for_clarifying_output;
+    let clear_active_session_pointers_for_alias_update =
+        turn_analysis_has_alias_only_state_patch(turn_analysis);
+    let current_outcome_refreshes_session_pointers =
+        current_outcome_has_ordered_entries(journal, semantic_clarify);
+    let preserve_active_session_pointers = !clear_active_session_pointers_for_alias_update
+        && !current_outcome_refreshes_session_pointers
+        && (should_preserve_active_session_pointers(turn_analysis)
+            || preserve_primary_task_for_clarifying_output);
     if preserve_active_session_pointers {
         tracing::info!(
             "conversation_state preserve_active_session_pointers task_id={} turn_type={}",
@@ -1356,6 +1020,8 @@ pub(crate) fn update_active_session_from_ask_outcome(
                         .as_ref()
                         .and_then(|state| state.active_observed_facts_task_id.clone()),
                 )
+            } else if clear_active_session_pointers_for_alias_update {
+                (None, None, None)
             } else {
                 let active_followup_task_id =
                     crate::followup_frame::sync_active_frame_from_ask_outcome_tx(
@@ -1397,6 +1063,46 @@ pub(crate) fn update_active_session_from_ask_outcome(
                     active_observed_facts_task_id,
                 )
             };
+        let mut last_primary_task_prompt = if preserve_primary_task_for_clarifying_output {
+            prior_state
+                .as_ref()
+                .and_then(|state| state.last_primary_task_prompt.clone())
+        } else {
+            next_last_primary_task_prompt(
+                prior_state.as_ref(),
+                route_result,
+                turn_analysis,
+                journal,
+                prompt,
+                resolved_prompt_for_execution,
+            )
+        };
+        let last_primary_task_output = if preserve_primary_task_for_clarifying_output {
+            prior_state
+                .as_ref()
+                .and_then(|state| state.last_primary_task_output.clone())
+        } else {
+            next_last_primary_task_output(
+                prior_state.as_ref(),
+                route_result,
+                turn_analysis,
+                journal,
+                resolved_prompt_for_execution,
+                answer_text,
+                answer_messages,
+            )
+        };
+        if last_primary_task_prompt.is_none() && last_primary_task_output.is_some() {
+            last_primary_task_prompt = unannotated_chat_primary_prompt_for_output(
+                prior_state.as_ref(),
+                route_result,
+                turn_analysis,
+                prompt,
+                resolved_prompt_for_execution,
+                answer_text,
+                answer_messages,
+            );
+        }
         let conversation_state = ConversationState {
             active_followup_task_id,
             active_clarify_task_id,
@@ -1408,35 +1114,8 @@ pub(crate) fn update_active_session_from_ask_outcome(
                 route_result,
                 resolved_prompt_for_execution,
             ),
-            last_primary_task_prompt: if preserve_primary_task_for_clarifying_output {
-                prior_state
-                    .as_ref()
-                    .and_then(|state| state.last_primary_task_prompt.clone())
-            } else {
-                next_last_primary_task_prompt(
-                    prior_state.as_ref(),
-                    route_result,
-                    turn_analysis,
-                    journal,
-                    prompt,
-                    resolved_prompt_for_execution,
-                )
-            },
-            last_primary_task_output: if preserve_primary_task_for_clarifying_output {
-                prior_state
-                    .as_ref()
-                    .and_then(|state| state.last_primary_task_output.clone())
-            } else {
-                next_last_primary_task_output(
-                    prior_state.as_ref(),
-                    route_result,
-                    turn_analysis,
-                    journal,
-                    resolved_prompt_for_execution,
-                    answer_text,
-                    answer_messages,
-                )
-            },
+            last_primary_task_prompt,
+            last_primary_task_output,
             locale_hint: effective_locale_hint(prior_state.as_ref(), payload),
             last_task_id: task.task_id.clone(),
             updated_at_ts: crate::now_ts_u64(),
@@ -1468,6 +1147,14 @@ fn should_preserve_active_session_pointers(
             | crate::intent_router::TurnType::FeedbackOrError
             | crate::intent_router::TurnType::PreferenceOrMemory
     )
+}
+
+fn current_outcome_has_ordered_entries(
+    journal: &crate::task_journal::TaskJournal,
+    semantic_clarify: bool,
+) -> bool {
+    !semantic_clarify
+        && !crate::followup_frame::derive_ordered_entries_from_journal(journal).is_empty()
 }
 
 fn load_authoritative_followup_frame(

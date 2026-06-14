@@ -1,0 +1,391 @@
+use serde_json::{json, Value};
+
+use super::*;
+use crate::{
+    executor::{StepExecutionResult, StepExecutionStatus},
+    IntentOutputContract, OutputLocatorKind, OutputResponseShape, OutputSemanticKind,
+    ResumeBehavior, RiskCeiling, ScheduleKind,
+};
+
+fn route_with_contract(output_contract: IntentOutputContract) -> RouteResult {
+    RouteResult {
+        ask_mode: crate::AskMode::planner_execute_chat_wrapped(),
+        resolved_intent: "List the newest config files and judge their artifact kind.".to_string(),
+        needs_clarify: false,
+        clarify_question: String::new(),
+        route_reason: "test".to_string(),
+        route_confidence: Some(1.0),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: RiskCeiling::Unknown,
+        resume_behavior: ResumeBehavior::None,
+        schedule_kind: ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract,
+    }
+}
+
+fn planned_call<'a>(action: &'a AgentAction, skill: &str, action_name: &str) -> Option<&'a Value> {
+    let (actual_skill, args) = match action {
+        AgentAction::CallSkill { skill, args } => (skill.as_str(), args),
+        AgentAction::CallTool { tool, args } => (tool.as_str(), args),
+        _ => return None,
+    };
+    let actual_action = args.get("action").and_then(Value::as_str)?;
+    (actual_skill == skill && actual_action == action_name).then_some(args)
+}
+
+fn ok_step(step_id: &str, skill: &str, output: &str) -> StepExecutionResult {
+    StepExecutionResult {
+        step_id: step_id.to_string(),
+        skill: skill.to_string(),
+        status: StepExecutionStatus::Ok,
+        output: Some(output.to_string()),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    }
+}
+
+#[test]
+fn recent_artifacts_judgment_keeps_config_file_content_reads() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let route = route_with_contract(IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+        locator_hint: "configs".to_string(),
+        ..IntentOutputContract::default()
+    });
+    let required = crate::task_contract::fallback_required_evidence_fields_for_output_contract(
+        &route.output_contract,
+    );
+    assert!(required.contains(&"content_excerpt".to_string()));
+    assert!(!required.contains(&"field_value".to_string()));
+
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "read_text_range",
+                "path": "configs/task_contract_matrix.toml",
+                "mode": "head",
+                "n": 15,
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(2),
+        &route.resolved_intent,
+        None,
+        actions,
+    );
+
+    assert!(
+        normalized
+            .iter()
+            .any(|action| planned_call(action, "fs_basic", "read_text_range").is_some()),
+        "normalized actions should keep bounded content reads: {normalized:?}"
+    );
+    assert!(
+        normalized
+            .iter()
+            .all(|action| {
+                planned_call(action, "config_basic", "read_field").is_none()
+                    && planned_call(action, "config_basic", "read_fields").is_none()
+            }),
+        "recent artifact classification must not rewrite content reads to field reads: {normalized:?}"
+    );
+}
+
+#[test]
+fn recent_artifacts_judgment_expands_listing_only_to_selected_content_reads() {
+    let mut state = crate::AppState::test_default_with_fixture_provider();
+    state.skill_rt.workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("repo root")
+        .to_path_buf();
+    let route = route_with_contract(IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+        locator_hint: "configs".to_string(),
+        ..IntentOutputContract::default()
+    });
+    let actions = vec![AgentAction::CallTool {
+        tool: "fs_basic".to_string(),
+        args: json!({
+            "action": "list_dir",
+            "path": "configs",
+            "sort_by": "mtime_desc",
+            "max_entries": 3,
+            "files_only": true,
+            "names_only": false,
+        }),
+    }];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        &route.resolved_intent,
+        None,
+        actions,
+    );
+
+    assert!(
+        planned_call(&normalized[0], "fs_basic", "list_dir").is_some(),
+        "{normalized:?}"
+    );
+    let read_count = normalized
+        .iter()
+        .filter(|action| planned_call(action, "fs_basic", "read_text_range").is_some())
+        .count();
+    assert_eq!(read_count, 3, "{normalized:?}");
+    assert!(
+        normalized
+            .iter()
+            .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. })),
+        "{normalized:?}"
+    );
+    assert!(
+        matches!(normalized.last(), Some(AgentAction::Respond { content }) if content == "{{last_output}}"),
+        "{normalized:?}"
+    );
+}
+
+#[test]
+fn recent_artifacts_judgment_rewrites_synth_only_after_listing_to_selected_file_reads() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let route = route_with_contract(IntentOutputContract {
+        response_shape: OutputResponseShape::Free,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+        locator_hint: "configs".to_string(),
+        ..IntentOutputContract::default()
+    });
+    let mut loop_state = LoopState::new(2);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","entries":[{"kind":"file","path":"configs/task_contract_matrix.toml"},{"kind":"file","path":"configs/agent_guard.toml"},{"kind":"file","path":"configs/skills_registry.toml"}],"sort_by":"mtime_desc"},"text":"{}"}"#,
+    ));
+    let actions = vec![
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+        AgentAction::Respond {
+            content: "{{last_output}}".to_string(),
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        &route.resolved_intent,
+        Some("configs"),
+        actions,
+    );
+
+    let read_paths = normalized
+        .iter()
+        .filter_map(|action| planned_call(action, "fs_basic", "read_text_range"))
+        .filter_map(|args| args.get("path").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        read_paths,
+        vec![
+            "configs/task_contract_matrix.toml",
+            "configs/agent_guard.toml",
+            "configs/skills_registry.toml"
+        ],
+        "{normalized:?}"
+    );
+    assert!(
+        normalized
+            .iter()
+            .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. })),
+        "{normalized:?}"
+    );
+}
+
+#[test]
+fn recent_artifacts_judgment_rewrites_repair_field_extract_to_selected_file_reads() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let route = route_with_contract(IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+        locator_hint: "configs".to_string(),
+        ..IntentOutputContract::default()
+    });
+    let mut loop_state = LoopState::new(4);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","entries":[{"kind":"file","path":"configs/task_contract_matrix.toml"},{"kind":"file","path":"configs/agent_guard.toml"},{"kind":"file","path":"configs/skills_registry.toml"}],"names":["task_contract_matrix.toml","agent_guard.toml","skills_registry.toml"],"sort_by":"mtime_desc"},"text":"{}"}"#,
+    ));
+
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "system_basic".to_string(),
+            args: json!({
+                "action": "extract_field",
+                "path": "configs/task_contract_matrix.toml",
+                "field_path": "runtime"
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        &route.resolved_intent,
+        Some("configs"),
+        actions,
+    );
+
+    let read_paths = normalized
+        .iter()
+        .filter_map(|action| planned_call(action, "fs_basic", "read_text_range"))
+        .filter_map(|args| args.get("path").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        read_paths,
+        vec![
+            "configs/task_contract_matrix.toml",
+            "configs/agent_guard.toml",
+            "configs/skills_registry.toml"
+        ],
+        "{normalized:?}"
+    );
+    assert!(
+        normalized
+            .iter()
+            .all(|action| planned_call(action, "system_basic", "extract_field").is_none()),
+        "field extraction should be rewritten away: {normalized:?}"
+    );
+    assert!(
+        normalized
+            .iter()
+            .any(|action| matches!(action, AgentAction::SynthesizeAnswer { .. })),
+        "rewritten plan should synthesize from bounded reads: {normalized:?}"
+    );
+}
+
+#[test]
+fn recent_artifacts_judgment_rewrites_capability_field_extract_to_selected_file_reads() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let route = route_with_contract(IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::Path,
+        semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+        locator_hint: "configs".to_string(),
+        ..IntentOutputContract::default()
+    });
+    let mut loop_state = LoopState::new(4);
+    loop_state.has_tool_or_skill_output = true;
+    loop_state.executed_step_results.push(ok_step(
+        "step_1",
+        "fs_basic",
+        r#"{"extra":{"action":"inventory_dir","entries":[{"kind":"file","path":"configs/task_contract_matrix.toml"},{"kind":"file","path":"configs/agent_guard.toml"},{"kind":"file","path":"configs/skills_registry.toml"}],"sort_by":"mtime_desc"},"text":"{}"}"#,
+    ));
+
+    let actions = vec![
+        AgentAction::CallCapability {
+            capability: "config_basic".to_string(),
+            args: json!({
+                "action": "read_field",
+                "path": "configs/task_contract_matrix.toml",
+                "field_path": "runtime"
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &loop_state,
+        &route.resolved_intent,
+        Some("configs"),
+        actions,
+    );
+
+    let read_count = normalized
+        .iter()
+        .filter(|action| planned_call(action, "fs_basic", "read_text_range").is_some())
+        .count();
+    assert_eq!(read_count, 3, "{normalized:?}");
+    assert!(
+        normalized
+            .iter()
+            .all(|action| !matches!(action, AgentAction::CallCapability { .. })),
+        "field extraction capability should be rewritten away: {normalized:?}"
+    );
+}
+
+#[test]
+fn recent_artifacts_workspace_root_does_not_add_unsorted_tree_context_for_ranking() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let route = route_with_contract(IntentOutputContract {
+        response_shape: OutputResponseShape::Strict,
+        requires_content_evidence: true,
+        locator_kind: OutputLocatorKind::CurrentWorkspace,
+        semantic_kind: OutputSemanticKind::RecentArtifactsJudgment,
+        ..IntentOutputContract::default()
+    });
+    let actions = vec![
+        AgentAction::CallTool {
+            tool: "fs_basic".to_string(),
+            args: json!({
+                "action": "list_dir",
+                "path": ".",
+                "sort_by": "mtime_desc",
+                "max_entries": 3,
+            }),
+        },
+        AgentAction::SynthesizeAnswer {
+            evidence_refs: vec!["last_output".to_string()],
+        },
+    ];
+
+    let normalized = normalize_planned_actions(
+        &state,
+        Some(&route),
+        &LoopState::new(1),
+        &route.resolved_intent,
+        Some("."),
+        actions,
+    );
+
+    assert!(
+        normalized
+            .iter()
+            .all(|action| planned_call(action, "system_basic", "tree_summary").is_none()),
+        "root tree_summary is unsorted and must not replace mtime-ranked candidates: {normalized:?}"
+    );
+}

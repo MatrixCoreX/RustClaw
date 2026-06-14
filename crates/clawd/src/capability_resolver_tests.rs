@@ -2,6 +2,27 @@ use serde_json::json;
 
 use super::*;
 
+fn state_with_workspace_registry() -> crate::AppState {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let registry_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../configs/skills_registry.toml");
+    let registry = claw_core::skill_registry::SkillsRegistry::load_from_path(&registry_path)
+        .expect("load workspace skills registry");
+    let enabled = registry
+        .enabled_names()
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    *state
+        .core
+        .skill_views_snapshot
+        .write()
+        .expect("skill snapshot lock") = std::sync::Arc::new(crate::SkillViewsSnapshot {
+        registry: Some(std::sync::Arc::new(registry)),
+        skills_list: std::sync::Arc::new(enabled),
+    });
+    state
+}
+
 #[test]
 fn resolves_filesystem_list_entries_to_fs_basic() {
     let action = resolve_static_capability_action(
@@ -118,4 +139,104 @@ fn resolver_candidate_rank_prefers_dedicated_low_risk_tool_before_run_cmd() {
     ];
     candidates.sort_by_key(resolver_candidate_rank);
     assert_eq!(candidates[0].skill, "fs_basic");
+}
+
+#[test]
+fn capability_resolution_record_covers_resolved_mapping() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "filesystem.list_entries",
+        json!({"path": "."}),
+    );
+    let action = action.expect("static filesystem capability should resolve");
+    match action {
+        AgentAction::CallTool { tool, .. } => assert_eq!(tool, "fs_basic"),
+        AgentAction::CallSkill { skill, .. } => assert_eq!(skill, "fs_basic"),
+        other => panic!("unexpected resolved action: {other:?}"),
+    }
+    assert_eq!(record.owner_layer, "capability_resolver");
+    assert!(matches!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+            | "capability_resolver_static_mapping_resolved"
+    ));
+    assert_eq!(record.outcome, "resolved");
+    assert!(matches!(record.source, "registry" | "static"));
+    assert_eq!(record.capability_ref, "filesystem.list_entries");
+    assert!(matches!(
+        record.resolved_ref.as_deref(),
+        Some("tool:fs_basic") | Some("skill:fs_basic")
+    ));
+    assert!(record.planner_kind.is_some());
+}
+
+#[test]
+fn registry_resolves_crypto_positions_capability() {
+    let state = state_with_workspace_registry();
+    let (action, record) =
+        resolve_capability_action_with_record_for_state(&state, "crypto.positions", json!({}));
+    let action = action.expect("registry crypto.positions capability should resolve");
+    match action {
+        AgentAction::CallSkill { skill, args } => {
+            assert_eq!(skill, "crypto");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("positions")
+            );
+        }
+        other => panic!("unexpected resolved action: {other:?}"),
+    }
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    assert_eq!(record.source, "registry");
+    assert_eq!(record.capability_ref, "crypto.positions");
+}
+
+#[test]
+fn registry_resolves_doc_parse_bare_capability() {
+    let state = state_with_workspace_registry();
+    let (action, record) = resolve_capability_action_with_record_for_state(
+        &state,
+        "doc_parse",
+        json!({"path": "/tmp/example.md"}),
+    );
+    let action = action.expect("registry doc_parse capability should resolve");
+    match action {
+        AgentAction::CallTool { tool, args } => {
+            assert_eq!(tool, "doc_parse");
+            assert_eq!(
+                args.get("action").and_then(Value::as_str),
+                Some("parse_doc")
+            );
+            assert_eq!(
+                args.get("path").and_then(Value::as_str),
+                Some("/tmp/example.md")
+            );
+        }
+        other => panic!("unexpected resolved action: {other:?}"),
+    }
+    assert_eq!(
+        record.reason_code,
+        "capability_resolver_registry_mapping_resolved"
+    );
+    assert_eq!(record.source, "registry");
+    assert_eq!(record.capability_ref, "doc_parse");
+}
+
+#[test]
+fn capability_resolution_record_covers_unresolved_mapping() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let (action, record) =
+        resolve_capability_action_with_record_for_state(&state, "unknown.example", json!({}));
+    assert!(action.is_none());
+    assert_eq!(record.owner_layer, "capability_resolver");
+    assert_eq!(record.reason_code, "capability_resolver_unresolved");
+    assert_eq!(record.outcome, "unresolved");
+    assert_eq!(record.source, "none");
+    assert_eq!(record.capability_ref, "unknown.example");
+    assert!(record.resolved_ref.is_none());
+    assert!(record.planner_kind.is_none());
 }

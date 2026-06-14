@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://rustclaw.local/prompts/schemas/direct_answer_gate.schema.json",
   "title": "DirectAnswerGateOut",
-  "description": "Schema for the JSON object returned by prompts/direct_answer_gate_prompt.md.",
+  "description": "Schema for the JSON object returned by prompts/direct_answer_gate_prompt.md. This output is a fallback safety decision for legacy direct-answer paths, not the ordinary semantic authority when planner-loop routing is enabled.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -51,6 +51,11 @@
           ]
         }
       }
+    },
+    "state_patch": {
+      "description": "Optional structured state patch for already-observed direct-answer follow-ups, such as quantity_comparison={source,selection,candidates,winner}. Runtime consumes this as machine state, not user-visible prose.",
+      "type": ["object", "null"],
+      "default": null
     },
     "output_contract": {
       "type": "object",
@@ -102,6 +107,7 @@
             "file_paths",
             "directory_purpose_summary",
             "content_excerpt_summary",
+            "document_heading",
             "content_excerpt_with_summary",
             "content_presence_check",
             "excerpt_kind_judgment",
@@ -111,6 +117,7 @@
             "quantity_comparison",
             "execution_failed_step",
             "generated_file_delivery",
+            "generated_file_path_report",
             "filesystem_mutation_result",
             "scalar_path_only",
             "file_basename",

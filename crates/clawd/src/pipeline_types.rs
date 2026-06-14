@@ -81,6 +81,7 @@ pub(crate) enum OutputSemanticKind {
     FilePaths,
     DirectoryPurposeSummary,
     ContentExcerptSummary,
+    DocumentHeading,
     ContentExcerptWithSummary,
     ContentPresenceCheck,
     ExcerptKindJudgment,
@@ -90,6 +91,7 @@ pub(crate) enum OutputSemanticKind {
     QuantityComparison,
     ExecutionFailedStep,
     GeneratedFileDelivery,
+    GeneratedFilePathReport,
     FilesystemMutationResult,
     ScalarPathOnly,
     FileBasename,
@@ -137,6 +139,7 @@ impl OutputSemanticKind {
         Self::FilePaths,
         Self::DirectoryPurposeSummary,
         Self::ContentExcerptSummary,
+        Self::DocumentHeading,
         Self::ContentExcerptWithSummary,
         Self::ContentPresenceCheck,
         Self::ExcerptKindJudgment,
@@ -146,6 +149,7 @@ impl OutputSemanticKind {
         Self::QuantityComparison,
         Self::ExecutionFailedStep,
         Self::GeneratedFileDelivery,
+        Self::GeneratedFilePathReport,
         Self::FilesystemMutationResult,
         Self::ScalarPathOnly,
         Self::FileBasename,
@@ -193,6 +197,7 @@ impl OutputSemanticKind {
             Self::FilePaths => "file_paths",
             Self::DirectoryPurposeSummary => "directory_purpose_summary",
             Self::ContentExcerptSummary => "content_excerpt_summary",
+            Self::DocumentHeading => "document_heading",
             Self::ContentExcerptWithSummary => "content_excerpt_with_summary",
             Self::ContentPresenceCheck => "content_presence_check",
             Self::ExcerptKindJudgment => "excerpt_kind_judgment",
@@ -202,6 +207,7 @@ impl OutputSemanticKind {
             Self::QuantityComparison => "quantity_comparison",
             Self::ExecutionFailedStep => "execution_failed_step",
             Self::GeneratedFileDelivery => "generated_file_delivery",
+            Self::GeneratedFilePathReport => "generated_file_path_report",
             Self::FilesystemMutationResult => "filesystem_mutation_result",
             Self::ScalarPathOnly => "scalar_path_only",
             Self::FileBasename => "file_basename",
@@ -286,6 +292,44 @@ pub(crate) struct SelfExtensionContract {
     pub(crate) mode: SelfExtensionMode,
     pub(crate) trigger: SelfExtensionTrigger,
     pub(crate) execute_now: bool,
+    pub(crate) scalar_count_filter: OutputScalarCountFilter,
+    pub(crate) list_selector: OutputListSelector,
+    pub(crate) structured_field_selector: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum OutputScalarCountTargetKind {
+    #[default]
+    Any,
+    File,
+    Dir,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct OutputScalarCountFilter {
+    pub(crate) target_kind: OutputScalarCountTargetKind,
+    pub(crate) include_hidden: Option<bool>,
+    pub(crate) recursive: Option<bool>,
+    pub(crate) extensions: Vec<String>,
+}
+
+impl OutputScalarCountFilter {
+    pub(crate) fn has_constraints(&self) -> bool {
+        self.target_kind != OutputScalarCountTargetKind::Any
+            || self.include_hidden.is_some()
+            || self.recursive.is_some()
+            || !self.extensions.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct OutputListSelector {
+    pub(crate) target_kind: OutputScalarCountTargetKind,
+    pub(crate) target_kind_specified: bool,
+    pub(crate) limit: Option<u64>,
+    pub(crate) sort_by: Option<String>,
+    pub(crate) include_metadata: Option<bool>,
+    pub(crate) include_hidden: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default)]

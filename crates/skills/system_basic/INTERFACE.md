@@ -121,7 +121,8 @@
 - `runtime_status` success `extra` fields:
   - `action`, `kind`, `value`, `field_value`, and `command_output`; evidence roles `field_value` and `command_output`.
 - `inventory_dir` success `extra` fields:
-  - `action`, `path`, `resolved_path`, `names`, `entries`, `counts`, and truncation/cap metadata; evidence roles `path`, `entries`, `results`, and `count`.
+  - `action`, `path`, `resolved_path`, `names`, `entries`, `counts`, `size_summary`, and truncation/cap metadata; evidence roles `path`, `entries`, `results`, `field_value`, and `count`.
+  - `size_summary` is language-neutral machine evidence with `matched_file_count`, `total_file_size_bytes`, `largest_file`, and `smallest_file`; use it for size comparisons instead of inferring from natural-language listing text.
 - `count_inventory` success `extra` fields:
   - `action`, `path`, `resolved_path`, `counts`, filters, and recursion flags; evidence roles `path` and `count`.
 - `workspace_glance`, `tree_summary`, and `dir_compare` success `extra` fields:

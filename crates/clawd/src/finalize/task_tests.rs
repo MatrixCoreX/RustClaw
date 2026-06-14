@@ -1,7 +1,11 @@
 use super::{
-    answer_verifier_forces_task_failure, assistant_memory_source_text,
-    deterministic_filtered_log_entry_recovery, drop_execution_summaries_when_delivery_is_scalar,
+    answer_text_is_machine_json_payload, answer_verifier_failure_machine_line,
+    answer_verifier_forces_task_failure, answer_verifier_should_force_task_failure,
+    ask_runtime_failure_machine_payload, assistant_memory_source_text,
+    delivery_path_gap_should_finalize_as_clarify, deterministic_filtered_log_entry_recovery,
+    deterministic_raw_tail_read_failure_recovery, drop_execution_summaries_when_delivery_is_scalar,
     journal_has_missing_file_search_evidence, non_failure_final_status,
+    record_answer_verifier_required_evidence_rollout_attribution,
     resume_context_has_directory_lookup_failure, resume_context_path_batch_facts_are_missing_only,
     resume_failure_is_unbound_path_lookup_clarify_result,
     should_reinsert_execution_summaries_for_delivery, should_use_answer_route_result,
@@ -57,6 +61,166 @@ fn answer_verifier_high_confidence_gap_forces_task_failure() {
 
     assert!(answer_verifier_forces_task_failure(false, &journal));
     assert!(!answer_verifier_forces_task_failure(true, &journal));
+    let payload: serde_json::Value = serde_json::from_str(
+        &journal
+            .answer_verifier_summary
+            .as_ref()
+            .expect("summary")
+            .required_evidence_failure_payload_text(),
+    )
+    .expect("structured payload");
+    assert_eq!(
+        payload
+            .get("message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("answer_verifier_required_evidence_block")
+    );
+    assert_eq!(
+        payload
+            .pointer("/missing_evidence_fields/0")
+            .and_then(serde_json::Value::as_str),
+        Some("command_output")
+    );
+    assert!(!answer_verifier_should_force_task_failure(
+        false, false, &journal
+    ));
+    assert!(answer_verifier_should_force_task_failure(
+        true, false, &journal
+    ));
+    assert!(!answer_verifier_should_force_task_failure(
+        true, true, &journal
+    ));
+    record_answer_verifier_required_evidence_rollout_attribution(&mut journal);
+    assert_eq!(
+        journal
+            .to_summary_json()
+            .pointer("/rollout_attribution/0/switch_name")
+            .and_then(serde_json::Value::as_str),
+        Some("answer_verifier_enforce_required")
+    );
+    assert_eq!(
+        journal
+            .to_summary_json()
+            .pointer("/rollout_attribution/0/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("answer_verifier_required_evidence_block")
+    );
+}
+
+#[test]
+fn delivery_path_gap_without_observation_finalizes_as_clarify() {
+    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    route.output_contract.delivery_required = true;
+    route.output_contract.response_shape = crate::OutputResponseShape::FileToken;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::GeneratedFileDelivery;
+
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-delivery-clarify", "ask", "prompt");
+    journal.answer_verifier_summary = Some(crate::task_journal::TaskJournalAnswerVerifierSummary {
+        pass: false,
+        missing_evidence_fields: vec!["path".to_string()],
+        answer_incomplete_reason: "missing_required_evidence:path".to_string(),
+        should_retry: false,
+        retry_instruction: "collect_required_evidence_fields:path".to_string(),
+        confidence: 0.0,
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "respond".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some("needs_input".to_string()),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+    journal.record_final_stop_signal("respond");
+
+    assert!(delivery_path_gap_should_finalize_as_clarify(
+        &route,
+        "needs_input",
+        &["needs_input".to_string()],
+        &journal,
+    ));
+    assert!(!delivery_path_gap_should_finalize_as_clarify(
+        &route,
+        "FILE:/tmp/result.txt",
+        &[],
+        &journal,
+    ));
+
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_2".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(r#"{"path":"/tmp/result.txt"}"#.to_string()),
+        error: None,
+        started_at: 3,
+        finished_at: 4,
+    });
+    assert!(!delivery_path_gap_should_finalize_as_clarify(
+        &route,
+        "needs_input",
+        &[],
+        &journal,
+    ));
+}
+
+#[test]
+fn ask_runtime_failure_payload_is_machine_readable() {
+    let payload: serde_json::Value =
+        serde_json::from_str(&ask_runtime_failure_machine_payload("provider timeout")).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.ask_runtime_failure")
+    );
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("ask_runtime_failure")
+    );
+    assert_eq!(
+        payload
+            .pointer("/error_summary")
+            .and_then(serde_json::Value::as_str),
+        Some("provider timeout")
+    );
+}
+
+#[test]
+fn answer_verifier_failure_machine_json_is_detected() {
+    assert!(answer_text_is_machine_json_payload(
+        r#"{"message_key":"answer_verifier_required_evidence_block","missing_evidence_fields":["output_format"]}"#,
+    ));
+    assert!(!answer_text_is_machine_json_payload("rustclaw"));
+}
+
+#[test]
+fn answer_verifier_failure_fallback_line_is_not_json() {
+    let line = answer_verifier_failure_machine_line(
+        r#"{"message_key":"answer_verifier_required_evidence_block","missing_evidence_fields":["output_format"]}"#,
+    );
+    assert!(line.contains("message_key=answer_verifier_required_evidence_block"));
+    assert!(line.contains("missing_evidence_fields=output_format"));
+    assert!(serde_json::from_str::<serde_json::Value>(&line).is_err());
+}
+
+#[test]
+fn answer_verifier_failure_err_json_triggers_user_message_path() {
+    assert!(super::answer_verifier_failure_needs_user_message(
+        "Host ThinkPad-X1 is observable.",
+        r#"{"message_key":"answer_verifier_required_evidence_block","answer_incomplete_reason":"shape"}"#,
+    ));
+}
+
+#[test]
+fn answer_verifier_failure_machine_line_triggers_user_message_path() {
+    assert!(super::answer_verifier_failure_needs_user_message(
+        "message_key=answer_verifier_required_evidence_block missing_evidence_fields=content_excerpt",
+        "",
+    ));
 }
 
 #[test]
@@ -101,6 +265,74 @@ fn filtered_log_entry_gap_recovers_from_read_range_observation() {
     assert!(recovered.contains("log.filtered_entry.line=10"));
     assert!(recovered.contains("provider timeout"));
     assert!(!recovered.contains("removed_think_block"));
+}
+
+#[test]
+fn raw_tail_read_failure_recovery_returns_observed_excerpt() {
+    let state = crate::AppState::test_default_with_fixture_provider();
+    let task = crate::ClaimedTask {
+        task_id: "task-raw-tail-recovery".to_string(),
+        user_id: 1,
+        chat_id: 1,
+        user_key: None,
+        channel: "test".to_string(),
+        external_user_id: None,
+        external_chat_id: None,
+        kind: "ask".to_string(),
+        payload_json: "{}".to_string(),
+    };
+    let mut route = route_result(crate::AskMode::planner_execute_plain());
+    route.output_contract.response_shape = crate::OutputResponseShape::Strict;
+    route.output_contract.semantic_kind = crate::OutputSemanticKind::RawCommandOutput;
+    route.output_contract.requires_content_evidence = true;
+    route.output_contract.delivery_required = false;
+    route.output_contract.locator_kind = crate::OutputLocatorKind::Path;
+    route.output_contract.locator_hint = "/workspace/logs/clawd-dev.log".to_string();
+    let mut journal =
+        crate::task_journal::TaskJournal::for_task("task-raw-tail-recovery", "ask", "prompt");
+    journal.record_finalizer_summary(crate::task_journal::TaskJournalFinalizerSummary {
+        stage: Some(crate::task_journal::TaskJournalFinalizerStage::ObservedGeneric),
+        disposition: Some(crate::finalize::FinalizerDisposition::QualifiedCompletion),
+        contract_ok: true,
+        used_evidence_ids_count: 1,
+        ..Default::default()
+    });
+    journal.push_step_result(&crate::executor::StepExecutionResult {
+        step_id: "step_1".to_string(),
+        skill: "fs_basic".to_string(),
+        status: crate::executor::StepExecutionStatus::Ok,
+        output: Some(
+            json!({
+                "extra": {
+                    "action": "read_range",
+                    "mode": "tail",
+                    "requested_n": 2,
+                    "path": "/workspace/logs/clawd-dev.log",
+                    "resolved_path": "/workspace/logs/clawd-dev.log",
+                    "excerpt": "98|WARN provider failed: http 401: credential_missing\n99|WARN memory preference fallback failed: http 401"
+                },
+                "text": "{}"
+            })
+            .to_string(),
+        ),
+        error: None,
+        started_at: 1,
+        finished_at: 2,
+    });
+
+    let recovered = deterministic_raw_tail_read_failure_recovery(
+        &state,
+        &task,
+        "read tail lines",
+        &route,
+        &journal,
+    )
+    .expect("raw tail read should recover from observed evidence");
+
+    assert_eq!(
+        recovered,
+        "WARN provider failed: http 401: credential_missing\nWARN memory preference fallback failed: http 401"
+    );
 }
 
 #[test]
@@ -622,11 +854,35 @@ fn resume_failure_execution_failed_step_is_success_answer_with_remaining_actions
     let answer = super::resume_failure_execution_failed_step_answer(&route, &resume_ctx, false)
         .expect("execution-failed-step answer");
 
-    assert!(answer.contains("cat /definitely_missing_rustclaw_contract_case"));
-    assert!(answer.contains("退出码为 1"));
-    assert!(answer.contains("No such file or directory"));
-    assert!(!answer.contains("继续"));
-    assert!(!answer.contains("暂停"));
+    let payload: serde_json::Value = serde_json::from_str(&answer).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/message_key")
+            .and_then(serde_json::Value::as_str),
+        Some("clawd.msg.execution.failed_step")
+    );
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(serde_json::Value::as_str),
+        Some("execution_failed_step")
+    );
+    assert_eq!(
+        payload
+            .pointer("/command")
+            .and_then(serde_json::Value::as_str),
+        Some("cat /definitely_missing_rustclaw_contract_case")
+    );
+    assert_eq!(
+        payload
+            .pointer("/exit_code")
+            .and_then(serde_json::Value::as_i64),
+        Some(1)
+    );
+    assert!(payload
+        .pointer("/detail")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|detail| detail.contains("No such file or directory")));
 }
 
 #[test]

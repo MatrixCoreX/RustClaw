@@ -9,8 +9,19 @@ mod attempt_ledger;
 mod dispatch_support;
 mod execution_loop;
 pub(crate) mod loop_control;
+pub(crate) mod migration_class;
 pub(crate) mod observed_output;
 mod planning;
+mod planning_actions;
+mod planning_followup;
+mod planning_numeric_limits;
+mod planning_parse;
+mod planning_path_metadata;
+mod planning_prompt;
+mod planning_recent_artifacts;
+mod planning_registry_preference;
+mod planning_route_markers;
+mod planning_structured_field_exact;
 mod prepare_round;
 mod skill_execution;
 mod support;
@@ -20,6 +31,13 @@ pub(crate) fn explicit_command_segment_for_policy(
     request: &str,
 ) -> Option<String> {
     planning::explicit_command_segment(runtime, request)
+}
+
+pub(crate) fn explicit_execution_command_segment_for_policy(
+    runtime: &crate::CommandIntentRuntime,
+    request: &str,
+) -> Option<String> {
+    planning::explicit_execution_command_segment(runtime, request)
 }
 
 use self::arg_resolver::{
@@ -35,23 +53,187 @@ use self::prepare_round::{prepare_round_actions, push_round_trace};
 use self::skill_execution::execute_prepared_skill_action;
 pub(crate) use self::support::append_delivery_message;
 use self::support::{
-    action_fingerprint, append_progress_hint, build_safe_skill_args_summary, encode_progress_i18n,
-    load_agent_loop_guard_policy, maybe_publish_execution_recipe_phase_hint, AgentLoopGuardPolicy,
-    PROGRESS_ARGS_SUMMARY_MAX_LEN,
+    action_fingerprint_for_policy, append_progress_hint, build_safe_skill_args_summary,
+    encode_progress_i18n, load_agent_loop_guard_policy, maybe_publish_execution_recipe_phase_hint,
+    registry_idempotency_guard_attribution, AgentLoopGuardPolicy, PROGRESS_ARGS_SUMMARY_MAX_LEN,
 };
 
 use crate::{repo, AgentAction, AppState, AskReply, ClaimedTask};
+
+pub(crate) fn answer_verifier_enforce_required_enabled(state: &AppState) -> bool {
+    load_agent_loop_guard_policy(state).answer_verifier_enforce_required
+}
+
+pub(crate) fn agent_loop_authority_selected_migration_class(
+    state: &AppState,
+    route: &crate::RouteResult,
+) -> Option<&'static str> {
+    let policy = load_agent_loop_guard_policy(state);
+    agent_loop_authority_selected_migration_class_for_policy(&policy, route)
+}
+
+pub(in crate::agent_engine) fn agent_loop_authority_selected_migration_class_for_policy(
+    policy: &AgentLoopGuardPolicy,
+    route: &crate::RouteResult,
+) -> Option<&'static str> {
+    if !policy.uses_agent_loop_semantic_authority()
+        || route.risk_ceiling == crate::RiskCeiling::High
+        || route.schedule_kind != crate::ScheduleKind::None
+    {
+        return None;
+    }
+    let eligible = migration_class::agent_decides_eligible_migration_class(route);
+    let selected = policy.selected_migration_class_for_eligible(eligible);
+    if selected != "none" {
+        Some(selected)
+    } else {
+        None
+    }
+}
+
+pub(crate) fn agent_decides_shadow_snapshot_for_route(
+    state: &AppState,
+    task: &ClaimedTask,
+    agent_run_context: Option<&AgentRunContext>,
+    route: &crate::RouteResult,
+) -> Option<crate::task_journal::TaskJournalRolloutAttribution> {
+    let policy = load_agent_loop_guard_policy(state);
+    if !policy.records_agent_decides_attribution() {
+        return None;
+    }
+    let budget_profile = AgentLoopGuardPolicy::budget_profile_for_context(
+        crate::execution_recipe::ExecutionRecipeRuntimeState::default(),
+        Some(route),
+    );
+    Some(
+        crate::task_journal::TaskJournalRolloutAttribution::agent_decides_shadow_snapshot(
+            route,
+            budget_profile.as_str(),
+            Some(loop_control::boundary_context_snapshot_json(
+                task,
+                &policy,
+                agent_run_context,
+                Some(route),
+                budget_profile,
+            )),
+        ),
+    )
+}
 
 const AGENT_TOOL_SPEC_PATH: &str = "prompts/agent_tool_spec.md";
 const CLAWD_CONTINUE_ON_ERROR_ARG: &str = "_clawd_continue_on_error";
 const CLAWD_LITERAL_COMMAND_ARG: &str = "_clawd_literal_command";
 const CLAWD_LITERAL_FAILURE_REPAIRABLE_ARG: &str = "_clawd_literal_failure_repairable";
 const CLAWD_MISSING_TARGET_REPAIRABLE_ARG: &str = "_clawd_missing_target_repairable";
+const CLAWD_USER_NAMED_OUTPUT_PATH_ARG: &str = "_clawd_user_named_output_path";
 const SINGLE_PLAN_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/single_plan_execution_prompt.md";
 const LIGHTWEIGHT_EXECUTION_PROMPT_LOGICAL_PATH: &str = "prompts/lightweight_execution_prompt.md";
 const LOOP_INCREMENTAL_PLAN_PROMPT_LOGICAL_PATH: &str = "prompts/loop_incremental_plan_prompt.md";
 const PLAN_REPAIR_PROMPT_LOGICAL_PATH: &str = "prompts/plan_repair_prompt.md";
 pub(crate) const TASK_CANCELED_ERR: &str = "__TASK_CANCELED_BY_USER__";
+
+fn structured_write_path_arg(normalized_skill: &str, args: &Value) -> Option<String> {
+    let obj = args.as_object()?;
+    match normalized_skill {
+        "write_file" => obj.get("path").and_then(Value::as_str),
+        "fs_basic" => {
+            let action = obj.get("action").and_then(Value::as_str)?.trim();
+            if matches!(action, "write_text" | "append_text") {
+                obj.get("path").and_then(Value::as_str)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+    .map(str::trim)
+    .filter(|path| !path.is_empty())
+    .map(ToString::to_string)
+}
+
+fn structured_write_has_content_arg(args: &Value) -> bool {
+    let Some(obj) = args.as_object() else {
+        return false;
+    };
+    ["content", "text", "data", "body"].iter().any(|key| {
+        obj.get(*key)
+            .and_then(Value::as_str)
+            .is_some_and(|v| !v.is_empty())
+    })
+}
+
+fn resolve_workspace_candidate_path(
+    workspace_root: &Path,
+    raw_path: &str,
+) -> Option<std::path::PathBuf> {
+    let trimmed = raw_path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let raw = Path::new(trimmed);
+    if raw
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return None;
+    }
+    let root = workspace_root
+        .canonicalize()
+        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let candidate = if raw.is_absolute() {
+        raw.to_path_buf()
+    } else {
+        root.join(raw)
+    };
+    candidate.starts_with(&root).then_some(candidate)
+}
+
+fn request_surface_names_user_output_path(request_text: &str, path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    let file_name = file_name.trim();
+    if file_name.is_empty() {
+        return false;
+    }
+    let surface = crate::intent::surface_signals::analyze_prompt_surface(request_text);
+    surface
+        .filename_candidates_excluding_field_selectors()
+        .into_iter()
+        .any(|candidate| {
+            let trimmed = candidate.trim();
+            let candidate_file_name = Path::new(trimmed)
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or(trimmed)
+                .trim();
+            !candidate_file_name.is_empty() && candidate_file_name.eq_ignore_ascii_case(file_name)
+        })
+}
+
+pub(crate) fn action_is_user_named_new_workspace_write(
+    workspace_root: &Path,
+    request_text: &str,
+    normalized_skill: &str,
+    args: &Value,
+) -> bool {
+    if !structured_write_has_content_arg(args) {
+        return false;
+    }
+    let Some(raw_path) = structured_write_path_arg(normalized_skill, args) else {
+        return false;
+    };
+    let Some(candidate) = resolve_workspace_candidate_path(workspace_root, &raw_path) else {
+        return false;
+    };
+    !candidate.exists() && request_surface_names_user_output_path(request_text, &candidate)
+}
+
+pub(crate) fn action_has_user_named_output_path_marker(args: &Value) -> bool {
+    args.get(CLAWD_USER_NAMED_OUTPUT_PATH_ARG)
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
 
 fn ensure_task_running(state: &AppState, task: &ClaimedTask) -> Result<(), String> {
     match repo::is_task_still_running(state, &task.task_id) {
@@ -370,6 +552,7 @@ pub(crate) struct LoopState {
     pub(crate) pending_user_input_required: bool,
     pub(crate) executed_step_results: Vec<crate::executor::StepExecutionResult>,
     pub(crate) round_traces: Vec<crate::task_journal::TaskJournalRoundTrace>,
+    pub(crate) rollout_attribution: Vec<crate::task_journal::TaskJournalRolloutAttribution>,
     pub(crate) execution_recipe: crate::execution_recipe::ExecutionRecipeRuntimeState,
     pub(crate) last_recipe_progress_phase: Option<crate::execution_recipe::ExecutionRecipePhase>,
     pub(crate) last_recipe_progress_scope:
@@ -431,6 +614,36 @@ fn seed_loop_state_from_agent_context(
             cross_turn_ctx.to_string(),
         );
     }
+    let alias_bindings = session_alias_bindings_for_loop_seed(ctx);
+    let alias_request_texts = [
+        ctx.original_user_request.as_deref(),
+        ctx.user_request
+            .as_deref()
+            .map(alias_mention_request_surface),
+    ];
+    let mut required_alias_targets = Vec::new();
+    for alias_request_text in alias_request_texts.into_iter().flatten() {
+        required_alias_targets.extend(
+            crate::conversation_state::alias_bindings_mentioned_in_prompt(
+                &alias_bindings,
+                alias_request_text,
+            )
+            .into_iter()
+            .filter_map(|binding| {
+                let target = binding.target.trim();
+                (!target.is_empty()).then_some(target.to_string())
+            }),
+        );
+    }
+    required_alias_targets.sort();
+    required_alias_targets.dedup();
+    if !required_alias_targets.is_empty() {
+        if let Ok(encoded) = serde_json::to_string(&required_alias_targets) {
+            loop_state
+                .output_vars
+                .insert("required_session_alias_targets".to_string(), encoded);
+        }
+    }
     if let Some(spec) = ctx.execution_recipe_hint {
         loop_state.output_vars.insert(
             "route_execution_recipe_kind".to_string(),
@@ -445,6 +658,67 @@ fn seed_loop_state_from_agent_context(
             spec.target_scope.as_str().to_string(),
         );
     }
+}
+
+fn alias_mention_request_surface(text: &str) -> &str {
+    text.split("### SESSION_ALIAS_BINDINGS")
+        .next()
+        .unwrap_or(text)
+}
+
+fn session_alias_bindings_for_loop_seed(
+    ctx: &AgentRunContext,
+) -> Vec<crate::conversation_state::SessionAliasBinding> {
+    let mut bindings = ctx.session_alias_bindings.clone();
+    if let Some(summary) = ctx.context_bundle_summary.as_deref() {
+        bindings.extend(session_alias_bindings_from_context_summary(summary));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    bindings.retain(|binding| {
+        let alias = binding.alias.trim();
+        let target = binding.target.trim();
+        if alias.is_empty() || target.is_empty() {
+            return false;
+        }
+        seen.insert((alias.to_string(), target.to_string()))
+    });
+    bindings
+}
+
+fn session_alias_bindings_from_context_summary(
+    summary: &str,
+) -> Vec<crate::conversation_state::SessionAliasBinding> {
+    let marker = "### SESSION_ALIAS_BINDINGS";
+    let Some((_, tail)) = summary.split_once(marker) else {
+        return Vec::new();
+    };
+    let block = tail.split("\n### ").next().unwrap_or(tail);
+    let mut current_alias: Option<String> = None;
+    let mut out = Vec::new();
+    for line in block.lines() {
+        let trimmed = line.trim();
+        let alias = trimmed
+            .strip_prefix("- alias:")
+            .or_else(|| trimmed.strip_prefix("alias:"))
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if let Some(alias) = alias {
+            current_alias = Some(alias.to_string());
+            continue;
+        }
+        let target = trimmed
+            .strip_prefix("target:")
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if let (Some(alias), Some(target)) = (current_alias.take(), target) {
+            out.push(crate::conversation_state::SessionAliasBinding {
+                alias,
+                target: target.to_string(),
+                updated_at_ts: 0,
+            });
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone)]
@@ -772,14 +1046,14 @@ fn plan_step_label(action: &AgentAction) -> String {
     }
 }
 
-fn user_safe_step_error(err: &str, prefer_english: bool) -> String {
+fn user_safe_step_error(err: &str, _prefer_english: bool) -> String {
     let trimmed = err.trim();
     if trimmed.is_empty() {
-        return if prefer_english {
-            "Execution failed without a clear reason.".to_string()
-        } else {
-            "执行失败，但没有返回明确原因".to_string()
-        };
+        return json!({
+            "message_key": "clawd.msg.execution.step_error_missing",
+            "reason_code": "execution_step_error_missing",
+        })
+        .to_string();
     }
     if let Some(structured) = crate::skills::parse_structured_skill_error(trimmed) {
         let skill = if structured.skill.trim().is_empty() {
@@ -792,6 +1066,23 @@ fn user_safe_step_error(err: &str, prefer_english: bool) -> String {
         ));
     }
     crate::truncate_for_agent_trace(trimmed)
+}
+
+fn resume_step_failed_machine_payload(
+    failed_index: usize,
+    failed_action: &str,
+    err: &str,
+    has_remaining_actions: bool,
+) -> String {
+    json!({
+        "message_key": "clawd.msg.execution.step_failed",
+        "reason_code": "execution_step_failed",
+        "failed_index": failed_index,
+        "failed_action": failed_action,
+        "error": err,
+        "remaining_actions_paused": has_remaining_actions,
+    })
+    .to_string()
 }
 
 fn resume_context_structured_skill_error(raw_err: Option<&str>) -> Option<Value> {
@@ -888,35 +1179,13 @@ async fn build_resume_context_error(
     let language_hint =
         crate::language_policy::task_response_language_hint(state, task, user_request);
     let prefer_english = language_hint.to_ascii_lowercase().starts_with("en");
-    let failed_index_text = failed_index.to_string();
     let safe_err = user_safe_step_error(err, prefer_english);
-    let fallback_user_error = if has_remaining_actions {
-        crate::bilingual_t_with_default_vars(
-            state,
-            "clawd.msg.resume_step_failed_with_remaining",
-            "第 {failed_index} 步未完成：{err}。后续步骤已暂停，你可以回复“继续”来执行剩余步骤。",
-            "Step {failed_index} could not be completed: {err}. Remaining steps were paused. Reply \"continue\" to run them.",
-            prefer_english,
-            &[
-                ("failed_index", &failed_index_text),
-                ("failed_action", failed_action),
-                ("err", &safe_err),
-            ],
-        )
-    } else {
-        crate::bilingual_t_with_default_vars(
-            state,
-            "clawd.msg.resume_step_failed_no_remaining",
-            "第 {failed_index} 步未完成：{err}",
-            "Step {failed_index} could not be completed: {err}",
-            prefer_english,
-            &[
-                ("failed_index", &failed_index_text),
-                ("failed_action", failed_action),
-                ("err", &safe_err),
-            ],
-        )
-    };
+    let fallback_user_error = resume_step_failed_machine_payload(
+        failed_index,
+        failed_action,
+        &safe_err,
+        has_remaining_actions,
+    );
     let mut observed_facts = vec![
         format!("failed_step_index: {failed_index}"),
         format!("failed_action: {failed_action}"),

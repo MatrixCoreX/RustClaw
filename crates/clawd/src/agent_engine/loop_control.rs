@@ -1,11 +1,24 @@
+use serde_json::{json, Value};
 use tracing::{info, warn};
 
+use super::support::LoopBudgetProfile;
 use super::{
     append_progress_hint, attempt_ledger, encode_progress_i18n, ensure_task_running,
     execute_actions_once, load_agent_loop_guard_policy, prepare_round_actions, push_round_trace,
     AgentLoopGuardPolicy, AgentRunContext, LoopState, RoundOutcome,
 };
 use crate::{AgentAction, AppState, AskReply, ClaimedTask, RouteResult};
+
+#[path = "loop_control_answer_recovery.rs"]
+mod loop_control_answer_recovery;
+#[path = "loop_control_answer_recovery_parse.rs"]
+mod loop_control_answer_recovery_parse;
+#[path = "loop_control_answer_recovery_text.rs"]
+mod loop_control_answer_recovery_text;
+
+use loop_control_answer_recovery::*;
+use loop_control_answer_recovery_parse::*;
+use loop_control_answer_recovery_text::*;
 
 fn has_authoritative_delivery(loop_state: &LoopState) -> bool {
     !loop_state.delivery_messages.is_empty()
@@ -110,6 +123,25 @@ fn route_needs_workspace_text_evidence_before_observed_finalize(route: &RouteRes
         && route.output_contract.locator_hint.trim().is_empty()
 }
 
+fn structured_scalar_equality_observation_can_finalize(
+    route_result: &RouteResult,
+    loop_state: &LoopState,
+    actions: &[AgentAction],
+) -> bool {
+    route_result.output_contract.semantic_kind
+        == crate::OutputSemanticKind::RecentScalarEqualityCheck
+        && !route_result.output_contract.delivery_required
+        && has_executable_observation_or_action(actions)
+        && !has_discussion_followup_action(actions)
+        && super::observed_output::structured_scalar_equality_direct_answer(
+            None,
+            route_result,
+            loop_state,
+            None,
+        )
+        .is_some()
+}
+
 fn latest_path_batch_facts_all_missing(loop_state: &LoopState) -> bool {
     for step in loop_state.executed_step_results.iter().rev() {
         if !step.is_ok() || step.skill != "system_basic" {
@@ -196,12 +228,27 @@ fn should_stop_for_observed_finalize(
             agent_run_context,
         )
         .is_some();
+    if structured_scalar_equality_observation_can_finalize(route_result, loop_state, actions) {
+        return required_success_marker.is_none_or(|marker| {
+            observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
+        });
+    }
     if route_result.output_contract.semantic_kind == crate::OutputSemanticKind::ExistenceWithPath
         && has_direct_observed_answer
     {
         return required_success_marker.is_none_or(|marker| {
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
         });
+    }
+    if quantity_comparison_one_sentence_needs_model_language_before_stop(route_result)
+        && !has_discussion_followup_action(actions)
+    {
+        return false;
+    }
+    if super::observed_output::route_disallows_direct_observation_passthrough(route_result)
+        && !has_discussion_followup_action(actions)
+    {
+        return false;
     }
     if route_result.output_contract.response_shape != crate::OutputResponseShape::Scalar
         && loop_state.round_no < loop_state.max_rounds
@@ -262,6 +309,17 @@ fn should_stop_for_observed_finalize(
         && required_success_marker.is_none_or(|marker| {
             observed_answer_contains_required_success_marker(agent_run_context, loop_state, marker)
         })
+}
+
+fn quantity_comparison_one_sentence_needs_model_language_before_stop(
+    route_result: &RouteResult,
+) -> bool {
+    route_result.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison
+        && route_result.output_contract.response_shape == crate::OutputResponseShape::OneSentence
+        && crate::contract_matrix::final_answer_shape_for_output_contract(
+            &route_result.output_contract,
+        )
+        .is_some_and(|shape| shape.allows_model_language())
 }
 
 fn evaluate_round_outcome(
@@ -393,6 +451,18 @@ async fn run_agent_round(
     )
     .await?;
     push_round_trace(loop_state, goal, &prepared_round);
+    let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
+    let budget_profile =
+        AgentLoopGuardPolicy::budget_profile_for_context(loop_state.execution_recipe, route_result);
+    maybe_record_agent_decides_shadow_first_action_attribution(
+        policy,
+        task,
+        agent_run_context,
+        route_result,
+        budget_profile,
+        &prepared_round.actions,
+        loop_state,
+    );
     let actions = prepared_round.actions;
     let mut outcome = execute_actions_once(
         state,
@@ -443,6 +513,433 @@ fn initial_execution_recipe_spec(
     crate::execution_recipe::ExecutionRecipeSpec::default()
 }
 
+fn maybe_record_agent_decides_shadow_attribution(
+    policy: &AgentLoopGuardPolicy,
+    task: &ClaimedTask,
+    agent_run_context: Option<&AgentRunContext>,
+    route_result: Option<&RouteResult>,
+    budget_profile: LoopBudgetProfile,
+    loop_state: &mut LoopState,
+) {
+    if !policy.records_agent_decides_attribution() {
+        return;
+    }
+    let Some(route) = route_result else {
+        return;
+    };
+    loop_state.rollout_attribution.push(
+        crate::task_journal::TaskJournalRolloutAttribution::agent_decides_shadow_snapshot(
+            route,
+            budget_profile.as_str(),
+            Some(boundary_context_snapshot_json(
+                task,
+                policy,
+                agent_run_context,
+                route_result,
+                budget_profile,
+            )),
+        ),
+    );
+}
+
+fn maybe_record_agent_decides_shadow_first_action_attribution(
+    policy: &AgentLoopGuardPolicy,
+    task: &ClaimedTask,
+    agent_run_context: Option<&AgentRunContext>,
+    route_result: Option<&RouteResult>,
+    budget_profile: LoopBudgetProfile,
+    actions: &[AgentAction],
+    loop_state: &mut LoopState,
+) {
+    if !policy.records_agent_decides_attribution() || loop_state.round_no != 1 {
+        return;
+    }
+    let Some(route) = route_result else {
+        return;
+    };
+    if loop_state
+        .rollout_attribution
+        .iter()
+        .any(|item| item.event == "agent_decides_shadow_first_action")
+    {
+        return;
+    }
+    loop_state.rollout_attribution.push(
+        crate::task_journal::TaskJournalRolloutAttribution::agent_decides_shadow_first_action(
+            route,
+            budget_profile.as_str(),
+            actions,
+            Some(boundary_context_snapshot_json(
+                task,
+                policy,
+                agent_run_context,
+                route_result,
+                budget_profile,
+            )),
+        ),
+    );
+}
+
+pub(super) fn boundary_context_snapshot_json(
+    task: &ClaimedTask,
+    policy: &AgentLoopGuardPolicy,
+    agent_run_context: Option<&AgentRunContext>,
+    route_result: Option<&RouteResult>,
+    budget_profile: LoopBudgetProfile,
+) -> Value {
+    let semantic_route_authority = policy.effective_semantic_route_authority();
+    let output_contract = route_result.map(|route| &route.output_contract);
+    let eligible_migration_class = route_result
+        .map(super::migration_class::agent_decides_eligible_migration_class)
+        .unwrap_or("none");
+    let selected_migration_class =
+        policy.selected_migration_class_for_eligible(eligible_migration_class);
+    let agent_loop_selected =
+        policy.uses_agent_loop_semantic_authority() && selected_migration_class != "none";
+    json!({
+        "schema_version": 1,
+        "owner_layer": "boundary_layer",
+        "semantic_routing": {
+            "activation_state": semantic_route_authority.as_str(),
+            "ordinary_semantic_authority": if agent_loop_selected {
+                "planner_loop_selected_class"
+            } else {
+                "planner_loop_shadow"
+            },
+            "normalizer_role": "initial_hint",
+            "post_route_role": "boundary_machine_gate",
+            "direct_answer_gate_role": "fallback_safety_check",
+            "runtime_default_authority": if agent_loop_selected {
+                "agent_loop_for_selected_migration_class"
+            } else {
+                "legacy_pre_agent_until_activation_gates_pass"
+            },
+            "agent_loop_authority_enabled": agent_loop_selected,
+            "chosen_authority": if agent_loop_selected {
+                semantic_route_authority.as_str()
+            } else {
+                "legacy_pre_agent"
+            },
+            "rollback_reason": if policy.uses_agent_loop_semantic_authority() && selected_migration_class == "none" {
+                "migration_class_not_selected"
+            } else {
+                "none"
+            },
+        },
+        "session": {
+            "user_id_present": task.user_id != 0,
+            "chat_id_present": task.chat_id != 0,
+            "user_key_present": task.user_key.as_deref().is_some_and(|value| !value.trim().is_empty()),
+        },
+        "workspace": {
+            "available": true,
+        },
+        "capability_visibility": {
+            "route_available": route_result.is_some(),
+            "visible_skill_candidates_count": route_result
+                .map(|route| route.visible_skill_candidates.len())
+                .unwrap_or(0),
+        },
+        "risk": {
+            "ceiling": route_result
+                .map(|route| route.risk_ceiling.as_str())
+                .unwrap_or("unknown"),
+        },
+        "budget": {
+            "profile": budget_profile.as_str(),
+            "agent_decides_migration_class": policy.agent_decides_migration_class.as_str(),
+            "eligible_migration_class": eligible_migration_class,
+            "selected_migration_class": selected_migration_class,
+            "max_rounds": policy.max_rounds,
+            "max_steps": policy.max_steps,
+            "max_tool_calls": policy.max_tool_calls,
+            "no_progress_limit": policy.no_progress_limit,
+            "repeat_action_limit": policy.repeat_action_limit,
+        },
+        "confirmation": {
+            "owned_by": "plan_verifier",
+        },
+        "dry_run": {
+            "owned_by": "plan_verifier_execution_adapter",
+        },
+        "active_bindings": {
+            "session_alias_count": agent_run_context
+                .map(|ctx| ctx.session_alias_bindings.len())
+                .unwrap_or(0),
+            "auto_locator_present": agent_run_context
+                .and_then(|ctx| ctx.auto_locator_path.as_deref())
+                .is_some_and(|value| !value.trim().is_empty()),
+            "authoritative_deictic_anchor": agent_run_context
+                .map(|ctx| ctx.has_authoritative_deictic_anchor)
+                .unwrap_or(false),
+            "fuzzy_locator_suggestion_count": agent_run_context
+                .map(|ctx| ctx.fuzzy_locator_suggestions.len())
+                .unwrap_or(0),
+        },
+        "memory": {
+            "execution_memory_context_present": agent_run_context
+                .and_then(|ctx| ctx.memory_context_for_execution.as_deref())
+                .is_some_and(|value| !value.trim().is_empty()),
+            "cross_turn_recent_execution_context_present": agent_run_context
+                .and_then(|ctx| ctx.cross_turn_recent_execution_context.as_deref())
+                .is_some_and(|value| !value.trim().is_empty()),
+        },
+        "delivery_constraints": {
+            "delivery_required": route_result
+                .map(|route| route.wants_file_delivery || route.output_contract.delivery_required)
+                .unwrap_or(false),
+            "response_shape": output_contract
+                .map(|contract| contract.response_shape.as_str())
+                .unwrap_or("unknown"),
+            "semantic_kind": output_contract
+                .map(|contract| contract.semantic_kind.as_str())
+                .unwrap_or("unknown"),
+            "locator_kind": output_contract
+                .map(|contract| contract.locator_kind.as_str())
+                .unwrap_or("unknown"),
+            "requires_content_evidence": output_contract
+                .map(|contract| contract.requires_content_evidence)
+                .unwrap_or(false),
+        },
+        "pre_agent_gates": pre_agent_gate_summary_json(route_result, agent_run_context),
+    })
+}
+
+fn pre_agent_gate_summary_json(
+    route_result: Option<&RouteResult>,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Value {
+    json!({
+        "schema_version": 1,
+        "intent_normalizer": route_result
+            .map(intent_normalizer_initial_hint_json)
+            .unwrap_or_else(|| json!({
+                "owner_layer": "intent_normalizer",
+                "authority_target": "initial_hint_shadow",
+                "ownership_class": "semantic_initial_hint",
+                "boundary_allowed": false,
+                "semantic_migration_target": "planner_loop_decision_envelope",
+                "available": false,
+            })),
+        "post_route_policy": route_result
+            .map(|route| post_route_boundary_gate_json(route, agent_run_context))
+            .unwrap_or_else(|| json!({
+                "owner_layer": "post_route_policy",
+                "authority_target": "boundary_machine_gate",
+                "ownership_class": "boundary_machine_check",
+                "boundary_allowed": true,
+                "semantic_migration_target": "none",
+                "available": false,
+            })),
+        "direct_answer_gate": route_result
+            .map(direct_answer_fallback_gate_json)
+            .unwrap_or_else(|| json!({
+                "owner_layer": "direct_answer_gate",
+                "authority_target": "fallback_safety_check",
+                "ownership_class": "fallback_safety_check",
+                "boundary_allowed": true,
+                "semantic_migration_target": "planner_loop_decision_envelope",
+                "available": false,
+            })),
+    })
+}
+
+fn intent_normalizer_initial_hint_json(route: &RouteResult) -> Value {
+    json!({
+        "owner_layer": "intent_normalizer",
+        "authority_target": "initial_hint_shadow",
+        "ownership_class": "semantic_initial_hint",
+        "boundary_allowed": false,
+        "semantic_migration_target": "planner_loop_decision_envelope",
+        "available": true,
+        "current_decision": route.first_layer_decision().as_str(),
+        "current_gate_kind": route.gate_kind().as_str(),
+        "output_contract_ref": crate::TaskContract::from_route_result(route).compact_prompt_line(),
+    })
+}
+
+fn post_route_boundary_gate_json(
+    route: &RouteResult,
+    agent_run_context: Option<&AgentRunContext>,
+) -> Value {
+    let boundary_class = post_route_boundary_class(route, agent_run_context);
+    let boundary_allowed = post_route_boundary_class_is_boundary_owned(boundary_class);
+    json!({
+        "owner_layer": "post_route_policy",
+        "authority_target": "boundary_machine_gate",
+        "ownership_class": if boundary_allowed {
+            "boundary_machine_check"
+        } else {
+            "semantic_policy_candidate"
+        },
+        "boundary_allowed": boundary_allowed,
+        "semantic_migration_target": if boundary_allowed {
+            "none"
+        } else {
+            "planner_loop_decision_envelope"
+        },
+        "available": true,
+        "boundary_class": boundary_class,
+        "fuzzy_locator_suggestion_count": agent_run_context
+            .map(|ctx| ctx.fuzzy_locator_suggestions.len())
+            .unwrap_or(0),
+        "auto_locator_present": agent_run_context
+            .and_then(|ctx| ctx.auto_locator_path.as_deref())
+            .is_some_and(|value| !value.trim().is_empty()),
+        "delivery_required": route.wants_file_delivery || route.output_contract.delivery_required,
+        "requires_content_evidence": route.output_contract.requires_content_evidence,
+    })
+}
+
+fn post_route_boundary_class(
+    route: &RouteResult,
+    agent_run_context: Option<&AgentRunContext>,
+) -> &'static str {
+    if agent_run_context
+        .map(|ctx| !ctx.fuzzy_locator_suggestions.is_empty())
+        .unwrap_or(false)
+    {
+        return "locator_fuzzy_candidates";
+    }
+    if route_reason_has_prefix(route, "clarify_reason_code:missing_")
+        || route_reason_has_marker(route, "locator_required_for_path_scoped_content")
+        || route_reason_has_marker(route, "deictic_bare_locator_requires_clarify")
+        || route_reason_has_marker(route, "unbound_existing_file_delivery_requires_clarify")
+        || route_reason_has_marker(route, "unbound_targeted_evidence_requires_clarify")
+        || route_reason_has_marker(route, "locatorless_observation_requires_clarify")
+    {
+        return "locator_binding";
+    }
+    if route.wants_file_delivery || route.output_contract.delivery_required {
+        return "delivery_contract";
+    }
+    if route.output_contract.requires_content_evidence {
+        return "content_evidence_contract";
+    }
+    "no_boundary_gate_observed"
+}
+
+fn post_route_boundary_class_is_boundary_owned(boundary_class: &str) -> bool {
+    matches!(
+        boundary_class,
+        "locator_fuzzy_candidates"
+            | "locator_binding"
+            | "delivery_contract"
+            | "content_evidence_contract"
+            | "no_boundary_gate_observed"
+    )
+}
+
+fn direct_answer_fallback_gate_json(route: &RouteResult) -> Value {
+    let boundary_class = direct_answer_gate_boundary_class(route);
+    let observed = boundary_class != "not_observed_in_planner_shadow";
+    let boundary_allowed = direct_answer_gate_boundary_class_is_boundary_owned(boundary_class);
+    json!({
+        "owner_layer": "direct_answer_gate",
+        "authority_target": "fallback_safety_check",
+        "ownership_class": if boundary_allowed {
+            "fallback_safety_check"
+        } else {
+            "semantic_policy_candidate"
+        },
+        "boundary_allowed": boundary_allowed,
+        "semantic_migration_target": if boundary_allowed {
+            "none"
+        } else {
+            "planner_loop_decision_envelope"
+        },
+        "available": true,
+        "observed": observed,
+        "boundary_class": boundary_class,
+        "observation_class": if observed {
+            "legacy_gate_observed"
+        } else {
+            "not_observed_in_planner_shadow"
+        },
+    })
+}
+
+fn direct_answer_gate_boundary_class(route: &RouteResult) -> &'static str {
+    if !route_reason_has_prefix(route, "direct_answer_gate_") {
+        return "not_observed_in_planner_shadow";
+    }
+    if route_reason_has_marker(route, "direct_answer_gate_unbound_deictic_clarify") {
+        return "locator_binding_fallback";
+    }
+    if route_reason_has_marker(route, "direct_answer_gate_bound_candidate_evidence")
+        || route_reason_has_marker(route, "direct_answer_gate_recent_count_selection")
+    {
+        return "evidence_backed_direct_candidate";
+    }
+    if route_reason_has_marker(route, "direct_answer_gate_memory_update_ignored")
+        || route_reason_has_marker(
+            route,
+            "direct_answer_gate_active_task_text_mutation_ignored",
+        )
+        || route_reason_has_marker(route, "direct_answer_gate_executionless_promotion_blocked")
+        || route_reason_has_marker(route, "direct_answer_gate_existing_observed_result_ignored")
+        || route_reason_has_marker(
+            route,
+            "direct_answer_gate_chat_promotion_without_structured_target_ignored",
+        )
+        || route_reason_has_marker(
+            route,
+            "direct_answer_gate_preference_memory_context_ignored",
+        )
+        || route_reason_has_marker(route, "direct_answer_gate_background_only_ignored")
+        || route_reason_has_marker(
+            route,
+            "direct_answer_gate_exact_candidate_ignored_execution",
+        )
+        || route_reason_has_marker(
+            route,
+            "direct_answer_gate_standalone_freeform_clarify_ignored",
+        )
+    {
+        return "fallback_safety_filter";
+    }
+    if route_reason_has_marker(route, "direct_answer_gate_contract_execute")
+        || route_reason_has_marker(route, "direct_answer_gate_inline_transform_execute")
+        || route_reason_has_marker(route, "direct_answer_gate_package_manager_detect_execute")
+        || route_reason_has_marker(route, "direct_answer_gate_recent_file_context_execute")
+        || route_reason_has_marker(route, "direct_answer_gate_artifact_listing_execute")
+        || route_reason_has_marker(route, "direct_answer_gate_workspace_child_context_execute")
+        || route_reason_has_marker(route, "direct_answer_gate_execute")
+    {
+        return "semantic_execution_promotion";
+    }
+    if route_reason_has_marker(route, "direct_answer_gate_clarify") {
+        return "semantic_clarify_candidate";
+    }
+    "legacy_unclassified_gate_observed"
+}
+
+fn direct_answer_gate_boundary_class_is_boundary_owned(boundary_class: &str) -> bool {
+    matches!(
+        boundary_class,
+        "not_observed_in_planner_shadow"
+            | "locator_binding_fallback"
+            | "evidence_backed_direct_candidate"
+            | "fallback_safety_filter"
+    )
+}
+
+fn route_reason_has_marker(route: &RouteResult, marker: &str) -> bool {
+    route
+        .route_reason
+        .split(';')
+        .map(str::trim)
+        .any(|part| part == marker)
+}
+
+fn route_reason_has_prefix(route: &RouteResult, prefix: &str) -> bool {
+    route
+        .route_reason
+        .split(';')
+        .map(str::trim)
+        .any(|part| part.starts_with(prefix))
+}
+
 pub(super) async fn run_agent_with_loop(
     state: &AppState,
     task: &ClaimedTask,
@@ -462,6 +959,21 @@ pub(super) async fn run_agent_with_loop(
     let policy = base_policy.adjusted_for_context(loop_state.execution_recipe, route_result);
     loop_state.max_rounds = policy.max_rounds.max(1);
     base_policy.apply_recipe_runtime_overrides(&mut loop_state.execution_recipe);
+    let enabled_rollout_switches = policy.enabled_rollout_switches();
+    if !enabled_rollout_switches.is_empty() {
+        loop_state.output_vars.insert(
+            "rollout_switches_enabled".to_string(),
+            enabled_rollout_switches.join(","),
+        );
+    }
+    maybe_record_agent_decides_shadow_attribution(
+        &policy,
+        task,
+        agent_run_context,
+        route_result,
+        budget_profile,
+        &mut loop_state,
+    );
     info!(
         "loop_budget_profile task_id={} profile={} max_rounds={} max_steps={} max_tool_calls={} no_progress_limit={} repeat_action_limit={}",
         task.task_id,
@@ -508,6 +1020,13 @@ pub(super) async fn run_agent_with_loop(
             .await;
         let route_result = agent_run_context.and_then(|ctx| ctx.route_result.as_ref());
         suppress_answer_verifier_retry_if_structurally_satisfied(&mut reply, route_result);
+        suppress_answer_verifier_retry_if_user_locator_disambiguation(&mut reply, route_result);
+        if try_preserve_rss_source_hosts_from_structured_evidence(route_result, &mut reply) {
+            return Ok(reply);
+        }
+        if try_recover_document_heading_answer_verifier_gap(route_result, &mut reply) {
+            return Ok(reply);
+        }
         if let Some(verifier) = answer_verifier_retry_summary(&reply, route_result).cloned() {
             if answer_verifier_retry_count < policy.answer_verifier_retry_limit
                 && policy.multi_round_enabled
@@ -569,6 +1088,21 @@ pub(super) async fn run_agent_with_loop(
             ) {
                 return Ok(reply);
             }
+            if try_recover_rss_news_answer_verifier_gap(route_result, &mut reply) {
+                return Ok(reply);
+            }
+            if try_recover_document_heading_answer_verifier_gap(route_result, &mut reply) {
+                return Ok(reply);
+            }
+            if try_recover_structured_scalar_output_format_answer_verifier_gap(
+                route_result,
+                &mut reply,
+            ) {
+                return Ok(reply);
+            }
+            if try_recover_http_health_answer_verifier_gap(route_result, &mut reply) {
+                return Ok(reply);
+            }
             if try_recover_generic_path_content_read_range_answer_verifier_gap(
                 route_result,
                 &mut reply,
@@ -617,1033 +1151,9 @@ async fn attach_answer_verifier_if_missing(
     }
 }
 
-fn answer_verifier_retry_summary<'a>(
-    reply: &'a AskReply,
-    route_result: Option<&RouteResult>,
-) -> Option<&'a crate::task_journal::TaskJournalAnswerVerifierSummary> {
-    if reply.should_fail_task || reply_final_status_is_clarify(reply) {
-        return None;
-    }
-    let summary = reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())?;
-    if answer_verifier_gap_is_structurally_satisfied(reply, route_result) {
-        return None;
-    }
-    summary.high_confidence_retry_gap().then_some(summary)
-}
-
-fn suppress_answer_verifier_retry_if_structurally_satisfied(
-    reply: &mut AskReply,
-    route_result: Option<&RouteResult>,
-) -> bool {
-    if !answer_verifier_gap_is_structurally_satisfied(reply, route_result) {
-        return false;
-    }
-    let Some(journal) = reply.task_journal.as_mut() else {
-        return false;
-    };
-    let Some(summary) = journal.answer_verifier_summary.as_ref() else {
-        return false;
-    };
-    if !summary.high_confidence_retry_gap() {
-        return false;
-    }
-    info!(
-        "answer_verifier_retry_suppressed_structural_satisfaction reason={}",
-        crate::truncate_for_log(&summary.answer_incomplete_reason)
-    );
-    journal.answer_verifier_summary = None;
-    true
-}
-
-fn answer_verifier_gap_is_structurally_satisfied(
-    reply: &AskReply,
-    route_result: Option<&RouteResult>,
-) -> bool {
-    let Some(summary) = reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())
-    else {
-        return false;
-    };
-    if !summary.high_confidence_retry_gap() {
-        return false;
-    }
-    let Some(route) = route_result else {
-        return false;
-    };
-    if route.output_contract.semantic_kind == crate::OutputSemanticKind::QuantityComparison {
-        return quantity_comparison_reply_has_derived_numeric_answer(reply);
-    }
-    if terminal_content_access_blocker_reply_satisfies_contract(reply, route) {
-        return true;
-    }
-    if let (Some(journal), Some(answer)) = (
-        reply.task_journal.as_ref(),
-        final_user_answer_candidate(reply),
-    ) {
-        return crate::answer_verifier::structurally_satisfies_answer_contract(
-            route, journal, answer,
-        );
-    }
-    false
-}
-
-fn terminal_content_access_blocker_reply_satisfies_contract(
-    reply: &AskReply,
-    route: &RouteResult,
-) -> bool {
-    if !route.output_contract.requires_content_evidence {
-        return false;
-    }
-    let Some(journal) = reply.task_journal.as_ref() else {
-        return false;
-    };
-    let Some(summary) = journal.finalizer_summary.as_ref() else {
-        return false;
-    };
-    if summary.disposition != Some(crate::finalize::FinalizerDisposition::QualifiedCompletion)
-        || summary.completion_ok != Some(true)
-        || summary.grounded_ok != Some(true)
-    {
-        return false;
-    }
-    journal
-        .step_results
-        .iter()
-        .rev()
-        .any(step_has_terminal_content_access_blocker)
-}
-
-fn step_has_terminal_content_access_blocker(
-    step: &crate::task_journal::TaskJournalStepTrace,
-) -> bool {
-    if step.status != crate::executor::StepExecutionStatus::Error {
-        return false;
-    }
-    let Some(error) = step.error_excerpt.as_deref().map(str::trim) else {
-        return false;
-    };
-    if error.is_empty() {
-        return false;
-    }
-    if let Some(policy_block) = crate::skills::parse_policy_block_error(error) {
-        return matches!(
-            policy_block.reason_code.as_str(),
-            "path_outside_workspace" | "path_parent_traversal"
-        );
-    }
-    let Some(structured) = crate::skills::parse_structured_skill_error(error) else {
-        return false;
-    };
-    if structured.error_kind != "permission_denied" {
-        return false;
-    }
-    let effective_skill = if structured.skill.trim().is_empty() {
-        step.skill.as_str()
-    } else {
-        structured.skill.as_str()
-    };
-    matches!(
-        effective_skill.to_ascii_lowercase().as_str(),
-        "fs_basic" | "system_basic" | "read_file" | "list_dir"
-    )
-}
-
-fn final_user_answer_candidate(reply: &AskReply) -> Option<&str> {
-    reply
-        .messages
-        .iter()
-        .rev()
-        .map(String::as_str)
-        .find(|message| {
-            let trimmed = message.trim();
-            !trimmed.is_empty() && !crate::finalize::is_execution_summary_message(trimmed)
-        })
-        .or_else(|| {
-            let trimmed = reply.text.trim();
-            (!trimmed.is_empty()).then_some(trimmed)
-        })
-}
-
-fn collect_size_bytes_from_json(value: &serde_json::Value, out: &mut Vec<u64>) {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(size) = map
-                .get("size_bytes")
-                .or_else(|| map.get("total_size_bytes"))
-                .and_then(|value| value.as_u64())
-            {
-                out.push(size);
-            }
-            for value in map.values() {
-                collect_size_bytes_from_json(value, out);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for value in items {
-                collect_size_bytes_from_json(value, out);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn observed_size_bytes(reply: &AskReply) -> Vec<u64> {
-    let mut sizes = Vec::new();
-    let Some(journal) = reply.task_journal.as_ref() else {
-        return sizes;
-    };
-    for step in &journal.step_results {
-        let Some(output) = step.output_excerpt.as_deref() else {
-            continue;
-        };
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
-            collect_size_bytes_from_json(&value, &mut sizes);
-        }
-    }
-    sizes.sort_unstable();
-    sizes.dedup();
-    sizes
-}
-
-fn numeric_literals(text: &str) -> Vec<f64> {
-    let mut values = Vec::new();
-    let mut token = String::new();
-    let mut has_digit = false;
-    for ch in text.chars() {
-        if ch.is_ascii_digit() || ch == ',' || ch == '.' {
-            if ch.is_ascii_digit() {
-                has_digit = true;
-            }
-            token.push(ch);
-            continue;
-        }
-        if has_digit {
-            push_numeric_literal(&mut values, &token);
-        }
-        token.clear();
-        has_digit = false;
-    }
-    if has_digit {
-        push_numeric_literal(&mut values, &token);
-    }
-    values
-}
-
-fn push_numeric_literal(values: &mut Vec<f64>, token: &str) {
-    let normalized = token.trim_matches('.').replace(',', "");
-    if normalized.is_empty() || normalized == "." {
-        return;
-    }
-    if let Ok(value) = normalized.parse::<f64>() {
-        values.push(value);
-    }
-}
-
-fn quantity_comparison_reply_has_derived_numeric_answer(reply: &AskReply) -> bool {
-    let observed_sizes = observed_size_bytes(reply);
-    if observed_sizes.len() < 2 {
-        return false;
-    }
-    let Some(answer) = final_user_answer_candidate(reply) else {
-        return false;
-    };
-    numeric_literals(answer).into_iter().any(|number| {
-        !observed_sizes
-            .iter()
-            .any(|size| (number - *size as f64).abs() < 0.000_001)
-    })
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct LogAnalyzeFinding {
-    path: String,
-    keyword_counts: Vec<(String, u64)>,
-    total_hits: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct StructuredSearchFinding {
-    action: String,
-    count: usize,
-    results: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct StructuredCountFinding {
-    path: Option<String>,
-    total: u64,
-    files: Option<u64>,
-    dirs: Option<u64>,
-    hidden: Option<u64>,
-    recursive: Option<bool>,
-}
-
-fn try_recover_log_analyze_answer_verifier_gap(user_text: &str, reply: &mut AskReply) -> bool {
-    let findings = observed_log_analyze_findings(reply);
-    if findings.is_empty() {
-        return false;
-    }
-    let answer = deterministic_log_analyze_summary_text(user_text, &findings);
-    let messages = vec![answer.clone()];
-    if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-    }
-    reply.text = answer;
-    reply.messages = messages;
-    reply.should_fail_task = false;
-    reply.error_text = None;
-    reply.is_llm_reply = false;
-    info!(
-        "answer_verifier_retry_exhausted_recovered_with_log_analyze_summary findings={}",
-        findings.len()
-    );
-    true
-}
-
-fn try_recover_structured_count_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
-    user_text: &str,
-    reply: &mut AskReply,
-) -> bool {
-    if !route_result.is_some_and(|route| {
-        route.output_contract.semantic_kind == crate::OutputSemanticKind::ScalarCount
-    }) {
-        return false;
-    }
-    let Some(finding) = observed_structured_count_findings(reply).into_iter().next() else {
-        return false;
-    };
-    let answer = deterministic_structured_count_summary_text(user_text, &finding);
-    let messages = vec![answer.clone()];
-    if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-    }
-    reply.text = answer;
-    reply.messages = messages;
-    reply.should_fail_task = false;
-    reply.error_text = None;
-    reply.is_llm_reply = false;
-    info!(
-        "answer_verifier_retry_exhausted_recovered_with_structured_count total={}",
-        finding.total
-    );
-    true
-}
-
-fn try_recover_structured_search_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
-    user_text: &str,
-    reply: &mut AskReply,
-) -> bool {
-    if !route_allows_structured_search_recovery(route_result) {
-        return false;
-    }
-    let Some(verifier) = reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())
-    else {
-        return false;
-    };
-    if !verifier.high_confidence_retry_gap() {
-        return false;
-    }
-    if !structured_search_verifier_requests_full_candidates(verifier) {
-        return false;
-    }
-    let Some(finding) = observed_structured_search_findings(reply)
-        .into_iter()
-        .max_by(|left, right| {
-            left.count
-                .cmp(&right.count)
-                .then_with(|| left.results.len().cmp(&right.results.len()))
-                .then_with(|| right.action.cmp(&left.action))
-        })
-    else {
-        return false;
-    };
-    if finding.results.is_empty() || finding.count > finding.results.len() {
-        return false;
-    }
-    let answer = deterministic_structured_search_summary_text(user_text, &finding);
-    let messages = vec![answer.clone()];
-    if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-    }
-    reply.text = answer;
-    reply.messages = messages;
-    reply.should_fail_task = false;
-    reply.error_text = None;
-    reply.is_llm_reply = false;
-    info!(
-        "answer_verifier_retry_exhausted_recovered_with_structured_search_results action={} count={}",
-        finding.action, finding.count
-    );
-    true
-}
-
-fn route_allows_structured_search_recovery(route_result: Option<&crate::RouteResult>) -> bool {
-    let Some(route) = route_result else {
-        return false;
-    };
-    matches!(
-        route.output_contract.semantic_kind,
-        crate::OutputSemanticKind::FileNames
-            | crate::OutputSemanticKind::DirectoryNames
-            | crate::OutputSemanticKind::FilePaths
-    )
-}
-
-fn try_recover_content_excerpt_summary_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
-    reply: &mut AskReply,
-) -> bool {
-    let Some(route) = route_result else {
-        return false;
-    };
-    if !route_allows_synthesis_recovery(route) {
-        return false;
-    }
-    let Some(verifier) = reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())
-    else {
-        return false;
-    };
-    if !verifier.high_confidence_retry_gap() {
-        return false;
-    }
-    if !verifier.missing_evidence_fields.iter().any(|field| {
-        field == "content_excerpt" || field == "any_of(command_output|content_excerpt|field_value)"
-    }) {
-        return false;
-    }
-    if !reply.task_journal.as_ref().is_some_and(|journal| {
-        crate::task_journal::evidence_coverage_for_route(route, journal).is_complete()
-    }) {
-        return false;
-    }
-    let Some(answer) = reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| {
-            journal
-                .step_results
-                .iter()
-                .rev()
-                .find(|step| {
-                    step.skill == "synthesize_answer"
-                        && step.status == crate::executor::StepExecutionStatus::Ok
-                        && step
-                            .output_excerpt
-                            .as_deref()
-                            .is_some_and(|text| !text.trim().is_empty())
-                })
-                .and_then(|step| step.output_excerpt.as_deref())
-        })
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .filter(|text| !crate::finalize::looks_like_planner_artifact(text))
-        .filter(|text| !crate::finalize::looks_like_internal_trace_artifact(text))
-        .filter(|text| !crate::finalize::is_execution_summary_message(text))
-        .map(ToString::to_string)
-    else {
-        return false;
-    };
-    let messages = vec![answer.clone()];
-    if let Some(journal) = reply.task_journal.as_mut() {
-        journal.answer_verifier_summary = None;
-        journal.record_final_answer(&answer);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Success);
-    }
-    reply.text = answer;
-    reply.messages = messages;
-    reply.should_fail_task = false;
-    reply.error_text = None;
-    reply.is_llm_reply = false;
-    info!("answer_verifier_retry_exhausted_recovered_with_content_excerpt_summary_synthesis");
-    true
-}
-
-fn route_allows_synthesis_recovery(route: &crate::RouteResult) -> bool {
-    if route
-        .output_contract
-        .semantic_kind
-        .is_content_excerpt_summary()
-        || route.output_contract.semantic_kind == crate::OutputSemanticKind::WorkspaceProjectSummary
-    {
-        return true;
-    }
-    false
-}
-
-fn try_recover_generic_path_content_read_range_answer_verifier_gap(
-    route_result: Option<&crate::RouteResult>,
-    reply: &mut AskReply,
-) -> bool {
-    let Some(route) = route_result else {
-        return false;
-    };
-    if !route.output_contract.requires_content_evidence
-        || route.output_contract.delivery_required
-        || route.output_contract.semantic_kind != crate::OutputSemanticKind::None
-        || matches!(
-            route.output_contract.response_shape,
-            crate::OutputResponseShape::FileToken
-        )
-        || !matches!(
-            route.output_contract.locator_kind,
-            crate::OutputLocatorKind::Path
-                | crate::OutputLocatorKind::Filename
-                | crate::OutputLocatorKind::CurrentWorkspace
-        )
-    {
-        return false;
-    }
-    let Some(verifier) = reply
-        .task_journal
-        .as_ref()
-        .and_then(|journal| journal.answer_verifier_summary.as_ref())
-    else {
-        return false;
-    };
-    if !verifier.high_confidence_retry_gap()
-        || !verifier
-            .missing_evidence_fields
-            .iter()
-            .any(|field| matches!(field.as_str(), "path" | "content_excerpt"))
-    {
-        return false;
-    }
-    info!("answer_verifier_retry_exhausted_no_generic_path_content_raw_recovery");
-    false
-}
-
-fn structured_search_verifier_requests_full_candidates(
-    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
-) -> bool {
-    verifier
-        .missing_evidence_fields
-        .iter()
-        .any(|field| matches!(field.as_str(), "candidates" | "results" | "paths" | "files"))
-}
-
-fn observed_log_analyze_findings(reply: &AskReply) -> Vec<LogAnalyzeFinding> {
-    let mut findings = Vec::new();
-    let Some(journal) = reply.task_journal.as_ref() else {
-        return findings;
-    };
-    for step in &journal.step_results {
-        if !step.skill.eq_ignore_ascii_case("log_analyze")
-            || step.status != crate::executor::StepExecutionStatus::Ok
-        {
-            continue;
-        }
-        let Some(output) = step.output_excerpt.as_deref() else {
-            continue;
-        };
-        let Some(finding) = parse_log_analyze_finding(output) else {
-            continue;
-        };
-        findings.push(finding);
-    }
-    findings.sort_by(|left, right| {
-        right
-            .total_hits
-            .cmp(&left.total_hits)
-            .then_with(|| left.path.cmp(&right.path))
-    });
-    findings
-}
-
-fn observed_structured_count_findings(reply: &AskReply) -> Vec<StructuredCountFinding> {
-    let mut findings = Vec::new();
-    let Some(journal) = reply.task_journal.as_ref() else {
-        return findings;
-    };
-    for step in &journal.step_results {
-        if step.status != crate::executor::StepExecutionStatus::Ok {
-            continue;
-        }
-        if !matches!(step.skill.as_str(), "fs_basic" | "system_basic") {
-            continue;
-        }
-        let Some(output) = step.output_excerpt.as_deref() else {
-            continue;
-        };
-        let Some(finding) = parse_structured_count_finding(output) else {
-            continue;
-        };
-        findings.push(finding);
-    }
-    findings
-}
-
-fn observed_structured_search_findings(reply: &AskReply) -> Vec<StructuredSearchFinding> {
-    let mut findings = Vec::new();
-    let Some(journal) = reply.task_journal.as_ref() else {
-        return findings;
-    };
-    for step in &journal.step_results {
-        if step.status != crate::executor::StepExecutionStatus::Ok {
-            continue;
-        }
-        if !matches!(
-            step.skill.as_str(),
-            "fs_basic" | "fs_search" | "system_basic"
-        ) {
-            continue;
-        }
-        let Some(output) = step.output_excerpt.as_deref() else {
-            continue;
-        };
-        let Some(finding) = parse_structured_search_finding(output) else {
-            continue;
-        };
-        findings.push(finding);
-    }
-    findings
-}
-
-fn parse_structured_count_finding(output: &str) -> Option<StructuredCountFinding> {
-    let value =
-        crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<serde_json::Value>(output)?;
-    let action = value
-        .get("action")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?
-        .to_ascii_lowercase();
-    if !matches!(action.as_str(), "count_inventory" | "inventory_dir") {
-        return None;
-    }
-    let counts = value.get("counts")?;
-    let total = counts.get("total").and_then(|value| value.as_u64())?;
-    Some(StructuredCountFinding {
-        path: value
-            .get("path")
-            .or_else(|| value.get("resolved_path"))
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string),
-        total,
-        files: counts.get("files").and_then(|value| value.as_u64()),
-        dirs: counts.get("dirs").and_then(|value| value.as_u64()),
-        hidden: counts.get("hidden").and_then(|value| value.as_u64()),
-        recursive: value.get("recursive").and_then(|value| value.as_bool()),
-    })
-}
-
-fn parse_structured_search_finding(output: &str) -> Option<StructuredSearchFinding> {
-    let value =
-        crate::prompt_utils::parse_llm_json_raw_or_any_with_repair::<serde_json::Value>(output)?;
-    let action = value
-        .get("action")
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?
-        .to_ascii_lowercase();
-    if !structured_search_action_has_candidate_list(&action) {
-        return None;
-    }
-    let raw_results = value.get("results").and_then(|value| value.as_array())?;
-    let mut results = Vec::new();
-    let mut seen = std::collections::BTreeSet::new();
-    for item in raw_results {
-        let Some(token) = structured_search_result_token(item) else {
-            continue;
-        };
-        if seen.insert(token.clone()) {
-            results.push(token);
-        }
-    }
-    if results.is_empty() {
-        return None;
-    }
-    let count = value
-        .get("count")
-        .and_then(|value| value.as_u64())
-        .map(|value| value as usize)
-        .unwrap_or(results.len());
-    Some(StructuredSearchFinding {
-        action,
-        count,
-        results,
-    })
-}
-
-fn structured_search_action_has_candidate_list(action: &str) -> bool {
-    matches!(
-        action,
-        "find_name" | "find_ext" | "find_entries" | "find_path" | "search"
-    )
-}
-
-fn structured_search_result_token(value: &serde_json::Value) -> Option<String> {
-    if let Some(text) = value.as_str() {
-        return non_empty_structured_search_token(text);
-    }
-    let object = value.as_object()?;
-    for key in [
-        "path",
-        "relative_path",
-        "full_path",
-        "name",
-        "entry",
-        "file",
-        "filename",
-    ] {
-        if let Some(text) = object.get(key).and_then(|value| value.as_str()) {
-            if let Some(token) = non_empty_structured_search_token(text) {
-                return Some(token);
-            }
-        }
-    }
-    None
-}
-
-fn non_empty_structured_search_token(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-fn parse_log_analyze_finding(output: &str) -> Option<LogAnalyzeFinding> {
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(output) {
-        let path = value
-            .get("path")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())?
-            .to_string();
-        let mut keyword_counts = value
-            .get("keyword_counts")
-            .and_then(|value| value.as_object())
-            .map(|counts| {
-                counts
-                    .iter()
-                    .filter_map(|(key, value)| value.as_u64().map(|count| (key.clone(), count)))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        return build_log_analyze_finding(path, &mut keyword_counts);
-    }
-    let path = extract_json_string_field(output, "path")?;
-    let mut keyword_counts = extract_keyword_counts(output);
-    build_log_analyze_finding(path, &mut keyword_counts)
-}
-
-fn build_log_analyze_finding(
-    path: String,
-    keyword_counts: &mut Vec<(String, u64)>,
-) -> Option<LogAnalyzeFinding> {
-    keyword_counts.retain(|(key, count)| !key.trim().is_empty() && *count > 0);
-    if keyword_counts.is_empty() {
-        return None;
-    }
-    keyword_counts.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
-    let total_hits = keyword_counts.iter().map(|(_, count)| *count).sum::<u64>();
-    Some(LogAnalyzeFinding {
-        path,
-        keyword_counts: keyword_counts.clone(),
-        total_hits,
-    })
-}
-
-fn extract_keyword_counts(output: &str) -> Vec<(String, u64)> {
-    let Some(marker_pos) = output.find("\"keyword_counts\"") else {
-        return Vec::new();
-    };
-    let after_marker = &output[marker_pos + "\"keyword_counts\"".len()..];
-    let Some(colon_pos) = after_marker.find(':') else {
-        return Vec::new();
-    };
-    let after_colon = &after_marker[colon_pos + 1..];
-    let Some(open_rel) = after_colon.find('{') else {
-        return Vec::new();
-    };
-    let object_start = colon_pos + 1 + open_rel;
-    let Some(object_end) = find_matching_json_object_end(after_marker, object_start) else {
-        return Vec::new();
-    };
-    let inner = &after_marker[object_start + 1..object_end];
-    inner
-        .split(',')
-        .filter_map(|part| {
-            let (key, value) = part.split_once(':')?;
-            let key = key.trim().trim_matches('"').to_string();
-            let count = value.trim().parse::<u64>().ok()?;
-            Some((key, count))
-        })
-        .collect()
-}
-
-fn find_matching_json_object_end(input: &str, open_pos: usize) -> Option<usize> {
-    let bytes = input.as_bytes();
-    if bytes.get(open_pos).copied() != Some(b'{') {
-        return None;
-    }
-    let mut depth = 0usize;
-    let mut in_string = false;
-    let mut escaped = false;
-    for (idx, ch) in input.char_indices().skip_while(|(idx, _)| *idx < open_pos) {
-        if in_string {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            match ch {
-                '\\' => escaped = true,
-                '"' => in_string = false,
-                _ => {}
-            }
-            continue;
-        }
-        match ch {
-            '"' => in_string = true,
-            '{' => depth += 1,
-            '}' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return Some(idx);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn extract_json_string_field(input: &str, field: &str) -> Option<String> {
-    let marker = format!("\"{field}\"");
-    let mut offset = 0usize;
-    while let Some(rel_pos) = input[offset..].find(&marker) {
-        let marker_end = offset + rel_pos + marker.len();
-        let after_marker = input[marker_end..].trim_start();
-        let Some(after_colon) = after_marker.strip_prefix(':') else {
-            offset = marker_end;
-            continue;
-        };
-        return parse_json_string(after_colon.trim_start());
-    }
-    None
-}
-
-fn parse_json_string(input: &str) -> Option<String> {
-    let mut chars = input.chars();
-    if chars.next()? != '"' {
-        return None;
-    }
-    let mut out = String::new();
-    let mut escaped = false;
-    for ch in chars {
-        if escaped {
-            out.push(match ch {
-                '"' => '"',
-                '\\' => '\\',
-                '/' => '/',
-                'n' => '\n',
-                'r' => '\r',
-                't' => '\t',
-                other => other,
-            });
-            escaped = false;
-            continue;
-        }
-        match ch {
-            '\\' => escaped = true,
-            '"' => return Some(out),
-            other => out.push(other),
-        }
-    }
-    None
-}
-
-fn deterministic_log_analyze_summary_text(
-    user_text: &str,
-    findings: &[LogAnalyzeFinding],
-) -> String {
-    let prefer_english = crate::language_policy::request_language_hint(user_text) == "en";
-    let mut sorted = findings.to_vec();
-    sorted.sort_by(|left, right| {
-        right
-            .total_hits
-            .cmp(&left.total_hits)
-            .then_with(|| left.path.cmp(&right.path))
-    });
-    let top = &sorted[0];
-    let overview = sorted
-        .iter()
-        .take(4)
-        .map(|finding| {
-            format!(
-                "{}: {}",
-                display_log_path(&finding.path),
-                format_keyword_counts(&finding.keyword_counts)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(if prefer_english { "; " } else { "；" });
-    if prefer_english {
-        format!(
-            "Most notable: `{}` has the heaviest recent signal ({}). Also checked other log files in the directory; summary: {}.",
-            display_log_path(&top.path),
-            format_keyword_counts(&top.keyword_counts),
-            overview
-        )
-    } else {
-        format!(
-            "最值得注意的是 `{}`：{}，这是当前已分析日志里异常信号最重的文件；同时也看了 logs 目录里的其他日志，简要汇总：{}。",
-            display_log_path(&top.path),
-            format_keyword_counts(&top.keyword_counts),
-            overview
-        )
-    }
-}
-
-fn deterministic_structured_search_summary_text(
-    user_text: &str,
-    finding: &StructuredSearchFinding,
-) -> String {
-    let count = finding.count.max(finding.results.len());
-    let prefer_english = crate::language_policy::request_language_hint(user_text) == "en";
-    let mut lines = Vec::new();
-    if prefer_english {
-        lines.push(format!("Found {count} candidates:"));
-    } else {
-        lines.push(format!("找到 {count} 个候选："));
-    }
-    for (idx, result) in finding.results.iter().enumerate() {
-        lines.push(format!("{}. {}", idx + 1, result));
-    }
-    lines.join("\n")
-}
-
-fn deterministic_structured_count_summary_text(
-    user_text: &str,
-    finding: &StructuredCountFinding,
-) -> String {
-    let prefer_english = crate::language_policy::request_language_hint(user_text) == "en";
-    let scope = finding.path.as_deref().unwrap_or(if prefer_english {
-        "the requested scope"
-    } else {
-        "目标范围"
-    });
-    let direct = finding.recursive == Some(false);
-    match (
-        prefer_english,
-        direct,
-        finding.files,
-        finding.dirs,
-        finding.hidden,
-    ) {
-        (true, true, Some(files), Some(dirs), Some(hidden)) => format!(
-            "{scope} has {} direct entries: {files} files, {dirs} directories, {hidden} hidden.",
-            finding.total
-        ),
-        (true, true, Some(files), Some(dirs), None) => format!(
-            "{scope} has {} direct entries: {files} files and {dirs} directories.",
-            finding.total
-        ),
-        (true, _, Some(files), Some(dirs), _) => format!(
-            "{scope} has {} entries: {files} files and {dirs} directories.",
-            finding.total
-        ),
-        (true, true, _, _, _) => {
-            format!("{scope} has {} direct entries.", finding.total)
-        }
-        (true, _, _, _, _) => format!("{scope} has {} entries.", finding.total),
-        (false, true, Some(files), Some(dirs), Some(hidden)) => format!(
-            "{scope} 共有 {} 个直接子项：文件 {files} 个，目录 {dirs} 个，隐藏项 {hidden} 个。",
-            finding.total
-        ),
-        (false, true, Some(files), Some(dirs), None) => format!(
-            "{scope} 共有 {} 个直接子项：文件 {files} 个，目录 {dirs} 个。",
-            finding.total
-        ),
-        (false, _, Some(files), Some(dirs), _) => format!(
-            "{scope} 共有 {} 个子项：文件 {files} 个，目录 {dirs} 个。",
-            finding.total
-        ),
-        (false, true, _, _, _) => format!("{scope} 共有 {} 个直接子项。", finding.total),
-        (false, _, _, _, _) => format!("{scope} 共有 {} 个子项。", finding.total),
-    }
-}
-
-fn display_log_path(path: &str) -> &str {
-    path.rsplit('/')
-        .next()
-        .filter(|value| !value.is_empty())
-        .unwrap_or(path)
-}
-
-fn format_keyword_counts(counts: &[(String, u64)]) -> String {
-    counts
-        .iter()
-        .take(5)
-        .map(|(key, count)| format!("{key} {count}"))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn mark_reply_failed_after_answer_verifier_exhausted(
-    user_text: &str,
-    reply: &mut AskReply,
-    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
-) {
-    let message = answer_verifier_exhausted_failure_text(user_text, verifier);
-    let mut messages = reply
-        .messages
-        .iter()
-        .filter(|message| crate::finalize::is_execution_summary_message(message))
-        .cloned()
-        .collect::<Vec<_>>();
-    messages.push(message.clone());
-    if let Some(journal) = reply.task_journal.as_mut() {
-        journal.record_final_answer(&message);
-        journal.record_final_status(crate::task_journal::TaskJournalFinalStatus::Failure);
-    }
-    reply.text = message.clone();
-    reply.messages = messages;
-    reply.should_fail_task = true;
-    reply.error_text = Some(message);
-}
-
-fn answer_verifier_exhausted_failure_text(
-    user_text: &str,
-    verifier: &crate::task_journal::TaskJournalAnswerVerifierSummary,
-) -> String {
-    let reason = verifier.answer_incomplete_reason.trim();
-    let reason = if reason.is_empty() {
-        "answer verifier reported the final answer is incomplete"
-    } else {
-        reason
-    };
-    if crate::language_policy::request_language_hint(user_text) == "en" {
-        format!(
-            "I could not produce a final answer that satisfies the request after retrying. Verification issue: {reason}"
-        )
-    } else {
-        format!("我重试后仍没能生成满足请求要求的最终回答。校验问题：{reason}")
-    }
-}
-
+#[cfg(test)]
+#[path = "loop_control_authority_tests.rs"]
+mod authority_tests;
 #[cfg(test)]
 #[path = "loop_control_tests.rs"]
 mod tests;

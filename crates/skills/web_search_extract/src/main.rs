@@ -591,4 +591,47 @@ mod tests {
             Some(0)
         );
     }
+
+    #[test]
+    fn response_extra_exposes_structured_candidates_for_search_evidence() {
+        let payload = json!({
+            "status": "ok",
+            "backend": "duckduckgo_html",
+            "items": [
+                {
+                    "title": "Rust Async",
+                    "url": "https://example.com/rust-async",
+                    "rank": 1,
+                    "source": "example.com",
+                    "snippet": "Tutorial"
+                }
+            ],
+            "extract_urls": ["https://example.com/rust-async"],
+            "summary": "result_count=1 backend=duckduckgo_html",
+            "citations": ["https://example.com/rust-async"]
+        });
+
+        let extra = build_response_extra(&input_for_test(), &payload);
+
+        assert_eq!(
+            extra
+                .pointer("/field_value/result_count")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            extra.pointer("/items/0/url").and_then(Value::as_str),
+            Some("https://example.com/rust-async")
+        );
+        assert_eq!(
+            extra
+                .pointer("/candidates/0/source")
+                .and_then(Value::as_str),
+            Some("example.com")
+        );
+        assert_eq!(
+            extra.pointer("/extract_urls/0").and_then(Value::as_str),
+            Some("https://example.com/rust-async")
+        );
+    }
 }

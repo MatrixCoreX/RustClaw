@@ -96,6 +96,153 @@ fn derive_locator_clarify_state_preserves_non_free_output_shape() {
 }
 
 #[test]
+fn derive_locator_clarify_state_preserves_resolved_intent_context() {
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::clarify(),
+        resolved_intent: "读取指定文件中的名字字段（name），仅输出该字段的值".to_string(),
+        needs_clarify: true,
+        clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
+        route_reason: "clarify".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            requires_content_evidence: true,
+            locator_kind: crate::OutputLocatorKind::Path,
+            ..crate::IntentOutputContract::default()
+        },
+    };
+    let clarify_state = derive_clarify_state_for_ask_outcome(
+        "task-structured",
+        "读一下那个文件里的名字字段，只输出值",
+        &route,
+        "LOCATOR_CLARIFY_PROMPT",
+        &[],
+        true,
+        &[],
+        None,
+    )
+    .expect("clarify state should be derived");
+
+    assert!(clarify_state
+        .source_request
+        .starts_with("读一下那个文件里的名字字段，只输出值"));
+    assert!(clarify_state.source_request.contains("[RESOLVED_INTENT]"));
+    assert!(clarify_state.source_request.contains("name"));
+}
+
+#[test]
+fn derive_locator_clarify_state_preserves_structured_field_selector_token() {
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::clarify(),
+        resolved_intent: "Read the selected structured file field value".to_string(),
+        needs_clarify: true,
+        clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
+        route_reason: "clarify missing locator".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Scalar,
+            requires_content_evidence: true,
+            locator_kind: crate::OutputLocatorKind::Path,
+            self_extension: crate::SelfExtensionContract {
+                structured_field_selector: Some("name".to_string()),
+                ..crate::SelfExtensionContract::default()
+            },
+            ..crate::IntentOutputContract::default()
+        },
+    };
+    let clarify_state = derive_clarify_state_for_ask_outcome(
+        "task-structured-selector",
+        "Read that file field value only",
+        &route,
+        "LOCATOR_CLARIFY_PROMPT",
+        &[],
+        true,
+        &[],
+        None,
+    )
+    .expect("clarify state should be derived");
+
+    assert!(clarify_state
+        .source_request
+        .split_whitespace()
+        .any(|part| part == "structured_field_selector=name"));
+    assert_eq!(
+        super::structured_field_selector_token_from_text(&clarify_state.source_request).as_deref(),
+        Some("name")
+    );
+}
+
+#[test]
+fn derive_locator_clarify_state_marks_non_content_probe_as_existence_contract() {
+    let route = crate::RouteResult {
+        ask_mode: crate::AskMode::clarify(),
+        resolved_intent: "Check whether the referenced script exists.".to_string(),
+        needs_clarify: true,
+        clarify_question: "LOCATOR_CLARIFY_PROMPT".to_string(),
+        route_reason: "clarify missing locator".to_string(),
+        route_confidence: Some(0.9),
+        visible_skill_candidates: Vec::new(),
+        risk_ceiling: crate::RiskCeiling::Low,
+        resume_behavior: crate::ResumeBehavior::None,
+        schedule_kind: crate::ScheduleKind::None,
+        schedule_intent: None,
+        wants_file_delivery: false,
+        should_refresh_long_term_memory: false,
+        agent_display_name_hint: String::new(),
+        output_contract: crate::IntentOutputContract {
+            exact_sentence_count: None,
+            response_shape: crate::OutputResponseShape::Strict,
+            requires_content_evidence: false,
+            delivery_required: false,
+            locator_kind: crate::OutputLocatorKind::None,
+            delivery_intent: crate::OutputDeliveryIntent::None,
+            semantic_kind: crate::OutputSemanticKind::None,
+            locator_hint: String::new(),
+            self_extension: crate::SelfExtensionContract::default(),
+        },
+    };
+
+    let clarify_state = derive_clarify_state_for_ask_outcome(
+        "task-exists",
+        "Check whether the referenced script exists.",
+        &route,
+        "LOCATOR_CLARIFY_PROMPT",
+        &[],
+        true,
+        &[],
+        None,
+    )
+    .expect("clarify state should be derived");
+
+    assert_eq!(
+        clarify_state.semantic_kind.as_deref(),
+        Some(crate::OutputSemanticKind::ExistenceWithPath.as_str())
+    );
+    assert_eq!(
+        clarify_state.output_shape.as_deref(),
+        Some(crate::OutputResponseShape::Strict.as_str())
+    );
+}
+
+#[test]
 fn clarify_candidate_targets_prefer_prior_observed_entries() {
     let snapshot = crate::conversation_state::ActiveSessionSnapshot {
         conversation_state: None,

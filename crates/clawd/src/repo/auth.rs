@@ -1,13 +1,17 @@
-use argon2::password_hash::rand_core::OsRng;
-use argon2::password_hash::{PasswordHash, PasswordHasher, SaltString};
-use argon2::{Argon2, PasswordVerifier};
-use claw_core::config::{AppConfig, ChannelBindingConfig};
 use claw_core::types::{AuthIdentity, ExchangeCredentialStatus};
 use rusqlite::{params, Connection, OptionalExtension};
 use tracing::{info, warn};
 
 use crate::db_init::DbPool;
 use crate::{mask_secret, normalize_external_id_opt, now_ts, AppState};
+
+#[path = "auth_seed.rs"]
+mod auth_seed;
+#[path = "auth_webd.rs"]
+mod auth_webd;
+
+pub(crate) use auth_seed::seed_channel_bindings;
+pub(crate) use auth_webd::{upsert_webd_login_account, verify_webd_password_login};
 
 fn generate_user_key() -> String {
     format!("rk-{}", uuid::Uuid::new_v4().simple())
@@ -1158,42 +1162,6 @@ pub(crate) fn delete_auth_key_by_id(
     Ok(changed > 0)
 }
 
-fn seed_channel_binding_rows(
-    db: &Connection,
-    channel: &str,
-    bindings: &[ChannelBindingConfig],
-) -> anyhow::Result<()> {
-    let now = now_ts();
-    for binding in bindings {
-        let user_key = normalize_user_key(&binding.user_key);
-        if user_key.is_empty() {
-            continue;
-        }
-        let external_user_id = normalize_external_id_opt(Some(&binding.external_user_id));
-        let external_chat_id = normalize_external_id_opt(Some(&binding.external_chat_id))
-            .or_else(|| external_user_id.clone());
-        if external_user_id.is_none() && external_chat_id.is_none() {
-            continue;
-        }
-        db.execute(
-            "INSERT INTO channel_bindings (channel, external_user_id, external_chat_id, user_key, bound_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
-             ON CONFLICT(channel, external_user_id, external_chat_id)
-             DO UPDATE SET user_key=excluded.user_key, updated_at=excluded.updated_at",
-            params![channel, external_user_id, external_chat_id, user_key, now],
-        )?;
-    }
-    Ok(())
-}
-
-pub(crate) fn seed_channel_bindings(db: &Connection, config: &AppConfig) -> anyhow::Result<()> {
-    seed_channel_binding_rows(db, "telegram", &config.telegram.bindings)?;
-    seed_channel_binding_rows(db, "whatsapp", &config.whatsapp.bindings)?;
-    seed_channel_binding_rows(db, "whatsapp", &config.whatsapp_cloud.bindings)?;
-    seed_channel_binding_rows(db, "whatsapp", &config.whatsapp_web.bindings)?;
-    Ok(())
-}
-
 pub(crate) fn normalize_user_key(raw: &str) -> String {
     raw.trim().to_string()
 }
@@ -1512,105 +1480,4 @@ pub(crate) fn bind_channel_identity(
         external_user_id.as_deref(),
         external_chat_id.as_deref(),
     )))
-}
-
-/// Returns `user_key` when username/password match and both webd row and auth_keys are enabled.
-pub(crate) fn verify_webd_password_login(
-    db: &Connection,
-    username: &str,
-    password: &str,
-) -> anyhow::Result<Option<String>> {
-    let username_norm = username.trim().to_lowercase();
-    if username_norm.is_empty() || password.is_empty() {
-        return Ok(None);
-    }
-    let row: Option<(String, String)> = db
-        .query_row(
-            "SELECT w.password_hash, w.user_key
-             FROM webd_login_accounts w
-             INNER JOIN auth_keys k ON k.user_key = w.user_key
-             WHERE w.username = ?1 AND w.enabled = 1 AND k.enabled = 1",
-            params![username_norm],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    let Some((hash_str, user_key)) = row else {
-        return Ok(None);
-    };
-    let parsed = PasswordHash::new(&hash_str)
-        .map_err(|e| anyhow::anyhow!("invalid stored password hash: {e}"))?;
-    if Argon2::default()
-        .verify_password(password.as_bytes(), &parsed)
-        .is_err()
-    {
-        return Ok(None);
-    }
-    Ok(Some(user_key))
-}
-
-pub(crate) fn hash_password_for_webd_login(password: &str) -> anyhow::Result<String> {
-    let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
-        .map(|h| h.to_string())
-        .map_err(|e| anyhow::anyhow!("hash password: {e}"))
-}
-
-/// Admin: bind or update a webd login row for an existing enabled auth key.
-pub(crate) fn upsert_webd_login_account(
-    db: &Connection,
-    username: &str,
-    password: &str,
-    user_key: &str,
-) -> anyhow::Result<()> {
-    let username_norm = username.trim().to_lowercase();
-    let uk = normalize_user_key(user_key);
-    let password = password.trim();
-    if username_norm.is_empty() || uk.is_empty() {
-        anyhow::bail!("username and user_key required");
-    }
-    if password.is_empty() {
-        anyhow::bail!("password required");
-    }
-    let exists: bool = db
-        .query_row(
-            "SELECT 1 FROM auth_keys WHERE user_key = ?1 AND enabled = 1 LIMIT 1",
-            params![uk],
-            |_| Ok(1_i32),
-        )
-        .optional()?
-        .is_some();
-    if !exists {
-        anyhow::bail!("user_key does not exist or is disabled in auth_keys");
-    }
-    let username_owner = db
-        .query_row(
-            "SELECT user_key FROM webd_login_accounts WHERE username = ?1 LIMIT 1",
-            params![username_norm],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    if username_owner
-        .as_deref()
-        .is_some_and(|existing_user_key| existing_user_key != uk)
-    {
-        anyhow::bail!("username already assigned to another key");
-    }
-    let ph = hash_password_for_webd_login(password)?;
-    let now = now_ts();
-    db.execute(
-        "DELETE FROM webd_login_accounts WHERE user_key = ?1 AND username != ?2",
-        params![uk, username_norm],
-    )?;
-    db.execute(
-        "INSERT INTO webd_login_accounts (username, password_hash, user_key, enabled, created_at, updated_at)
-         VALUES (?1, ?2, ?3, 1, ?4, ?4)
-         ON CONFLICT(username) DO UPDATE SET
-           password_hash=excluded.password_hash,
-           user_key=excluded.user_key,
-           enabled=1,
-           updated_at=excluded.updated_at",
-        params![username_norm, ph, uk, now],
-    )?;
-    Ok(())
 }

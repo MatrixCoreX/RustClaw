@@ -140,6 +140,7 @@ pub(super) fn normalize_skill_arg_aliases(normalized_skill: &str, args: &mut Val
     }
     match normalized_skill {
         "fs_search" => normalize_fs_search_arg_aliases(args),
+        "kb" => normalize_kb_arg_aliases(args),
         _ => false,
     }
 }
@@ -246,6 +247,72 @@ fn normalize_fs_search_arg_aliases(args: &mut Value) -> bool {
         changed |= move_string_alias_if_missing(obj, "pattern", &["name", "keyword", "query"]);
     }
     changed
+}
+
+fn normalize_kb_arg_aliases(args: &mut Value) -> bool {
+    let Some(obj) = args.as_object_mut() else {
+        return false;
+    };
+    let Some(is_ingest) = obj
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.eq_ignore_ascii_case("ingest"))
+    else {
+        return false;
+    };
+    let mut changed = move_string_alias_if_missing(
+        obj,
+        "namespace",
+        &["kb_name", "kb_namespace", "knowledge_base_name"],
+    );
+    if !is_ingest || kb_ingest_has_source_paths(obj) {
+        return changed;
+    }
+    if let Some(path) = ["source", "source_path", "file_path"]
+        .iter()
+        .find_map(|alias| {
+            obj.get(*alias)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+        })
+    {
+        obj.insert("paths".to_string(), Value::Array(vec![Value::String(path)]));
+        changed = true;
+    } else if let Some(paths) = ["sources", "source_paths", "file_paths"]
+        .iter()
+        .find_map(|alias| {
+            let values = obj.get(*alias)?.as_array()?;
+            let paths = values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| Value::String(value.to_string()))
+                .collect::<Vec<_>>();
+            (!paths.is_empty()).then_some(paths)
+        })
+    {
+        obj.insert("paths".to_string(), Value::Array(paths));
+        changed = true;
+    }
+    changed
+}
+
+fn kb_ingest_has_source_paths(obj: &serde_json::Map<String, Value>) -> bool {
+    obj.get("paths").is_some_and(|value| match value {
+        Value::Array(items) => items
+            .iter()
+            .any(|item| item.as_str().is_some_and(|path| !path.trim().is_empty())),
+        Value::String(path) => !path.trim().is_empty(),
+        _ => false,
+    }) || obj
+        .get("path")
+        .and_then(Value::as_str)
+        .is_some_and(|path| !path.trim().is_empty())
 }
 
 fn normalize_fs_search_find_path_contract(obj: &mut serde_json::Map<String, Value>) -> bool {
@@ -386,6 +453,19 @@ pub(super) fn rewrite_args_with_auto_locator_path(
                 }
                 "find_path" if auto_path.is_dir() => {
                     rewrite_root_field(args, auto_locator_path, allow_missing_rewrite)
+                }
+                _ => false,
+            }
+        }
+        "config_basic" => {
+            let action = args
+                .as_object()
+                .and_then(|obj| obj.get("action"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match action {
+                "read_field" | "read_fields" if auto_path.is_file() => {
+                    rewrite_path_field(args, auto_locator_path, allow_missing_rewrite)
                 }
                 _ => false,
             }

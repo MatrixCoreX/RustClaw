@@ -14,6 +14,19 @@ pub(crate) enum MemoryUseProfile {
     SkillScoped,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChatMemoryContextHint {
+    Default,
+    CurrentRequestOnly,
+    ActiveTaskContextOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlannerMemoryContextHint {
+    Default,
+    StableFactsDisabled,
+}
+
 impl MemoryUseProfile {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
@@ -73,8 +86,8 @@ impl MemoryUseDecision {
             include_assistant_results: false,
             include_similar_triggers: false,
             include_unfinished_goals: false,
-            include_relevant_facts: true,
-            include_knowledge_docs: true,
+            include_relevant_facts: false,
+            include_knowledge_docs: false,
             include_recent_snippets: false,
             max_chars,
             reason: reason.into(),
@@ -117,6 +130,27 @@ impl MemoryUseDecision {
         }
     }
 
+    pub(crate) fn planner_without_stable_facts(
+        max_chars: usize,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self {
+            profile: MemoryUseProfile::PlannerScoped,
+            mode: MemoryContextMode::Planner,
+            include_preferences: true,
+            include_long_term_summary: false,
+            include_recent_related_events: false,
+            include_assistant_results: false,
+            include_similar_triggers: false,
+            include_unfinished_goals: false,
+            include_relevant_facts: false,
+            include_knowledge_docs: true,
+            include_recent_snippets: false,
+            max_chars,
+            reason: reason.into(),
+        }
+    }
+
     pub(crate) fn chat_scoped(
         max_chars: usize,
         include_active_recent_context: bool,
@@ -137,6 +171,10 @@ impl MemoryUseDecision {
             max_chars,
             reason: reason.into(),
         }
+    }
+
+    pub(crate) fn chat_active_task_context_only(reason: impl Into<String>) -> Self {
+        Self::disabled(MemoryContextMode::Chat, reason)
     }
 
     pub(crate) fn skill_scoped(max_chars: usize, reason: impl Into<String>) -> Self {
@@ -234,13 +272,14 @@ pub(crate) fn decide_route_memory_use_policy(
         );
     }
 
-    MemoryUseDecision::route_minimal(full_max, "new_route_task_uses_stable_memory_only")
+    MemoryUseDecision::route_minimal(full_max, "new_route_task_uses_preferences_only")
 }
 
 pub(crate) fn decide_planner_memory_use_policy(
     state: &AppState,
     budget_tier: ExecutionContextBudgetTier,
     ask_mode: &crate::AskMode,
+    context_hint: PlannerMemoryContextHint,
 ) -> MemoryUseDecision {
     let prompt_cap = state.policy.memory.prompt_max_chars.max(512);
     let max_chars = match budget_tier {
@@ -258,6 +297,12 @@ pub(crate) fn decide_planner_memory_use_policy(
             .min(768)
             .min(prompt_cap),
     };
+    if matches!(context_hint, PlannerMemoryContextHint::StableFactsDisabled) {
+        return MemoryUseDecision::planner_without_stable_facts(
+            max_chars,
+            "standalone_planner_uses_knowledge_docs_without_stable_facts",
+        );
+    }
     let reason = match ask_mode.first_layer_decision() {
         crate::FirstLayerDecision::PlannerExecute => {
             "planner_execution_uses_goals_preferences_and_stable_facts"
@@ -274,9 +319,20 @@ pub(crate) fn decide_chat_memory_use_policy(
     state: &AppState,
     budget_tier: ExecutionContextBudgetTier,
     ask_mode: &crate::AskMode,
+    route_reason: &str,
     has_active_session_state: bool,
     chat_memory_budget_chars: usize,
+    context_hint: ChatMemoryContextHint,
 ) -> MemoryUseDecision {
+    if route_reason
+        .split(';')
+        .any(|part| part.trim() == "standalone_freeform_clarify_downgraded_to_direct_answer")
+    {
+        return MemoryUseDecision::disabled(
+            MemoryContextMode::Chat,
+            "standalone_freeform_clarify_downgrade_uses_current_request_only",
+        );
+    }
     let prompt_cap = state.policy.memory.prompt_max_chars.max(384);
     let max_chars = match budget_tier {
         ExecutionContextBudgetTier::Full => chat_memory_budget_chars.max(384).min(prompt_cap),
@@ -284,6 +340,17 @@ pub(crate) fn decide_chat_memory_use_policy(
             chat_memory_budget_chars.max(384).min(640).min(prompt_cap)
         }
     };
+    if matches!(context_hint, ChatMemoryContextHint::CurrentRequestOnly) {
+        return MemoryUseDecision::disabled(
+            MemoryContextMode::Chat,
+            "standalone_direct_answer_uses_current_request_only",
+        );
+    }
+    if matches!(context_hint, ChatMemoryContextHint::ActiveTaskContextOnly) {
+        return MemoryUseDecision::chat_active_task_context_only(
+            "active_task_direct_answer_uses_active_task_context_only",
+        );
+    }
     let include_active_recent_context =
         has_active_session_state && matches!(budget_tier, ExecutionContextBudgetTier::Full);
     let reason = if include_active_recent_context {

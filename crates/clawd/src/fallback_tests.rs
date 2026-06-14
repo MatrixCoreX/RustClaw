@@ -10,18 +10,14 @@ fn test_state(locale: &str, schedule_locale: &str) -> AppState {
 }
 
 #[test]
-fn render_clarify_fallback_follows_language_hint_before_config_locale() {
-    let state = test_state("en-US", "en-US");
-    let text = render_clarify_fallback_with_language_hint(
-        &state,
-        "task-test",
-        ClarifyFallbackSource::IntentUnresolved,
-        None,
-        "zh-CN",
+fn render_clarify_fallback_uses_i18n_resource_for_configured_locale() {
+    let mut state = test_state("en-US", "en-US");
+    state.policy.schedule.i18n_dict.insert(
+        ClarifyFallbackSource::IntentUnresolved
+            .i18n_key()
+            .to_string(),
+        "RESOURCE EN intent unresolved".to_string(),
     );
-    assert!(text.contains("我没看出这条消息要做什么"));
-
-    let state = test_state("zh-CN", "zh-CN");
     let text = render_clarify_fallback_with_language_hint(
         &state,
         "task-test",
@@ -29,28 +25,110 @@ fn render_clarify_fallback_follows_language_hint_before_config_locale() {
         None,
         "en",
     );
-    assert!(text.contains("I couldn't determine the requested action"));
+    assert_eq!(text, "RESOURCE EN intent unresolved");
+
+    let mut state = test_state("zh-CN", "zh-CN");
+    state.policy.schedule.i18n_dict.insert(
+        ClarifyFallbackSource::IntentUnresolved
+            .i18n_key()
+            .to_string(),
+        "RESOURCE ZH intent unresolved".to_string(),
+    );
+    let text = render_clarify_fallback_with_language_hint(
+        &state,
+        "task-test",
+        ClarifyFallbackSource::IntentUnresolved,
+        None,
+        "zh-CN",
+    );
+    assert_eq!(text, "RESOURCE ZH intent unresolved");
 }
 
 #[test]
-fn missing_file_delivery_response_text_keeps_locator_hint() {
-    let state = test_state("en-US", "en-US");
-    let text = missing_file_delivery_response_text_for_language(
+fn render_clarify_fallback_without_i18n_resource_returns_machine_payload() {
+    let state = test_state("zh-CN", "zh-CN");
+    let text = render_clarify_fallback_with_language_hint(
         &state,
+        "task-test",
+        ClarifyFallbackSource::LlmUnavailable,
+        None,
         "zh-CN",
+    );
+    let payload: serde_json::Value = serde_json::from_str(&text).expect("machine payload json");
+    assert_eq!(
+        payload
+            .pointer("/message_key")
+            .and_then(|value| value.as_str()),
+        Some("clawd.msg.fallback.llm_unavailable")
+    );
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(|value| value.as_str()),
+        Some("llm_unavailable")
+    );
+}
+
+#[test]
+fn render_clarify_fallback_uses_requested_locale_resource_when_schedule_locale_differs() {
+    let mut state = test_state("zh-CN", "zh-CN").with_prompt_layers_installed();
+    state.policy.schedule.i18n_dict.clear();
+    let text = render_clarify_fallback_with_language_hint(
+        &state,
+        "task-test",
+        ClarifyFallbackSource::LlmUnavailable,
+        None,
+        "en",
+    );
+    assert_eq!(
+        text,
+        "I could not reach the model service for this turn. Please retry, or switch to another available model."
+    );
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&text).is_err(),
+        "localized fallback must not expose machine payload JSON"
+    );
+}
+
+#[test]
+fn missing_file_delivery_default_payload_keeps_locator_hint_without_language_template() {
+    let text = missing_file_delivery_default_payload(Some("definitely_missing_named_file.txt"));
+    let payload: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/message_key")
+            .and_then(|value| value.as_str()),
+        Some("clawd.msg.delivery.file_not_found_path_next_step")
+    );
+    assert_eq!(
+        payload
+            .pointer("/missing_path")
+            .and_then(|value| value.as_str()),
+        Some("definitely_missing_named_file.txt")
+    );
+    assert_eq!(
+        payload
+            .pointer("/reason_code")
+            .and_then(|value| value.as_str()),
+        Some("missing_file_delivery_not_found")
+    );
+}
+
+#[test]
+fn missing_file_delivery_default_text_is_user_visible_not_machine_json() {
+    let state = test_state("en-US", "en-US");
+    let text = missing_file_delivery_default_text(
+        &state,
         Some("definitely_missing_named_file.txt"),
+        "en-US",
     );
     assert!(text.contains("definitely_missing_named_file.txt"));
-    assert!(text.contains("未找到"));
-
-    let state = test_state("zh-CN", "zh-CN");
-    let text = missing_file_delivery_response_text_for_language(
-        &state,
-        "en",
-        Some("/tmp/definitely-missing.txt"),
+    assert!(
+        serde_json::from_str::<serde_json::Value>(&text).is_err(),
+        "visible missing-file text must not be machine JSON: {text}"
     );
-    assert!(text.contains("/tmp/definitely-missing.txt"));
-    assert!(text.contains("File not found"));
+    assert!(!text.contains("message_key"));
+    assert!(!text.contains("reason_code"));
 }
 
 /// 7 source 的 metric label / i18n key 互不冲突。
@@ -85,6 +163,93 @@ fn user_response_contract_renders_structured_clarify_context() {
     assert!(block.contains("\"original_user_request\": \"看一下这个\""));
     assert!(block.contains("\"language_hint\": \"zh-CN\""));
     assert!(block.contains("candidate_context"));
+}
+
+#[test]
+fn user_response_contract_carries_clarify_case_as_missing_slot() {
+    let contract = UserResponseContract::clarify_from_fallback_source(
+        ClarifyFallbackSource::IntentUnresolved,
+        "看一下那个日志最近 20 行",
+        "semantic_contract_requires_evidence",
+        Some("clarify_case: missing_read_target\nresolved_user_intent: 查看日志最近 20 行\nsemantic_kind: raw_command_output"),
+        "zh-CN",
+    );
+
+    assert_eq!(
+        contract.missing_slots,
+        vec![
+            "missing_read_target".to_string(),
+            "intent_unresolved".to_string()
+        ]
+    );
+    assert!(contract.policy_boundary.iter().any(|boundary| {
+        boundary.contains("requested operation is already understood")
+            && boundary.contains("missing target/path/scope/locator")
+    }));
+    let block = contract.to_prompt_context_block();
+    assert!(block.contains("\"missing_read_target\""));
+    assert!(block.contains("semantic_kind: raw_command_output"));
+    assert!(block.contains("requested operation is already understood"));
+}
+
+#[test]
+fn structured_clarify_default_uses_missing_read_target_i18n() {
+    let mut state = test_state("zh-CN", "zh-CN");
+    state.policy.schedule.i18n_dict.insert(
+        "clawd.msg.clarify_missing_read_target".to_string(),
+        "请提供具体要读取的文件名或路径。".to_string(),
+    );
+    let contract = UserResponseContract::clarify_from_fallback_source(
+        ClarifyFallbackSource::IntentUnresolved,
+        "读一下那个文件里的名字字段，只输出值",
+        "semantic_contract_requires_evidence",
+        Some("clarify_case: missing_read_target\nresolved_user_intent: 读取指定文件中的 name 字段值，仅输出该值\nsemantic_kind: none"),
+        "zh-CN",
+    );
+
+    let text = structured_clarify_default_text(&state, &contract)
+        .expect("specific missing read target default");
+    assert_eq!(text, "请提供具体要读取的文件名或路径。");
+}
+
+#[test]
+fn structured_clarify_default_uses_missing_search_locator_i18n() {
+    let mut state = test_state("zh-CN", "zh-CN");
+    state.policy.schedule.i18n_dict.insert(
+        "clawd.msg.clarify_missing_search_locator".to_string(),
+        "请提供具体要查找的名称、目录或路径。".to_string(),
+    );
+    let contract = UserResponseContract::clarify_from_fallback_source(
+        ClarifyFallbackSource::IntentUnresolved,
+        "看看那个脚本在不在",
+        "semantic_contract_requires_evidence",
+        Some("clarify_case: missing_search_locator\nresolved_user_intent: 检查脚本是否存在\nsemantic_kind: existence_with_path"),
+        "zh-CN",
+    );
+
+    let text = structured_clarify_default_text(&state, &contract)
+        .expect("specific missing search locator default");
+    assert_eq!(text, "请提供具体要查找的名称、目录或路径。");
+}
+
+#[test]
+fn user_response_contract_carries_resolved_intent_from_structured_clarify_context() {
+    let contract = UserResponseContract::clarify_from_fallback_source(
+        ClarifyFallbackSource::IntentUnresolved,
+        "把那份本地配置直接甩给我，别贴正文",
+        "missing locator",
+        Some(
+            "clarify_case: missing_search_locator\nresolved_user_intent: 获取本地配置文件但不粘贴正文\nsemantic_kind: scalar_path_only",
+        ),
+        "zh-CN",
+    );
+
+    assert_eq!(
+        contract.resolved_user_intent,
+        "获取本地配置文件但不粘贴正文"
+    );
+    let block = contract.to_prompt_context_block();
+    assert!(block.contains("\"resolved_user_intent\": \"获取本地配置文件但不粘贴正文\""));
 }
 
 #[test]
@@ -334,13 +499,25 @@ fn user_response_contract_renders_structured_policy_block_context() {
     assert!(block.contains("Do not claim the path was read."));
 }
 
-/// 每个 source 的英文默认文案非空，且 i18n key 都在
+/// 每个 source 的机器默认 payload 非空，且 i18n key 都在
 /// `clawd.msg.fallback.` 命名空间下，避免被误用为其它字典。
 #[test]
-fn default_en_text_nonempty_and_key_namespaced() {
+fn machine_default_payload_nonempty_and_key_namespaced() {
     for src in ClarifyFallbackSource::all() {
-        assert!(!src.default_en().trim().is_empty(), "source={src:?}");
-        assert!(!src.default_zh().trim().is_empty(), "source={src:?}");
+        let payload: serde_json::Value =
+            serde_json::from_str(&src.machine_default_payload()).expect("machine payload json");
+        assert_eq!(
+            payload
+                .pointer("/message_key")
+                .and_then(|value| value.as_str()),
+            Some(src.i18n_key())
+        );
+        assert_eq!(
+            payload
+                .pointer("/reason_code")
+                .and_then(|value| value.as_str()),
+            Some(src.as_metric_label())
+        );
         assert!(
             src.i18n_key().starts_with("clawd.msg.fallback."),
             "source={src:?} key={}",
@@ -349,24 +526,17 @@ fn default_en_text_nonempty_and_key_namespaced() {
     }
 }
 
-/// 老 super-fallback key 的默认文案一定在
+/// 老 super-fallback key 的机器默认 payload 一定在
 /// `all_clarify_fallback_texts_from_dict` 集合里（即使字典没显式配置）；
 /// 这是历史 DB 兼容性守底。
 #[test]
-fn all_texts_includes_legacy_super_fallback_default() {
+fn all_texts_includes_legacy_super_fallback_machine_default() {
     let empty_dict = HashMap::new();
     let texts = all_clarify_fallback_texts_from_dict(&empty_dict);
+    let legacy_default = legacy_super_fallback_machine_payload();
     assert!(
-        texts
-            .iter()
-            .any(|t| t == LEGACY_SUPER_FALLBACK_DEFAULT_EN.trim()),
-        "legacy default text missing from {texts:?}"
-    );
-    assert!(
-        texts
-            .iter()
-            .any(|t| t == LEGACY_SUPER_FALLBACK_DEFAULT_ZH.trim()),
-        "legacy zh default text missing from {texts:?}"
+        texts.iter().any(|text| text == legacy_default.trim()),
+        "legacy machine default missing from {texts:?}"
     );
 }
 
@@ -386,24 +556,17 @@ fn legacy_super_fallback_recognized_when_overridden_by_dict() {
     ));
 }
 
-/// 任意 source 的默认英文文案，都能被 `is_known_*` 识别回来（用空 dict 跑，
+/// 任意 source 的机器默认 payload，都能被 `is_known_*` 识别回来（用空 dict 跑，
 /// 强制走 default）。这是比对端 should_skip_* 正确性的核心契约。
 #[test]
-fn default_text_per_source_is_recognized_by_is_known() {
+fn machine_default_payload_per_source_is_recognized_by_is_known() {
     let dict = HashMap::new();
     for src in ClarifyFallbackSource::all() {
-        // ExecutionFailedPartial / VerifyRejected 默认文案带 {context_hint}
-        // 占位符；用 lookup_or_default 拿到的就是含占位符的字面字符串，
-        // is_known 同时识别模板和空 context 渲染后的结果。
-        let text = lookup_or_default(&dict, src.i18n_key(), src.default_en());
+        let default_payload = src.machine_default_payload();
+        let text = lookup_or_default(&dict, src.i18n_key(), &default_payload);
         assert!(
             is_known_clarify_fallback_text_with_dict(&dict, &text),
             "source={src:?} text={text:?} not recognized by is_known"
-        );
-        let zh_text = src.default_zh().replace("{context_hint}", "");
-        assert!(
-            is_known_clarify_fallback_text_with_dict(&dict, &zh_text),
-            "source={src:?} zh_text={zh_text:?} not recognized by is_known"
         );
     }
 }

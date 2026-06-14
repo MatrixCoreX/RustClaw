@@ -27,7 +27,7 @@ chat|golden_chat_bilingual|golden,chat,bilingual|Briefly tell me 你是谁，回
 act|golden_act_hostname|golden,act,short|只输出当前机器 hostname，不要解释
 
 # --- 多步 act：需要 list + 二次摘取；验证 multi-step planner + observed 链路 ---
-act|golden_act_logs_top3|golden,act,multistep|列出 logs 目录下最大的 3 个文件，按大小从大到小，输出"文件名 大小"|expect=logs
+act|golden_act_logs_top3|golden,act,multistep|列出 logs 目录下最大的 3 个文件，按大小从大到小，输出"文件名 大小"|expect=model_io.log
 
 # --- observed：列文件并挑选回答；验证 observed_answer_fallback 复用 ---
 act|golden_observed_hidden|golden,act,observed|看一下当前目录有没有隐藏文件，只回答有或没有，并补 3 个例子
